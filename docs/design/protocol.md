@@ -124,6 +124,11 @@ change. Studio matches this ID only against its own plain-send pending records;
 the field names the creating send/draft-edit/reply-delivery operation in Core
 general, not a claim about which verb the client invoked.
 
+The same receipt row supplies `provenance.delivery_reason` for a user node:
+`run_completion` for a revisit delivered after its target Run completed, or
+`carried_after_turn_interruption` for a held message carried into the next
+Turn. Other or unknown saved values are omitted.
+
 
 `HistoryRelationsArgs` はnode_id、必須relation（previous/next/sources/replacements）、limit既定50・最大200、任意cursor。`Page<RelationItem>` の各要素はnode_id/provenanceと、置換関係に限るreplacement_id/source_revision/source_hashを持つ。previous/nextは会話辺、sourcesはcompleted置換出力→出典、replacementsは出典→completed置換出力である。relation item直下のsource_revision/hashは置換記録時の出典witness、provenance.source_revisionは返却nodeの現在版であり区別する。cursorは対象node・relation・revisionとwatermarkに束縛し、追加関係を途中pageへ混入させない。履歴変更・無制限の祖先/子孫探索は含めない。採用経路は既存history.listで取得する。
 

@@ -1330,7 +1330,23 @@ record!(HistoryWindowObservation {
     activity: HistoryWindowActivity,
     tools: HistoryWindowTools,
     recovery: Vec<HistoryWindowRecovery>,
-    usage: Vec<HistoryWindowUsage>
+    usage: Vec<HistoryWindowUsage>,
+    branch_points: Vec<HistoryWindowBranchPoint>
+});
+// A window node where the selected Thread's family diverges. `current` indexes
+// the alternative the selected Thread follows; alternatives are ordered by the
+// write order of their first node after the point.
+record!(HistoryWindowBranchPoint {
+    node_id: String,
+    current: u32,
+    alternatives: Vec<HistoryWindowBranchAlternative>
+});
+record!(HistoryWindowBranchAlternative {
+    thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")] title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] last_request: Option<String>,
+    running: bool,
+    pruned_originals: bool
 });
 record!(HistoryWindowTools {
     calls: Vec<HistoryWindowToolCall>,
@@ -1363,7 +1379,10 @@ record!(HistoryWindowToolCall {
     #[serde(skip_serializing_if = "Option::is_none")] prior_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] elapsed_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")] started_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")] output_revision: Option<(u64, bool)>
+    #[serde(skip_serializing_if = "Option::is_none")] output_revision: Option<(u64, bool)>,
+    // Saved output bytes remain; retention can reclaim them while the
+    // execution keeps its output revision.
+    output_available: bool
 });
 record!(HistoryWindowRecovery {
     node_id: String, failure_count: u64, latest_attempt_id: String,
@@ -1542,6 +1561,9 @@ pub enum HistoryExportRecord {
 }
 args!(HistoryRelationsArgs { node_id: String, relation: HistoryRelation, #[serde(default = "list_limit")] limit: u32, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String> });
 states!(MessageReplyState { Pending => "pending", Replied => "replied", Ignored => "ignored", Cancelled => "cancelled" });
+// Why a saved input was delivered, from its receipt: a revisit after the
+// target Run completed, or a held message carried into the next Turn.
+states!(MessageDeliveryReason { RunCompletion => "run_completion", CarriedAfterTurnInterruption => "carried_after_turn_interruption" });
 record!(MessageProvenance {
     expect_reply: bool,
     #[serde(default, skip_serializing_if="Option::is_none")] reply_to: Option<String>,
@@ -1553,6 +1575,7 @@ record!(NodeProvenance {
     #[serde(default, skip_serializing_if="Option::is_none")] notification: Option<NotificationDescriptor>,
     #[serde(default, skip_serializing_if="Option::is_none")] message: Option<MessageProvenance>,
     #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] delivery_reason: Option<MessageDeliveryReason>,
     /// Operation that created this user node, when uniquely proven by its receipt.
     #[serde(default, skip_serializing_if = "Option::is_none")] client_operation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] attempt_id: Option<String>,

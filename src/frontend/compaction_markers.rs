@@ -1,56 +1,43 @@
 //! Compaction markers for the conversation (#230): a summary row names how it
 //! came about, and a skipped, failed or spill-only automatic attempt leaves one
-//! note after the response that triggered it. Saved facts only, read on the DB
-//! worker and projected on the presentation worker. A page without a summary or
-//! an automatic attempt does no compaction read.
+//! note after the response that triggered it. Saved facts only: the owner's
+//! `compact.list` joined to each response's provenance `attempt_id`. A page
+//! without a summary or an attempt-bound response reads nothing.
+use super::native_history::Owner;
 use crate::{
-    control::Control,
     presentation::{PresentationKind, compaction_marker::MarkerFacts, messages::Message},
-    protocol::{ApiError, CompactListArgs},
-    storage::StorageError,
+    protocol::{ApiError, Command, CompactListArgs, CompactListResult},
     ui::UiNode,
 };
-use rusqlite::Connection;
+use serde_json::Value;
 
-const MAX_NODES: usize = 128;
-const AUTOMATIC_ATTEMPTS: &str = "SELECT oi.node_id,oi.attempt_id FROM output_item oi INDEXED BY output_item_node JOIN automatic_compaction c ON c.attempt_id=oi.attempt_id WHERE oi.node_id IN (SELECT value FROM json_each(?1))";
-
-pub(super) struct Raw {
-    attempts: Vec<(String, String)>,
-    events: crate::readback::RawCompactions,
-}
-pub(super) fn read_tx(
-    db: &Connection,
+/// The Thread's compaction events, when the page has a node they can mark.
+pub(super) async fn read(
+    owner: &Owner<'_>,
     thread: &str,
-    summaries: usize,
-    assistants: &[String],
-) -> Result<Option<Raw>, StorageError> {
-    let encoded = serde_json::to_string(assistants).expect("String IDs serialize");
-    let attempts = if assistants.is_empty() {
-        Vec::new()
-    } else {
-        db.prepare_cached(AUTOMATIC_ATTEMPTS)?
-            .query_map([encoded], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    if summaries == 0 && attempts.is_empty() {
-        return Ok(None);
+    nodes: &[UiNode],
+    attempts: &[(String, String)],
+) -> Result<Vec<Value>, ApiError> {
+    let summaries = nodes
+        .iter()
+        .any(|node| node.presentation.kind == PresentationKind::Summary);
+    if !summaries && attempts.is_empty() {
+        return Ok(Vec::new());
     }
-    let args = CompactListArgs {
-        thread_id: Some(thread.into()),
-        since: None,
-        until: None,
-        limit: 200,
-    };
-    let events =
-        crate::readback::read_compactions_tx(db, thread, &args).map_err(StorageError::from)?;
-    Ok(Some(Raw { attempts, events }))
+    let page: CompactListResult = owner
+        .call(Command::CompactList(CompactListArgs {
+            thread_id: Some(thread.into()),
+            since: None,
+            until: None,
+            limit: 200,
+        }))
+        .await?;
+    Ok(page.items)
 }
 
-/// Applies prepared events to the page. Unmatched nodes keep their ordinary row.
-pub(super) fn apply(nodes: &mut [UiNode], raw: Raw) -> Result<(), ApiError> {
-    let page = crate::readback::prepare_compactions(raw.events)?;
-    let items = page["items"].as_array().cloned().unwrap_or_default();
+/// Applies the events to the page; `attempts` pairs each response node with
+/// its saved attempt. Unmatched nodes keep their ordinary row.
+pub(super) fn apply(nodes: &mut [UiNode], items: &[Value], attempts: &[(String, String)]) {
     let by_summary = |id: &str| {
         items
             .iter()
@@ -64,8 +51,8 @@ pub(super) fn apply(nodes: &mut [UiNode], raw: Raw) -> Result<(), ApiError> {
             node.presentation.ui_messages.title = Some(Message::CompactionMarker(facts));
         }
     }
-    for (node_id, attempt) in raw.attempts {
-        let Some(node) = nodes.iter_mut().find(|node| node.node_id == node_id) else {
+    for (node_id, attempt) in attempts {
+        let Some(node) = nodes.iter_mut().find(|node| &node.node_id == node_id) else {
             continue;
         };
         let event = items.iter().find(|item| {
@@ -80,62 +67,28 @@ pub(super) fn apply(nodes: &mut [UiNode], raw: Raw) -> Result<(), ApiError> {
             node.presentation.compaction_note = Some(facts);
         }
     }
-    Ok(())
-}
-
-pub(super) async fn enrich(
-    control: &Control,
-    viewed_thread: Option<&str>,
-    nodes: &mut [UiNode],
-) -> Result<(), ApiError> {
-    let Some(thread) = viewed_thread.map(str::to_owned) else {
-        return Ok(());
-    };
-    if nodes.len() > MAX_NODES {
-        return Ok(());
-    }
-    let summaries = nodes
-        .iter()
-        .filter(|node| node.presentation.kind == PresentationKind::Summary)
-        .count();
-    let assistants = nodes
-        .iter()
-        .filter(|node| node.presentation.kind == PresentationKind::Assistant)
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    if summaries == 0 && assistants.is_empty() {
-        return Ok(());
-    }
-    // Markers are cosmetic: a failed or unreadable compaction read leaves the
-    // ordinary rows, and the page's own reads still report storage failures.
-    let Ok(Some(raw)) = control
-        .store
-        .database
-        .call(move |db| read_tx(db, &thread, summaries, &assistants))
-        .await
-    else {
-        return Ok(());
-    };
-    let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();
-    let projected = super::presentation_work(move || {
-        let mut owned = owned;
-        let result = apply(&mut owned, raw);
-        (owned, result)
-    })
-    .await?;
-    let (projected, _unreadable_events_keep_ordinary_rows) = projected;
-    for (target, node) in nodes.iter_mut().zip(projected) {
-        *target = node;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::UiLanguage;
-    use rusqlite::params;
-    use serde_json::{Value, json};
+    use rusqlite::{Connection, params};
+    use serde_json::json;
+
+    /// The owner's `compact.list` items for the fixture Thread.
+    fn items(db: &Connection) -> Vec<Value> {
+        let args = CompactListArgs {
+            thread_id: Some("t".into()),
+            since: None,
+            until: None,
+            limit: 200,
+        };
+        crate::readback::compactions(db, "t", &args).unwrap()["items"]
+            .as_array()
+            .cloned()
+            .unwrap()
+    }
 
     fn node(db: &Connection, id: &str, kind: &str, at: &str, payload: Value) {
         db.execute(
@@ -229,10 +182,8 @@ mod tests {
             ui("resp1", "assistant_response", json!({"output":[]})),
             ui("resp2", "assistant_response", json!({"output":[]})),
         ];
-        let raw = read_tx(&db, "t", 1, &["resp1".into(), "resp2".into()])
-            .unwrap()
-            .unwrap();
-        apply(&mut nodes, raw).unwrap();
+        let attempts = [("resp1".into(), "a1".into()), ("resp2".into(), "a2".into())];
+        apply(&mut nodes, &items(&db), &attempts);
         let facts = match &nodes[0].presentation.ui_messages.title {
             Some(Message::CompactionMarker(facts)) => facts.clone(),
             other => panic!("{other:?}"),
@@ -278,13 +229,10 @@ mod tests {
         assert_ne!(noted, node.presentation.projection_stamp);
     }
     #[test]
-    fn pages_without_summaries_or_automatic_attempts_do_no_compaction_read() {
+    fn a_response_without_an_automatic_attempt_keeps_its_ordinary_row() {
         let db = fixture();
-        assert!(read_tx(&db, "t", 0, &[]).unwrap().is_none());
-        assert!(
-            read_tx(&db, "t", 0, &["original".into()])
-                .unwrap()
-                .is_none()
-        );
+        let mut nodes = vec![ui("resp1", "assistant_response", json!({"output":[]}))];
+        apply(&mut nodes, &items(&db), &[("resp1".into(), "other".into())]);
+        assert!(nodes[0].presentation.compaction_note.is_none());
     }
 }

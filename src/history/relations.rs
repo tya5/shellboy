@@ -53,7 +53,7 @@ fn provenance_with_sender_evidence(
     include_operation_id: bool,
 ) -> Result<(NodeProvenance, Option<String>), ApiError> {
     let mut result=connection.query_row(
-        "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",[node_id],|row|Ok(NodeProvenance{ output_limit: None, notification: None,message:None,sender:None,client_operation_id:None,attempt_id:None,kind:row.get(0)?,created_at:row.get(1)?,source_revision:row.get(2)?,turn_id:row.get(3)?,run_id:row.get(4)?,origin_thread_id:row.get(5)?})
+        "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",[node_id],|row|Ok(NodeProvenance{ output_limit: None, notification: None,message:None,sender:None,delivery_reason:None,client_operation_id:None,attempt_id:None,kind:row.get(0)?,created_at:row.get(1)?,source_revision:row.get(2)?,turn_id:row.get(3)?,run_id:row.get(4)?,origin_thread_id:row.get(5)?})
     ).optional().map_err(sql_error)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"history node not found"))?;
     if result.kind == "assistant_response" {
         result.attempt_id = saved_attempt_id(connection, node_id)?;
@@ -67,7 +67,7 @@ fn provenance_with_sender_evidence(
     let mut operation_id = None;
     if result.kind == "user" {
         let mut statement = connection.prepare(
-            "SELECT CASE WHEN length(CAST(sender_json AS BLOB))<=8192 THEN sender_json END, CASE WHEN target_thread_id=?2 AND typeof(client_operation_id)='text' THEN CAST(client_operation_id AS BLOB) END FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 LIMIT 2",
+            "SELECT CASE WHEN length(CAST(sender_json AS BLOB))<=8192 THEN sender_json END, CASE WHEN target_thread_id=?2 AND typeof(client_operation_id)='text' THEN CAST(client_operation_id AS BLOB) END, CASE WHEN json_valid(result_json) AND json_type(result_json,'$.delivery_context.reason')='text' THEN substr(json_extract(result_json,'$.delivery_context.reason'),1,64) END FROM receipt INDEXED BY receipt_message_node WHERE message_node_id=?1 LIMIT 2",
         ).map_err(sql_error)?;
         let origin = result
             .origin_thread_id
@@ -79,6 +79,12 @@ fn provenance_with_sender_evidence(
         let mut sender_raw = None;
         if let Some(row) = rows.next().map_err(sql_error)? {
             sender_raw = row.get::<_, Option<String>>(0).map_err(sql_error)?;
+            // The receipt's delivery context is fixed once the input is admitted.
+            result.delivery_reason = row
+                .get::<_, Option<String>>(2)
+                .map_err(sql_error)?
+                .as_deref()
+                .and_then(crate::protocol::MessageDeliveryReason::parse);
             let candidate = match row.get_ref(1).map_err(sql_error)? {
                 rusqlite::types::ValueRef::Blob(bytes)
                     if bytes.len() <= MAX_CLIENT_OPERATION_ID_BYTES =>
@@ -308,7 +314,7 @@ mod tests {
              CREATE TABLE node(id TEXT PRIMARY KEY,kind TEXT,created_at TEXT,payload_revision INTEGER,turn_id TEXT,output_limit_attempt_id TEXT);
              CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,thread_id TEXT);
              CREATE TABLE run(id TEXT PRIMARY KEY,thread_id TEXT);
-             CREATE TABLE receipt(message_node_id TEXT,sender_json TEXT,client_operation_id TEXT,target_thread_id TEXT);
+             CREATE TABLE receipt(message_node_id TEXT,sender_json TEXT,client_operation_id TEXT,target_thread_id TEXT,result_json TEXT);
              CREATE INDEX receipt_message_node ON receipt(message_node_id);
              CREATE TABLE model_attempt(id TEXT PRIMARY KEY,input_manifest_json TEXT NOT NULL DEFAULT '{}',error_json TEXT);
              CREATE TABLE output_item(attempt_id TEXT NOT NULL REFERENCES model_attempt(id),ordinal INTEGER NOT NULL,item_id TEXT,item_type TEXT NOT NULL,phase TEXT,status TEXT NOT NULL,payload_json TEXT NOT NULL,node_id TEXT REFERENCES node(id),PRIMARY KEY(attempt_id,ordinal));
@@ -453,5 +459,35 @@ mod tests {
         assert_eq!(sender.kind, crate::protocol::SenderKind::ExternalCli);
         assert_eq!(sender.label.as_deref(), Some("reviewer"));
         assert_eq!(provenance.kind, "user");
+    }
+
+    #[test]
+    fn user_provenance_reports_the_saved_delivery_reason_of_its_receipt() {
+        use crate::protocol::MessageDeliveryReason as Reason;
+        let db = attempt_provenance_db();
+        db.execute_batch(
+            "INSERT INTO node(id,kind,created_at,payload_revision) VALUES('revisit','user','now',0),('carried','user','now',0),('other','user','now',0),('direct','user','now',0);
+             INSERT INTO receipt(message_node_id,sender_json,result_json) VALUES
+               ('revisit','{\"kind\":\"human\"}','{\"deliver\":\"complete\",\"delivery_context\":{\"reason\":\"run_completion\"}}'),
+               ('carried','{\"kind\":\"human\"}','{\"delivery_context\":{\"reason\":\"carried_after_turn_interruption\"}}'),
+               ('other','{\"kind\":\"human\"}','{\"delivery_context\":{\"reason\":\"not_a_reason\"}}'),
+               ('direct','{\"kind\":\"human\"}','not json');",
+        )
+        .unwrap();
+        for (node, expected) in [
+            ("revisit", Some(Reason::RunCompletion)),
+            ("carried", Some(Reason::CarriedAfterTurnInterruption)),
+            ("other", None),
+            ("direct", None),
+            ("other-kind", None),
+        ] {
+            let provenance = provenance(&db, node).unwrap();
+            assert_eq!(provenance.delivery_reason, expected, "{node}");
+        }
+        assert_eq!(
+            provenance(&db, "revisit").unwrap().sender.unwrap().kind,
+            crate::protocol::SenderKind::Human,
+            "the reason is a separate fact; the sender stays the saved sender"
+        );
     }
 }

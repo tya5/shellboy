@@ -5673,6 +5673,61 @@
       ],
       "type": "object"
     },
+    "HistoryWindowBranchAlternative": {
+      "properties": {
+        "last_request": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pruned_originals": {
+          "type": "boolean"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "thread_id",
+        "running",
+        "pruned_originals"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowBranchPoint": {
+      "properties": {
+        "alternatives": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowBranchAlternative"
+          },
+          "type": "array"
+        },
+        "current": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "current",
+        "alternatives"
+      ],
+      "type": "object"
+    },
     "HistoryWindowCommittedAttempt": {
       "properties": {
         "attempt_id": {
@@ -5772,6 +5827,12 @@
         "activity": {
           "$ref": "#/definitions/HistoryWindowActivity"
         },
+        "branch_points": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowBranchPoint"
+          },
+          "type": "array"
+        },
         "committed_attempts": {
           "items": {
             "$ref": "#/definitions/HistoryWindowCommittedAttempt"
@@ -5809,7 +5870,8 @@
         "activity",
         "tools",
         "recovery",
-        "usage"
+        "usage",
+        "branch_points"
       ],
       "type": "object"
     },
@@ -6007,6 +6069,9 @@
           "minimum": 0,
           "type": "integer"
         },
+        "output_available": {
+          "type": "boolean"
+        },
         "output_revision": {
           "maxItems": 2,
           "minItems": 2,
@@ -6070,7 +6135,8 @@
         "ordinal",
         "result_state",
         "released",
-        "background"
+        "background",
+        "output_available"
       ],
       "type": "object"
     },
@@ -6850,6 +6916,13 @@
       "title": "MessageCancelResult",
       "type": "object"
     },
+    "MessageDeliveryReason": {
+      "enum": [
+        "run_completion",
+        "carried_after_turn_interruption"
+      ],
+      "type": "string"
+    },
     "MessageDetails": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -7342,6 +7415,16 @@
         },
         "created_at": {
           "type": "string"
+        },
+        "delivery_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageDeliveryReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "kind": {
           "type": "string"

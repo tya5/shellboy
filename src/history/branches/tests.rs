@@ -425,13 +425,16 @@ fn markers_group_alternatives_per_divergence_point_and_follow_the_viewed_lineage
     let nodes = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let on_r = markers(&db, "r", &nodes(&["u:1", "a:1", "u:2"])).unwrap();
     assert_eq!(on_r.len(), 1);
-    assert_eq!(on_r[0].anchor_node_id, "a:1");
+    assert_eq!(on_r[0].node_id, "a:1");
     assert_eq!(on_r[0].alternatives.len(), 3);
-    let followed = &on_r[0].alternatives[on_r[0].current];
+    let followed = &on_r[0].alternatives[on_r[0].current as usize];
     assert_eq!(followed.thread_id, "r");
-    assert_eq!(followed.excerpt.as_deref(), Some("text of u:2"));
+    assert_eq!(followed.last_request.as_deref(), Some("text of u:2"));
     let on_c = markers(&db, "c", &nodes(&["u:1", "a:1", "u:c"])).unwrap();
-    assert_eq!(on_c[0].alternatives[on_c[0].current].thread_id, "c");
+    assert_eq!(
+        on_c[0].alternatives[on_c[0].current as usize].thread_id,
+        "c"
+    );
     // Only anchors on the loaded page get a marker.
     assert!(markers(&db, "c", &nodes(&["u:c"])).unwrap().is_empty());
     // A Thread with no relatives reads nothing further.
@@ -486,17 +489,17 @@ fn the_followed_alternative_shows_the_viewed_threads_own_last_request() {
     path(&db, "s", &["u:1", "a:1", "u:s", "a:s"]);
     path(&db, "t", &["u:1", "a:1", "u:2", "a:2", "u:t-own"]);
     let marks = markers(&db, "t", &["a:1".to_string(), "a:2".to_string()]).unwrap();
-    let first = marks.iter().find(|m| m.anchor_node_id == "a:1").unwrap();
+    let first = marks.iter().find(|m| m.node_id == "a:1").unwrap();
     // At a:1 P and S diverge; T follows P's shared prefix, so P is the followed alternative.
-    let followed = &first.alternatives[first.current];
+    let followed = &first.alternatives[first.current as usize];
     assert_eq!(followed.thread_id, "p");
-    assert_eq!(followed.excerpt.as_deref(), Some("text of u:t-own"));
+    assert_eq!(followed.last_request.as_deref(), Some("text of u:t-own"));
     let other = first
         .alternatives
         .iter()
         .find(|a| a.thread_id == "s")
         .unwrap();
-    assert_eq!(other.excerpt.as_deref(), Some("text of u:s"));
+    assert_eq!(other.last_request.as_deref(), Some("text of u:s"));
 }
 
 #[test]

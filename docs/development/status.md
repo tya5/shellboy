@@ -39,12 +39,15 @@ typed `input_limit`; no shortened history is sent. See the
 
 ## Core #311 client cutover (4d) checkpoint
 
-The cutover is not started in code. 4c (`draft.list`, submitted outcome on
-the draft record) and 4g (`attachment.reload`) are restacked on 4e/4f. The
-TUI still owns `Control`: several private reads and wakes have no protocol
-read yet. They are listed in
-[the TUI client design](../design/tui-client.md#unit-4d-cutover-gaps);
-resume when each has an approved owner read.
+4c (`draft.list`, submitted outcome on the draft record) and 4g
+(`attachment.reload`) are restacked on 4e/4f. Slice 1 (history facts) moves
+input sources, branch and compaction markers and the detail panel's current
+executions to owner reads
+([design](../design/tui-client.md#unit-4d-slice-1-history-facts)). The TUI
+still owns `Control`: the received snapshot and the remaining reads and wakes
+in [the cutover gaps](../design/tui-client.md#unit-4d-cutover-gaps) have no
+protocol read yet. Next: slices 2 (live work) and 3 (wakes, including
+`retention_changed` for `output_available`).
 
 ## Core #311 selected history client (4e/4f)
 

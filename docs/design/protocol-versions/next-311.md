@@ -109,3 +109,24 @@ refresh its cache, so owner shutdown and context capture fence it like other
 context-changing requests. Reload does not send to a model, change the saved selection or
 successful-send baseline, or publish a new event fact. The TUI's explicit reload
 calls the same owner operation.
+
+## History window facts (unit 4d slice 1)
+
+`NodeProvenance.delivery_reason` reports why a saved user input was delivered,
+from the receipt row that already supplies its `sender`: `run_completion` (a
+revisit after the target Run completed) or `carried_after_turn_interruption`
+(a held message carried into the next Turn). It is absent for other inputs and
+for an unknown saved value, and is fixed once the input is admitted.
+
+A `history.window` observation adds `branch_points`: each window node where
+the selected Thread's family diverges, with `current` indexing the alternative
+the selected Thread follows and, per alternative, its Thread ID, title, last
+request excerpt, `running` and `pruned_originals`. It is computed in the same
+read transaction and `read_sequence` as the window, under the existing branch
+bounds (256 family Threads, 32 ancestors, 160-character excerpts) and only for
+the window's own nodes; it is not stored.
+
+Each `tools.calls` entry adds `output_available`: whether saved output bytes
+remain for its execution. Retention can reclaim them while `output_revision`
+keeps its sequence. No event fact announces that change yet; a later window
+read observes it.

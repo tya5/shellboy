@@ -28,8 +28,8 @@ use serde_json::Value;
 
 use super::sql_error;
 use crate::protocol::{
-    ApiError, ErrorCode, MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadBranchesArgs,
-    ThreadScopeFilter,
+    ApiError, ErrorCode, HistoryWindowBranchAlternative, HistoryWindowBranchPoint, MAX_LIST_LIMIT,
+    PageCursor, RecordPage, ThreadBranchesArgs, ThreadScopeFilter,
 };
 
 /// Ancestors followed upward from the requested Thread.
@@ -532,29 +532,15 @@ fn expired() -> ApiError {
     )
 }
 
-/// One alternative at a divergence point.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Alternative {
-    pub thread_id: String,
-    pub title: Option<String>,
-    pub excerpt: Option<String>,
-    pub running: bool,
-    pub pruned_originals: bool,
-}
-/// The alternatives meeting at one node of the viewed Thread's path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Marker {
-    pub anchor_node_id: String,
-    pub alternatives: Vec<Alternative>,
-    /// The alternative the viewed Thread follows here.
-    pub current: usize,
-}
-
 /// Markers for the nodes of `thread`'s path that appear in `nodes`.
 ///
 /// Divergence points come from lookups alone; the tip scan, JSON parse and run
 /// and prune flags are read only for the Threads of a point that is on the page.
-pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Marker>, ApiError> {
+pub fn markers(
+    db: &Connection,
+    thread: &str,
+    nodes: &[String],
+) -> Result<Vec<HistoryWindowBranchPoint>, ApiError> {
     let wanted: HashSet<&str> = nodes.iter().map(String::as_str).collect();
     // A Thread with no parent and no child has no divergence point.
     let has_relative = exists(
@@ -653,10 +639,10 @@ pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Ma
         for (position, (_, _, index)) in keyed.iter().enumerate() {
             // The followed alternative shows the viewed Thread's own last request.
             let source = load(if position == current { viewed } else { *index })?;
-            alternatives.push(Alternative {
+            alternatives.push(HistoryWindowBranchAlternative {
                 thread_id: family.members[*index].id.clone(),
                 title: source.title.clone(),
-                excerpt: source
+                last_request: source
                     .tip
                     .as_ref()
                     .and_then(|t| t.last_request.as_ref())
@@ -665,10 +651,10 @@ pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Ma
                 pruned_originals: source.pruned_originals,
             });
         }
-        out.push(Marker {
-            anchor_node_id: anchor,
+        out.push(HistoryWindowBranchPoint {
+            node_id: anchor,
+            current: current as u32,
             alternatives,
-            current,
         });
     }
     Ok(out)

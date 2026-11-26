@@ -124,7 +124,11 @@ fn observe(
         .collect::<Vec<_>>();
     let facts = crate::frontend::read_window_facts(db, &items, extra)
         .map_err(StorageError::into_api_error)?;
+    // Divergence points among the window's own nodes, under the family bounds.
+    let window_ids = items.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+    let branch_points = history::branches::markers(db, &window.thread_id, &window_ids)?;
     Ok(HistoryWindowObservation {
+        branch_points,
         read_sequence,
         pending: pending(db, &window.thread_id, holds).map_err(sql_error)?,
         committed_attempts,

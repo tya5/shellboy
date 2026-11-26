@@ -224,9 +224,8 @@ their labels. A window recovery reason is a 256-character excerpt; when it is
 cut short the event points at the F6 source node. Reasoning ranges are clipped
 to each display page (recorded gap, not yet witnessed).
 
-Still private and separate from these reads: message metadata, branch and
-compaction markers, the received-response snapshot, activity and index pause,
-context usage, and the detail panel's current tool executions.
+Still private and separate from these reads: the received-response snapshot,
+activity and index pause, and context usage (see the 4d gaps below).
 
 ### Unit 4d cutover gaps
 
@@ -237,18 +236,17 @@ checkpoint (4a–4g stacked); not a mechanism proposal.
 Existing reads cover these (migration only): context usage
 (`thread.get` `context_usage`), the branch list (`thread.branches`), the
 in-process command dispatch (`Thread` create/set, the management fallback) over
-the selected endpoint, index pause value (`index.status` `paused`/`reason`),
-compaction markers (`compact.list` plus node provenance `attempt_id`), the
-detail panel's current executions (`history.window` `observe_node_ids`;
-parity of its has-output bit is unchecked), and
-the received snapshot (`history.received` with positioned `history.read`).
+the selected endpoint, and the index pause value (`index.status`
+`paused`/`reason`).
 
 No protocol read or wake fact exists for these:
 
-- Revisit (run-completion delivery) source of a saved input. Node provenance
-  and `message.get` carry sender and reply state but not the delivery reason.
-- Branch markers for the visible nodes. `thread.branches` pages the family at
-  most 200 Threads per page, so a marker for one visible node can need every page.
+- The received-response snapshot. `history.received` and a positioned
+  `history.read` give the saved response, its Turn and recovery wait, but not
+  the selected-path node it follows (the private read takes the last path node
+  of the same Turn saved before it), nor whether a stream difference differs
+  from the final response (the private read compares the saved
+  `raw_response` body).
 - Wait-to-shell relations for live work. The owner's pending wait registry is
   in memory; the saved run wait reason has no waited execution.
 - Wakes that `events.wait` does not report: index saved/pause change, storage
@@ -259,6 +257,32 @@ No protocol read or wake fact exists for these:
   (index coverage window, storage physical sample, lifecycle, saved, operation,
   attachment and deletion inspections). The protocol records lack, for
   example, the index coverage window.
+
+### Unit 4d slice 1: history facts
+
+Every selected page, positioned window, rebase, saved-message install and node
+hydration takes its input-source facts from the window's node provenance:
+saved `sender`, reply relation, `created_at` and the receipt's
+`delivery_reason` (`run_completion` shows the revisit row). Parent-relative
+labels use the selected Thread's parent from the header the current view
+already read, or one `thread.get` when a model sender from another Thread
+needs it. A reply row's request excerpt is one bounded `history.read` of the
+replied-to node. Branch markers are the observation's `branch_points` (same
+transaction and `read_sequence`, window nodes only). Compaction markers join
+`compact.list` (200 events) to each response's provenance `attempt_id`, read
+only when the page has a summary or an attempt-bound response. The detail
+panel's current executions are one tail `history.window` observing the
+selected sources (`observe_node_ids`), and its saved-output row is the call's
+`output_available`; the internal output retention generation row is retired.
+
+Changes a user can see: a saved input whose receipt sender is the pre-kind
+`null` is shown as unknown rather than human, and a reply whose recipient
+Thread was deleted no longer shows a reply state (the owner's typed reply
+relation has no such state). Branch and compaction markers now also appear
+on the current view, which previously skipped them. `output_available` changes when retention
+reclaims output, but nothing wakes the client for it yet; a retention wake is
+slice 3's `retention_changed`. Until then the next window read for any other
+reason shows it.
 
 ### Draft save and selected view
 

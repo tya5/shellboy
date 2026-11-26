@@ -3,7 +3,6 @@ pub mod activity;
 mod admission;
 mod program_status;
 use admission::{spawn_read, spawn_work};
-mod branch_markers;
 pub(crate) mod browser;
 mod browser_read;
 mod client_operations;
@@ -2652,7 +2651,7 @@ async fn run_client(
                         let sender=updates.worker();
                         let target=thread_id.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&selection.cancel,async move {
-                            let result=HistoryReader::new(&control,&sender,render_width).links(node_ids).await.map_err(|error|error.to_string());
+                            let result=HistoryReader::new(&control,&sender,render_width).links(&target,node_ids).await.map_err(|error|error.to_string());
                             update(&sender,UiUpdate::DetailLinks {thread_id:target,generation,request_id,result}).await;
                         }) {
                             update(&updates,UiUpdate::DetailLinks {thread_id,generation,request_id,result:Err(i18n::local!(language, "リンクの読込キューが満杯です。完了後に再操作してください", "The link-read queue is full. Wait for completion, then try again").into())}).await;

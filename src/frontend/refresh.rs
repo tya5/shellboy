@@ -69,7 +69,7 @@ async fn read_current(
         owner,
         render_width,
         known,
-        history_reader::Metadata::Snapshot(stop.clone()),
+        Some(details.parent_thread_id().map(str::to_owned)),
         history_reader::window_args(thread, Anchor::Tail, 49, 0, pinned),
         None,
         |items| 0..items.len(),
@@ -80,22 +80,11 @@ async fn read_current(
     let read_revision = page.info.read_revision;
     let target = thread.to_owned();
     let selection_revision = page.info.revision;
-    let pinned_ids = tool_scope
-        .as_ref()
-        .map(|scope| {
-            scope
-                .nodes
-                .iter()
-                .map(|node| node.node_id.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
     // Read-only snapshot reads: they never wait behind the owner's writer.
     let raw = snapshot::read(
         control.store.database.path().to_path_buf(),
         stop.clone(),
         move |db| {
-            let sources = message_metadata::read_tx(db, Some(&target), &pinned_ids)?;
             let received = received::query_tx(
                 db,
                 &target,
@@ -114,16 +103,15 @@ async fn read_current(
                 Err(crate::storage::StorageError::Operation(_)) => Default::default(),
                 Err(error) => return Err(error),
             };
-            Ok((sources, received, usage))
+            Ok((received, usage))
         },
     )
     .await;
-    let (sources, received, context_usage) = checked_storage(control, raw).await?;
+    let (received, context_usage) = checked_storage(control, raw).await?;
     if let Some(scope) = &mut tool_scope {
         let tools = page.observation.tools.clone();
         let mut nodes = std::mem::take(&mut scope.nodes);
         nodes = presentation_work(move || {
-            message_metadata::apply(&mut nodes, &sources);
             tools::reset_observations(&mut nodes);
             tools::apply_window(&mut nodes, &tools);
             for node in &mut nodes {

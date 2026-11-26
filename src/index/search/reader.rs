@@ -337,6 +337,7 @@ mod tests {
                         notification: None,
                         message: None,
                         sender: None,
+                        delivery_reason: None,
                         client_operation_id: None,
                         attempt_id: None,
                         kind: "user".into(),

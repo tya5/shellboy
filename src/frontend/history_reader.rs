@@ -169,23 +169,16 @@ fn display_position(position: NodePosition) -> HistoryDisplayPosition {
     }
 }
 
-/// How a page reads its saved source metadata: the history worker's enrichment
-/// with branch and compaction markers, or the current view's read-only snapshot
-/// that never waits behind the owner's writer.
-pub(super) enum Metadata {
-    Enriched,
-    Snapshot(CancellationToken),
-}
-
 /// Read and project one selected window. `wanted` names the node whose
 /// extent follows a source position; every other node shows its tail.
+/// `parent` is the selected Thread's parent when the caller already read it.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn read_page(
     control: &Control,
     owner: &Owner<'_>,
     width: u16,
     known: &[KnownSubmission],
-    metadata: Metadata,
+    parent: Option<Option<String>>,
     args: HistoryWindowArgs,
     expected_revision: Option<u64>,
     keep: impl FnOnce(&[crate::protocol::HistorySnippet]) -> std::ops::Range<usize>,
@@ -198,7 +191,7 @@ pub(super) async fn read_page(
         })
         .await?;
     project_page(
-        control, owner, width, known, metadata, &thread, window, wanted,
+        control, owner, width, known, parent, &thread, window, wanted,
     )
     .await
 }
@@ -209,7 +202,7 @@ async fn project_page(
     owner: &Owner<'_>,
     width: u16,
     known: &[KnownSubmission],
-    metadata: Metadata,
+    parent: Option<Option<String>>,
     thread: &str,
     window: SelectedWindow,
     wanted: impl Fn(&crate::protocol::HistorySnippet) -> Option<NodePosition>,
@@ -230,8 +223,13 @@ async fn project_page(
             char_offset: position.offset(node.display.total_chars as usize),
         })
     });
+    let provenance = nodes
+        .iter()
+        .map(|node| node.source.provenance.clone())
+        .collect::<Vec<_>>();
+    let sources = message_metadata::read(owner, thread, parent, &provenance).await?;
     let language = control.store.config.ui.language;
-    let mut projected = presentation_work(move || {
+    let projected = presentation_work(move || {
         nodes
             .into_iter()
             .map(|node| {
@@ -241,31 +239,20 @@ async fn project_page(
             .collect::<Vec<_>>()
     })
     .await?;
-    match metadata {
-        Metadata::Enriched => {
-            message_metadata::enrich(control, Some(thread), &mut projected).await?
-        }
-        Metadata::Snapshot(stop) => {
-            let ids = projected
-                .iter()
-                .map(|node| node.node_id.clone())
-                .collect::<Vec<_>>();
-            let viewed = thread.to_owned();
-            let facts = snapshot::read(
-                control.store.database.path().to_path_buf(),
-                stop,
-                move |db| message_metadata::read_tx(db, Some(&viewed), &ids),
-            )
-            .await;
-            let facts = checked_storage(control, facts).await?;
-            projected = presentation_work(move || {
-                message_metadata::apply(&mut projected, &facts);
-                projected
-            })
-            .await?;
-        }
-    }
+    let attempts = projected
+        .iter()
+        .zip(&provenance)
+        .filter_map(|(node, provenance)| {
+            Some((node.node_id.clone(), provenance.attempt_id.clone()?))
+        })
+        .collect::<Vec<_>>();
+    let compactions = compaction_markers::read(owner, thread, &projected, &attempts).await?;
     let (mut projected, observation) = presentation_work(move || {
+        let mut projected = projected;
+        for (node, provenance) in projected.iter_mut().zip(&provenance) {
+            message_metadata::apply(node, provenance, &sources);
+        }
+        compaction_markers::apply(&mut projected, &compactions, &attempts);
         native_history::apply_observation(&mut projected, &observation, language);
         (projected, observation)
     })
@@ -380,7 +367,7 @@ impl<'a> HistoryReader<'a> {
             &self.owner(),
             self.width,
             &self.known,
-            Metadata::Enriched,
+            None,
             args,
             expected_revision,
             |items| 0..items.len(),
@@ -411,7 +398,7 @@ impl<'a> HistoryReader<'a> {
             &owner,
             width,
             &known,
-            Metadata::Enriched,
+            None,
             window_args(&thread, Anchor::Tail, PAGE_NODES - 1, 0, Vec::new()),
             None,
             |items| 0..items.len(),
@@ -614,7 +601,7 @@ impl<'a> HistoryReader<'a> {
                     &self.owner(),
                     self.width,
                     &self.known,
-                    Metadata::Enriched,
+                    None,
                     window_args(
                         thread,
                         Anchor::Node(node.clone()),
@@ -687,9 +674,11 @@ impl<'a> HistoryReader<'a> {
     }
     /// Bounded selected-item facts. No off-page body is installed into history
     /// and no shell output bytes are read. Each source projects from its owner
-    /// display extent at offset 0; current execution facts are one saved read.
+    /// display extent at offset 0; current execution facts are the selected
+    /// Thread's window observation of those nodes.
     pub(super) async fn links(
         &self,
+        thread: &str,
         node_ids: Vec<String>,
     ) -> Result<DetailSourceSnapshot, ApiError> {
         if node_ids.is_empty()
@@ -721,42 +710,39 @@ impl<'a> HistoryReader<'a> {
             let available = node_ids
                 .iter()
                 .zip(&displays)
-                .map(|(id, display)| (id.clone(), display.is_some()))
+                .filter(|(_, display)| display.is_some())
+                .map(|(id, _)| id.clone())
                 .collect::<Vec<_>>();
-            let (current, read_revision, observed_at) = self.control.store.database.call(move |db| {
-                let tx = db.transaction()?;
-                // Node/group identity constrains every call; a matching call ID
-                // elsewhere can never supply current lifecycle facts.
-                let mut tools = tx.prepare(r"
-                    SELECT CASE WHEN length(CAST(c.call_id AS BLOB))<=512 THEN c.call_id END,s.id,s.state,s.exit_code,s.output_complete,
-                           s.retention_generation,
-                           EXISTS(SELECT 1 FROM output_chunk o WHERE o.execution_id=s.id)
-                    FROM tool_call c JOIN tool_group g ON g.id=c.group_id
-                    LEFT JOIN shell_execution s ON s.id=c.operation_id AND s.turn_id=g.turn_id
-                    WHERE c.group_id IN (
-                      SELECT CASE WHEN json_valid(n.payload_json) THEN json_extract(n.payload_json,'$.group_id') END
-                      FROM node n WHERE n.id=?1 AND n.kind='assistant_response'
-                      UNION SELECT r.group_id FROM tool_result r WHERE r.node_id=?1)
-                    AND (EXISTS(SELECT 1 FROM node n WHERE n.id=?1 AND n.kind='assistant_response'
-                         AND json_valid(n.payload_json) AND json_extract(n.payload_json,'$.group_id')=c.group_id)
-                         OR EXISTS(SELECT 1 FROM tool_result r WHERE r.node_id=?1
-                            AND r.group_id=c.group_id AND r.call_id=c.call_id))
-                    ORDER BY c.ordinal,c.call_id LIMIT 17")?;
-                let mut current = Vec::with_capacity(available.len());
-                for (id, available) in available {
-                    current.push(if available { tools.query_map([&id], |row| Ok((
-                        row.get::<_,Option<String>>(0)?,row.get::<_,Option<String>>(1)?,
-                        row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,
-                        row.get::<_,Option<bool>>(4)?,row.get::<_,Option<i64>>(5)?,
-                        row.get::<_,bool>(6)?,
-                    )))?.collect::<Result<Vec<_>,_>>()? } else {Vec::new()});
-                }
-                drop(tools);
-                let read_revision=message_queue::read_revision();
-                let observed_at=chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
-                tx.commit()?;
-                Ok((current,read_revision,observed_at))
-            }).await.map_err(storage_error)?;
+            let window = owner
+                .window(window_args(thread, Anchor::Tail, 0, 0, available))
+                .await
+                .map_err(unavailable)?;
+            let observation = window.observation.ok_or_else(|| {
+                ApiError::new(ErrorCode::ProtocolMismatch, "Invalid selected history response")
+            })?;
+            let read_revision = observation.read_sequence;
+            let observed_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+            let current = node_ids
+                .iter()
+                .zip(&displays)
+                .map(|(id, display)| {
+                    let mut calls = display
+                        .as_ref()
+                        .map(|_| {
+                            observation
+                                .tools
+                                .calls
+                                .iter()
+                                .filter(|call| &call.node_id == id)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    calls.sort_by(|a, b| (a.ordinal, &a.call_id).cmp(&(b.ordinal, &b.call_id)));
+                    calls.truncate(17);
+                    calls
+                })
+                .collect::<Vec<_>>();
             let rows = node_ids
                 .into_iter()
                 .zip(displays)
@@ -786,17 +772,19 @@ impl<'a> HistoryReader<'a> {
                     if current.len()>16 {
                         fields.push(field("/current_tools/truncated".into(),local!(language, "現在の実行情報", "Current execution details"),crate::ui::text_width::glyphs::select(local!(language, "先頭16呼出しまで · 詳細はCLIで確認", "First 16 calls · use CLI for details"), local!(language, "先頭16呼出しまで | 詳細はCLIで確認", "First 16 calls | use CLI for details")).into()));
                     }
-                    for (index,(call,execution,state,code,complete,retention,has_output)) in current.into_iter().take(16).enumerate() {
+                    for (index,call) in current.into_iter().take(16).enumerate() {
                         let prefix=format!("/current_tools/{index}");
-                        let mut call_field=field(format!("{prefix}/call_id"),local!(language, "呼出しID", "Call ID"),call.clone().unwrap_or_default());
-                        if call.is_none() {call_field.display=Some(crate::ui::text_width::glyphs::select(local!(language, "IDが表示上限を超えています · O原文", "ID exceeds display limit · O for original"), local!(language, "IDが表示上限を超えています | O原文", "ID exceeds display limit | O for original")).into());call_field.value_omitted=true;}
+                        // The execution is current only when its saved shell row joins.
+                        let execution=call.shell_state.is_some().then_some(call.execution_id).flatten();
+                        let shown=call.call_id.len()<=512;
+                        let mut call_field=field(format!("{prefix}/call_id"),local!(language, "呼出しID", "Call ID"),if shown {call.call_id} else {String::new()});
+                        if !shown {call_field.display=Some(crate::ui::text_width::glyphs::select(local!(language, "IDが表示上限を超えています · O原文", "ID exceeds display limit · O for original"), local!(language, "IDが表示上限を超えています | O原文", "ID exceeds display limit | O for original")).into());call_field.value_omitted=true;}
                         fields.push(call_field);
                         fields.push(field(format!("{prefix}/execution_id"),local!(language, "実行ID", "Execution ID"),execution.unwrap_or_else(||local!(language, "未取得", "Not retrieved").into())));
-                        fields.push(field(format!("{prefix}/state"),local!(language, "現在の実行状態", "Current execution state"),state.unwrap_or_else(||local!(language, "利用不可・未実行", "Unavailable or not started").into())));
-                        fields.push(field(format!("{prefix}/exit_code"),local!(language, "現在の終了コード", "Current exit code"),code.map_or(local!(language, "未確定", "Not yet known").into(),|v|v.to_string())));
-                        fields.push(field(format!("{prefix}/output_complete"),local!(language, "出力回収完了", "Output collection complete"),complete.map_or(local!(language, "未取得", "Not retrieved").into(),|v|v.to_string())));
-                        fields.push(field(format!("{prefix}/retention_generation"),local!(language, "出力保持世代", "Output retention generation"),retention.map_or(local!(language, "未取得", "Not retrieved").into(),|v|v.to_string())));
-                        fields.push(field(format!("{prefix}/output_available"),local!(language, "保存出力あり", "Saved output available"),has_output.to_string()));
+                        fields.push(field(format!("{prefix}/state"),local!(language, "現在の実行状態", "Current execution state"),call.shell_state.unwrap_or_else(||local!(language, "利用不可・未実行", "Unavailable or not started").into())));
+                        fields.push(field(format!("{prefix}/exit_code"),local!(language, "現在の終了コード", "Current exit code"),call.shell_exit_code.map_or(local!(language, "未確定", "Not yet known").into(),|v|v.to_string())));
+                        fields.push(field(format!("{prefix}/output_complete"),local!(language, "出力回収完了", "Output collection complete"),call.output_revision.map_or(local!(language, "未取得", "Not retrieved").into(),|(_,complete)|complete.to_string())));
+                        fields.push(field(format!("{prefix}/output_available"),local!(language, "保存出力あり", "Saved output available"),call.output_available.to_string()));
                     }
                     fields.extend(node.presentation.fields.into_iter().take(128usize.saturating_sub(fields.len())));
                     node.presentation.blocks=Vec::new();
@@ -821,8 +809,8 @@ impl<'a> HistoryReader<'a> {
         viewed_thread: &str,
     ) -> Result<UiNode, ApiError> {
         let result = async {
-            let (display, observation) = self
-                .owner()
+            let owner = self.owner();
+            let (display, observation, provenance) = owner
                 .node(
                     viewed_thread,
                     &node_id,
@@ -834,20 +822,34 @@ impl<'a> HistoryReader<'a> {
                 .map_err(unavailable)?;
             let width = self.width;
             let language = self.control.store.config.ui.language;
-            let mut node =
+            let node =
                 presentation_work(move || display.into_ui_node(node_id, width, language)).await?;
-            message_metadata::enrich(
-                self.control,
-                Some(viewed_thread),
-                std::slice::from_mut(&mut node),
+            let sources = match &provenance {
+                Some(provenance) => {
+                    Some(message_metadata::read(&owner, viewed_thread, None, [provenance]).await?)
+                }
+                None => None,
+            };
+            let attempts = provenance
+                .as_ref()
+                .and_then(|provenance| provenance.attempt_id.clone())
+                .map(|attempt| vec![(node.node_id.clone(), attempt)])
+                .unwrap_or_default();
+            let compactions = compaction_markers::read(
+                &owner,
+                viewed_thread,
+                std::slice::from_ref(&node),
+                &attempts,
             )
             .await?;
             let (mut node, read_sequence) = presentation_work(move || {
-                native_history::apply_observation(
-                    std::slice::from_mut(&mut node),
-                    &observation,
-                    language,
-                );
+                let mut node = node;
+                if let (Some(provenance), Some(sources)) = (&provenance, &sources) {
+                    message_metadata::apply(&mut node, provenance, sources);
+                }
+                let nodes = std::slice::from_mut(&mut node);
+                compaction_markers::apply(nodes, &compactions, &attempts);
+                native_history::apply_observation(nodes, &observation, language);
                 (node, observation.read_sequence)
             })
             .await?;
@@ -892,7 +894,7 @@ mod detail_link_tests {
                 let node=format!("call-{group}");
                 db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,'p','m',0,'completed','{}','now')",[&attempt])?;
                 db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,'u','completed','now')",rusqlite::params![group,attempt])?;
-                db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','assistant_response','now',?2)",rusqlite::params![node,json!({"group_id":group,"text":"[source](https://example.test/source)"}).to_string()])?;
+                db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','assistant_response','now',?2)",rusqlite::params![node,json!({"group_id":group,"text":"[source](https://example.test/source)","output":[{"type":"function_call","name":"shell","call_id":"same","arguments":"{}"}]}).to_string()])?;
                 db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,'same',0,'shell','{}','completed')",[group])?;
             }
             db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('other',?1,1,'shell','{}','completed')",["x".repeat(200_000)])?;
@@ -902,7 +904,7 @@ mod detail_link_tests {
         let (updates, _) = std::sync::mpsc::sync_channel(8);
         let reader = HistoryReader::new(&control, &updates, 80);
         let first = reader
-            .links(vec!["call-g".into(), "call-other".into()])
+            .links("t", vec!["call-g".into(), "call-other".into()])
             .await
             .unwrap();
         let get = |source: &DetailSourceFacts, key: &str| {
@@ -939,7 +941,7 @@ mod detail_link_tests {
             db.execute_batch("UPDATE shell_execution SET state='exited',exit_code=7,output_complete=1,retention_generation=1 WHERE id='exec'; DELETE FROM output_chunk WHERE execution_id='exec'; UPDATE node SET deleted_reason='gc',payload_json=NULL WHERE id='call-other';")?; Ok(())
         }).await.unwrap();
         let second = reader
-            .links(vec!["call-g".into(), "call-other".into()])
+            .links("t", vec!["call-g".into(), "call-other".into()])
             .await
             .unwrap();
         assert!(second.read_revision > first.read_revision);
@@ -954,10 +956,6 @@ mod detail_link_tests {
         assert_eq!(
             get(&second.sources[0], "/current_tools/0/output_available").as_deref(),
             Some("false")
-        );
-        assert_eq!(
-            get(&second.sources[0], "/current_tools/0/retention_generation").as_deref(),
-            Some("1")
         );
         assert!(second.sources[1].unavailable_reason.is_some());
         assert!(second.sources[1].links.is_empty());
@@ -977,6 +975,7 @@ mod detail_link_tests {
         let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
         tokio::spawn(control.clone().serve(receive));
         owner.db.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','now')",[])?;
             let call=json!({"text":"[call source](https://example.test/call)"}).to_string();
             let result=json!({"item":{"type":"function_call_output","call_id":"call","output":json!({"status":"exited","exit_code":0,"output":"https://example.test/result"}).to_string()}}).to_string();
             for (id,kind,payload) in [("call","assistant_response",call),("result","tool_result",result),("large","assistant_response",json!({"text":"x".repeat(100_000)}).to_string())] {
@@ -988,7 +987,7 @@ mod detail_link_tests {
         let (updates, _incoming) = std::sync::mpsc::sync_channel(8);
         let reader = HistoryReader::new(&control, &updates, 80);
         let snapshot = reader
-            .links(vec!["call".into(), "result".into()])
+            .links("t", vec!["call".into(), "result".into()])
             .await
             .unwrap();
         assert!(snapshot.observed_at.ends_with(" UTC"));
@@ -1010,19 +1009,22 @@ mod detail_link_tests {
         );
         for ids in [vec![], vec!["call".into(); 3], vec!["x".repeat(257)]] {
             assert_eq!(
-                reader.links(ids).await.unwrap_err().code,
+                reader.links("t", ids).await.unwrap_err().code,
                 ErrorCode::InvalidArgument
             );
         }
         // Positioned display pages have no whole-payload limit: a large source
         // is available; reclaimed and absent sources are not.
         let large = reader
-            .links(vec!["call".into(), "large".into()])
+            .links("t", vec!["call".into(), "large".into()])
             .await
             .unwrap();
         assert!(large.sources[1].unavailable_reason.is_none());
         for id in ["deleted", "absent"] {
-            let snapshot = reader.links(vec!["call".into(), id.into()]).await.unwrap();
+            let snapshot = reader
+                .links("t", vec!["call".into(), id.into()])
+                .await
+                .unwrap();
             assert_eq!(snapshot.sources[0].node_id, "call");
             assert!(snapshot.sources[0].unavailable_reason.is_none());
             let unavailable = &snapshot.sources[1];
@@ -1238,6 +1240,79 @@ mod read_stamping_tests {
         assert!(last > empty.presentation.read_revision);
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod owner_fact_tests {
+    use super::*;
+    use crate::presentation::InputSource;
+    use serde_json::json;
+
+    /// Input sources and branch markers come from the owner's window: the
+    /// receipt's delivery reason and the family's divergence points.
+    #[tokio::test]
+    async fn page_shows_saved_delivery_reasons_and_branch_points_from_the_owner_window() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        owner.db.call(|db| {
+            let tx = db.transaction()?;
+            let user = |text: &str| json!({"role":"user","content":[{"type":"input_text","text":text}]});
+            crate::history::append_node(&tx, "thread", "ask", None, "user", &user("first request"), "2026-11-01T00:00:00Z")?;
+            crate::history::append_node(&tx, "thread", "answer", None, "assistant", &json!({"role":"assistant","content":[{"type":"output_text","text":"answer"}]}), "2026-11-01T00:01:00Z")?;
+            crate::history::append_node(&tx, "thread", "revisit", None, "user", &user("run finished"), "2026-11-01T00:02:00Z")?;
+            for (id, result) in [
+                ("ask", json!({})),
+                ("revisit", json!({"deliver":"complete","delivery_context":{"reason":"run_completion"}})),
+            ] {
+                tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,updated_at,path_admission,result_json)VALUES(?1,?1,'{\"kind\":\"human\"}','thread',?1,'applied','now','now','admitted',?2)", rusqlite::params![id, result.to_string()])?;
+            }
+            // A branch that left the conversation after the answer.
+            tx.execute("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)SELECT 'branch','thread','branch',cwd,agents_path,profile_id,model_id,'now' FROM thread WHERE id='thread'", [])?;
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES('branch-own','user','2026-11-01T00:03:00Z',?1)", [user("other way").to_string()])?;
+            for (ordinal, node) in ["ask", "answer", "branch-own"].into_iter().enumerate() {
+                tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('branch',?1,?2)", rusqlite::params![ordinal as i64, node])?;
+            }
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let (updates, incoming) = std::sync::mpsc::sync_channel(32);
+        HistoryReader::new(&control, &updates, 80)
+            .page(&Reply::new("thread", 1), None, None)
+            .await
+            .unwrap();
+        let nodes = loop {
+            if let UiUpdate::History { nodes, .. } = incoming.try_recv().unwrap() {
+                break nodes;
+            }
+        };
+        let node = |id: &str| nodes.iter().find(|node| node.node_id == id).unwrap();
+        assert_eq!(node("ask").presentation.input_source, InputSource::Human);
+        assert_eq!(
+            node("revisit").presentation.input_source,
+            InputSource::Revisit
+        );
+        assert_eq!(
+            node("revisit").presentation.created_at.as_deref(),
+            Some("2026-11-01T00:02:00Z")
+        );
+        let marker = node("answer").presentation.branch_marker.clone().unwrap();
+        let threads = marker
+            .alternatives
+            .iter()
+            .map(|alternative| alternative.thread_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(threads.len(), 2);
+        assert!(threads.contains(&"branch"));
+        assert_eq!(threads[marker.current], "thread");
+        assert!(
+            nodes
+                .iter()
+                .filter(|node| node.node_id != "answer")
+                .all(|node| node.presentation.branch_marker.is_none())
+        );
+        control.shutdown().await.unwrap();
+        server.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
 }

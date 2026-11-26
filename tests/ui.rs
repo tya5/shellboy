@@ -3986,6 +3986,7 @@ fn shellboy_provenance_fixture() -> shellboy::protocol::NodeProvenance {
         notification: None,
         message: None,
         sender: None,
+        delivery_reason: None,
         client_operation_id: None,
         attempt_id: None,
         kind: "assistant_response".into(),

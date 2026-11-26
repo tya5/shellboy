@@ -1,8 +1,8 @@
 //! One-row branch marker (#237): where this conversation's branches diverge.
-//! Display only, from the saved facts of `thread branches`. The row names the
+//! Display only, from the selected window's saved branch points. The row names the
 //! alternative being previewed (`2/3`); previewing never switches Threads.
 use crate::config::UiLanguage;
-use crate::history::branches::Marker;
+use crate::protocol::HistoryWindowBranchPoint;
 use crate::ui::text_width::{UnicodeWidthStr, glyphs};
 
 /// Characters of an alternative's last request shown in the row.
@@ -51,18 +51,20 @@ pub struct BranchMarker {
     pub preview: usize,
 }
 impl BranchMarker {
-    pub fn from_facts(marker: &Marker) -> Self {
+    /// The client validated `current` against the alternatives on receipt.
+    pub fn from_facts(point: &HistoryWindowBranchPoint) -> Self {
+        let current = point.current as usize;
         Self {
-            alternatives: marker
+            alternatives: point
                 .alternatives
                 .iter()
                 .map(|a| Alt {
                     thread_id: a.thread_id.clone(),
-                    excerpt: a.excerpt.clone(),
+                    excerpt: a.last_request.clone(),
                 })
                 .collect(),
-            current: marker.current,
-            preview: marker.current,
+            current,
+            preview: current,
         }
     }
     pub fn step(&mut self, delta: isize) -> bool {

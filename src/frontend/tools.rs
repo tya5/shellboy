@@ -37,7 +37,8 @@ SELECT c.ordinal,
        substr(s.started_at,1,128),
        CASE WHEN json_valid(c.arguments_json) THEN json_extract(c.arguments_json,'$.background')=1 ELSE 0 END,
        s.saved_sequence,s.output_complete,
-       CASE WHEN json_valid(c.arguments_json) THEN substr(json_extract(c.arguments_json,'$.description'),1,80) END
+       CASE WHEN json_valid(c.arguments_json) THEN substr(json_extract(c.arguments_json,'$.description'),1,80) END,
+       EXISTS(SELECT 1 FROM output_chunk oc WHERE oc.execution_id=s.id)
 FROM tool_call c LEFT JOIN shell_execution s ON s.id=c.operation_id
     AND s.turn_id=(SELECT turn_id FROM tool_group WHERE id=c.group_id)
 WHERE c.group_id=COALESCE(
@@ -172,6 +173,7 @@ fn read_tx_reference(
                         row.get::<_, Option<i64>>(13)?
                             .map(|seq| (seq as u64, complete))
                     },
+                    output_available: row.get(16)?,
                 })
             })
             .optional()?;
@@ -258,7 +260,8 @@ calls AS MATERIALIZED (
         substr(s.started_at,1,128) AS started_at,
         CASE WHEN json_valid(c.arguments_json) THEN json_extract(c.arguments_json,'$.background')=1 ELSE 0 END AS background,
         CASE WHEN json_valid(c.arguments_json) THEN substr(json_extract(c.arguments_json,'$.description'),1,80) END AS description,
-        s.saved_sequence AS output_sequence,s.output_complete
+        s.saved_sequence AS output_sequence,s.output_complete,
+        EXISTS(SELECT 1 FROM output_chunk oc WHERE oc.execution_id=s.id) AS output_available
  FROM keys JOIN tool_call c ON c.group_id=keys.group_id AND c.call_id=keys.call_id
  JOIN tool_group g ON g.id=c.group_id
  LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id
@@ -284,7 +287,7 @@ item_calls AS MATERIALIZED (
 )
 SELECT requested.node_id,c.call_id,c.ordinal,c.command,
  c.result_state,c.shell_state,c.result_node_id IS NOT NULL,c.group_id,c.exit_code,c.operation_id,
- o.node_id,c.result_node_id,c.elapsed_ms,priors.reason,c.started_at,c.background,c.output_sequence,c.output_complete,c.description
+ o.node_id,c.result_node_id,c.elapsed_ms,priors.reason,c.started_at,c.background,c.output_sequence,c.output_complete,c.description,c.output_available
 FROM requested JOIN calls c ON c.group_id=requested.group_id AND c.call_id=requested.call_id
 LEFT JOIN node source ON source.id=requested.node_id
 LEFT JOIN first_items first ON first.group_id=c.group_id AND first.call_id=c.call_id
@@ -462,6 +465,7 @@ fn read_sources_batch(
                     row.get::<_, Option<i64>>(16)?
                         .map(|seq| (seq as u64, complete))
                 },
+                output_available: row.get(19)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

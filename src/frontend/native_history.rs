@@ -38,7 +38,15 @@ impl Owner<'_> {
         args.include_observation = true;
         let thread = args.thread_id.clone();
         let window: HistoryWindow = self.call(Command::HistoryWindow(args)).await?;
-        if window.thread_id != thread || window.observation.is_none() {
+        let Some(observation) = &window.observation else {
+            return Err(invalid_response());
+        };
+        if window.thread_id != thread
+            || observation
+                .branch_points
+                .iter()
+                .any(|point| point.current as usize >= point.alternatives.len())
+        {
             return Err(invalid_response());
         }
         Ok(window)
@@ -94,16 +102,24 @@ impl Owner<'_> {
         })
     }
 
-    /// One positioned node by ID, plus the selected window's facts for it. A
-    /// received response is never on a path: its observation is the selected
-    /// tail's, which orders the install but has no facts for it. Any other
-    /// node must still be selected at the same source revision.
+    /// One positioned node by ID, plus the selected window's facts and the
+    /// node's provenance from it. A received response is never on a path: its
+    /// observation is the selected tail's, which orders the install but has no
+    /// facts or provenance for it. Any other node must still be selected at the
+    /// same source revision.
     pub(super) async fn node(
         &self,
         thread_id: &str,
         node_id: &str,
         position: HistoryDisplayPosition,
-    ) -> Result<(DisplayExtent, HistoryWindowObservation), ApiError> {
+    ) -> Result<
+        (
+            DisplayExtent,
+            HistoryWindowObservation,
+            Option<crate::protocol::NodeProvenance>,
+        ),
+        ApiError,
+    > {
         use crate::protocol::HistoryDisplayNode as Node;
         let display = self.display(node_id, None, position).await?;
         let received = matches!(display.outline.node, Node::Received);
@@ -121,20 +137,23 @@ impl Owner<'_> {
                 excerpt_chars: 0,
             })
             .await?;
-        if !received {
-            match window.items.as_slice() {
-                [item] if item.node_id == node_id => {
+        let provenance = if received {
+            None
+        } else {
+            match window.items.pop() {
+                Some(item) if window.items.is_empty() && item.node_id == node_id => {
                     if item.kind != display.kind
                         || item.provenance.source_revision != display.source_revision
                     {
                         return Err(source_changed());
                     }
+                    Some(item.provenance)
                 }
                 _ => return Err(invalid_response()),
             }
-        }
+        };
         let observation = window.observation.take().ok_or_else(invalid_response)?;
-        Ok((display, observation))
+        Ok((display, observation, provenance))
     }
 
     pub(super) async fn display(
@@ -356,6 +375,12 @@ pub(super) fn apply_observation(
     super::tools::apply_window(nodes, &observation.tools);
     super::recovery::apply_window(nodes, &observation.recovery, language);
     super::usage::apply_window(nodes, &observation.usage);
+    for point in &observation.branch_points {
+        if let Some(node) = nodes.iter_mut().find(|node| node.node_id == point.node_id) {
+            node.presentation.branch_marker =
+                Some(crate::presentation::branch_marker::BranchMarker::from_facts(point));
+        }
+    }
 }
 
 fn validate_outline(

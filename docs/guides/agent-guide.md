@@ -731,6 +731,10 @@ Deleted sender Threads do not erase those saved IDs. Follow those IDs with the
 ordinary inspection commands; they are facts, not permission to stop/retry work.
 `external_cli` is not necessarily a human, recorded TUI submissions can be
 `human`, and missing historical evidence is `unknown`. No credential is exposed.
+`provenance.delivery_reason` says why a user input arrived when its receipt
+records one: `run_completion` for a message delivered after its target Run
+completed, `carried_after_turn_interruption` for a held message carried into
+the next Turn. It does not change who the sender is.
 
 An optional `--sender-label 'reviewer'` is a self-asserted name (at most 64 Unicode
 characters, no controls/newlines), not a verified role or authority.

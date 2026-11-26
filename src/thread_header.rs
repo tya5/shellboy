@@ -267,6 +267,9 @@ fn read_candidates(
 }
 
 impl RawHeader {
+    pub(crate) fn parent_thread_id(&self) -> Option<&str> {
+        self.details.parent_thread_id.as_deref()
+    }
     pub(crate) fn into_native(self) -> ThreadDetails {
         let mut details = self.details;
         let mut fallback = None;
