@@ -190,10 +190,15 @@ Reply only to a request this Thread received, never on behalf of a child or to
 a request you sent. To withdraw your own
 request, use `message cancel`. Do not reply after cancellation.
 After context loss, run `shellboy message list --awaiting --owed-by-thread THREAD_ID`
-to find duties this Thread owes; `thread get` shows the `pending_replies` counts.
-If a duty is `awaiting_own_ask`, `reply.blocking_message_id` identifies the
-question whose answer is pending; its reply or other terminal outcome makes the
-duty owed again.
+to find duties this Thread owes; `thread get` shows the `pending_replies` counts
+and lists duties in `pending_replies.awaiting_own_ask`.
+
+Asking back keeps your duty open. If your Run ends while a question you sent
+after receiving the request (`message ask --to NAME` or `--thread ID`) is still
+unanswered, the duty becomes `awaiting_own_ask` instead of being reminded or
+ignored; `reply.blocking_message_id` names that question. Its answer, or its
+cancelled or ignored outcome, wakes this Thread and the duty is owed again: if
+that Run ends without the reply, the duty becomes `ignored`.
 
 If the target is unavailable, check `error.details.pending_duty_ids` for up to
 16 duties this Thread owes, not questions it sent. A missing ID prefix can
@@ -231,11 +236,8 @@ shellboy message get --message MESSAGE_ID
 shellboy history read --node REPLY_NODE_ID
 ```
 
-Acceptance opens one reply duty. An ask you send after receiving that duty keeps it
-open if your Turn ends while its answer is pending. `message reply` is the final
-answer that closes the duty; send interim status with ordinary `message send` to
-the asker, never by replying to close the assignment early. Check `delivery_status`
-on the same message for delivery and inspect its assigned `run_id` or `turn_id`, when present, for execution.
+Acceptance opens one reply duty. Check `delivery_status` on the same message for
+delivery and inspect its assigned `run_id` or `turn_id`, when present, for execution.
 Check `reply.state` and use `reply.node_id` for the answer body. A closed duty
 without a reply is not an answer. Do not substitute a child's final Turn text. A reply closes one duty; use
 a separate ask for the next assignment. Use ordinary `message send` for progress.

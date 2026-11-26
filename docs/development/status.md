@@ -1,5 +1,16 @@
 # Development status
 
+## Core #433 reply duties awaiting an own ask
+
+Branch `task/core433-awaiting-own-ask`: a reply duty whose Thread asks back and
+ends its Run becomes `awaiting_own_ask`; the asker's Run that receives the
+answer or outcome owes it again, and ignores it if that Run ends unanswered. One
+open/terminal state rule in `control::reply` drives blocking, reply, cancel,
+deletion and settlement; migration `next_open_reply_duties` widens the
+open-duty indexes and adds the owner-Run index. Not landed. Open question for the
+owner: `exec --result reply` still ends with exit 4 when the recipient Run
+completes while the duty awaits its own ask.
+
 ## Core #421 Unit 2: operation evidence
 
 The public result registry describes the existing `operation.get` envelope as `OperationReceiptDetails`. Receipt storage and replay are unchanged; Studio adoption is separate.

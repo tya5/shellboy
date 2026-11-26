@@ -71,8 +71,10 @@ messages. `satisfied` is not necessarily success: inspect the reply snapshot's
 reply has no deadline; a timeout limits only that wait call. At normal Run end,
 one reminder is delivered for unanswered applied requests; if still unanswered,
 they become `ignored`. Human decision questions are distinct: they do not trigger
-these outcomes or pause another reply duty you hold. Tell your requester you are
-blocked on the human before ending the Run. A recovery-waiting Run leaves the reply pending; an actual terminal replyless normal completion, explicit stop or
+these outcomes. Asking back, to a person or another Thread, keeps a reply duty you
+hold open while that question is unanswered (`awaiting_own_ask`, see the
+[Agent Guide](agent-guide.md#reply-to-a-request)); tell your requester with
+`message send` that you are blocked before ending the Run. A recovery-waiting Run leaves the reply pending; an actual terminal replyless normal completion, explicit stop or
 terminal failure resolves it as `ignored` and delivers that outcome to the requesting Thread.
 Use `thread_settled` for stalls and an explicit recovery decision; do not resend
 the same request merely because it is held or the wait timed out. Cancellation
