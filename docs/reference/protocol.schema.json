@@ -14117,6 +14117,17 @@
             "null"
           ]
         },
+        "stop_settlement_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunStopSettlementFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The same saved Run fact `run.get` returns; present only while the Run is `stopping`."
+        },
         "targets": {
           "items": {
             "$ref": "#/definitions/StatusTarget"

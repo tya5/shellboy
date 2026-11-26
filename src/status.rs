@@ -64,6 +64,9 @@ pub struct WorkItem {
     pub compaction_outcome: Option<crate::compaction::discard::CompactionOutcomeFact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revisit: Option<RevisitSummary>,
+    /// The same saved Run fact `run.get` returns; present only while the Run is `stopping`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_settlement_failure: Option<RunStopSettlementFailure>,
     pub targets: Vec<crate::protocol::StatusTarget>,
     #[serde(default, flatten)]
     pub additional_properties: std::collections::BTreeMap<String, Value>,
@@ -490,6 +493,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<W
         stdin_open: None,
         stdin_last_write_at: None,
         revisit: None,
+        stop_settlement_failure: None,
         targets: Vec::new(),
         additional_properties: Default::default(),
     };
@@ -701,13 +705,16 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     let mut page_len = 0;
     for projected in selected.iter_mut().take(args.limit as usize) {
         if projected.kind == "run" {
-            let warnings: Option<String> = db
+            let (warnings, stop_settlement_failure): (Option<String>, Option<String>) = db
                 .query_row(
-                    "SELECT instruction_warnings_json FROM run WHERE id=?1",
+                    "SELECT instruction_warnings_json,stop_settlement_failure FROM run WHERE id=?1",
                     [&projected.id],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .map_err(sql)?;
+            projected.stop_settlement_failure = crate::readback::decode_stop_settlement_failure(
+                stop_settlement_failure.as_deref(),
+            )?;
             if let Some(warnings) = warnings {
                 let Some(remaining) = remaining_warning_bytes.checked_sub(warnings.len()) else {
                     break;

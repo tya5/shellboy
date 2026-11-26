@@ -106,6 +106,7 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | `status --memory` | Owner-wide cache retained/limit/entry accounting and native process memory; unknown values have reasons. Exclusive with activity filters; on-demand and no provider request |
 
 A Run status item can include skipped `instruction_warnings` with `path`, `reason` and `hint`.
+While a Run is `stopping` after a failed stop settlement, its status item includes the same `stop_settlement_failure` (`storage` or `invariant`) as `run get`.
 A Turn can include `reason`, `message` (saved failure evidence) and `hint` (one next action).
 Each diagnostic is bounded; use `turn get --turn ID` to inspect the saved Turn before retrying.
 `model_auth` identifies missing local credentials or HTTP authorization refusal, not an invalid-key verdict.

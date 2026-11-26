@@ -6581,6 +6581,28 @@ mod driverless_child_stop_notification_tests {
                     .db
                     .call(|db| crate::frontend::inspect_run_fields_for_test(db, "run-3"))
             };
+            // The Run row of the work projection carries the same saved fact.
+            let work_row = || async {
+                let status = control
+                    .request(Request::new(
+                        format!("{}:status-child-stop", owner.instance_id),
+                        Command::Status(StatusArgs {
+                            run_id: Some("run-3".into()),
+                            all: true,
+                            ..Default::default()
+                        }),
+                    ))
+                    .await
+                    .result
+                    .unwrap();
+                status["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["kind"] == "run" && item["id"] == "run-3")
+                    .cloned()
+                    .unwrap()
+            };
             let fields = inspect().await.unwrap();
             assert_eq!(
                 fields
@@ -6590,6 +6612,12 @@ mod driverless_child_stop_notification_tests {
                 fail_drain.then_some("storage")
             );
             let after = get().await.result.unwrap();
+            let row = work_row().await;
+            assert_eq!(row["state"], after["state"]);
+            assert_eq!(
+                row.get("stop_settlement_failure"),
+                after.get("stop_settlement_failure")
+            );
             if fail_drain {
                 assert_eq!(after["state"], "stopping");
                 assert_eq!(after["stop_settlement_failure"], "storage");
@@ -6622,6 +6650,9 @@ mod driverless_child_stop_notification_tests {
                 let settled = get().await.result.unwrap();
                 assert_eq!(settled["state"], "stopped");
                 assert!(settled.get("stop_settlement_failure").is_none());
+                let row = work_row().await;
+                assert_eq!(row["state"], "stopped");
+                assert!(row.get("stop_settlement_failure").is_none());
                 assert!(
                     !inspect()
                         .await
