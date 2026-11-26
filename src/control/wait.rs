@@ -75,25 +75,106 @@ impl Drop for Guard {
     }
 }
 
+/// The saved pending record fields that prove a live wait for one shell.
+#[derive(serde::Deserialize)]
+struct PendingRecord {
+    operation_id: String,
+    caller: Option<PendingCaller>,
+    conditions: Vec<WaitCondition>,
+    timeout_ms: u64,
+    accepted_at: String,
+}
+#[derive(serde::Deserialize)]
+struct PendingCaller {
+    run_id: String,
+    execution_id: String,
+}
+impl PendingRecord {
+    /// The wait this record proves for `execution`: its caller's Run, accepted
+    /// instant and wire fact.
+    fn shell_wait(
+        self,
+        operation: &str,
+        execution: &str,
+    ) -> Option<(String, chrono::DateTime<chrono::FixedOffset>, ShellWait)> {
+        let caller = self.caller?;
+        let first = self.conditions.first()?.clone();
+        let accepted = chrono::DateTime::parse_from_rfc3339(&self.accepted_at).ok()?;
+        (self.operation_id == operation && caller.execution_id == execution).then(|| {
+            (
+                caller.run_id,
+                accepted,
+                ShellWait {
+                    operation_id: self.operation_id,
+                    accepted_at: self.accepted_at,
+                    timeout_ms: self.timeout_ms,
+                    condition_count: u32::try_from(self.conditions.len()).unwrap_or(u32::MAX),
+                    first_condition: first,
+                },
+            )
+        })
+    }
+}
+
 impl Control {
-    /// Bounded in-process ownership witnesses; the frontend joins these exact
-    /// operations to their committed pending records in its normal read snapshot.
-    pub(crate) fn pending_wait_sources(&self) -> Option<Vec<(String, String)>> {
-        let entries = self.waits.entries.lock().expect("wait registry poisoned");
-        if entries.len() > 128 {
-            return None;
+    /// Write `wait` on shell rows whose live registration matches its saved
+    /// pending record (same operation, Run and shell), read on the inspection
+    /// lane. Registrations exist only for admitted IPC waits, so the lookup is
+    /// bounded by `MAX_WAIT_WORK`.
+    pub(super) async fn project_shell_waits<'a>(
+        &self,
+        rows: impl IntoIterator<Item = &'a mut Value>,
+    ) -> Result<()> {
+        let mut rows: Vec<_> = rows.into_iter().collect();
+        let candidates: Vec<(String, String)> = {
+            let entries = self.waits.entries.lock().expect("wait registry poisoned");
+            entries
+                .iter()
+                .filter_map(|(operation, registration)| {
+                    let execution = registration.source.strip_prefix("shell:")?;
+                    rows.iter()
+                        .any(|row| row["execution_id"] == execution)
+                        .then(|| (operation.clone(), execution.to_owned()))
+                })
+                .collect()
+        };
+        if candidates.is_empty() {
+            return Ok(());
         }
-        let mut sources = entries
-            .iter()
-            .filter_map(|(operation, registration)| {
-                registration
-                    .source
-                    .strip_prefix("shell:")
-                    .map(|execution| (operation.clone(), execution.to_owned()))
-            })
-            .collect::<Vec<_>>();
-        sources.sort_unstable();
-        Some(sources)
+        let saved = super::db::read_only(&self.store.database, "ShellWait", move |db| {
+            let mut saved = Vec::new();
+            for (operation, execution) in candidates {
+                let body: Option<String> = db
+                    .query_row(
+                        "SELECT value FROM app_meta WHERE key=?1",
+                        [WaitKeys::new(&operation).pending()],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let proved = body
+                    .and_then(|body| serde_json::from_str::<PendingRecord>(&body).ok())
+                    .and_then(|record| record.shell_wait(&operation, &execution));
+                if let Some((run, accepted, wait)) = proved {
+                    saved.push((execution, run, accepted, wait));
+                }
+            }
+            Ok(saved)
+        })
+        .await?;
+        for row in &mut rows {
+            let earliest = saved
+                .iter()
+                .filter(|(execution, run, ..)| {
+                    row["execution_id"] == execution.as_str() && row["run_id"] == run.as_str()
+                })
+                .min_by_key(|(_, _, accepted, wait)| (*accepted, &wait.operation_id))
+                .map(|(.., wait)| wait);
+            if let Some(wait) = earliest {
+                row["wait"] =
+                    serde_json::to_value(wait).map_err(|_| invalid("cannot encode shell wait"))?;
+            }
+        }
+        Ok(())
     }
 }
 struct Observation {
@@ -763,63 +844,91 @@ mod tests {
         .await
         .unwrap();
     }
+    async fn read(control: &Arc<Control>, command: Command) -> Value {
+        let response = control
+            .request(Request::new(
+                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                command,
+            ))
+            .await;
+        assert!(response.ok, "{:?}", response.error);
+        response.result.unwrap()
+    }
+    async fn shell_wait(control: &Arc<Control>, execution: &str) -> Value {
+        let shell = read(
+            control,
+            Command::ShellGet(ExecutionTarget {
+                execution_id: execution.into(),
+            }),
+        )
+        .await;
+        shell.get("wait").cloned().unwrap_or(Value::Null)
+    }
     #[tokio::test]
-    async fn pending_source_snapshot_is_exact_bounded_and_guard_owned() {
+    async fn shell_wait_exists_only_while_its_registration_matches_the_saved_record() {
         let (_dir, owner, control) = fixture().await;
-        assert_eq!(control.pending_wait_sources(), Some(vec![]));
-        {
-            let mut entries = control.waits.entries.lock().unwrap();
-            entries.insert(
-                "z:operation".into(),
-                Registration {
-                    source: "shell:execution:日本".into(),
-                },
-            );
-            entries.insert(
-                "a:operation".into(),
-                Registration {
-                    source: "shell:shell:nested".into(),
-                },
-            );
-        }
-        assert_eq!(
-            control.pending_wait_sources(),
-            Some(vec![
-                ("a:operation".into(), "shell:nested".into()),
-                ("z:operation".into(), "execution:日本".into())
-            ])
+        assert_eq!(shell_wait(&control, "sa").await, Value::Null);
+        let cancel = CancellationToken::new();
+        let task = spawn_wait(
+            &control,
+            "visible",
+            Some(origin("a", "ra", "ta", "sa")),
+            cancel.clone(),
         );
-        let guard = Guard {
-            entries: control.waits.entries.clone(),
-            id: "a:operation".into(),
-        };
-        drop(guard);
-        assert_eq!(control.pending_wait_sources().unwrap().len(), 1);
-        {
-            let mut entries = control.waits.entries.lock().unwrap();
-            for index in 0..127 {
-                entries.insert(
-                    format!("operation-{index}"),
-                    Registration {
-                        source: format!("shell:execution-{index}"),
-                    },
-                );
-            }
-        }
-        assert_eq!(control.pending_wait_sources().unwrap().len(), 128);
-        control.waits.entries.lock().unwrap().insert(
-            "overflow".into(),
-            Registration {
-                source: "shell:last".into(),
-            },
+        registered(&control).await;
+        let wait = shell_wait(&control, "sa").await;
+        assert_eq!(wait["operation_id"], "visible");
+        assert_eq!(wait["timeout_ms"], 30000);
+        assert_eq!(wait["condition_count"], 1);
+        assert_eq!(
+            wait["first_condition"],
+            json!({"type":"shell_ended","execution_id":"sa2"})
         );
         assert!(
-            control.pending_wait_sources().is_none(),
-            "overflow is unavailable, never a partial/global-prefix snapshot"
+            chrono::DateTime::parse_from_rfc3339(wait["accepted_at"].as_str().unwrap()).is_ok()
         );
-        control.waits.entries.lock().unwrap().remove("overflow");
-        assert_eq!(control.pending_wait_sources().unwrap().len(), 128);
-        control.waits.entries.lock().unwrap().clear();
+        let listed = read(
+            &control,
+            Command::ShellList(ShellListArgs {
+                thread_id: Some("a".into()),
+                since: None,
+                until: None,
+                command_contains: None,
+                state: Some("running".into()),
+                exit_code: None,
+                limit: 10,
+                cursor: None,
+            }),
+        )
+        .await;
+        let waits: Vec<_> = listed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| (item["execution_id"].clone(), item.get("wait").cloned()))
+            .collect();
+        assert!(
+            waits.contains(&(json!("sa"), Some(wait.clone()))),
+            "{waits:?}"
+        );
+        assert!(waits.contains(&(json!("sa2"), None)), "{waits:?}");
+        // A saved record for another caller Run does not prove this shell's wait.
+        let rewrite = |run: &'static str| {
+            owner.db.call(move |db| {
+                db.execute(
+                    "UPDATE app_meta SET value=json_set(value,'$.caller.run_id',?1) WHERE key='wait.pending.visible'",
+                    [run],
+                )?;
+                Ok(())
+            })
+        };
+        rewrite("rb").await.unwrap();
+        assert_eq!(shell_wait(&control, "sa").await, Value::Null);
+        rewrite("ra").await.unwrap();
+        assert_eq!(shell_wait(&control, "sa").await, wait);
+        cancel.cancel();
+        assert_eq!(task.await.unwrap().unwrap()["status"], "interrupted");
+        assert_eq!(shell_wait(&control, "sa").await, Value::Null);
         owner.shutdown().await.unwrap();
     }
 
@@ -836,10 +945,6 @@ mod tests {
         );
         assert!(
             matches!(tokio::time::timeout(Duration::from_secs(60),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
-        );
-        assert_eq!(
-            control.pending_wait_sources(),
-            Some(vec![("background-visible".into(), "sa".into())])
         );
         owner
             .db
@@ -870,7 +975,6 @@ mod tests {
         assert!(
             matches!(events.try_recv(),Ok(super::super::EngineEvent::Changed {thread_id,recovery:false}) if thread_id=="a")
         );
-        assert_eq!(control.pending_wait_sources(), Some(vec![]));
         owner
             .db
             .call(|db| {
@@ -948,8 +1052,8 @@ mod tests {
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty)
             ));
             assert_eq!(
-                control.pending_wait_sources(),
-                Some(vec![]),
+                shell_wait(&control, "sa").await,
+                Value::Null,
                 "Guard cleanup is independent of the failed DB mutation"
             );
             owner

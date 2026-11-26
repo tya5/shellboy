@@ -169,22 +169,10 @@ impl Compactor {
         }
     }
     pub async fn context_metrics(&self, thread: &str) -> Result<Value, ApiError> {
-        self.read_context_metrics(thread, None).await
-    }
-
-    pub(crate) async fn context_metrics_display(&self, thread: &str) -> Result<Value, ApiError> {
-        self.read_context_metrics(thread, Some(512)).await
-    }
-
-    async fn read_context_metrics(
-        &self,
-        thread: &str,
-        scalar_bytes: Option<usize>,
-    ) -> Result<Value, ApiError> {
         let thread = thread.to_owned();
         let raw = self
             .database
-            .call(move |db| super::context_usage::read_context_usage_tx(db, &thread, scalar_bytes))
+            .call(move |db| super::context_usage::read_context_usage_tx(db, &thread, None))
             .await
             .map_err(storage_error)?;
         Ok(super::context_usage::prepare_context_usage(raw).0)

@@ -33,6 +33,18 @@ struct Current {
     tool_scope: Option<ToolObservation>,
 }
 
+/// Provider-reported tokens of `thread.get`'s last successful attempt; all
+/// unknown when the owner reported none or could not bound that evidence.
+fn reported_context_usage(usage: Option<&Value>) -> crate::ui::ContextUsage {
+    let latest = usage.map(|usage| &usage["last_successful_attempt"]);
+    let tokens = |key: &str| latest.and_then(|latest| latest[key].as_u64());
+    crate::ui::ContextUsage {
+        input_tokens: tokens("input_tokens"),
+        cached_tokens: tokens("cached_tokens"),
+        output_tokens: tokens("output_tokens"),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn read_current(
     control: &Control,
@@ -104,21 +116,12 @@ async fn read_current(
                     view_revision: None,
                 },
             )?;
-            // Existing bounded display read; a limit error is an unknown value.
-            let usage = match crate::compaction::context_usage::read_context_usage_tx(
-                db,
-                &target,
-                Some(512),
-            ) {
-                Ok(raw) => raw.reported_usage().into(),
-                Err(crate::storage::StorageError::Operation(_)) => Default::default(),
-                Err(error) => return Err(error),
-            };
-            Ok((sources, received, usage))
+            Ok((sources, received))
         },
     )
     .await;
-    let (sources, received, context_usage) = checked_storage(control, raw).await?;
+    let (sources, received) = checked_storage(control, raw).await?;
+    let context_usage = reported_context_usage(details.context_usage());
     if let Some(scope) = &mut tool_scope {
         let tools = page.observation.tools.clone();
         let mut nodes = std::mem::take(&mut scope.nodes);
@@ -147,7 +150,7 @@ async fn read_current(
         ),
         None => None,
     };
-    let activity = activity::read_cancellable(control, thread, stop).await?;
+    let activity = activity::read_cancellable(control, owner, thread, stop).await?;
     Ok(Current {
         details: details.prepare_for_ui(language),
         page,
@@ -686,9 +689,13 @@ mod tests {
         let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
         let dispatcher = tokio::spawn(control.clone().serve(dispatcher));
         control.start().await.unwrap();
+        let native = Owner {
+            data_dir: &owner.loaded.data_dir,
+            instance: &control.store.instance_id,
+        };
         let cancelled = CancellationToken::new();
         cancelled.cancel();
-        let error = activity::read_cancellable(&control, "t", cancelled)
+        let error = activity::read_cancellable(&control, &native, "t", cancelled)
             .await
             .err()
             .unwrap();
@@ -710,7 +717,7 @@ mod tests {
                 .unwrap();
             let initial = crate::test_watchdog::watchdog(
                 "initial activity saved pause",
-                activity::read_cancellable(&control, "t", CancellationToken::new()),
+                activity::read_cancellable(&control, &native, "t", CancellationToken::new()),
             )
             .await;
             drop(release);

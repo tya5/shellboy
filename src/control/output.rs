@@ -714,6 +714,7 @@ fn snapshot(db: &Connection, execution: &str) -> Result<Snapshot> {
     Ok(Snapshot {
         details: ShellDetails {
             foreground: None,
+            wait: None,
             stdin_open: None,
             stdin_last_write_at: None,
             execution_id: execution.into(),

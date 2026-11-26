@@ -2108,7 +2108,6 @@ async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_op
         let mut found = false;
         while let Ok(update) = incoming.try_recv() {
             if let crate::ui::UiUpdate::Thread { details, .. } = update {
-                assert!(details.context_usage.is_none());
                 assert!(!details.agents_path.is_empty());
                 found = true;
             }

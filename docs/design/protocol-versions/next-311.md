@@ -109,3 +109,22 @@ refresh its cache, so owner shutdown and context capture fence it like other
 context-changing requests. Reload does not send to a model, change the saved selection or
 successful-send baseline, or publish a new event fact. The TUI's explicit reload
 calls the same owner operation.
+
+## Shell waits and selected header facts (4d slice 2)
+
+`shell.list` items and `shell.get` add an optional `wait`: the earliest
+accepted `wait` that this shell is running now, with its `operation_id`,
+`accepted_at`, `timeout_ms`, `condition_count` and `first_condition`. The owner
+writes it only while its in-memory registration of that operation matches the
+saved pending record for the same Run and shell; the field is absent otherwise,
+including after cleanup or a failed cleanup that left the saved record behind.
+Registration and cleanup already publish a saved change for the caller's
+Thread. Waits are admitted IPC observations (at most 32 at once), so the proof
+read is bounded; it runs on the read-only inspection lane.
+
+`thread.get` with `display` now also returns `context_usage`, read in the same
+read-only transaction as the header, and `context_usage.last_successful_attempt`
+adds the attempt's provider-reported `output_tokens`. `index.status` reads its
+saved state in one read-only transaction and no longer waits behind index
+writes; its result is unchanged. No operation, event fact or CLI option is
+added.

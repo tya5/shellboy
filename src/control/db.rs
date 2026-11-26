@@ -1348,17 +1348,18 @@ impl Store {
             }
             Command::ThreadGet(args) => {
                 let id = target(args.thread_id.as_deref(), caller)?;
-                if args.display {
-                    return MutationResult::value(
-                        crate::thread_header::read_tx(tx, &id)
-                            .map_err(StorageError::into_api_error)?
-                            .into_native(),
-                    );
-                }
-                let mut details = read_thread_details(tx, &id, true)?;
-                self.project_thread_details(&mut details, true);
-                details.last_compaction =
-                    Some(crate::readback::last_compaction(tx, &details.thread_id)?);
+                let mut details = if args.display {
+                    crate::thread_header::read_tx(tx, &id)
+                        .map_err(StorageError::into_api_error)?
+                        .into_native()
+                } else {
+                    let mut details = read_thread_details(tx, &id, true)?;
+                    self.project_thread_details(&mut details, true);
+                    details.last_compaction =
+                        Some(crate::readback::last_compaction(tx, &details.thread_id)?);
+                    details
+                };
+                details.context_usage = Some(context_usage_tx(tx, &details.thread_id)?);
                 MutationResult::value(details)
             }
             Command::CompactList(args) => {
@@ -6837,6 +6838,41 @@ mod browser_creation_notification_tests {
         );
         owner.shutdown().await.unwrap();
     }
+}
+
+/// Bounded display context usage in the caller's read transaction; a display
+/// limit is reported as unavailable, never as a failed Thread read.
+fn context_usage_tx(tx: &rusqlite::Transaction<'_>, thread: &str) -> Result<Value> {
+    use crate::compaction::context_usage::{prepare_context_usage, read_context_usage_tx};
+    match read_context_usage_tx(tx, thread, Some(512)) {
+        Ok(raw) => Ok(prepare_context_usage(raw).0),
+        Err(StorageError::Operation(error)) => Ok(json!({"available":false,"error":error})),
+        Err(error) => Err(error.into_api_error()),
+    }
+}
+
+/// One read-only transaction on the owner's inspection lane, which never
+/// waits behind the writer.
+pub(crate) async fn read_only<T: Send + 'static>(
+    database: &DbWorker,
+    kind: &'static str,
+    read: impl FnOnce(&rusqlite::Transaction<'_>) -> std::result::Result<T, StorageError>
+    + Send
+    + 'static,
+) -> Result<T> {
+    let path = database.path().to_path_buf();
+    let observer = database.clone();
+    let queued_at = std::time::Instant::now();
+    inspection_work(move || {
+        let mut db = open_inspection(&path)?;
+        observer.observe_inspection(&mut db, kind, queued_at, None, |db| {
+            let tx = db.transaction().map_err(sql_error)?;
+            let value = read(&tx).map_err(StorageError::into_api_error)?;
+            tx.commit().map_err(sql_error)?;
+            Ok(value)
+        })
+    })
+    .await?
 }
 
 async fn inspection_work<T: Send + 'static>(

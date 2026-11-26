@@ -601,6 +601,9 @@ and `elapsed_ms`. While starting/running/stopping, elapsed_ms is calculated
 at read time from the saved start and wall clock, not a process-liveness
 check or monotonic measurement. For terminal shells it is the saved completion
 duration, if known. No output or reclaimed output gives last_output_at: null.
+While a shell is running `shellboy wait`, `shell get` and `shell list` add
+`wait` with its operation ID, `accepted_at`, `timeout_ms`, `condition_count`
+and `first_condition`; it disappears when the wait ends.
 
 Status timing does not affect activity_at, sorting, cursor or fingerprint.
 
