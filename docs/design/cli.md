@@ -204,8 +204,10 @@ stderr carries known Thread/message/Run/Turn/answer IDs, per-step operation IDs,
 and repair count. Failure stdout is empty. Exit codes:0 success;2 input/unsupported
 Schema;3 invalid JSON/Schema after the repair cap (raw answer and errors on stderr);
 4 recovery/held/stopped/failed/no usable answer;5 overall execution timeout, or
-an owner wait `interrupted` by input for the calling Thread (#446: every exec wait
-ends its observation there, naming the unfinished target);
+an owner wait reported `interrupted` (#446: every exec wait ends its observation
+there with the owner's reason, naming the unfinished target; a satisfied wait's
+target snapshot decides the outcome, and saved facts are read only to build the
+result);
 6 owner/transport/protocol/output failure. Timeout and interruption never send
 stop/retry or start an owner. Known IDs permit inspection; an uncertain send must be inspected
 by operation ID before resubmission. The timeout begins after input/Schema reads,

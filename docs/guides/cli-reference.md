@@ -730,11 +730,11 @@ reply duty is still open (`pending` or `awaiting_own_ask` after the recipient
 asked back), for `reply_received` until `--timeout-ms`, and reads the reply node.
 A terminal state without a reply exits 4 and the deadline exits 5, naming the
 state. In every mode, each owner wait is one wait for the rest of `--timeout-ms`
-(never sliced or re-armed), and a wait interrupted by input for the calling
-Thread (exec run from a model shell) ends exec's observation: it exits 5
-`interrupted`, naming the Run, Turn or reply duty that is still open, and stops
-nothing. Resume with `shellboy wait` on the reported IDs after handling that
-input. `turn-end` sends an ordinary message and waits
+(never sliced or re-armed), and a wait the owner reports `interrupted` (for
+example input for the calling Thread when exec runs in a model shell, or owner
+shutdown) ends exec's observation: it exits 5 `interrupted` with the owner's
+reason, naming the Run, Turn or reply duty that is still open, and stops
+nothing. Resume with `shellboy wait` on the reported IDs. `turn-end` sends an ordinary message and waits
 for the assigned Turn; `run-end` sends an ordinary message and waits for the
 assigned Run, reading its last Turn's end message. An existing Turn can handle
 other input; a Run can continue into later Turns and wait for owned work. Neither
