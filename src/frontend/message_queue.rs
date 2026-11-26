@@ -37,9 +37,7 @@ pub(super) fn query(
                 completion_scheduled: row.get(11)?,
                 created_at: row.get(3)?,
                 held: row.get::<_, String>(4)? == "held",
-                hold_reason: row.get(5)?,
                 uncertain: row.get::<_, String>(6)? == "unknown",
-                now: row.get(7)?,
                 excerpt_truncated: excerpt.chars().count() > 512,
                 excerpt: excerpt.chars().take(512).collect(),
                 attachment_count: row.get::<_, i64>(9)? as u64,
@@ -667,7 +665,7 @@ mod tests {
             before.items[1].sender_thread.as_deref(),
             Some("sender-thread")
         );
-        assert!(before.items[1].now && before.items[1].held && before.items[1].uncertain);
+        assert!(before.items[1].held && before.items[1].uncertain);
         let tx = db.unchecked_transaction().unwrap();
         tx.execute("INSERT INTO thread_path VALUES('thread','z-first')", [])
             .unwrap();
