@@ -55,6 +55,11 @@ Slice 2b (`task/core311-4d-s2b-activity`) moves the rest of the activity
 to the owner's `thread.get` `activity`, shared with the window observation,
 and live work to `shell.list`/`shell.get`; the activity snapshot read and the
 TUI live-work SQL are deleted.
+Slice 3 (wakes): the TUI's only owner wake is its owner-wide `events.wait`,
+now with `index_changed`, `retention_changed` and opt-in `output` entries.
+The private index, GC availability, owner-state and display-output wakes and
+the in-process output markers are deleted. Gap: an operation inspection of a
+receipt with no Thread no longer refreshes when it settles.
 
 ## Core #311 selected history client (4e/4f)
 

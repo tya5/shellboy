@@ -144,10 +144,26 @@ drops the outstanding read; there is no new subscription or polling path.
 The embedded client consumes owner-wide saved-change metadata from one
 instance-fenced `events.wait` at a time. The list and status need changes to
 Threads not yet visible, so this wait deliberately does not filter Thread IDs;
-it never requests text or reasoning. Changes feed existing view scopes and
-receipt observers. A gap resets the current browser generation and schedules
-normal bounded first-page and selected reads, not a walk through old pages.
-The first baseline also refreshes any view already shown before it arrived.
+it never requests text or reasoning, and it requests `output` entries. Changes
+feed existing view scopes and receipt observers. A gap resets the current
+browser generation and schedules normal bounded first-page and selected reads,
+not a walk through old pages. The first baseline also refreshes any view
+already shown before it arrived.
+
+This one wait is the client's only owner wake (4d slice 3):
+
+- `index_changed` rereads the index pause, the selected Thread and an index,
+  storage or retained-source inspection.
+- `retention_changed` rereads a visible inspection and the selected detail
+  sources.
+- `output` re-reads the shown execution: the shell inspection, a Watch row's
+  detail, or the open live preview. The live work output age counts from when
+  the client received the entry; a newer saved output time supersedes it, as
+  before. An owner Instant is not meaningful in another process.
+- An owner notification for one Thread arrives as an ordinary change for it.
+  The operation inspection therefore refreshes through its receipt's Thread;
+  a receipt with no Thread gets no wake (gap below).
+- A baseline or gap rereads everything the marks and output entries cover.
 
 No worker or queued event buffer is added; dropping the pending wait drops its
 connection. All wait errors, including typed wait-class admission refusal, stop
@@ -165,7 +181,7 @@ or diagnostics paths, or implement reattachment to a replacement owner.
 | `EngineEvent::Changed { recovery }`: bell for a new saved recovery transition, including nonselected Threads | The owner-wide saved-change hint already wakes the client; `thread.get` and `turn.get` can explain current recovery. Their current state does not distinguish a new transition from a baseline or ordinary change while already recovering. |
 | `EngineEvent::Notice` and `Error`: release/cancellation and transient status text | Project release/cancellation from bounded saved tool results, deduplicated by saved identity. A generic raw error or notice event is not a native replacement; check each unsaved status call site for an existing typed result. |
 | DB activity, GC watches and UI-memory callback: slow/no-progress footer, Help diagnostics and `status --memory` UI cache contribution | The adopted design drops raw worker telemetry and callbacks. Existing native status does not reproduce those UI-only diagnostics. Keep slow-job reporting on the owner rather than depending on a terminal to sample it. |
-| `DisplayOutput` wake plus `committed_*_output_markers`: exact visible execution refresh, output-age indicator and retained live tail | `wait` already has `shell_output` for an exact read cursor and `shell.read` can return decoded segments. Establish cursor coverage for the visible set, same-timestamp commits, retained-tail baseline, truncation and terminal edges before replacing the hint. `shell.get.last_output_at` is not a lossless output cursor. |
+| `DisplayOutput` wake plus `committed_*_output_markers`: exact visible execution refresh, output-age indicator and retained live tail | `wait` already has `shell_output` for an exact read cursor and `shell.read` can return decoded segments. Establish cursor coverage for the visible set, same-timestamp commits, retained-tail baseline, truncation and terminal edges before replacing the hint. `shell.get.last_output_at` is not a lossless output cursor. Replaced in 4d slice 3 by `events.wait` `output` entries. |
 
 Approved user-visible changes: live preview shows answer text only; saved
 reasoning is unchanged. The private DB/GC footer, Help diagnostics and UI-memory
@@ -249,10 +265,9 @@ No protocol read or wake fact exists for these:
   and `message.get` carry sender and reply state but not the delivery reason.
 - Branch markers for the visible nodes. `thread.branches` pages the family at
   most 200 Threads per page, so a marker for one visible node can need every page.
-- Wakes that `events.wait` does not report: index saved/pause change, storage
-  availability change, management owner-state hint, and committed output
-  across the visible and watched executions (`wait` `shell_output` covers one
-  exact execution cursor).
+- A wake for a runtime receipt that has no Thread (`storage.collect`,
+  `config.set`, index operations, shell writes): an open operation inspection
+  of one does not refresh when it settles.
 - Management inspections answered in process with client-only payloads
   (index coverage window, storage physical sample, lifecycle, saved, operation,
   attachment and deletion inspections). The protocol records lack, for

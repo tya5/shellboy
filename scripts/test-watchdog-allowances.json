@@ -122,14 +122,6 @@
   {
     "file": "src/control/driver/shell_output/live_marker_tests.rs",
     "rule": "raw-timeout",
-    "fingerprint": "8d8c86908dd05a6802e97374f889cde2809bb170c90a7ea1c312138bb2940928",
-    "function": "marker_case",
-    "count": 1,
-    "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing marker_case occurrence; migrate with shared-read integration, no whole-file exemption."
-  },
-  {
-    "file": "src/control/driver/shell_output/live_marker_tests.rs",
-    "rule": "raw-timeout",
     "fingerprint": "dfa38e358d62857c1432ae682a807740e92eb19c271c14cf31c083b8caf1e7b8",
     "function": "marker_case",
     "count": 1,
@@ -906,7 +898,7 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "174d1a2b5a01c1face6b613f5b6ab95b16aa71a7b191963941fd6407b3c92af1",
+    "fingerprint": "cfff186455c258dd34cbe0fcacadf15c0fcad57a290d31e98efe643c5801bc99",
     "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
     "count": 1,
     "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
@@ -923,14 +915,6 @@
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
     "fingerprint": "3c590dc30393a4f2e3a78bbd76596cb02e7e74ae8c092be74a1134bc195a3edd",
-    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
-    "count": 1,
-    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "63195a73774baea32848f7215609874d929fe211be71f9774a1ccc09765a934c",
     "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
     "count": 1,
     "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."

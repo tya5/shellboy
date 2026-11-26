@@ -801,6 +801,26 @@ successful file write, including a restart-required write; refused and no-op wri
 do not. Readers use `config.get` to reread both on-disk and loaded values. The marker
 contains no config values or diff and adds no event path, persistence, cache, or poller.
 
+`index_changed` and `retention_changed` (#311) are required marks of the same kind,
+also retained as the newest sequence only. The index service records `index_changed`
+after any committed change to saved index state, including the profile pause
+(`index.status`). GC records `retention_changed` after a committed tombstone of a saved
+source, a raw-output deletion or a new raw retention generation, and a managed-file
+deletion (availability of saved data). Neither carries a value, and both ignore the
+Thread filter; readers reread `index.status` or the affected saved reads. Change
+entries also cover owner work state: every owner notification that concerns one
+Thread (a pending receipt, a finished compaction queue, a running foreground shell)
+goes through `Control::changed`. Owner stop reaches clients as the typed disconnect.
+
+`include_output` (CLI `--output`) adds `output`: up to 64 `{thread_id, execution_id, seq}`
+entries in seq order, each the latest committed output batch of one shell execution
+after the cursor, filtered by `thread_ids`. It is written after each output commit
+(`driver/shell_output.rs`) and never carries output bytes; read them with `shell.read`
+or `wait` `shell_output`. Entries share the clock: at most 4096 executions are kept,
+evicting the oldest raises the same floor (`resync_required`), and a page that stops at
+64 entries sets `more` with `cursor` at its last entry. Absent unless asked; baseline and
+resync return an empty list.
+
 The cursor moves past changes to Threads excluded by `thread_ids`; a client that adds a Thread to the
 filter reads it once. A pending call at owner shutdown or caller disconnect ends with an error
 (`read_only`, not applied); after an owner restart the next call returns `resync_required`.

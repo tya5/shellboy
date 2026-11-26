@@ -140,6 +140,7 @@ async fn wait_for_live_text(control: &Arc<Control>, thread: &str, expected: &str
                     timeout_ms: 1_000,
                     include_text: true,
                     include_reasoning_activity: false,
+                    include_output: false,
                 }),
             )
             .await,

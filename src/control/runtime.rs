@@ -577,39 +577,62 @@ impl Control {
         use super::change_clock::Poll;
         let include_text = args.include_text;
         let include_reasoning_activity = args.include_reasoning_activity;
-        let result = |status,
-                      seq: u64,
-                      changes: Vec<(String, u64)>,
-                      more,
-                      config_changed,
-                      text,
-                      reasoning_activity,
-                      attempt_ends,
-                      recovery_transitions| {
+        let include_output = args.include_output;
+        struct Page {
+            status: EventsWaitStatus,
+            seq: u64,
+            changes: Vec<(String, u64)>,
+            more: bool,
+            marks: [bool; 3],
+            text: Vec<crate::protocol::EventLiveText>,
+            reasoning_activity: Vec<crate::protocol::EventReasoningActivity>,
+            attempt_ends: Vec<crate::protocol::EventAttemptEnd>,
+            recovery_transitions: Vec<crate::protocol::EventRecoveryTransition>,
+            output: Vec<crate::protocol::EventOutput>,
+        }
+        let result = |page: Page| {
             let cursor = EventCursor {
                 v: 1,
                 instance_id: self.store.instance_id.clone(),
-                seq,
+                seq: page.seq,
             }
             .encode();
+            let [config_changed, index_changed, retention_changed] = page.marks;
             encode_result(
                 EventsWaitResult {
-                    status,
+                    status: page.status,
                     cursor,
-                    changes: changes
+                    changes: page
+                        .changes
                         .into_iter()
                         .map(|(thread_id, seq)| EventChange { thread_id, seq })
                         .collect(),
-                    more,
+                    more: page.more,
                     config_changed,
-                    recovery_transitions,
-                    live_text: include_text.then_some(text),
-                    reasoning_activity,
-                    attempt_ends: include_text.then_some(attempt_ends),
+                    index_changed,
+                    retention_changed,
+                    recovery_transitions: page.recovery_transitions,
+                    live_text: include_text.then_some(page.text),
+                    reasoning_activity: page.reasoning_activity,
+                    attempt_ends: include_text.then_some(page.attempt_ends),
+                    output: include_output.then_some(page.output),
                 },
                 ErrorCode::InvalidState,
                 "Cannot encode events result",
             )
+        };
+        // Baselines and resynchronisation carry no change entries, marks or output.
+        let snapshot = |status, head, text, reasoning_activity| Page {
+            status,
+            seq: head,
+            changes: vec![],
+            more: false,
+            marks: [false; 3],
+            text,
+            reasoning_activity,
+            attempt_ends: vec![],
+            recovery_transitions: vec![],
+            output: vec![],
         };
         let Some(token) = args.after.as_deref() else {
             let (head, text, activity) = self.change_clock.snapshot(
@@ -617,17 +640,7 @@ impl Control {
                 include_text,
                 include_reasoning_activity,
             );
-            return result(
-                EventsWaitStatus::Baseline,
-                head,
-                vec![],
-                false,
-                false,
-                text,
-                activity,
-                vec![],
-                vec![],
-            );
+            return result(snapshot(EventsWaitStatus::Baseline, head, text, activity));
         };
         let after = EventCursor::decode(token)?;
         if after.instance_id != self.store.instance_id {
@@ -636,17 +649,12 @@ impl Control {
                 include_text,
                 include_reasoning_activity,
             );
-            return result(
+            return result(snapshot(
                 EventsWaitStatus::ResyncRequired,
                 head,
-                vec![],
-                false,
-                false,
                 text,
                 activity,
-                vec![],
-                vec![],
-            );
+            ));
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(std::time::Duration::from_millis(args.timeout_ms));
@@ -656,11 +664,14 @@ impl Control {
         } else {
             args.thread_ids.iter().cloned().map(Some).collect()
         };
-        let mut keys = vec![Key::Config];
+        let mut keys = vec![Key::Marks];
         for thread in threads {
             keys.push(Key::Changed(thread.clone()));
             if include_text {
                 keys.extend([Key::Live(thread.clone()), Key::AttemptEnd(thread.clone())]);
+            }
+            if include_output {
+                keys.push(Key::Output(thread.clone()));
             }
             if include_reasoning_activity {
                 keys.push(Key::Reasoning(thread));
@@ -677,6 +688,7 @@ impl Control {
                 &args.thread_ids,
                 include_text,
                 include_reasoning_activity,
+                include_output,
             ) {
                 None => {
                     return Err(ApiError::new(
@@ -689,17 +701,12 @@ impl Control {
                     text,
                     reasoning_activity,
                 }) => {
-                    return result(
+                    return result(snapshot(
                         EventsWaitStatus::ResyncRequired,
                         head,
-                        vec![],
-                        false,
-                        false,
                         text,
                         reasoning_activity,
-                        vec![],
-                        vec![],
-                    );
+                    ));
                 }
                 Some(Poll::Ready {
                     changes,
@@ -710,59 +717,42 @@ impl Control {
                     reasoning_changed,
                     recovery_transitions,
                     config_changed,
+                    index_changed,
+                    retention_changed,
+                    output,
                     attempt_ends,
                 }) => {
-                    if !changes.is_empty() || config_changed || !recovery_transitions.is_empty() {
-                        return result(
-                            EventsWaitStatus::Changed,
-                            cursor,
-                            changes,
-                            more,
-                            config_changed,
+                    let marks = [config_changed, index_changed, retention_changed];
+                    let status = if !changes.is_empty()
+                        || marks.contains(&true)
+                        || !output.is_empty()
+                        || !recovery_transitions.is_empty()
+                    {
+                        Some(EventsWaitStatus::Changed)
+                    } else if reasoning_changed
+                        || !attempt_ends.is_empty()
+                        || text.iter().any(|attempt| !attempt.deltas.is_empty())
+                    {
+                        Some(EventsWaitStatus::Text)
+                    } else if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
+                        Some(EventsWaitStatus::Timeout)
+                    } else {
+                        None
+                    };
+                    if let Some(status) = status {
+                        let changed = status == EventsWaitStatus::Changed;
+                        return result(Page {
+                            status,
+                            seq: cursor,
+                            changes: if changed { changes } else { vec![] },
+                            more: changed && more,
+                            marks: if changed { marks } else { [false; 3] },
                             text,
                             reasoning_activity,
                             attempt_ends,
                             recovery_transitions,
-                        );
-                    }
-                    if reasoning_changed || !attempt_ends.is_empty() {
-                        return result(
-                            EventsWaitStatus::Text,
-                            cursor,
-                            vec![],
-                            false,
-                            false,
-                            text,
-                            reasoning_activity,
-                            attempt_ends,
-                            recovery_transitions,
-                        );
-                    }
-                    if text.iter().any(|attempt| !attempt.deltas.is_empty()) {
-                        return result(
-                            EventsWaitStatus::Text,
-                            cursor,
-                            vec![],
-                            false,
-                            false,
-                            text,
-                            reasoning_activity,
-                            attempt_ends,
-                            recovery_transitions,
-                        );
-                    }
-                    if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
-                        return result(
-                            EventsWaitStatus::Timeout,
-                            cursor,
-                            vec![],
-                            false,
-                            false,
-                            text,
-                            reasoning_activity,
-                            attempt_ends,
-                            recovery_transitions,
-                        );
+                            output,
+                        });
                     }
                 }
             }

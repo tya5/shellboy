@@ -365,6 +365,9 @@ pub struct EventsWaitOptions {
     /// Return bounded active-attempt metadata, never model text.
     #[arg(long)]
     pub reasoning_activity: bool,
+    /// Also return which shell executions committed output (IDs only); read it with shell read.
+    #[arg(long)]
+    pub output: bool,
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum UsageCommand {
@@ -2275,6 +2278,7 @@ impl Cli {
                 timeout_ms: a.timeout_ms,
                 include_text: a.text,
                 include_reasoning_activity: a.reasoning_activity,
+                include_output: a.output,
             }),
             CliCommand::History { command } => match command {
                 HistoryCommand::List(a) => C::HistoryList(wire::HistoryListArgs {

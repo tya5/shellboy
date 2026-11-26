@@ -534,13 +534,35 @@ mod tests {
             Arc::new(Semaphore::new(32)),
             Some(receipt_startup()),
         ));
-        let mut committed_changes = control.subscribe();
+        // Saved readback, woken by the public saved-change feed for this Thread.
+        let events = |after: Option<String>, thread_ids: Vec<String>| {
+            let control = control.clone();
+            async move {
+                let reply = control
+                    .request(crate::protocol::Request::new(
+                        uuid::Uuid::new_v4().to_string(),
+                        crate::protocol::Command::EventsWait(crate::protocol::EventsWaitArgs {
+                            after,
+                            thread_ids,
+                            timeout_ms: crate::protocol::DEFAULT_WAIT_TIMEOUT_MS,
+                            include_text: false,
+                            include_reasoning_activity: false,
+                            include_output: false,
+                        }),
+                    ))
+                    .await;
+                serde_json::from_value::<crate::protocol::EventsWaitResult>(reply.result.unwrap())
+                    .unwrap()
+                    .cursor
+            }
+        };
+        let mut cursor = events(None, vec!["thread".into()]).await;
         sender
             .try_send(UiAction::Cancel {
                 thread_id: "thread".into(),
             })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("committed cancellation", async {
             loop {
                 let state: String = control
                     .store
@@ -557,10 +579,7 @@ mod tests {
                 if state == "stopped" {
                     break;
                 }
-                match committed_changes.recv().await {
-                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(error) => panic!("committed cancellation notifications closed: {error}"),
-                }
+                cursor = events(Some(cursor), vec!["thread".into()]).await;
             }
         })
         .await
@@ -612,6 +631,7 @@ mod tests {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .unwrap();
+        let mut changes = events(None, vec![]).await;
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let attempted=observer.delivery.observed_attempt.notified();
@@ -623,10 +643,7 @@ mod tests {
                 assert!(!bridge.is_finished(), "shutdown must retain pending UI results");
                 tokio::select! {
                     _=&mut attempted=>{},
-                    change=committed_changes.recv()=>match change {
-                        Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>{},
-                        Err(error)=>panic!("committed closing notifications closed: {error}"),
-                    },
+                    next=events(Some(changes.clone()), vec![])=>changes=next,
                 }
             }
         }).await.unwrap_or_else(|error| {

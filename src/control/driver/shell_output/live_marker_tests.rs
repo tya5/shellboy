@@ -1,22 +1,22 @@
-//! Native pipe -> committed output -> exact in-process marker -> Notify ordering.
+//! Native pipe -> committed output -> exact `events.wait` output entry.
 use super::*;
-use crate::{app::DataOwner, control::LiveShell, shell::ShellSupervisor};
-use futures_util::FutureExt;
-use std::{
-    collections::BTreeMap,
-    sync::Arc,
-    time::{Duration, Instant},
+use crate::{
+    app::DataOwner,
+    control::LiveShell,
+    protocol::{Command, EventsWaitArgs, EventsWaitResult, EventsWaitStatus, Request},
+    shell::ShellSupervisor,
 };
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 const WATCHDOG: Duration = Duration::from_secs(60);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn actual_output_commit_marks_only_its_registered_execution_before_notification() {
+async fn actual_output_commit_reports_only_its_execution_to_output_waiters() {
     marker_case(false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn rolled_back_output_batch_has_no_marker_or_normal_output_notification() {
+async fn rolled_back_output_batch_reports_no_output_entry() {
     marker_case(true).await;
 }
 
@@ -46,7 +46,6 @@ async fn marker_case(rollback: bool) {
         }
         tx.commit()?;Ok(())
     }).await.unwrap();
-    let hidden_marker = Instant::now();
     let supervisor = ShellSupervisor::new(&owner.loaded.config);
     let mut handles = Vec::new();
     let mut collectors = Vec::new();
@@ -65,7 +64,6 @@ async fn marker_case(rollback: bool) {
                 LiveShell {
                     run_id: Some(format!("r{index}")),
                     handle: handle.clone(),
-                    last_committed_output: (index == 2).then_some(hidden_marker),
                 },
             )
             .await;
@@ -80,38 +78,28 @@ async fn marker_case(rollback: bool) {
             collect_shell(&collecting, &shell_owner, &execution, shell).await
         }));
     }
-    assert!(
-        control
-            .committed_output_markers(&[])
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        control
-            .committed_output_markers(&["absent".into()])
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(
-        control
-            .committed_output_markers(&["s0".into(), "s1".into(), "s2".into(), "absent".into()])
-            .await
-            .unwrap_err()
-            .code,
-        ErrorCode::InputLimit
-    );
-    let ids = ["s0".into(), "s1".into(), "s2".into()];
-    assert_eq!(
-        control.committed_output_markers(&ids).await.unwrap(),
-        vec![("s2".into(), hidden_marker)]
-    );
-    let subscription = control.display_output_subscription();
-    let notified = subscription.notify.notified();
-    tokio::pin!(notified);
-    notified.as_mut().enable();
-    let output_started = Instant::now();
+    let events = |after: Option<String>, timeout_ms| {
+        let control = control.clone();
+        async move {
+            let reply = control
+                .request(Request::new(
+                    uuid::Uuid::new_v4().to_string(),
+                    Command::EventsWait(EventsWaitArgs {
+                        after,
+                        thread_ids: vec![],
+                        timeout_ms,
+                        include_text: false,
+                        include_reasoning_activity: false,
+                        include_output: true,
+                    }),
+                ))
+                .await;
+            serde_json::from_value::<EventsWaitResult>(reply.result.unwrap()).unwrap()
+        }
+    };
+    let baseline = events(None, 0).await;
+    assert_eq!(baseline.output, Some(vec![]));
+    let (head, _, _) = control.change_clock.snapshot(&[], false, false);
     handles[0].write("go\n", "UTF-8").await.unwrap();
     if rollback {
         let failed = tokio::time::timeout(WATCHDOG, collectors.remove(0))
@@ -120,29 +108,30 @@ async fn marker_case(rollback: bool) {
             .unwrap()
             .unwrap_err();
         assert_eq!(failed.code, ErrorCode::SaveFailed);
-        assert!(
-            notified.as_mut().now_or_never().is_none(),
-            "rolled-back output never emits the normal output Notify"
-        );
-        assert_eq!(
-            control.committed_output_markers(&ids).await.unwrap(),
-            vec![("s2".into(), hidden_marker)]
-        );
+        // The save failure stops the owner, so read the clock behind events.wait.
+        let Some(crate::control::change_clock::Poll::Ready { output, .. }) =
+            control.change_clock.poll(head, &[], false, false, true)
+        else {
+            panic!("the cursor stays inside the clock");
+        };
+        assert!(output.is_empty(), "rolled-back output is never reported");
     } else {
-        tokio::time::timeout(WATCHDOG, notified.as_mut())
-            .await
-            .unwrap();
-        // Deliberately no DB observation before this getter: the notification
-        // itself must not race ahead of recording the committed marker.
-        let markers = control.committed_output_markers(&ids).await.unwrap();
-        let committed = markers.iter().find(|(id, _)| id == "s0").unwrap().1;
-        assert!(committed >= output_started);
-        assert_eq!(markers.len(), 2);
+        let page = crate::test_watchdog::watchdog(
+            "committed output entry",
+            events(Some(baseline.cursor), 60_000),
+        )
+        .await
+        .unwrap();
+        assert_eq!(page.status, EventsWaitStatus::Changed);
+        let output = page.output.unwrap();
+        assert_eq!(output.len(), 1);
         assert_eq!(
-            markers.iter().find(|(id, _)| id == "s2").unwrap().1,
-            hidden_marker
+            (
+                output[0].thread_id.as_str(),
+                output[0].execution_id.as_str()
+            ),
+            ("t0", "s0")
         );
-        assert!(!markers.iter().any(|(id, _)| id == "s1"));
         assert!(
             !handles[0].is_finished(),
             "stdin gate keeps output observation separate from process completion"
@@ -191,13 +180,6 @@ async fn marker_case(rollback: bool) {
     for execution in ["s0", "s1", "s2"] {
         control.live.remove_shell(execution).await;
     }
-    assert!(
-        control
-            .committed_output_markers(&ids)
-            .await
-            .unwrap()
-            .is_empty()
-    );
     let shutdown = control.shutdown().await;
     if rollback {
         assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);

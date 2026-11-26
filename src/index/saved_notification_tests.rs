@@ -20,6 +20,15 @@ fn take_signal(signal: &Notify) -> bool {
     )
 }
 
+/// Whether an index mark is newer than `seen`, as an events.wait caller observes it.
+fn take_mark(index: &IndexService, seen: &mut u64) -> bool {
+    index
+        .change_clock
+        .get()
+        .expect("fixture installs a change clock")
+        .take_mark(crate::control::ChangeMark::Index, seen)
+}
+
 async fn fixture(url: String) -> (tempfile::TempDir, DbWorker, Arc<IndexService>) {
     let root = tempfile::tempdir().unwrap();
     let db = DbWorker::open(root.path().join("shellboy.db"))
@@ -38,6 +47,7 @@ async fn fixture(url: String) -> (tempfile::TempDir, DbWorker, Arc<IndexService>
     config.indexing.auto_history = true;
     config.indexing.retries = 0;
     let service = IndexService::new(db.clone(), Arc::new(config));
+    service.set_change_clock(crate::control::ChangeClock::standalone());
     db.call(|db| {
         let body = json!({"role":"user","content":[{"type":"input_text","text":"synthetic source"}]}).to_string();
         db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES('source','user','2026-01-01T00:00:00Z',?1,?2,?3)", params![body,body.len() as i64,hash(body.as_bytes())])?;
@@ -104,13 +114,14 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
     for success in [false, true] {
         let (url, started, release, server) = proxy().await;
         let (_root, db, service) = fixture(url).await;
+        let mut seen = 0;
         let args = IndexArgs::default();
-        assert!(!take_signal(&service.saved_changed));
+        assert!(!take_mark(&service, &mut seen));
         service.status(args.clone()).await.unwrap();
         service.wake();
         assert!(take_signal(&service.notify));
         assert!(
-            !take_signal(&service.saved_changed),
+            !take_mark(&service, &mut seen),
             "read/wake is not saved progress"
         );
         assert_eq!(
@@ -121,11 +132,11 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
                 .segments,
             1
         );
-        assert!(take_signal(&service.saved_changed));
+        assert!(take_mark(&service, &mut seen));
         let duplicate = service.enqueue_new(&["source".into()]).await.unwrap();
         assert_eq!(duplicate.segments, 0);
         assert!(
-            !take_signal(&service.saved_changed),
+            !take_mark(&service, &mut seen),
             "INSERT OR IGNORE no-op is quiet"
         );
         let worker = service.clone();
@@ -136,12 +147,12 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
             .unwrap()
             .unwrap();
         assert!(
-            take_signal(&service.saved_changed),
+            take_mark(&service, &mut seen),
             "claim is observable before HTTP completes"
         );
         assert_eq!(service.status(args.clone()).await.unwrap().running, 1);
         assert!(
-            !take_signal(&service.saved_changed),
+            !take_mark(&service, &mut seen),
             "status is a simple saved read"
         );
         release.send(success).unwrap();
@@ -162,17 +173,17 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
         assert_eq!(status.failed, u64::from(!success));
         assert_eq!(status.paused, !success);
         assert!(
-            take_signal(&service.saved_changed),
+            take_mark(&service, &mut seen),
             "adoption leaves one permit without a visible UI waiter"
         );
         assert!(
-            !take_signal(&service.saved_changed),
+            !take_mark(&service, &mut seen),
             "coalesced, not an event queue"
         );
         if !success {
             assert!(service.process_one(CancellationToken::new()).await.unwrap());
             assert!(
-                take_signal(&service.saved_changed),
+                take_mark(&service, &mut seen),
                 "paused discard is saved progress"
             );
             assert_eq!(
@@ -181,7 +192,7 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
             );
         }
         assert!(!service.process_one(CancellationToken::new()).await.unwrap());
-        assert!(!take_signal(&service.saved_changed), "idle work is quiet");
+        assert!(!take_mark(&service, &mut seen), "idle work is quiet");
         if success {
             let space = service
                 .status(IndexArgs::default())
@@ -192,7 +203,7 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
             service.select_space(&space).await.unwrap();
             service.retry(IndexArgs::default()).await.unwrap();
             assert!(
-                !take_signal(&service.saved_changed),
+                !take_mark(&service, &mut seen),
                 "already-selected space and retry without failed work are no-ops"
             );
         }
@@ -203,8 +214,9 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
 #[tokio::test]
 async fn rejected_enqueue_rolls_back_without_signal_or_saved_job_and_retry_noop_is_quiet() {
     let (_root, db, service) = fixture("http://127.0.0.1:9/v1".into()).await;
+    let mut seen = 0;
     service.retry(IndexArgs::default()).await.unwrap();
-    assert!(!take_signal(&service.saved_changed));
+    assert!(!take_mark(&service, &mut seen));
     db.call(|db| {
         db.execute_batch("CREATE TRIGGER reject_bootstrap BEFORE INSERT ON app_meta WHEN NEW.key LIKE 'index.bootstrap.%' AND json_extract(NEW.value,'$.segment.start')=1 BEGIN SELECT RAISE(ABORT,'synthetic enqueue rollback'); END;")?;
         Ok(())
@@ -232,7 +244,7 @@ async fn rejected_enqueue_rolls_back_without_signal_or_saved_job_and_retry_noop_
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::SaveFailed);
-    assert!(!take_signal(&service.saved_changed));
+    assert!(!take_mark(&service, &mut seen));
     db.call(|db| {
         assert_eq!(
             db.query_row(
@@ -258,6 +270,7 @@ async fn rejected_enqueue_rolls_back_without_signal_or_saved_job_and_retry_noop_
 async fn startup_partial_authorization_recovery_preserves_commit_signal_before_later_decode_error()
 {
     let (_root, db, service) = fixture("http://127.0.0.1:9/v1".into()).await;
+    let mut seen = 0;
     db.call(|db| {
         db.execute(
             "INSERT INTO app_meta(key,value)VALUES('index.auto.a',?1)",
@@ -273,10 +286,10 @@ async fn startup_partial_authorization_recovery_preserves_commit_signal_before_l
     .unwrap();
     assert!(service.start().await.is_err());
     assert!(
-        take_signal(&service.saved_changed),
+        take_mark(&service, &mut seen),
         "earlier per-row autocommit survives later decode failure"
     );
-    assert!(!take_signal(&service.saved_changed));
+    assert!(!take_mark(&service, &mut seen));
     db.call(|db| {
         let first: AutoAdmission = json_meta(db, "index.auto.a")?.unwrap();
         assert_eq!(first.state, "failed");
@@ -308,7 +321,8 @@ async fn actual_control_index_retry_receipt_replay_does_not_clear_new_pause_or_n
     .unwrap();
     let control = Control::new(&owner, root.path().into());
     control.start().await.unwrap();
-    assert!(!take_signal(&control.index.saved_changed));
+    let mut seen = 0;
+    assert!(!take_mark(&control.index, &mut seen));
     let key = IndexKeys::new(control.index.profile_key.as_deref().unwrap()).pause();
     let seed_key = key.clone();
     owner
@@ -328,8 +342,8 @@ async fn actual_control_index_retry_receipt_replay_does_not_clear_new_pause_or_n
     );
     let first = control.request(request.clone()).await;
     assert!(first.ok, "{first:?}");
-    assert!(take_signal(&control.index.saved_changed));
-    assert!(!take_signal(&control.index.saved_changed));
+    assert!(take_mark(&control.index, &mut seen));
+    assert!(!take_mark(&control.index, &mut seen));
     let seed_key = key.clone();
     owner
         .db
@@ -346,7 +360,7 @@ async fn actual_control_index_retry_receipt_replay_does_not_clear_new_pause_or_n
     assert!(replay.ok, "{replay:?}");
     assert_eq!(replay.result, first.result);
     assert!(
-        !take_signal(&control.index.saved_changed),
+        !take_mark(&control.index, &mut seen),
         "replay never invokes the mutator again"
     );
     owner

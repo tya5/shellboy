@@ -942,6 +942,7 @@ async fn stalled_permanent_error_body_is_not_retried() {
                             timeout_ms: 1_000,
                             include_text: true,
                             include_reasoning_activity: false,
+                            include_output: false,
                         }),
                     )
                     .await,
@@ -3017,6 +3018,7 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
                 timeout_ms: 0,
                 include_text: true,
                 include_reasoning_activity: false,
+                include_output: false,
             })
         };
         let cursor = request(&fixture.control, events(None)).await["cursor"]

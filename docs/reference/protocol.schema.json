@@ -3543,6 +3543,27 @@
       ],
       "type": "object"
     },
+    "EventOutput": {
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "execution_id",
+        "seq"
+      ],
+      "type": "object"
+    },
     "EventReasoningActivity": {
       "properties": {
         "attempt_id": {
@@ -3619,6 +3640,9 @@
             "null"
           ]
         },
+        "include_output": {
+          "type": "boolean"
+        },
         "include_reasoning_activity": {
           "type": "boolean"
         },
@@ -3664,6 +3688,9 @@
         "cursor": {
           "type": "string"
         },
+        "index_changed": {
+          "type": "boolean"
+        },
         "live_text": {
           "items": {
             "$ref": "#/definitions/EventLiveText"
@@ -3675,6 +3702,15 @@
         },
         "more": {
           "type": "boolean"
+        },
+        "output": {
+          "items": {
+            "$ref": "#/definitions/EventOutput"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "reasoning_activity": {
           "default": [],
@@ -3689,6 +3725,9 @@
           },
           "type": "array"
         },
+        "retention_changed": {
+          "type": "boolean"
+        },
         "status": {
           "$ref": "#/definitions/EventsWaitStatus"
         }
@@ -3698,7 +3737,9 @@
         "cursor",
         "changes",
         "more",
-        "config_changed"
+        "config_changed",
+        "index_changed",
+        "retention_changed"
       ],
       "title": "EventsWaitResult",
       "type": "object"
@@ -16885,6 +16926,9 @@
         "cursor": {
           "type": "string"
         },
+        "index_changed": {
+          "type": "boolean"
+        },
         "live_text": {
           "items": {
             "$ref": "#/definitions/EventLiveText"
@@ -16896,6 +16940,15 @@
         },
         "more": {
           "type": "boolean"
+        },
+        "output": {
+          "items": {
+            "$ref": "#/definitions/EventOutput"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "reasoning_activity": {
           "default": [],
@@ -16910,6 +16963,9 @@
           },
           "type": "array"
         },
+        "retention_changed": {
+          "type": "boolean"
+        },
         "status": {
           "$ref": "#/definitions/EventsWaitStatus"
         }
@@ -16919,7 +16975,9 @@
         "cursor",
         "changes",
         "more",
-        "config_changed"
+        "config_changed",
+        "index_changed",
+        "retention_changed"
       ],
       "title": "EventsWaitResult",
       "type": "object"

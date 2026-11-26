@@ -167,7 +167,7 @@ Result `EventsWaitResult` contains `status`, `cursor`, `changes`, and `more`; pr
 | status | when | client action |
 |---|---|---|
 | `baseline` | `after` absent | read current state; keep `cursor` |
-| `changed` | ≥1 matching Thread entry or `config_changed` after the cursor | re-read those Threads and/or `config.get`; continue with `cursor` |
+| `changed` | ≥1 matching Thread entry, a mark (`config_changed`, `index_changed`, `retention_changed`) or a requested `output` entry after the cursor | re-read those Threads, `config.get`, `index.status`, affected saved reads or those executions; continue with `cursor` |
 | `timeout` | none before deadline | continue with `cursor` |
 | `resync_required` | `after.instance_id` ≠ current instance (owner restart), or `after.seq < floor` | re-read everything the client shows; continue with the new `cursor` |
 
@@ -182,7 +182,9 @@ its latest-per-Thread entries); it is not filtered by `thread_ids` and has no
 Thread ID. For each caller, the flag is true exactly when that retained sequence
 is newer than its `after` cursor and no later than the returned cursor. It is
 not consumed: independent tabs/devices/CLI processes with older cursors all see
-the mark. A `changed` response can therefore have an empty `changes` array.
+the mark. A `changed` response can therefore have an empty `changes` array. `index_changed` and `retention_changed` (#311) work the same way; see
+[protocol](protocol.md#change-hints-eventswait-243-stage-b) for their writers and for the opt-in
+`output` entries.
 Baseline and resync return false; timeout returns false only after the caller's
 cursor has passed the retained mark. The `config.set` write worker marks and
 wakes waiters after every successful file write (`applied.written`), including
