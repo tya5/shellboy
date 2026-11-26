@@ -117,12 +117,10 @@ pub(super) fn get(
     if let Some(operation) = &args.operation_id {
         let record = tx
             .query_row(
-                &format!("{EXACT_EVIDENCE}{BINDINGS}{SUBMISSION_GROUP}"),
-                params![
-                    operation,
-                    super::DraftSubmission::id_for_operation(operation),
-                    args.thread_id
-                ],
+                &format!(
+                    "{SUBMITTED} AND client_operation_id=?1 AND (?2 IS NULL OR target_thread_id=?2)"
+                ),
+                params![operation, args.thread_id],
                 submitted_row,
             )
             .optional()
@@ -194,71 +192,32 @@ fn live_selection(tx: &Transaction<'_>, thread: &str) -> super::Result<u64> {
         })
 }
 
-// Exact reconciliation uses the frozen copy's primary key and the unique
-// delivery operation index, even when the caller never learned the Thread.
-const EXACT_EVIDENCE: &str = "WITH evidence AS (
-    SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,
-           json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,
-           json_extract(body_json,'$._submission.source_revision') AS source_revision,
-           json_extract(body_json,'$._submission.message_id') AS message_id,
-           updated_at AS accepted_at, thread_id
-      FROM draft WHERE id=?2 AND state='submitted' AND (?3 IS NULL OR thread_id=?3)
-       AND json_extract(body_json,'$._submission.operation_id')=?1
-    UNION ALL
-    SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),
-           json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at,target_thread_id
-      FROM receipt WHERE client_operation_id=?1 AND (?3 IS NULL OR target_thread_id=?3)
-       AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id
-       AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id
-)";
-const LIST_EVIDENCE: &str = "WITH evidence AS (
-    SELECT json_extract(body_json,'$._submission.operation_id') AS operation_id,
-           json_extract(body_json,'$._submission.source_draft_id') AS source_draft_id,
-           json_extract(body_json,'$._submission.source_revision') AS source_revision,
-           json_extract(body_json,'$._submission.message_id') AS message_id,
-           updated_at AS accepted_at, thread_id
-      FROM draft WHERE thread_id=?1 AND state='submitted'
-    UNION ALL
-    SELECT client_operation_id,json_extract(result_json,'$.draft_submission.source_draft_id'),
-           json_extract(result_json,'$.draft_submission.source_revision'),message_node_id,created_at,target_thread_id
-      FROM receipt WHERE target_thread_id=?1
-       AND json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id
-       AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id
-)";
-// Identical copy and receipt evidence describe one record. Conflicting
-// bindings for an operation cannot win by timestamp.
-const BINDINGS: &str = ", bindings AS (
-    SELECT max(accepted_at) AS accepted_at,operation_id,source_draft_id,source_revision,message_id,thread_id
-      FROM evidence GROUP BY operation_id,source_draft_id,source_revision,message_id,thread_id
-)
-SELECT max(accepted_at) AS accepted_at,operation_id,source_draft_id,source_revision,message_id,
-       count(*) AS bindings,thread_id FROM bindings";
-const SUBMISSION_GROUP: &str = " GROUP BY operation_id";
+// Acceptance writes one body-free binding into the operation's receipt in the
+// same transaction as the submitted copy, and the receipt outlives the copy's
+// collection. The unique client_operation_id makes it the only record source.
+const SUBMITTED: &str = "SELECT created_at,client_operation_id,
+       json_extract(result_json,'$.draft_submission.source_draft_id'),
+       json_extract(result_json,'$.draft_submission.source_revision'),
+       message_node_id,target_thread_id
+  FROM receipt WHERE json_extract(result_json,'$.draft_submission.operation_id')=client_operation_id
+   AND json_extract(result_json,'$.draft_submission.message_id')=message_node_id";
 
 type DraftRow = (String, String, DraftRecord);
 fn submitted_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DraftRow> {
-    if row.get::<_, i64>(5)? != 1 {
-        return Err(rusqlite::Error::InvalidQuery);
-    }
     let operation_id: String = row.get(1)?;
-    let source_draft_id: String = row.get(2)?;
     let revision: i64 = row.get(3)?;
     let source_revision = u64::try_from(revision)
         .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(3, revision))?;
-    let message_id: String = row.get(4)?;
-    if operation_id.is_empty() || source_draft_id.is_empty() || message_id.is_empty() {
-        return Err(rusqlite::Error::InvalidQuery);
-    }
     Ok((
         row.get(0)?,
         operation_id.clone(),
         DraftRecord::Submitted {
             draft_id: super::DraftSubmission::id_for_operation(&operation_id),
-            thread_id: row.get(6)?,
+            thread_id: row.get(5)?,
             operation_id,
-            source_draft_id,
+            source_draft_id: row.get(2)?,
             source_revision,
-            message_id,
+            message_id: row.get(4)?,
         },
     ))
 }
@@ -312,7 +271,7 @@ pub(super) fn list(tx: &Transaction<'_>, args: &DraftListArgs) -> super::Result<
                     })?.collect()
             }
             DraftListKind::Submitted => {
-                tx.prepare(&format!("{LIST_EVIDENCE}{BINDINGS}{SUBMISSION_GROUP} HAVING ?2 IS NULL OR (max(accepted_at),operation_id)<(?2,?3) ORDER BY accepted_at DESC,operation_id DESC LIMIT ?4"))?
+                tx.prepare(&format!("{SUBMITTED} AND target_thread_id=?1 AND (?2 IS NULL OR (created_at,client_operation_id)<(?2,?3)) ORDER BY created_at DESC,client_operation_id DESC LIMIT ?4"))?
                     .query_map(params![args.thread_id,time,key,count], submitted_row)?.collect()
             }
         }
