@@ -648,7 +648,7 @@ mod tests {
                 .unwrap()
                 .into_ui_node(id.into(), 80, language)];
             super::super::tools::apply_window(&mut native, &no_tools());
-            let (native, expected) = (unlabeled(&native[0]), unlabeled(&expected[0]));
+            let (native, expected) = (comparable(&native[0]), comparable(&expected[0]));
             if native != expected {
                 mismatches.push(format!(
                     "{id} at {offset:?}: {}",
@@ -800,7 +800,7 @@ mod tests {
             .unwrap();
         assert_eq!(native.len(), expected.len());
         for (native, expected) in native.iter().zip(&expected) {
-            let (native, expected) = (unlabeled(native), unlabeled(expected));
+            let (native, expected) = (comparable(native), comparable(expected));
             assert!(
                 native == expected,
                 "{}: {}",
@@ -832,18 +832,10 @@ mod tests {
         }
     }
 
-    /// Payload-path field labels need the saved payload's shape (collection
-    /// counts and item names), which the display outline does not carry yet
-    /// (open on #311). Every other projected fact, including the keys, values
-    /// and order of those fields, must match.
-    fn unlabeled(node: &crate::ui::UiNode) -> crate::ui::UiNode {
+    /// Wall-clock elapsed observations differ between two reads by design;
+    /// every other projected fact, field labels included, must match.
+    fn comparable(node: &crate::ui::UiNode) -> crate::ui::UiNode {
         let mut node = node.clone();
-        for field in &mut node.presentation.fields {
-            if !field.key.starts_with("/ui_") && !field.key.starts_with("/saved_") {
-                field.label.clear();
-            }
-        }
-        // Wall-clock elapsed observations differ between two reads by design.
         for tool in node
             .presentation
             .blocks

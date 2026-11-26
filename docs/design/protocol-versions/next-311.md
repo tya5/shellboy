@@ -13,8 +13,10 @@ projection facts. Each page contains at most 8 KiB of source bytes; the named
 extent preserves the original source geometry and contains at most 64 KiB.
 
 The first page also carries `display.outline`, typed immutable source facts
-scoped to that extent; continuations omit it. No TUI layout or raw payload
-is added.
+scoped to that extent; continuations omit it. Each outline field carries
+`shape`, its path through the saved payload as `key`, `index` and `count`
+segments (`count` follows a collection), so a client renders the field label
+in its own language. No TUI layout, localized label or raw payload is added.
 
 ## Scoped live event facts
 

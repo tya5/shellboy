@@ -26,6 +26,22 @@ pub(super) fn markdown(p: &mut NodePresentation) {
 }
 
 pub(super) fn finish(p: &mut NodePresentation, payload: &Value) {
+    finish_labeled(p, payload, None);
+}
+
+/// Finish a native extent: field labels follow the owner's saved path shapes.
+pub(super) fn finish_shaped(
+    p: &mut NodePresentation,
+    shapes: &std::collections::HashMap<&str, &[crate::protocol::HistoryDisplayPathSegment]>,
+) {
+    finish_labeled(p, &Value::Null, Some(shapes));
+}
+
+fn finish_labeled(
+    p: &mut NodePresentation,
+    payload: &Value,
+    shapes: Option<&std::collections::HashMap<&str, &[crate::protocol::HistoryDisplayPathSegment]>>,
+) {
     let mut total = 0;
     let before = p.fields.len();
     p.fields.retain(|f| {
@@ -45,6 +61,13 @@ pub(super) fn finish(p: &mut NodePresentation, payload: &Value) {
         || p.links.len() >= MAX_LINKS;
     p.details_omitted |= p.metadata_limited || p.body_omitted_chars > 0 || p.body_extent_unknown;
     fields::decorate(&mut p.fields, payload);
+    if let Some(shapes) = shapes {
+        for field in &mut p.fields {
+            if let Some(shape) = shapes.get(field.key.as_str()) {
+                field.label = fields::shape_label(shape, crate::config::UiLanguage::Ja);
+            }
+        }
+    }
     // A bounded provenance cache is optional. If metadata is full, preserve all
     // canonical/legacy facts and mark the display as limited instead of cutting
     // a translated safety sentence or dropping an unrelated source field.
