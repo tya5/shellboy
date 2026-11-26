@@ -203,13 +203,15 @@ stdout contains one validated JSON value and newline only. A JSON diagnostic on
 stderr carries known Thread/message/Run/Turn/answer IDs, per-step operation IDs,
 and repair count. Failure stdout is empty. Exit codes:0 success;2 input/unsupported
 Schema;3 invalid JSON/Schema after the repair cap (raw answer and errors on stderr);
-4 recovery/held/stopped/failed/no usable answer;5 overall execution timeout;
-6 owner/transport/protocol/output failure. Timeout never sends stop/retry or
-starts an owner. Known IDs permit inspection; an uncertain send must be inspected
+4 recovery/held/stopped/failed/no usable answer;5 overall execution timeout, or
+an owner wait `interrupted` by input for the calling Thread (#446: every exec wait
+ends its observation there, naming the unfinished target);
+6 owner/transport/protocol/output failure. Timeout and interruption never send
+stop/retry or start an owner. Known IDs permit inspection; an uncertain send must be inspected
 by operation ID before resubmission. The timeout begins after input/Schema reads,
-covers all RPCs/repairs and defaults300000ms (1..86400000); owner waits are bounded
-chunks of at most30000ms under that monotonic deadline, except the reply-duty
-wait, which is one wait for the rest of the deadline (#441).
+covers all RPCs/repairs and defaults300000ms (1..86400000); each owner wait
+(Run end, Turn end, reply duty) is one wait for the rest of that monotonic
+deadline, never sliced or re-armed (#441, #446); its timeout is exec's timeout.
 
 First-version Schema validation uses serde_json only, not a new dependency. The
 accepted bounded subset is boolean schemas and object schemas using `$schema`

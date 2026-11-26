@@ -742,8 +742,12 @@ an expected-reply message, waits for the assigned Run to end and then, while the
 reply duty is still open (`pending` or `awaiting_own_ask` after the recipient
 asked back), for `reply_received` until `--timeout-ms`, and reads the reply node.
 A terminal state without a reply exits 4 and the deadline exits 5, naming the
-state; a reply wait interrupted by input for the calling Thread also exits 5 and
-leaves the duty open. `turn-end` sends an ordinary message and waits
+state. In every mode, each owner wait is one wait for the rest of `--timeout-ms`
+(never sliced or re-armed), and a wait interrupted by input for the calling
+Thread (exec run from a model shell) ends exec's observation: it exits 5
+`interrupted`, naming the Run, Turn or reply duty that is still open, and stops
+nothing. Resume with `shellboy wait` on the reported IDs after handling that
+input. `turn-end` sends an ordinary message and waits
 for the assigned Turn; `run-end` sends an ordinary message and waits for the
 assigned Run, reading its last Turn's end message. An existing Turn can handle
 other input; a Run can continue into later Turns and wait for owned work. Neither
@@ -767,7 +771,7 @@ metadata/error object with Thread, message, Run, Turn, result mode, reply or end
 owner facts, not a per-exec bill; an existing active Turn can include other input.
 Exit codes are0 success,2 invalid input/unsupported Schema,
 3 JSON/Schema mismatch after repairs,4 recovery/held/stopped/failed/unavailable
-result,5 timeout or interrupted reply wait,6 owner/transport/protocol/output failure. Schema mismatch after the repair cap includes the raw result and bounded
+result,5 timeout or interrupted wait,6 owner/transport/protocol/output failure. Schema mismatch after the repair cap includes the raw result and bounded
 validation errors. Output-size/page limits exit6 with result node IDs for inspection,
 not a silently truncated successful result. Inspect saved targets before
 resending an uncertain mutation. `--timeout-ms` defaults300000 (1..86400000),
