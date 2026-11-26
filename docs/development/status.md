@@ -15,12 +15,12 @@ saved sends nothing. Default stays silent. Not landed.
 Branch `task/core445-artifact-read`: `artifact.read` returns one regular file of
 an exact artifact version as base64. The owner applies the scheme contract
 (`shellboy-app:` folder by relative path, `file:`/absolute path as one file,
-everything else refused), bounded by `limits.attachment_file_bytes` and one
-reply frame (6 MiB raw). The read runs on the attachment blocking-file pool.
+everything else refused), bounded by the smaller of `limits.attachment_file_bytes`
+and what fits one reply frame (refused by size before reading). The read runs on the attachment blocking-file pool.
 `artifact add/update --uri shellboy-app:./dir` joins the folder to the CLI cwd.
 Protocol notes in `protocol-versions/next-445.md`; no schema migration. Not
-landed. Open: the 8 MiB reply frame caps reads below the 20 MiB default
-`attachment_file_bytes`; larger app assets need a ranged read if wanted.
+landed. The 8 MiB reply frame caps reads below the 20 MiB default
+`attachment_file_bytes`; no ranged read (decided 11/26).
 
 ## Core #441 exec waits while the reply duty is open
 

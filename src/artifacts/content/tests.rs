@@ -172,3 +172,38 @@ fn only_the_exact_saved_version_of_the_named_thread_resolves() {
         ErrorCode::ThreadNotFound
     );
 }
+
+#[test]
+fn files_beyond_one_reply_frame_are_refused_before_reading_with_the_effective_limit() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("large.bin");
+    let args = ArtifactReadArgs {
+        thread_id: "t".into(),
+        artifact_id: "a".into(),
+        version: 1,
+        path: None,
+    };
+    let operation = "instance:read";
+    // A configured limit above the frame leaves the frame as the bound.
+    let limit = effective_limit(u64::MAX, operation, &args);
+    assert!(limit < MAX_FRAME_BYTES as u64);
+    assert_eq!(effective_limit(limit - 1, operation, &args), limit - 1);
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(limit + 1).unwrap();
+    let error = read_file(Target::File(path.clone()), limit).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InputLimit);
+    assert_eq!(reason(&error), "file_too_large");
+    assert_eq!(error.details.as_ref().unwrap()["limit_bytes"], limit);
+    // The largest admitted file still fits one frame with its envelope.
+    file.set_len(limit).unwrap();
+    let (raw_bytes, base64) = read_file(Target::File(path), limit).unwrap();
+    let content = ArtifactContent {
+        artifact_id: args.artifact_id,
+        version: args.version,
+        path: None,
+        raw_bytes,
+        base64,
+    };
+    let reply = Response::success(operation, serde_json::to_value(content).unwrap());
+    assert!(crate::protocol::encode_frame(&reply).is_ok());
+}

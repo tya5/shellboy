@@ -12326,7 +12326,9 @@ are refused as `path_outside_folder` while a link that stays inside and a
 linked folder are followed; a `file:` URI and an absolute path return only that
 file and refuse a `path`; `http:`, `https:`, relative, remote-host `file:` and
 unknown URIs are refused before any file access; a file one byte over the limit
-is `input_limit`; the version lookup resolves only the exact saved version of
+is `input_limit`; a sparse file one byte above the frame-derived effective
+limit is refused by size with that `limit_bytes`, and a file at the limit
+encodes into one frame with its envelope; the version lookup resolves only the exact saved version of
 the named Thread. `cli_process::artifact_read_serves_a_published_app_folder_and_refuses_escapes`
 runs the end-to-end path through a real owner and CLI: `artifact add --uri
 shellboy-app:./kanban` stores an absolute folder, `artifact read` returns
