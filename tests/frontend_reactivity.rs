@@ -176,16 +176,7 @@ impl Fixture {
     fn accept_update(&mut self, update: UiUpdate) {
         let trace = match &update {
             UiUpdate::GcDiagnostics(Some(snapshot)) => {
-                let stage = match snapshot.stage.as_str() {
-                    "reset" => "reset",
-                    "roots" => "roots",
-                    "provenance" => "provenance",
-                    "sweep" => "sweep",
-                    "cleanup" => "cleanup",
-                    "complete" => "complete",
-                    _ => "other",
-                };
-                Some(json!({"event":"gc_diagnostics","stage":stage,
+                Some(json!({"event":"gc_diagnostics","stage":snapshot.stage,
                     "scanned":snapshot.scanned,"deferrals":snapshot.deferrals,
                     "restarts":snapshot.restarts,"kept_over_budget":snapshot.kept_over_budget,
                     "kept_receipts":snapshot.kept_receipts,"kept_marks":snapshot.kept_marks,

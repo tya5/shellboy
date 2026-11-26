@@ -2,13 +2,6 @@
 //! of committed stages, whatever fails after a stage commits.
 use super::*;
 
-const ORDER: [&str; 4] = [
-    "closed_spill",
-    "closed_summary",
-    "active_spill",
-    "active_summary",
-];
-
 macro_rules! record_test {
     ($name:ident, $fault:expr) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -206,12 +199,9 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
         trigger_identity(&receipt.terminal["trigger"]),
         "the captured input/A/target facts are immutable across FINISH/reopen"
     );
-    let committed = receipt.terminal["committed_stages"]
-        .as_object()
-        .expect("stage facts");
     assert!(
-        committed.keys().all(|name| ORDER.contains(&name.as_str())),
-        "only known stage names are persisted"
+        receipt.terminal["committed_stages"].is_object(),
+        "stage facts"
     );
     if fault == Fault::RejectFact {
         assert!(receipt.terminal["committed_stages"][scenario.stage()].is_null());

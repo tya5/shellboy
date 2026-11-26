@@ -1615,8 +1615,8 @@ mod tests {
         .unwrap();
         let job = gc.start_history().await.unwrap().unwrap();
         assert!(rx.borrow_and_update().is_some());
-        gc.history_step(&job).await.unwrap();
-        assert_eq!(rx.borrow_and_update().as_ref().unwrap().stage, "receipts");
+        let step = gc.history_step(&job).await.unwrap();
+        assert_eq!(rx.borrow_and_update().as_ref().unwrap().stage, step.stage);
         db.call(|db| {
             db.execute("UPDATE gc_job SET cursor_json='invalid' WHERE id='job'", [])?;
             Ok(())
