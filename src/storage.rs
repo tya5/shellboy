@@ -89,6 +89,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (64, "0064_thread_cwd_partitions"),
     (65, "0065_run_request_ceiling"),
     (66, "0066_run_stop_settlement_failure"),
+    (67, "next_open_reply_duties"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

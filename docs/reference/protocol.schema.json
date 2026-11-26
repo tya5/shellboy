@@ -516,6 +516,21 @@
       ],
       "type": "object"
     },
+    "AwaitingOwnAsk": {
+      "properties": {
+        "blocking_message_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "blocking_message_id"
+      ],
+      "type": "object"
+    },
     "BranchItem": {
       "properties": {
         "branch_kind": {
@@ -5709,6 +5724,7 @@
     "MessageReplyState": {
       "enum": [
         "pending",
+        "awaiting_own_ask",
         "replied",
         "ignored",
         "cancelled"
@@ -6970,6 +6986,12 @@
       "properties": {
         "asked_by": {
           "$ref": "#/definitions/PendingReplyCount"
+        },
+        "awaiting_own_ask": {
+          "items": {
+            "$ref": "#/definitions/AwaitingOwnAsk"
+          },
+          "type": "array"
         },
         "owed_by": {
           "$ref": "#/definitions/PendingReplyCount"

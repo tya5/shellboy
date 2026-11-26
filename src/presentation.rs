@@ -857,6 +857,7 @@ pub enum InputSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReplyState {
     Pending,
+    AwaitingOwnAsk,
     Replied,
     Ignored,
     Cancelled,
@@ -867,6 +868,9 @@ impl ReplyState {
         use crate::ui::i18n::local;
         match self {
             Self::Pending => local!(language, "返事待ち", "awaiting reply"),
+            Self::AwaitingOwnAsk => {
+                local!(language, "自分の質問の答え待ち", "awaiting own question")
+            }
             Self::Replied => local!(language, "返事済み", "replied"),
             Self::Ignored => local!(language, "返事なし", "ignored"),
             Self::Cancelled => local!(language, "取消", "cancelled"),

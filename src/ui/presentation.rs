@@ -3114,6 +3114,7 @@ mod tests {
         for language in [UiLanguage::Ja, UiLanguage::En] {
             for state in [
                 crate::presentation::ReplyState::Pending,
+                crate::presentation::ReplyState::AwaitingOwnAsk,
                 crate::presentation::ReplyState::Replied,
                 crate::presentation::ReplyState::Ignored,
                 crate::presentation::ReplyState::Cancelled,

@@ -131,6 +131,7 @@ fn valid(value: &Value, relation: &MessageProvenance) -> bool {
             | (
                 Some(
                     MessageReplyState::Pending
+                        | MessageReplyState::AwaitingOwnAsk
                         | MessageReplyState::Ignored
                         | MessageReplyState::Cancelled
                 ),

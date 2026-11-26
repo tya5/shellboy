@@ -1422,7 +1422,7 @@ pub enum HistoryExportRecord {
     },
 }
 args!(HistoryRelationsArgs { node_id: String, relation: HistoryRelation, #[serde(default = "list_limit")] limit: u32, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String> });
-states!(MessageReplyState { Pending => "pending", Replied => "replied", Ignored => "ignored", Cancelled => "cancelled" });
+states!(MessageReplyState { Pending => "pending", AwaitingOwnAsk => "awaiting_own_ask", Replied => "replied", Ignored => "ignored", Cancelled => "cancelled" });
 record!(MessageProvenance {
     expect_reply: bool,
     #[serde(default, skip_serializing_if="Option::is_none")] reply_to: Option<String>,
