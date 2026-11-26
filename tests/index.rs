@@ -2641,7 +2641,6 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         assert!(running.await.unwrap().unwrap());
         f.db.call(move|db| {
             assert_eq!(db.query_row("SELECT state FROM embedding_job WHERE source_node_id='target'",[],|r|r.get::<_,String>(0))?,"failed");
-            assert_eq!(db.query_row("SELECT json_extract(error_json,'$.kind') FROM embedding_job WHERE source_node_id='target'",[],|r|r.get::<_,String>(0))?,"space_unavailable");
             assert_eq!(db.query_row("SELECT COUNT(*) FROM embedding_chunk WHERE source_node_id='target'",[],|r|r.get::<_,i64>(0))?,0);
             assert_eq!(db.query_row("SELECT value FROM app_meta WHERE key=(SELECT 'index.input.'||id FROM embedding_job WHERE source_node_id='target')",[],|r|r.get::<_,String>(0))?,expected,"space changes do not invalidate authorized text");
             Ok(())

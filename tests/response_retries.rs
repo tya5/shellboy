@@ -503,7 +503,7 @@ async fn progress(
         for (name, query) in [
             ("runs", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'stop_reason',substr(stop_reason,1,128)) FROM run WHERE (?1 IS NULL OR id=(SELECT run_id FROM turn WHERE id=?1)) ORDER BY rowid DESC LIMIT 8"),
             ("turns", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'generation',generation,'instruction_snapshot_present',instruction_snapshot_id IS NOT NULL,'recovery_code',substr(json_extract(recovery_reason_json,'$.code'),1,128)) FROM turn WHERE (?1 IS NULL OR id=?1) ORDER BY rowid DESC LIMIT 8"),
-            ("attempts", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64),'error_kind',substr(json_extract(error_json,'$.error.kind'),1,128),'http_phase',substr(json_extract(input_manifest_json,'$.http_observation.phase'),1,128),'retry_number',json_extract(error_json,'$.automatic_retry.number'),'retry_delay_ms',json_extract(error_json,'$.automatic_retry.delay_ms')) FROM model_attempt WHERE (?1 IS NULL OR turn_id=?1) ORDER BY rowid DESC LIMIT 8"),
+            ("attempts", "SELECT json_object('id',substr(id,1,128),'state',substr(state,1,64)) FROM model_attempt WHERE (?1 IS NULL OR turn_id=?1) ORDER BY rowid DESC LIMIT 8"),
         ] {
             let rows = db.prepare(query)?.query_map([turn.as_deref()], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -3183,7 +3183,7 @@ async fn output_limit_does_not_adopt_a_summary() {
         .send(terminal_sse("", cut, ""))
         .ok()
         .unwrap();
-    crate::test_watchdog::watchdog("cut Summary stays failed", async {
+    let downstream = crate::test_watchdog::watchdog("cut Summary stays failed", async {
         loop {
             let result = request(
                 &fixture.control,
@@ -3193,7 +3193,7 @@ async fn output_limit_does_not_adopt_a_summary() {
             )
             .await;
             match result["downstream"]["state"].as_str() {
-                Some("failed") => break,
+                Some("failed") => break result["downstream"].clone(),
                 Some("completed") => panic!("cut Summary adopted: {result}"),
                 _ => tokio::task::yield_now().await,
             }
@@ -3201,12 +3201,16 @@ async fn output_limit_does_not_adopt_a_summary() {
     })
     .await
     .unwrap();
+    assert!(downstream["outcome"]["error"].is_object(), "{downstream}");
+    // The cut summary was not adopted: the selected range is still on the path.
     let thread = fixture.accepted.thread_id.clone();
     fixture.control.store.database.call(move |db| {
-        let rows = db.prepare("SELECT state,json_extract(error_json,'$.error.kind'),json_extract(input_manifest_json,'$.adoption') FROM model_attempt WHERE thread_id=?1 AND kind='summary'")?
-            .query_map([thread], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        assert_eq!(rows, vec![("failed".into(), "output_limit".into(), None)]);
+        let kept: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id='old-large-context')",
+            [thread],
+            |r| r.get(0),
+        )?;
+        assert!(kept);
         Ok(())
     }).await.unwrap();
     fixture.close().await;

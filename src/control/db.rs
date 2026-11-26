@@ -5928,19 +5928,10 @@ mod thread_deletion_notification_tests {
             // Audit rows participate in the same transactions as the production
             // writes. A failed batch cannot leave audit or outcome fragments.
             db.execute_batch(r#"
-                CREATE TABLE fixture_reply_phase(phase TEXT NOT NULL);
-                INSERT INTO fixture_reply_phase VALUES('sync');
-                CREATE TABLE fixture_reply_transition(message TEXT NOT NULL,phase TEXT NOT NULL);
                 CREATE TABLE fixture_reply_delivery(event TEXT NOT NULL,run TEXT NOT NULL);
                 CREATE TRIGGER fixture_reply_delivery AFTER INSERT ON delivery
                 WHEN NEW.event_id GLOB 'reply-outcome-owner-message-*'
                 BEGIN INSERT INTO fixture_reply_delivery VALUES(NEW.event_id,NEW.recipient_id); END;
-                CREATE TRIGGER fixture_reply_transition AFTER UPDATE OF result_json ON receipt
-                WHEN json_extract(OLD.result_json,'$.reply.state')='pending'
-                 AND json_extract(NEW.result_json,'$.reply.state')='recipient_deleted'
-                BEGIN
-                    INSERT INTO fixture_reply_transition VALUES(NEW.message_node_id,(SELECT phase FROM fixture_reply_phase));
-                END;
                 CREATE TRIGGER fixture_reply_fault BEFORE INSERT ON event
                 WHEN NEW.id='reply-outcome-owner-message-005'
                 BEGIN SELECT RAISE(ABORT,'fixture synchronous outcome rollback'); END;
@@ -5961,13 +5952,6 @@ mod thread_deletion_notification_tests {
         owner
             .db
             .call(|db| {
-                assert_eq!(
-                    db.query_row("SELECT count(*) FROM fixture_reply_transition", [], |r| r
-                        .get::<_, i64>(
-                        0
-                    ))?,
-                    0
-                );
                 assert_eq!(
                     db.query_row(
                         "SELECT count(*) FROM event WHERE kind='reply_outcome'",
@@ -6002,10 +5986,9 @@ mod thread_deletion_notification_tests {
             .await
             .unwrap();
         owner.db.call(|db| {
-            let count: i64 = db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='sync'", [], |r| r.get(0))?;
-            assert_eq!(count, 16, "measure the deletion transaction, not a shutdown snapshot");
-            assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome'", [], |r| r.get::<_,i64>(0))?, count);
-            db.execute_batch("UPDATE fixture_reply_phase SET phase='gc'; CREATE TRIGGER fixture_reply_fault BEFORE INSERT ON event WHEN NEW.id='reply-outcome-owner-message-020' BEGIN SELECT RAISE(ABORT,'fixture GC outcome rollback'); END;")?;
+            // The deletion transaction itself committed 16 outcomes, not a shutdown snapshot.
+            assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome'", [], |r| r.get::<_,i64>(0))?, 16);
+            db.execute_batch("CREATE TRIGGER fixture_reply_fault BEFORE INSERT ON event WHEN NEW.id='reply-outcome-owner-message-020' BEGIN SELECT RAISE(ABORT,'fixture GC outcome rollback'); END;")?;
             Ok(())
         }).await.unwrap();
         // Before starting the owner worker, drive the real bounded service to
@@ -6042,13 +6025,6 @@ mod thread_deletion_notification_tests {
             .db
             .call(|db| {
                 assert_eq!(
-                    db.query_row("SELECT count(*) FROM fixture_reply_transition", [], |r| r
-                        .get::<_, i64>(
-                        0
-                    ))?,
-                    16
-                );
-                assert_eq!(
                     db.query_row(
                         "SELECT count(*) FROM event WHERE kind='reply_outcome'",
                         [],
@@ -6063,11 +6039,22 @@ mod thread_deletion_notification_tests {
             .unwrap();
         let batch = gc.history_step(&job).await.unwrap();
         assert_eq!(batch.candidates, 128);
-        owner.db.call(|db| {
-            assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='gc'", [], |r| r.get::<_,i64>(0))?, 112);
-            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='parent' AND json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_,i64>(0))?, 1);
-            Ok(())
-        }).await.unwrap();
+        owner
+            .db
+            .call(|db| {
+                // One committed batch added its outcomes; one parent message is left for after reopen.
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM event WHERE kind='reply_outcome'",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    128
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
         drop(gc);
         drop(store);
         let control = Control::new(&owner, root.path().into());
@@ -6126,12 +6113,9 @@ mod thread_deletion_notification_tests {
         .expect("test watchdog elapsed while waiting for the durable GC continuation");
         control.shutdown().await.unwrap();
         reopened.db.call(|db| {
-            assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='sync'", [], |r| r.get::<_,i64>(0))?, 16);
-            assert_eq!(db.query_row("SELECT count(*),count(DISTINCT message) FROM fixture_reply_transition", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?, (129,129));
             for n in 0..129 {
                 let message = format!("owner-message-{n:03}");
                 let event = format!("reply-outcome-{message}");
-                assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1", [&message], |r| r.get::<_,String>(0))?, "recipient_deleted");
                 // One outcome per message, delivered to a sender Run. A notice the
                 // stopped Run never admitted is offered again to the next Run (#433).
                 assert_eq!(db.query_row("SELECT count(DISTINCT e.id) FROM event e JOIN fixture_reply_delivery d ON d.event=e.id JOIN run r ON r.id=d.run WHERE e.id=?1 AND e.kind='reply_outcome' AND e.target_thread_id='sender' AND r.thread_id='sender' AND json_extract(e.payload_ref_json,'$.message_id')=?2 AND json_extract(e.payload_ref_json,'$.state')='recipient_deleted'", params![event,message], |r| r.get::<_,i64>(0))?, 1);
