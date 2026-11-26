@@ -64,15 +64,19 @@ that owns them.
   such ask. A duty admitted before this evidence was saved is never blocked. The
   ask is read in the same transaction from index `receipt_pending_asked`.
 - **Reopening.** When the blocking ask becomes terminal (answered, cancelled,
-  ignored, recipient deleted), the transaction that delivers its answer or
-  `reply_outcome` to the asker also returns each duty awaiting it to `pending`
-  and saves `reply.owner_run_id`: the asker's live Run that receives the
-  delivery (a new Run if the Thread was idle; the stopping Run if the delivery is
-  held). The duty's delivery `run_id`/`turn_id` never change.
-- **Owner Run.** A duty's owner Run is `reply.owner_run_id` once reopened,
-  otherwise its delivery `run_id` (index `receipt_reply_owner_pending`). Run end,
-  explicit stop and the startup sweep settle only pending duties of their owner
-  Run, so an earlier Run's sweep never settles a reopened or awaiting duty.
+  ignored, recipient deleted), the transaction that saves its answer or
+  `reply_outcome` for the asker also returns each duty awaiting it to `pending`
+  with `reply.reopened_after` naming the ask. The duty has no owner Run yet.
+- **Owner Run.** Turn preparation, after admitting its Run's input and notices,
+  saves `reply.owner_run_id` on each reopened duty whose answer is now on the
+  Thread's selected path or whose `reply_outcome` is delivered to that Run. A
+  held answer (stopping Thread) or an untargeted outcome therefore belongs to the
+  later Run that admits it, never to the stopping Run. A duty's owner Run is
+  its delivery `run_id` unless reopened, then `reply.owner_run_id` (index
+  `receipt_reply_owner_pending`); its delivery `run_id`/`turn_id` never change.
+  Run end, explicit stop and the startup sweep settle only pending duties of
+  their owner Run, so neither an earlier Run nor a Run that never admitted the
+  answer settles a reopened or awaiting duty.
 - **One wake.** The answer or outcome is the reopened duty's one wake: if the
   owner Run reaches the Run-end rule with the duty unanswered and no other later
   open own ask, it becomes `ignored` without a reminder.
