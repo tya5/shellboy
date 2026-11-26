@@ -45,6 +45,8 @@ struct Fixture {
     reply_wait: Arc<tokio::sync::Notify>,
     /// Every condition of every `wait` the owner received, in order.
     wait_conditions: Arc<std::sync::Mutex<Vec<WaitCondition>>>,
+    /// While true, the next `message.ask` is refused instead of reaching the owner.
+    refuse_next_ask: Arc<std::sync::atomic::AtomicBool>,
 }
 async fn read_request(stream: &mut TcpStream) -> Value {
     let mut bytes = Vec::new();
@@ -134,6 +136,8 @@ impl Fixture {
         let (waits, waited) = (reply_waits.clone(), reply_wait.clone());
         let wait_conditions = Arc::new(std::sync::Mutex::new(Vec::<WaitCondition>::new()));
         let conditions = wait_conditions.clone();
+        let refuse_next_ask = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let refuse_ask = refuse_next_ask.clone();
         tokio::spawn(async move {
             let mut sent = false;
             while let Some(invocation) = receive.recv().await {
@@ -200,6 +204,15 @@ impl Fixture {
                     ));
                     continue;
                 }
+                if matches!(&invocation.request.command, Command::MessageAsk(_))
+                    && refuse_ask.swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    let _ = invocation.reply.send(Response::failure(
+                        invocation.request.operation_id.clone(),
+                        ApiError::new(ErrorCode::InvalidState, "synthetic refused ask"),
+                    ));
+                    continue;
+                }
                 if matches!(&invocation.request.command, Command::MessageSend(_)) {
                     sent = true;
                 }
@@ -232,6 +245,7 @@ impl Fixture {
             reply_waits,
             reply_wait,
             wait_conditions,
+            refuse_next_ask,
         }
     }
     /// Returns once a client asked the owner to wait for this message's reply.
@@ -1039,6 +1053,62 @@ async fn reply_mode_returns_explicit_reply_not_end_message() {
         serde_json::from_slice::<Value>(&output.stdout).unwrap(),
         json!({"value":"reply"})
     );
+    fixture.close().await;
+}
+
+/// #446: a diagnostic describes only its own message. After an invalid reply,
+/// a refused repair ask reports no reply state from the earlier duty.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refused_repair_ask_reports_no_earlier_reply_state() {
+    let mut fixture = Fixture::new().await;
+    let schema = fixture.root.path().join("integer.json");
+    std::fs::write(&schema, br#"{"type":"integer"}"#).unwrap();
+    let mut command = fixture.command_mode(&schema, "reply");
+    command.arg("work");
+    let mut child = spawn(command);
+    let first = fixture.next(&mut child).await;
+    // The first ask reached the owner; the repair ask will be refused.
+    fixture
+        .refuse_next_ask
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let duty: String = fixture
+        .owner
+        .db
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT message_node_id FROM receipt WHERE json_extract(result_json,'$.expect_reply')=1",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    first
+        .reply
+        .send(cli_call(&[
+            "message",
+            "reply",
+            "--message",
+            &duty,
+            "--text",
+            "not an integer",
+        ]))
+        .unwrap();
+    fixture
+        .next(&mut child)
+        .await
+        .reply
+        .send(answer("Replied."))
+        .unwrap();
+    let output = crate::test_watchdog::watchdog("refused repair", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let diagnostic = diagnostic(&output);
+    assert_eq!(diagnostic["repairs"], 1, "{diagnostic}");
+    assert!(diagnostic["message_id"].is_null(), "{diagnostic}");
+    assert!(diagnostic["reply_state"].is_null(), "{diagnostic}");
     fixture.close().await;
 }
 
