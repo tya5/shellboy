@@ -12285,7 +12285,26 @@ Purpose coverage adds a multi-page attachment list assertion for first-page and 
   true no-op. A real-machine live-owner follow-up is separate from the
   temporary-store witness; no installed-owner test is claimed.
 
-
 ## Core #433 awaiting-own-ask (local evidence)
 
-The five added unit witnesses cover the existing Turn-end duty settlement with a later unanswered ask, exact blocker visibility in `message list` and `message get`, the Thread `pending_replies` waiting summary, re-owing after a blocking Ask's terminal outcome, subsequent reminder/ignore behavior, and a pre-existing Ask not blocking a duty. The first focused run passed 12 reply tests and exposed a fixture that tried to re-open a duty while its blocker was still pending; the fixture was corrected to transition the blocker before testing re-owing. The corrected focused run is in progress. No hosted CI or integration/real-owner test is claimed.
+Local macOS, temporary stores only. `control::driver::awaiting_own_ask_tests`
+drives real `message ask`/`reply`/`cancel` commands and `driver::next` Run ends
+(model adoption is simulated by marking the admitted receipts applied):
+
+- ask back (to another Thread, and a named `--to` ask) then Run end: the duty is
+  `awaiting_own_ask` with the exact blocker in `message list --awaiting`,
+  `message get` and `pending_replies.awaiting_own_ask`; the earlier Run's
+  `terminal_tx` and startup `terminal_batch_tx` sweeps leave it open;
+- the answer starts a later Run that owns the duty (`reply.owner_run_id`;
+  delivery `run_id` unchanged); that Run's end without a reply ignores it
+  without a reminder;
+- a cancelled own ask reopens the duty for the Run that receives the outcome,
+  and that Run's reply settles it;
+- an ask older than the duty, and a duty without saved `admitted_at` (receipt
+  admitted before this change), are not blocked: the ordinary reminder applies.
+
+`open_duty_reads_seek_state_qualified_indexes_for_both_open_states` checks with
+EXPLAIN QUERY PLAN that every open-duty read, the blocker search, reopening and
+the owner-Run settlement search their partial index without a temporary B-tree.
+No hosted CI, real owner, Studio or `exec --result reply` follow-through is
+claimed; results are in the branch report.
