@@ -43,6 +43,8 @@ struct Fixture {
     /// through `reply_wait`.
     reply_waits: Arc<std::sync::Mutex<Vec<String>>>,
     reply_wait: Arc<tokio::sync::Notify>,
+    /// Every condition of every `wait` the owner received, in order.
+    wait_conditions: Arc<std::sync::Mutex<Vec<WaitCondition>>>,
 }
 async fn read_request(stream: &mut TcpStream) -> Value {
     let mut bytes = Vec::new();
@@ -130,6 +132,8 @@ impl Fixture {
         let reply_waits = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let reply_wait = Arc::new(tokio::sync::Notify::new());
         let (waits, waited) = (reply_waits.clone(), reply_wait.clone());
+        let wait_conditions = Arc::new(std::sync::Mutex::new(Vec::<WaitCondition>::new()));
+        let conditions = wait_conditions.clone();
         tokio::spawn(async move {
             let mut sent = false;
             while let Some(invocation) = receive.recv().await {
@@ -138,6 +142,10 @@ impl Fixture {
                     .unwrap()
                     .push(debug.split('(').next().unwrap_or_default().to_owned());
                 if let Command::Wait(args) = &invocation.request.command {
+                    conditions
+                        .lock()
+                        .unwrap()
+                        .extend(args.conditions.iter().cloned());
                     for condition in &args.conditions {
                         if let WaitCondition::ReplyReceived { message_id } = condition {
                             waits.lock().unwrap().push(message_id.clone());
@@ -223,6 +231,7 @@ impl Fixture {
             swallow_hints,
             reply_waits,
             reply_wait,
+            wait_conditions,
         }
     }
     /// Returns once a client asked the owner to wait for this message's reply.
@@ -1393,15 +1402,13 @@ async fn reply_mode_interruption_names_the_snapshot_state_and_leaves_the_duty_op
     fixture.close().await;
 }
 
-/// #446: the Run-end and Turn-end waits follow the reply wait's rule. Input
-/// for the Thread whose shell runs exec ends exec's observation with exit 5
-/// naming the target, which keeps running.
+/// #446: the Run-end and Turn-end waits follow the reply wait's rule. One
+/// wait is sent for the open target; the owner's `interrupted` (here, input for
+/// the Thread whose shell runs exec) ends exec's observation with exit 5, and
+/// the target keeps running.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn end_mode_interruption_names_the_running_target_and_leaves_it_running() {
-    for (mode, unfinished) in [
-        ("turn-end", "has not completed"),
-        ("run-end", "has not ended"),
-    ] {
+async fn end_mode_interruption_sends_one_wait_and_leaves_the_target_running() {
+    for mode in ["turn-end", "run-end"] {
         let mut fixture = Fixture::new().await;
         let created = fixture
             .control
@@ -1456,23 +1463,61 @@ async fn end_mode_interruption_names_the_running_target_and_leaves_it_running() 
             .await;
         assert!(input.ok, "{:?}", input.error);
         let after = model_request(&mut fixture).await;
-        let body = after.body.to_string();
-        assert!(body.contains("interrupted"), "{mode}: {body}");
-        assert!(body.contains(unfinished), "{mode}: {body}");
-        let target = recipient.clone();
-        let running: String = fixture
+        // The exec tool result: exit 5 and exec's typed stderr diagnostic.
+        let result: Value = after.body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|item| item["type"] == "function_call_output")
+            .and_then(|item| serde_json::from_str(item["output"].as_str()?).ok())
+            .unwrap_or_else(|| panic!("{mode}: no tool result in {}", after.body));
+        assert_eq!(result["exit_code"], 5, "{mode}: {result}");
+        let diagnostic = result["output"]
+            .as_str()
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|line| line["command"] == "exec")
+            .unwrap_or_else(|| panic!("{mode}: no exec diagnostic in {result}"));
+        assert_eq!(diagnostic["status"], "interrupted", "{mode}: {diagnostic}");
+        // Exactly one wait went to the owner, for the exact open target.
+        let targets: Vec<(String, &str)> = fixture
+            .wait_conditions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|condition| match condition {
+                WaitCondition::TurnCompleted { turn_id } => Some((turn_id.clone(), "turn")),
+                WaitCondition::RunEnded { run_id } => Some((run_id.clone(), "run")),
+                _ => None,
+            })
+            .collect();
+        let [(target, table)] = targets.as_slice() else {
+            panic!("{mode}: one Run-end or Turn-end wait expected, got {targets:?}");
+        };
+        let field = if *table == "turn" {
+            "turn_id"
+        } else {
+            "run_id"
+        };
+        assert_eq!(diagnostic[field], target.as_str(), "{mode}: {diagnostic}");
+        let (id, kind) = (target.clone(), *table);
+        let (thread, state): (String, String) = fixture
             .owner
             .db
             .call(move |db| {
-                Ok(
-                    db.query_row("SELECT state FROM run WHERE thread_id=?1", [target], |r| {
-                        r.get(0)
-                    })?,
-                )
+                Ok(db.query_row(
+                    &format!("SELECT thread_id,state FROM {kind} WHERE id=?1"),
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?)
             })
             .await
             .unwrap();
-        assert_eq!(running, "live", "{mode}: the target keeps running");
+        assert_eq!(thread, recipient, "{mode}: the recipient's {kind}");
+        let live = if kind == "turn" { "running" } else { "live" };
+        assert_eq!(state, live, "{mode}: the target keeps running");
         after.reply.send(answer("Handled.")).unwrap();
         held.reply.send(answer(r#"{"value":"done"}"#)).unwrap();
         fixture.close().await;

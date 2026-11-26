@@ -325,7 +325,9 @@ impl Session {
                 ended_reply(reply["state"].as_str(), reply["node_id"].as_str())
             }
             (WaitStatus::Timeout, Some(state)) => Err(deadline_expired(&open_duty(state))),
-            (WaitStatus::Interrupted, Some(state)) => Err(interrupted(&open_duty(state))),
+            (WaitStatus::Interrupted, Some(state)) => {
+                Err(interrupted(&open_duty(state), wait.reason.as_deref()))
+            }
             _ => Err(impossible_reply_wait()),
         }
     }
@@ -335,91 +337,99 @@ impl Session {
         }
         if matches!(mode, ResultMode::RunEnd | ResultMode::Reply) {
             let run = self.progress.run_id.clone().expect("assigned run");
-            let target = format!("Run {run} has not ended");
-            let mut waited = false;
-            loop {
-                let facts: RunDetails = self
-                    .request(
-                        "run",
-                        Command::RunGet(RunTarget {
+            let facts: RunDetails = self
+                .request(
+                    "run",
+                    Command::RunGet(RunTarget {
+                        run_id: run.clone(),
+                    }),
+                )
+                .await?;
+            // An open Run gets one wait; the owner's snapshot of it decides.
+            let (state, end_message_node_id) = match facts.state {
+                RunState::Live | RunState::Stopping => {
+                    let wait = self
+                        .wait_once(WaitCondition::RunEnded {
                             run_id: run.clone(),
-                        }),
-                    )
-                    .await?;
-                match facts.state {
-                    RunState::Completed => {
-                        let message = self.progress.message_id.clone().expect("accepted message");
-                        let delivery: MessageDetails = self
+                        })
+                        .await
+                        .map_err(|failure| {
+                            failure.at_deadline(&format!("Run {run} has not ended"))
+                        })?;
+                    let state: RunState = ended_target(
+                        &wait,
+                        target_snapshot(&wait.snapshot, "run", "run_id", &run),
+                        &format!("Run {run} has not ended"),
+                        "Target requires explicit recovery",
+                    )?;
+                    // The end message is a result fact, read only to build it.
+                    let end = if state == RunState::Completed && mode == ResultMode::RunEnd {
+                        let ended: RunDetails = self
                             .request(
-                                "message",
-                                Command::MessageGet(MessageTarget {
-                                    message_id: message.clone(),
+                                "run",
+                                Command::RunGet(RunTarget {
+                                    run_id: run.clone(),
                                 }),
                             )
                             .await?;
-                        if delivery.delivery_status != DeliveryStatus::Applied {
-                            return Err(Failure::new(4, "held", "Message was not applied"));
-                        }
-                        self.progress.end_message_node_id = if mode == ResultMode::Reply {
-                            self.await_reply(&message, delivery.reply.as_ref()).await?
-                        } else {
-                            facts.end_message_node_id
-                        };
-                        break;
+                        ended.end_message_node_id
+                    } else {
+                        None
+                    };
+                    (state, end)
+                }
+                state => (state, facts.end_message_node_id),
+            };
+            match state {
+                RunState::Completed => {
+                    let message = self.progress.message_id.clone().expect("accepted message");
+                    let delivery: MessageDetails = self
+                        .request(
+                            "message",
+                            Command::MessageGet(MessageTarget {
+                                message_id: message.clone(),
+                            }),
+                        )
+                        .await?;
+                    if delivery.delivery_status != DeliveryStatus::Applied {
+                        return Err(Failure::new(4, "held", "Message was not applied"));
                     }
-                    RunState::Stopped | RunState::Failed if mode == ResultMode::Reply => {
-                        // A Stop settles the duty unless it awaits the recipient's
-                        // own ask (#433); the saved reply state decides (#441).
-                        let message = self.progress.message_id.clone().expect("accepted message");
-                        let delivery: MessageDetails = self
-                            .request(
-                                "message",
-                                Command::MessageGet(MessageTarget {
-                                    message_id: message.clone(),
-                                }),
-                            )
-                            .await?;
-                        if delivery.delivery_status != DeliveryStatus::Applied {
-                            return Err(Failure::new(
-                                4,
-                                "execution_unavailable",
-                                "Run ended without a successful end message",
-                            ));
-                        }
-                        self.progress.end_message_node_id =
-                            self.await_reply(&message, delivery.reply.as_ref()).await?;
-                        break;
-                    }
-                    RunState::Stopped | RunState::Failed => {
+                    self.progress.end_message_node_id = if mode == ResultMode::Reply {
+                        self.await_reply(&message, delivery.reply.as_ref()).await?
+                    } else {
+                        end_message_node_id
+                    };
+                }
+                RunState::Stopped | RunState::Failed if mode == ResultMode::Reply => {
+                    // A Stop settles the duty unless it awaits the recipient's
+                    // own ask (#433); the saved reply state decides (#441).
+                    let message = self.progress.message_id.clone().expect("accepted message");
+                    let delivery: MessageDetails = self
+                        .request(
+                            "message",
+                            Command::MessageGet(MessageTarget {
+                                message_id: message.clone(),
+                            }),
+                        )
+                        .await?;
+                    if delivery.delivery_status != DeliveryStatus::Applied {
                         return Err(Failure::new(
                             4,
                             "execution_unavailable",
                             "Run ended without a successful end message",
                         ));
                     }
-                    // A satisfied wait means the Run ended; it is never re-armed.
-                    _ if waited => return Err(unended_after_wait()),
-                    _ => {}
+                    self.progress.end_message_node_id =
+                        self.await_reply(&message, delivery.reply.as_ref()).await?;
                 }
-                let wait = self
-                    .wait_once(WaitCondition::RunEnded {
-                        run_id: run.clone(),
-                    })
-                    .await
-                    .map_err(|failure| failure.at_deadline(&target))?;
-                match wait.status {
-                    WaitStatus::Satisfied => waited = true,
-                    WaitStatus::Timeout => return Err(deadline_expired(&target)),
-                    WaitStatus::Interrupted => return Err(interrupted(&target)),
-                    WaitStatus::RecoveryWait => {
-                        return Err(Failure::new(
-                            4,
-                            "recovery_wait",
-                            "Target requires explicit recovery",
-                        ));
-                    }
-                    WaitStatus::Unavailable => return Err(wait_unavailable()),
+                RunState::Stopped | RunState::Failed => {
+                    return Err(Failure::new(
+                        4,
+                        "execution_unavailable",
+                        "Run ended without a successful end message",
+                    ));
                 }
+                RunState::Live | RunState::Stopping => return Err(impossible_wait()),
             }
         } else {
             let turn = self.progress.turn_id.clone().ok_or_else(|| {
@@ -429,79 +439,86 @@ impl Session {
                     "Message has no assigned Turn; inspect its saved receipt",
                 )
             })?;
-            let target = format!("Turn {turn} has not completed");
-            let mut waited = false;
-            loop {
-                let facts: TurnDetails = self
-                    .request(
-                        "turn",
-                        Command::TurnGet(TurnTarget {
+            let mut facts: TurnDetails = self
+                .request(
+                    "turn",
+                    Command::TurnGet(TurnTarget {
+                        turn_id: turn.clone(),
+                    }),
+                )
+                .await?;
+            // An open Turn gets one wait; the owner's snapshot of it decides.
+            let state = match facts.state {
+                TurnState::Preparing | TurnState::Running | TurnState::Waiting => {
+                    let wait = self
+                        .wait_once(WaitCondition::TurnCompleted {
                             turn_id: turn.clone(),
-                        }),
-                    )
-                    .await?;
-                match facts.state {
-                    TurnState::Completed => {
-                        self.progress
-                            .turn_usage
-                            .push(json!({"turn_id":turn,"usage_totals":facts.usage_totals}));
-                        let message = self.progress.message_id.clone().expect("accepted message");
-                        let delivery: MessageDetails = self
+                        })
+                        .await
+                        .map_err(|failure| {
+                            failure.at_deadline(&format!("Turn {turn} has not completed"))
+                        })?;
+                    let state: TurnState = ended_target(
+                        &wait,
+                        target_snapshot(&wait.snapshot, "turn", "turn_id", &turn),
+                        &format!("Turn {turn} has not completed"),
+                        "Target requires explicit recovery; no automatic retry was requested",
+                    )?;
+                    if state == TurnState::Completed {
+                        // Usage and the end message are result facts, read
+                        // only to build the result.
+                        facts = self
                             .request(
-                                "message",
-                                Command::MessageGet(MessageTarget {
-                                    message_id: message,
+                                "turn",
+                                Command::TurnGet(TurnTarget {
+                                    turn_id: turn.clone(),
                                 }),
                             )
                             .await?;
-                        if delivery.delivery_status != DeliveryStatus::Applied {
-                            return Err(Failure::new(
-                                4,
-                                "held",
-                                "Message was not applied; the completed Turn is not proof of its answer",
-                            ));
-                        }
-                        self.progress.end_message_node_id = facts.end_message_node_id;
-                        break;
                     }
-                    TurnState::RecoveryWait => {
-                        return Err(Failure::new(
-                            4,
-                            "recovery_wait",
-                            "Target requires explicit recovery; no automatic retry was requested",
-                        ));
-                    }
-                    TurnState::Stopped | TurnState::Failed => {
-                        return Err(Failure::new(
-                            4,
-                            "execution_unavailable",
-                            "Target ended without a successful answer",
-                        ));
-                    }
-                    // A satisfied wait means the Turn ended; it is never re-armed.
-                    _ if waited => return Err(unended_after_wait()),
-                    _ => {}
+                    state
                 }
-                let wait = self
-                    .wait_once(WaitCondition::TurnCompleted {
-                        turn_id: turn.clone(),
-                    })
-                    .await
-                    .map_err(|failure| failure.at_deadline(&target))?;
-                // Satisfied is an observation, not success evidence: the
-                // saved Turn is read again.
-                match wait.status {
-                    WaitStatus::Satisfied => waited = true,
-                    WaitStatus::Timeout => return Err(deadline_expired(&target)),
-                    WaitStatus::Interrupted => return Err(interrupted(&target)),
-                    WaitStatus::RecoveryWait => {
+                state => state,
+            };
+            match state {
+                TurnState::Completed => {
+                    self.progress
+                        .turn_usage
+                        .push(json!({"turn_id":turn,"usage_totals":facts.usage_totals}));
+                    let message = self.progress.message_id.clone().expect("accepted message");
+                    let delivery: MessageDetails = self
+                        .request(
+                            "message",
+                            Command::MessageGet(MessageTarget {
+                                message_id: message,
+                            }),
+                        )
+                        .await?;
+                    if delivery.delivery_status != DeliveryStatus::Applied {
                         return Err(Failure::new(
                             4,
-                            "recovery_wait",
-                            "Target requires explicit recovery; no automatic retry was requested",
+                            "held",
+                            "Message was not applied; the completed Turn is not proof of its answer",
                         ));
                     }
-                    WaitStatus::Unavailable => return Err(wait_unavailable()),
+                    self.progress.end_message_node_id = facts.end_message_node_id;
+                }
+                TurnState::RecoveryWait => {
+                    return Err(Failure::new(
+                        4,
+                        "recovery_wait",
+                        "Target requires explicit recovery; no automatic retry was requested",
+                    ));
+                }
+                TurnState::Stopped | TurnState::Failed => {
+                    return Err(Failure::new(
+                        4,
+                        "execution_unavailable",
+                        "Target ended without a successful answer",
+                    ));
+                }
+                TurnState::Preparing | TurnState::Running | TurnState::Waiting => {
+                    return Err(impossible_wait());
                 }
             }
         }
@@ -586,14 +603,15 @@ fn deadline_expired(target: &str) -> Failure {
         format!("Client deadline expired while {target}; no target was stopped"),
     )
 }
-/// Input for the calling Thread ended exec's observation (the owner's
-/// `interrupted`) while `target` is still open; it keeps running.
-fn interrupted(target: &str) -> Failure {
+/// The owner's `interrupted` ended exec's observation while `target` is still
+/// open; the owner's own reason is reported and nothing is stopped.
+fn interrupted(target: &str, reason: Option<&str>) -> Failure {
     Failure::new(
         5,
         "interrupted",
         format!(
-            "Wait was interrupted by input for the calling Thread while {target}; no target was stopped"
+            "Owner wait ended ({}) while {target}; no target was stopped",
+            reason.unwrap_or("interrupted")
         ),
     )
 }
@@ -603,13 +621,40 @@ fn open_duty(state: &str) -> String {
 fn wait_unavailable() -> Failure {
     Failure::new(4, "execution_unavailable", "Wait target became unavailable")
 }
-/// A saved target still open after the owner reported its wait satisfied.
-fn unended_after_wait() -> Failure {
+/// A wait result the owner never produces for its condition, such as a
+/// satisfied wait whose target snapshot is missing or still open.
+fn impossible_wait() -> Failure {
     Failure::new(
         6,
         "owner_error",
-        "Owner reported the wait satisfied but the target has not ended",
+        "Owner returned an impossible result for the wait",
     )
+}
+/// The owner's snapshot of one wait target, by its `type` and ID field.
+fn target_snapshot<'a>(snapshot: &'a Value, kind: &str, key: &str, id: &str) -> Option<&'a Value> {
+    snapshot["conditions"]
+        .as_array()?
+        .iter()
+        .find(|item| item["type"] == kind && item[key] == id)
+}
+/// Status-first dispatch for a Run-end or Turn-end wait (#446): `satisfied`
+/// yields the ended state from the owner's snapshot; the deadline and an
+/// interruption end exec's observation with exit 5 naming the open `target`.
+fn ended_target<T: DeserializeOwned>(
+    wait: &WaitResult,
+    snapshot: Option<&Value>,
+    target: &str,
+    recovery: &str,
+) -> Result<T, Failure> {
+    match wait.status {
+        WaitStatus::Satisfied => snapshot
+            .and_then(|item| serde_json::from_value(item["state"].clone()).ok())
+            .ok_or_else(impossible_wait),
+        WaitStatus::Timeout => Err(deadline_expired(target)),
+        WaitStatus::Interrupted => Err(interrupted(target, wait.reason.as_deref())),
+        WaitStatus::RecoveryWait => Err(Failure::new(4, "recovery_wait", recovery)),
+        WaitStatus::Unavailable => Err(wait_unavailable()),
+    }
 }
 impl Failure {
     /// A client-deadline failure during a wait names the target still open.
@@ -623,10 +668,7 @@ impl Failure {
 }
 /// The `reply_received` snapshot for one message, in the saved reply shape.
 fn reply_snapshot(snapshot: &Value, message: &str) -> Option<Value> {
-    snapshot["conditions"]
-        .as_array()?
-        .iter()
-        .find(|item| item["type"] == "reply" && item["message_id"] == message)
+    target_snapshot(snapshot, "reply", "message_id", message)
         .map(|item| json!({"state": item["state"], "node_id": item["reply_node_id"]}))
 }
 /// The duty's state while the owner's single open-state rule holds it open.

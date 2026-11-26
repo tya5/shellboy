@@ -1334,7 +1334,7 @@ Use `shellboy startup --last N` (or omit `--last`) (default 5, maximum 20) to in
 An external agent or test can drive a running owner with `printf 'message\n' | shellboy chat --json`:
 piped lines in, one JSON object per progress event and end message out (schema in the
 [CLI reference](cli-reference.md#interactive-chat-client-242)), recorded as `external_cli`. It
-uses the same RPCs as `message send`, `wait` and `events wait` (it follows change hints instead of polling); a model needs no chat client inside its own shell. `shellboy exec` runs saved work noninteractively and validates only its final JSON answer locally. Run from your shell, it exits 5 `interrupted` when input arrives for your Thread, leaving its target running; handle the input, then resume with `shellboy wait` on the IDs it reported.
+uses the same RPCs as `message send`, `wait` and `events wait` (it follows change hints instead of polling); a model needs no chat client inside its own shell. `shellboy exec` runs saved work noninteractively and validates only its final JSON answer locally. When the owner interrupts its wait (for example because input arrived for your Thread, or the owner is stopping), it exits 5 `interrupted` and leaves its target running; resume with `shellboy wait` on the IDs it reported once you have handled what interrupted it.
 
 ## Terminal-free startup
 
