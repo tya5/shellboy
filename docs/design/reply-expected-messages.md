@@ -506,7 +506,7 @@ sender-label rules; repairs are sent in the same mode.
 
 | Mode | Send | Wait | Result text |
 |---|---|---|---|
-| `reply` (default) | `message ask --thread` | `run_ended` on the Run the message was assigned to, then `reply_received` on the message until that wait reports the duty ended (#441) | the reply node (`message get` → `reply.node_id` → `history read --node`) |
+| `reply` (default) | `message ask --thread` | `run_ended` on the Run the message was assigned to, then `reply_received` on the message while its duty is open (#441) | the reply node (`message get` → `reply.node_id` → `history read --node`) |
 | `turn-end` | ordinary `message send`, no reply duty | `turn_completed` on the Turn the message was assigned to | that Turn's end message (`turn get` → `end_message_node_id` → `history read --end-message-only`) |
 | `run-end` | ordinary `message send`, no reply duty | `run_ended` on the Run the message was assigned to | that Run's end message (`run get` → `end_message_node_id` → `history read --end-message-only`) |
 
@@ -519,16 +519,19 @@ for `turn-end`, `turn_id` present), otherwise exit 4 `held`; the message must be
 `applied` before its result is read.
 
 **Open duty in `reply` mode (#441, decision 2026-11-26).** When the assigned Run
-ends (completed, or stopped or failed with the message applied), exec waits with
-the existing `reply_received` wait, bounded by its own `--timeout-ms`. The owner's
-wait alone decides whether the duty ended: it is satisfied once the duty leaves its
-open states (`pending`, or `awaiting_own_ask` after the recipient asked back,
-#433), and exec waits again while the wait times out with the duty open. Exec takes
-the reply state and node from that wait's snapshot of the message; a wait result
-without that state is `owner_error` (exit 6), never another wait. It returns the
-reply node once `replied`; a terminal state without a reply (`ignored`,
+ends (completed, or stopped or failed with the message applied), exec classifies
+the saved reply duty from `message get` with the owner's single open-state rule
+(`control::reply::is_open`); a duty that already ended is returned without a
+wait. Only while it is open (`pending`, or `awaiting_own_ask` after the recipient
+asked back, #433) exec waits with the existing `reply_received` wait, bounded by
+its own `--timeout-ms`, and classifies that wait's snapshot of the message the
+same way; there is no retry or fallback read. An `interrupted` wait (input for
+the calling Thread) ends exec's observation with exit 5 `interrupted`, leaving the
+target and its duty untouched; a wait result the owner never produces for this
+condition, including a missing snapshot, is `owner_error` (exit 6). Exec returns
+the reply node once `replied`; a terminal state without a reply (`ignored`,
 `cancelled`, `recipient_deleted`) exits 4 `reply_unavailable`, and the client
-deadline exits 5 `timeout`; both messages name the state. No timer or owner
+deadline exits 5 `timeout`; these messages name the state. No timer or owner
 behaviour is added.
 
 **Which end message.** Both modes read the saved end message of a Turn: the
