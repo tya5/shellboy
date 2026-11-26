@@ -760,6 +760,8 @@ async fn next_with_clients(
         for (event,payload)in &events {
             notification_admission::admit_notification_tx(&tx,&thread,&run,&turn,event,payload,&now())?;
         }
+        // #433: this Run now holds any answer or outcome a reopened duty waited for.
+        super::reply::claim_reopened_tx(&tx,&thread,&run,&now())?;
         // #183: after the delivered events, so a change notice and the new
         // context line arrive together. Only once the Turn's AGENTS reference
         // is fixed by its instruction snapshot; requests always follow that.

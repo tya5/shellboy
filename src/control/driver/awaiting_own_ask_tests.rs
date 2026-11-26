@@ -224,6 +224,63 @@ impl Fixture {
             .unwrap();
     }
 
+    /// A human message to the worker: starts a Run, resuming held input.
+    async fn send(&self, thread: &str) -> String {
+        self.execute(
+            Command::MessageSend(crate::protocol::MessageSendArgs {
+                max_model_requests: None,
+                resume_recovery: false,
+                human: true,
+                sender_label: None,
+                thread_id: Some(thread.into()),
+                text: "carry on".into(),
+                deliver: Deliver::Next,
+            }),
+            None,
+        )
+        .await["run_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// Explicit Stop: admission, then the driver's drained-stop settlement.
+    async fn begin_stop(&self, run: &str) {
+        let run = run.to_owned();
+        self.control
+            .store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                super::super::state::admit_run_stop_tx(
+                    &tx,
+                    &run,
+                    super::super::state::RunStopAdmission::Explicit { at: "stop" },
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn finish_stop(&self, run: &str, thread: &str) {
+        let owned = vec![(run.to_owned(), thread.to_owned())];
+        self.control
+            .store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let mut keys = Vec::new();
+                super::super::state::stop_drained_runs(&tx, &owned, false, &mut keys)?;
+                super::super::reply::terminal_tx(&tx, &owned[0].0, "stopped", &mut keys)?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
     async fn shutdown(self) {
         self.control.shutdown().await.unwrap();
         self.owner.shutdown().await.unwrap();
@@ -317,7 +374,11 @@ async fn ask_back_keeps_duty_open_and_the_answering_run_owes_it_once() {
         let (reply, delivered) = f.reply_fact(&duty).await;
         assert_eq!(reply["state"], "pending");
         assert!(reply.get("blocking_message_id").is_none());
-        assert_eq!(reply["owner_run_id"], second_run.as_str());
+        assert_eq!(reply["reopened_after"], question.as_str());
+        assert!(
+            reply.get("owner_run_id").is_none(),
+            "owned only once admitted"
+        );
         assert_eq!(
             delivered.as_deref(),
             Some(first_run.as_str()),
@@ -326,8 +387,13 @@ async fn ask_back_keeps_duty_open_and_the_answering_run_owes_it_once() {
         f.sweep_old_runs(&first_run).await;
         assert_eq!(f.reply_fact(&duty).await.0["state"], "pending");
 
-        // The answering Run ends without a reply: the duty is ignored, not reminded.
+        // The Run admitting the answer owns the duty; its end without a reply
+        // ignores it, without a reminder.
         let second = f.admit("worker", &second_run).await;
+        assert_eq!(
+            f.reply_fact(&duty).await.0["owner_run_id"],
+            second_run.as_str()
+        );
         f.adopt(&second).await;
         f.end_turn(&second).await;
         assert!(matches!(
@@ -375,10 +441,14 @@ async fn cancelled_own_ask_reowes_the_duty_to_the_run_that_receives_the_outcome(
     let outcome_run = f.live_run("worker").await;
     let reply = f.reply_fact(&duty).await.0;
     assert_eq!(reply["state"], "pending");
-    assert_eq!(reply["owner_run_id"], outcome_run.as_str());
+    assert!(reply.get("owner_run_id").is_none());
 
-    // That Run handles the outcome and can settle the duty.
+    // That Run admits the outcome, owns the duty and can settle it.
     let handling = f.admit("worker", &outcome_run).await;
+    assert_eq!(
+        f.reply_fact(&duty).await.0["owner_run_id"],
+        outcome_run.as_str()
+    );
     assert!(
         handling
             .events
@@ -448,4 +518,80 @@ async fn older_ask_and_pre_upgrade_duty_are_never_blocked() {
     assert_eq!(reply["state"], "pending");
     assert!(reply["reminded_at"].is_string());
     f.shutdown().await;
+}
+
+#[tokio::test]
+async fn held_answer_or_outcome_across_stop_is_owned_by_the_run_that_admits_it() {
+    for outcome in [false, true] {
+        let f = fixture(&["worker", "helper"]).await;
+        let (duty, first_run) = f.ask(None, Some("worker"), None).await;
+        let first = f.admit("worker", &first_run).await;
+        f.adopt(&first).await;
+        let (question, helper_run) = f
+            .ask(
+                Some(origin("worker", &first_run, &first.turn)),
+                Some("helper"),
+                None,
+            )
+            .await;
+        f.end_turn(&first).await;
+        assert!(matches!(
+            next(&f.control, "worker", &first_run).await.unwrap(),
+            Next::Done
+        ));
+        assert_eq!(f.reply_fact(&duty).await.0["state"], "awaiting_own_ask");
+
+        // The worker is stopping when the answer or the outcome arrives: the
+        // stopping Run receives neither (held answer, untargeted notice).
+        let stopping = f.send("worker").await;
+        f.begin_stop(&stopping).await;
+        if outcome {
+            f.execute(
+                Command::MessageCancel(MessageCancelArgs {
+                    message_ids: vec![question.clone()],
+                }),
+                None,
+            )
+            .await;
+        } else {
+            let helper = f.admit("helper", &helper_run).await;
+            f.adopt(&helper).await;
+            f.reply(Some(origin("helper", &helper_run, &helper.turn)), &question)
+                .await;
+        }
+        let reply = f.reply_fact(&duty).await.0;
+        assert_eq!(reply["state"], "pending");
+        assert!(reply.get("owner_run_id").is_none());
+
+        // Stop and every sweep leave the reopened duty open.
+        f.finish_stop(&stopping, "worker").await;
+        assert_eq!(f.run_state(&stopping).await, "stopped");
+        f.sweep_old_runs(&stopping).await;
+        f.sweep_old_runs(&first_run).await;
+        let (reply, delivered) = f.reply_fact(&duty).await;
+        assert_eq!(reply["state"], "pending");
+        assert!(reply.get("owner_run_id").is_none());
+        assert_eq!(delivered.as_deref(), Some(first_run.as_str()));
+
+        // The next Run admits the held answer or notice and owes the duty.
+        let later = f.send("worker").await;
+        let handling = f.admit("worker", &later).await;
+        if outcome {
+            assert!(
+                handling
+                    .events
+                    .iter()
+                    .any(|event| *event == format!("reply-outcome-{question}"))
+            );
+        }
+        assert_eq!(f.reply_fact(&duty).await.0["owner_run_id"], later.as_str());
+        f.adopt(&handling).await;
+        f.end_turn(&handling).await;
+        assert!(matches!(
+            next(&f.control, "worker", &later).await.unwrap(),
+            Next::Done
+        ));
+        assert_eq!(f.reply_fact(&duty).await.0["state"], "ignored");
+        f.shutdown().await;
+    }
 }
