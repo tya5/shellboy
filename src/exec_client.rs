@@ -892,7 +892,7 @@ pub async fn execute(
             session.progress.thread_id=Some(created["thread_id"].as_str().ok_or_else(||Failure::new(6,"owner_error","Thread creation returned no ID"))?.to_owned());
         }
         for repair in 0..=options.max_repairs {
-            session.progress.repairs=repair;session.progress.end_message_node_id=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
+            session.progress.repairs=repair;session.progress.end_message_node_id=None;session.progress.reply_state=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
             let thread_id = session.progress.thread_id.clone();
             let sender_label = Some(options.sender_label.clone());
             let command = if options.result == ResultMode::Reply {
