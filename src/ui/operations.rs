@@ -1738,15 +1738,48 @@ impl Form {
                         Boolean,
                     ),
                     f("parts", "要約partの一覧", "false".into(), Boolean),
+                    f("display", "表示ソースの末尾", "false".into(), Boolean),
+                    f("offset", "表示ソースの位置", String::new(), Number),
+                    f(
+                        "from_end",
+                        "表示ソースの末尾からの位置",
+                        String::new(),
+                        Number,
+                    ),
                     f("limit", "取得byte数", "65536".into(), Number),
                     f("cursor", "続きcursor", String::new(), Text),
                     f("encoding", "encoding", DEFAULT_ENCODING.into(), Text),
                 ],
                 |form, _cwd| {
+                    let end_message_only = form.boolean("end_message_only")?;
+                    let parts = form.boolean("parts")?;
+                    let positions = [
+                        form.boolean("display")?
+                            .then_some(HistoryDisplayPosition::Tail),
+                        form.optional_number("offset")?
+                            .map(|offset| HistoryDisplayPosition::Absolute { offset }),
+                        form.optional_number("from_end")?
+                            .map(|offset| HistoryDisplayPosition::FromEnd { offset }),
+                    ];
+                    let mut selected = positions.into_iter().flatten();
+                    let position = selected.next();
+                    if selected.next().is_some()
+                        || (position.is_some() && (end_message_only || parts))
+                    {
+                        return Err(local!(
+                            form.language,
+                            "表示ソースの末尾・位置・末尾からの位置は一つだけ選び、要約partや終了メッセージと併用しないでください",
+                            "Choose only one of display source tail, offset or offset from end, without summary parts or end message only"
+                        )
+                        .into());
+                    }
                     Ok(Command::HistoryRead(HistoryReadArgs {
-                        display: None,
-                        end_message_only: form.boolean("end_message_only")?,
-                        parts: form.boolean("parts")?,
+                        display: position.map(|position| HistoryDisplayRead {
+                            position,
+                            selection: None,
+                        }),
+                        end_message_only,
+                        parts,
                         node_id: form.owned("node")?,
                         limit_bytes: form.number("limit")?,
                         cursor: form.optional("cursor")?,

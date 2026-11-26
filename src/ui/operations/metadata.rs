@@ -101,6 +101,9 @@ impl Form {
             "excerpt_chars" => FieldId::ExcerptChars,
             "end_message_only" => FieldId::EndMessageOnly,
             "parts" => FieldId::Parts,
+            "display" => FieldId::Display,
+            "offset" => FieldId::DisplayOffset,
+            "from_end" => FieldId::DisplayFromEnd,
             "encoding" => FieldId::Encoding,
             "relation" => FieldId::Relation,
             "kinds" => FieldId::Kinds,
@@ -1303,6 +1306,13 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::LimitBytes => local!(language, "取得byte数", "Read size in bytes"),
         FieldId::EndMessageOnly => local!(language, "終了メッセージのみ", "End message only"),
         FieldId::Parts => local!(language, "要約partの一覧", "Summary parts"),
+        FieldId::Display => local!(language, "表示ソースの末尾", "Display source tail"),
+        FieldId::DisplayOffset => local!(language, "表示ソースの位置", "Display source offset"),
+        FieldId::DisplayFromEnd => local!(
+            language,
+            "表示ソースの末尾からの位置",
+            "Display source offset from end"
+        ),
         FieldId::Encoding => local!(language, "文字コード", "Encoding"),
         FieldId::Relation => local!(language, "履歴の関係", "History relationship"),
         FieldId::Kinds => local!(language, "含めるnode種類", "Included node kinds"),
@@ -1810,6 +1820,21 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "要約ノードの保存済みpart(map、reduce)を、範囲・段・費用・本文つきで取得します。",
             "Fetch a summary node's saved parts (map, reduce) with range, stage, usage and bodies."
+        ),
+        FieldId::Display => local!(
+            language,
+            "原文ではなく表示ソースの末尾を取得します。最初の頁は型付きの概要を含みます。位置・要約part・終了メッセージとは同時に指定できません。",
+            "Read the display-source tail rather than original text; the first page includes a typed outline. Do not combine with an offset, summary parts or end message only."
+        ),
+        FieldId::DisplayOffset => local!(
+            language,
+            "表示ソースをこの絶対文字位置の周辺から取得します。末尾からの位置・要約part・終了メッセージとは同時に指定できません。",
+            "Read the display source around this absolute character offset. Do not combine with an offset from end, summary parts or end message only."
+        ),
+        FieldId::DisplayFromEnd => local!(
+            language,
+            "表示ソースを末尾からこの文字数の位置の周辺から取得します。要約part・終了メッセージとは同時に指定できません。",
+            "Read the display source around this character offset from its end. Do not combine with summary parts or end message only."
         ),
         FieldId::Encoding => local!(
             language,
