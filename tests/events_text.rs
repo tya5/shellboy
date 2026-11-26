@@ -172,6 +172,7 @@ fn wait_command(after: Option<&str>, threads: &[&str], timeout_ms: u64, text: bo
         timeout_ms,
         include_text: text,
         include_reasoning_activity: false,
+        include_output: false,
     })
 }
 fn wait_request(control: &Control, command: Command) -> Request {
@@ -319,6 +320,7 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
                         timeout_ms: 30_000,
                         include_text: false,
                         include_reasoning_activity: true,
+                        include_output: false,
                     }),
                 )
             };

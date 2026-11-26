@@ -6,14 +6,16 @@
 //! is told to resynchronise instead of silently missing changes.
 //!
 //! The same lock and sequence also carry unsaved model text and attempt-scoped
-//! reasoning activity for clients that opt in (#243 E3, #275). Both are freed when
+//! reasoning activity for clients that opt in (#243 E3, #275), and each shell
+//! execution's latest committed-output position (#311): IDs and sequence only,
+//! never output bytes, coalesced per execution under the same Thread bound. Both are freed when
 //! the attempt ends (`LiveTextGuard`), never saved and never a source of truth.
 //! Writers never wait
 //! for a reader: the lock is held only for memory updates and copies, never across
 //! `.await` or I/O, and a reader that stops reading holds nothing here.
 use super::wait::wakes::{Key, Wakes};
 use crate::protocol::{
-    EventAttemptEnd, EventAttemptOutcome, EventLiveText, EventReasoningActivity,
+    EventAttemptEnd, EventAttemptOutcome, EventLiveText, EventOutput, EventReasoningActivity,
     EventRecoveryTransition, EventTextDelta, MAX_EVENT_CHANGES, MAX_FRAME_BYTES,
 };
 use std::{
@@ -62,10 +64,15 @@ struct Inner {
     seq: u64,
     /// Highest sequence ever evicted. A cursor below it may have missed a change.
     floor: u64,
-    /// Latest global config-file write mark; every client compares it to its own cursor.
+    /// Latest owner-wide marks; every client compares them to its own cursor.
     config_changed_seq: Option<u64>,
+    index_changed_seq: Option<u64>,
+    retention_changed_seq: Option<u64>,
     by_thread: HashMap<String, u64>,
     by_seq: BTreeMap<u64, String>,
+    /// Latest committed-output sequence per execution, with its Thread.
+    output_by_execution: HashMap<String, u64>,
+    output_by_seq: BTreeMap<u64, (String, String)>,
     recovery: VecDeque<EventRecoveryTransition>,
     /// Keyed by Thread: a Thread streams one attempt at a time, and a later attempt replaces it.
     text: HashMap<String, AttemptText>,
@@ -107,8 +114,22 @@ pub(crate) enum Poll {
         reasoning_changed: bool,
         recovery_transitions: Vec<EventRecoveryTransition>,
         config_changed: bool,
+        index_changed: bool,
+        retention_changed: bool,
+        /// Empty unless asked for.
+        output: Vec<EventOutput>,
         attempt_ends: Vec<EventAttemptEnd>,
     },
+}
+
+/// Owner-wide latest-change marks. Each has no Thread and ignores the Thread filter.
+#[derive(Clone, Copy)]
+pub(crate) enum Mark {
+    Config,
+    /// Saved index state or the profile pause changed (`index.status`).
+    Index,
+    /// GC made a saved source, raw output or managed file unavailable.
+    Retention,
 }
 
 /// Frees an attempt's retained text however its stream ends (return, cancel, drop).
@@ -175,11 +196,53 @@ impl ChangeClock {
             .unwrap_or_else(|poison| poison.into_inner())
     }
     pub(crate) fn record_config_changed(&self) {
+        self.record_mark(Mark::Config);
+    }
+    pub(crate) fn record_mark(&self, mark: Mark) {
         let mut inner = self.lock();
         inner.seq += 1;
-        inner.config_changed_seq = Some(inner.seq);
+        let seq = Some(inner.seq);
+        match mark {
+            Mark::Config => inner.config_changed_seq = seq,
+            Mark::Index => inner.index_changed_seq = seq,
+            Mark::Retention => inner.retention_changed_seq = seq,
+        }
         drop(inner);
-        self.wakes.publish([Key::Config]);
+        self.wakes.publish([Key::Marks]);
+    }
+    /// A committed output batch. Eviction raises the shared floor, like Thread entries.
+    pub(crate) fn record_output(&self, thread_id: &str, execution_id: &str) {
+        let mut inner = self.lock();
+        inner.seq += 1;
+        let seq = inner.seq;
+        if let Some(old) = inner
+            .output_by_execution
+            .insert(execution_id.to_owned(), seq)
+        {
+            inner.output_by_seq.remove(&old);
+        }
+        inner
+            .output_by_seq
+            .insert(seq, (thread_id.to_owned(), execution_id.to_owned()));
+        let old_floor = inner.floor;
+        while inner.output_by_execution.len() > self.cap {
+            let Some((evicted, (_, execution))) = inner.output_by_seq.pop_first() else {
+                break;
+            };
+            inner.output_by_execution.remove(&execution);
+            inner.floor = inner.floor.max(evicted);
+        }
+        let floor = if inner.floor != old_floor {
+            inner.floor
+        } else {
+            0
+        };
+        drop(inner);
+        self.wakes.publish_clock(
+            [Key::Output(Some(thread_id.into())), Key::Output(None)],
+            floor,
+            0,
+        );
     }
     pub(crate) fn record(&self, thread_id: &str) {
         self.record_change(thread_id, false);
@@ -499,6 +562,7 @@ impl ChangeClock {
         filter: &[String],
         include_text: bool,
         include_reasoning_activity: bool,
+        include_output: bool,
     ) -> Option<Poll> {
         let inner = self.lock();
         if after > inner.seq {
@@ -560,6 +624,27 @@ impl ChangeClock {
             changes.retain(|(_, seq)| *seq <= cursor);
             more = true;
         }
+        let mut output = Vec::new();
+        if include_output {
+            for (seq, (thread, execution)) in inner.output_by_seq.range(after + 1..=cursor) {
+                if !filter.is_empty() && !filter.contains(thread) {
+                    continue;
+                }
+                if output.len() == MAX_EVENT_CHANGES {
+                    cursor = output.last().map_or(cursor, |last: &EventOutput| last.seq);
+                    changes.retain(|(_, seq)| *seq <= cursor);
+                    recovery_transitions.retain(|event| event.seq <= cursor);
+                    more = true;
+                    break;
+                }
+                output.push(EventOutput {
+                    thread_id: thread.clone(),
+                    execution_id: execution.clone(),
+                    seq: *seq,
+                });
+            }
+        }
+        let mark = |seq: Option<u64>| seq.is_some_and(|seq| seq > after && seq <= cursor);
         let text = if include_text {
             inner.live_text(after, cursor, filter)
         } else {
@@ -592,11 +677,46 @@ impl ChangeClock {
             reasoning_activity,
             reasoning_changed,
             recovery_transitions,
-            config_changed: inner
-                .config_changed_seq
-                .is_some_and(|seq| seq > after && seq <= cursor),
+            config_changed: mark(inner.config_changed_seq),
+            index_changed: mark(inner.index_changed_seq),
+            retention_changed: mark(inner.retention_changed_seq),
+            output,
             attempt_ends,
         })
+    }
+}
+
+#[cfg(test)]
+impl ChangeClock {
+    pub(crate) fn standalone() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self::new(Wakes::default()))
+    }
+    /// Whether `mark` is newer than `seen`, read as an events.wait caller would;
+    /// `seen` moves to the head.
+    pub(crate) fn take_mark(&self, mark: Mark, seen: &mut u64) -> bool {
+        let mut found = false;
+        loop {
+            let Some(Poll::Ready {
+                config_changed,
+                index_changed,
+                retention_changed,
+                more,
+                cursor,
+                ..
+            }) = self.poll(*seen, &[], false, false, false)
+            else {
+                panic!("a test cursor stays inside the retained clock");
+            };
+            found |= match mark {
+                Mark::Config => config_changed,
+                Mark::Index => index_changed,
+                Mark::Retention => retention_changed,
+            };
+            *seen = cursor;
+            if !more {
+                return found;
+            }
+        }
     }
 }
 
@@ -723,12 +843,13 @@ mod tests {
             more: true,
             attempt_ends,
             ..
-        }) = clock.poll(0, &[], true, false)
+        }) = clock.poll(0, &[], true, false, false)
         else {
             panic!("first page");
         };
         assert!(attempt_ends.is_empty());
-        let Some(Poll::Ready { attempt_ends, .. }) = clock.poll(cursor, &["t".into()], true, false)
+        let Some(Poll::Ready { attempt_ends, .. }) =
+            clock.poll(cursor, &["t".into()], true, false, false)
         else {
             panic!("second page");
         };
@@ -749,13 +870,121 @@ mod tests {
             );
         }
         assert!(matches!(
-            clock.poll(cursor, &[], true, false),
+            clock.poll(cursor, &[], true, false, false),
             Some(Poll::Resync { .. })
         ));
         assert!(matches!(
-            clock.poll(cursor, &[], false, false),
+            clock.poll(cursor, &[], false, false, false),
             Some(Poll::Ready { .. })
         ));
+    }
+
+    #[test]
+    fn index_and_retention_marks_are_independent_and_ignore_the_thread_filter() {
+        let clock = ChangeClock::new(Wakes::default());
+        clock.record_mark(Mark::Index);
+        clock.record("t");
+        let Some(Poll::Ready {
+            index_changed,
+            retention_changed,
+            config_changed,
+            cursor,
+            ..
+        }) = clock.poll(0, &["other".into()], false, false, false)
+        else {
+            panic!("expected ready");
+        };
+        assert!(index_changed && !retention_changed && !config_changed);
+        clock.record_mark(Mark::Retention);
+        let Some(Poll::Ready {
+            index_changed,
+            retention_changed,
+            ..
+        }) = clock.poll(cursor, &[], false, false, false)
+        else {
+            panic!("expected ready");
+        };
+        assert!(!index_changed && retention_changed);
+        let mut seen = 0;
+        assert!(clock.take_mark(Mark::Retention, &mut seen));
+        assert!(!clock.take_mark(Mark::Retention, &mut seen));
+        assert!(!clock.take_mark(Mark::Index, &mut seen));
+    }
+
+    #[test]
+    fn output_entries_coalesce_per_execution_page_with_changes_and_honour_the_filter() {
+        let clock = ChangeClock::new(Wakes::default());
+        clock.record_output("t", "x");
+        clock.record_output("u", "y");
+        clock.record_output("t", "x");
+        let Some(Poll::Ready { output, .. }) = clock.poll(0, &[], false, false, false) else {
+            panic!("expected ready");
+        };
+        assert!(output.is_empty(), "absent unless asked");
+        let Some(Poll::Ready { output, cursor, .. }) = clock.poll(0, &[], false, false, true)
+        else {
+            panic!("expected ready");
+        };
+        let ids: Vec<_> = output.iter().map(|o| o.execution_id.as_str()).collect();
+        assert_eq!(ids, ["y", "x"]);
+        assert!(output[0].seq < output[1].seq);
+        let Some(Poll::Ready { output, .. }) = clock.poll(0, &["t".into()], false, false, true)
+        else {
+            panic!("expected ready");
+        };
+        assert_eq!(output.len(), 1);
+        assert_eq!(
+            (
+                output[0].thread_id.as_str(),
+                output[0].execution_id.as_str()
+            ),
+            ("t", "x")
+        );
+        for n in 0..=MAX_EVENT_CHANGES {
+            clock.record_output("t", &format!("e{n}"));
+        }
+        clock.record("after-output");
+        let Some(Poll::Ready {
+            output,
+            changes,
+            more: true,
+            cursor: page,
+            ..
+        }) = clock.poll(cursor, &[], false, false, true)
+        else {
+            panic!("a full output page has more");
+        };
+        assert_eq!(output.len(), MAX_EVENT_CHANGES);
+        assert_eq!(page, output.last().unwrap().seq);
+        assert!(changes.is_empty(), "a later change waits for its page");
+        let Some(Poll::Ready {
+            output,
+            changes,
+            more: false,
+            ..
+        }) = clock.poll(page, &[], false, false, true)
+        else {
+            panic!("second page");
+        };
+        assert_eq!(output.len(), 1);
+        assert_eq!(changes.len(), 1);
+    }
+
+    #[test]
+    fn output_eviction_raises_the_shared_floor() {
+        let clock = ChangeClock::with_capacity(2);
+        clock.record_output("t", "a");
+        let cursor = 1;
+        clock.record_output("t", "b");
+        clock.record_output("t", "c");
+        assert!(matches!(
+            clock.poll(0, &[], false, false, true),
+            Some(Poll::Resync { .. })
+        ));
+        let Some(Poll::Ready { output, .. }) = clock.poll(cursor, &[], false, false, true) else {
+            panic!("a cursor at the evicted entry missed nothing");
+        };
+        assert_eq!(output.len(), 2);
     }
 
     #[test]
@@ -764,16 +993,16 @@ mod tests {
         for id in ["a", "b", "a", "a", "c"] {
             clock.record(id);
         }
-        let (changes, more, cursor) = ready(clock.poll(0, &[], false, false));
+        let (changes, more, cursor) = ready(clock.poll(0, &[], false, false, false));
         assert_eq!(
             changes,
             vec![("b".into(), 2), ("a".into(), 4), ("c".into(), 5)]
         );
         assert!(!more);
         assert_eq!(cursor, 5);
-        let (changes, _, _) = ready(clock.poll(2, &[], false, false));
+        let (changes, _, _) = ready(clock.poll(2, &[], false, false, false));
         assert_eq!(changes.len(), 2);
-        let (none, _, cursor) = ready(clock.poll(5, &[], false, false));
+        let (none, _, cursor) = ready(clock.poll(5, &[], false, false, false));
         assert!(none.is_empty());
         assert_eq!(cursor, 5);
     }
@@ -788,7 +1017,8 @@ mod tests {
         clock.record_config_changed();
 
         for after in [older, newer] {
-            let Some(Poll::Ready { config_changed, .. }) = clock.poll(after, &[], false, false)
+            let Some(Poll::Ready { config_changed, .. }) =
+                clock.poll(after, &[], false, false, false)
             else {
                 panic!("expected ready");
             };
@@ -797,7 +1027,8 @@ mod tests {
                 "cursor {after} must independently see the mark"
             );
         }
-        let Some(Poll::Ready { config_changed, .. }) = clock.poll(3, &[], false, false) else {
+        let Some(Poll::Ready { config_changed, .. }) = clock.poll(3, &[], false, false, false)
+        else {
             panic!("expected ready");
         };
         assert!(!config_changed, "a cursor after the mark must not see it");
@@ -808,10 +1039,10 @@ mod tests {
         let clock = ChangeClock::new(Wakes::default());
         clock.record("a");
         clock.record("b");
-        let (changes, _, cursor) = ready(clock.poll(0, &["b".into()], false, false));
+        let (changes, _, cursor) = ready(clock.poll(0, &["b".into()], false, false, false));
         assert_eq!(changes, vec![("b".into(), 2)]);
         assert_eq!(cursor, 2);
-        let (changes, _, cursor) = ready(clock.poll(0, &["zzz".into()], false, false));
+        let (changes, _, cursor) = ready(clock.poll(0, &["zzz".into()], false, false, false));
         assert!(changes.is_empty());
         assert_eq!(cursor, 2);
     }
@@ -822,11 +1053,11 @@ mod tests {
         for i in 0..100 {
             clock.record(&format!("t{i}"));
         }
-        let (first, more, cursor) = ready(clock.poll(0, &[], false, false));
+        let (first, more, cursor) = ready(clock.poll(0, &[], false, false, false));
         assert_eq!(first.len(), MAX_EVENT_CHANGES);
         assert!(more);
         assert_eq!(cursor, 64);
-        let (rest, more, cursor) = ready(clock.poll(cursor, &[], false, false));
+        let (rest, more, cursor) = ready(clock.poll(cursor, &[], false, false, false));
         assert_eq!(rest.len(), 36);
         assert!(!more);
         assert_eq!(cursor, 100);
@@ -841,11 +1072,11 @@ mod tests {
         }
         // "a" (seq 1) was evicted: a reader at 0 may have missed it.
         assert!(matches!(
-            clock.poll(0, &[], false, false),
+            clock.poll(0, &[], false, false, false),
             Some(Poll::Resync { head: 4, .. })
         ));
         // A reader at the floor has already seen everything evicted.
-        let (changes, _, _) = ready(clock.poll(1, &[], false, false));
+        let (changes, _, _) = ready(clock.poll(1, &[], false, false, false));
         assert_eq!(changes.len(), 3);
         assert!(clock.lock().by_thread.len() <= 3);
     }
@@ -857,12 +1088,12 @@ mod tests {
             clock.record("a");
         }
         clock.record("b");
-        let (changes, _, _) = ready(clock.poll(0, &[], false, false));
+        let (changes, _, _) = ready(clock.poll(0, &[], false, false, false));
         assert_eq!(changes.len(), 2);
     }
 
     fn text_poll(clock: &ChangeClock, after: u64, filter: &[String]) -> (Vec<EventLiveText>, u64) {
-        match clock.poll(after, filter, true, false) {
+        match clock.poll(after, filter, true, false, false) {
             Some(Poll::Ready { text, cursor, .. }) => (text, cursor),
             _ => panic!("expected ready"),
         }
@@ -883,7 +1114,7 @@ mod tests {
         clock.record_text("t", "a1", 9, "!", false);
         clock.record_text("t", "a1", 10, "", false);
         // Plain poll: no text, one change, cursor past the text.
-        let (changes, _, cursor) = ready(clock.poll(1, &[], false, false));
+        let (changes, _, cursor) = ready(clock.poll(1, &[], false, false, false));
         assert!(changes.is_empty());
         assert_eq!(cursor, 7);
         // From seq 2 on: answer text merges; reasoning is excluded but offsets stay global.
@@ -919,7 +1150,7 @@ mod tests {
         first.received(now - std::time::Duration::from_secs(30));
         first.received(now - std::time::Duration::from_secs(5));
         let Some(Poll::Ready { text, cursor, .. }) =
-            clock.poll(baseline, &["selected".into()], true, false)
+            clock.poll(baseline, &["selected".into()], true, false, false)
         else {
             panic!("expected a receive update")
         };
@@ -957,7 +1188,7 @@ mod tests {
             cursor,
             recovery_transitions,
             ..
-        }) = clock.poll(0, &[], false, false)
+        }) = clock.poll(0, &[], false, false, false)
         else {
             panic!("expected first recovery page")
         };
@@ -971,7 +1202,7 @@ mod tests {
             cursor,
             recovery_transitions,
             ..
-        }) = clock.poll(cursor, &[], false, false)
+        }) = clock.poll(cursor, &[], false, false, false)
         else {
             panic!("expected final recovery page")
         };
@@ -980,13 +1211,13 @@ mod tests {
         assert_eq!(recovery_transitions.len(), 1);
         assert!(recovery_transitions[0].seq < cursor);
         assert!(
-            matches!(clock.poll(cursor, &[], false, false), Some(Poll::Ready { recovery_transitions, .. }) if recovery_transitions.is_empty())
+            matches!(clock.poll(cursor, &[], false, false, false), Some(Poll::Ready { recovery_transitions, .. }) if recovery_transitions.is_empty())
         );
         let narrow = ChangeClock::with_capacity(1);
         narrow.record_change("recovering", true);
         narrow.record_change("recovering", true);
         assert!(matches!(
-            narrow.poll(0, &[], false, false),
+            narrow.poll(0, &[], false, false, false),
             Some(Poll::Resync { .. })
         ));
     }
@@ -1000,7 +1231,7 @@ mod tests {
             reasoning_activity,
             reasoning_changed,
             ..
-        }) = clock.poll(0, &[], false, true)
+        }) = clock.poll(0, &[], false, true, false)
         else {
             panic!("expected start");
         };
@@ -1019,7 +1250,7 @@ mod tests {
             reasoning_activity,
             reasoning_changed,
             ..
-        }) = clock.poll(start_cursor, &[], false, true)
+        }) = clock.poll(start_cursor, &[], false, true, false)
         else {
             panic!("expected reasoning delta");
         };
@@ -1030,7 +1261,7 @@ mod tests {
         );
         assert!(
             clock
-                .poll(0, &["other".into()], false, true)
+                .poll(0, &["other".into()], false, true, false)
                 .is_some_and(|poll| match poll {
                     Poll::Ready {
                         reasoning_activity, ..
@@ -1041,7 +1272,7 @@ mod tests {
         drop(guard);
         assert!(
             clock
-                .poll(start_cursor, &[], false, true)
+                .poll(start_cursor, &[], false, true, false)
                 .is_some_and(|poll| match poll {
                     Poll::Ready {
                         reasoning_activity, ..
@@ -1174,7 +1405,7 @@ mod tests {
             cursor,
             reasoning_activity,
             ..
-        }) = clock.poll(0, &[], false, true)
+        }) = clock.poll(0, &[], false, true, false)
         else {
             panic!("expected first page")
         };
@@ -1193,7 +1424,7 @@ mod tests {
             cursor,
             reasoning_activity,
             ..
-        }) = clock.poll(cursor, &[], false, true)
+        }) = clock.poll(cursor, &[], false, true, false)
         else {
             panic!("expected second page")
         };
@@ -1211,7 +1442,7 @@ mod tests {
             cursor,
             reasoning_activity,
             ..
-        }) = clock.poll(cursor, &[], false, true)
+        }) = clock.poll(cursor, &[], false, true, false)
         else {
             panic!("expected final page")
         };
@@ -1236,7 +1467,7 @@ mod tests {
         for i in 0..MAX_EVENT_CHANGES {
             clock.record(&format!("{id}{i}"));
         }
-        let Some(Poll::Ready { changes, text, .. }) = clock.poll(0, &[], true, true) else {
+        let Some(Poll::Ready { changes, text, .. }) = clock.poll(0, &[], true, true, false) else {
             panic!("expected ready")
         };
         let reply = serde_json::to_vec(&crate::protocol::EventsWaitResult {
@@ -1248,8 +1479,11 @@ mod tests {
                 .collect(),
             more: false,
             config_changed: false,
+            index_changed: false,
+            retention_changed: false,
             live_text: Some(text),
             attempt_ends: None,
+            output: None,
             recovery_transitions: vec![],
             reasoning_activity: vec![],
         })
@@ -1338,6 +1572,7 @@ mod tests {
                 timeout_ms: 0,
                 include_text: true,
                 include_reasoning_activity: false,
+                include_output: false,
             })
         };
         let changed = control.changed.notified();
@@ -1391,6 +1626,7 @@ mod tests {
                     timeout_ms: 0,
                     include_text: true,
                     include_reasoning_activity: false,
+                    include_output: false,
                 }),
             )
         };
@@ -1431,6 +1667,7 @@ mod tests {
                     timeout_ms: 3_600_000,
                     include_text: false,
                     include_reasoning_activity: false,
+                    include_output: false,
                 }),
             )
         };
@@ -1470,6 +1707,7 @@ mod tests {
                     timeout_ms: 3_600_000,
                     include_text: false,
                     include_reasoning_activity: true,
+                    include_output: false,
                 }),
             )
         };
@@ -1530,6 +1768,7 @@ mod tests {
                     timeout_ms: 3_600_000,
                     include_text,
                     include_reasoning_activity: false,
+                    include_output: false,
                 }),
             )
         };
@@ -1607,6 +1846,7 @@ mod tests {
                                     timeout_ms: 0,
                                     include_text: true,
                                     include_reasoning_activity: true,
+                                    include_output: false,
                                 }),
                             ))
                             .await;
@@ -1631,7 +1871,7 @@ mod tests {
     fn cursor_ahead_of_the_clock_is_rejected() {
         let clock = ChangeClock::new(Wakes::default());
         clock.record("a");
-        assert!(clock.poll(2, &[], false, false).is_none());
+        assert!(clock.poll(2, &[], false, false, false).is_none());
     }
 }
 

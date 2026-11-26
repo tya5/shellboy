@@ -1,5 +1,6 @@
 //! Independent operation admission and per-Thread drivers on one async runtime.
 mod change_clock;
+pub(crate) use change_clock::{ChangeClock, Mark as ChangeMark};
 mod compact;
 mod config_ops;
 mod credential_ops;
@@ -127,8 +128,6 @@ impl Default for DriverSlot {
 struct LiveShell {
     run_id: Option<String>,
     handle: ShellHandle,
-    // In-process observation of a successfully committed output batch only.
-    last_committed_output: Option<std::time::Instant>,
 }
 
 #[cfg(test)]
@@ -457,6 +456,9 @@ impl Control {
             attachments.clone(),
         ));
         let waits = wait::WaitRegistry::new(store.database.wait_wakes());
+        let change_clock = Arc::new(change_clock::ChangeClock::new(waits.keyed.clone()));
+        index.set_change_clock(change_clock.clone());
+        gc.set_change_clock(change_clock.clone());
         let changed = Arc::new(Notify::new());
         Arc::new(Self {
             #[cfg(test)]
@@ -484,7 +486,7 @@ impl Control {
             origins: Mutex::new(HashMap::new()),
             events,
             changed: changed.clone(),
-            change_clock: Arc::new(change_clock::ChangeClock::new(waits.keyed.clone())),
+            change_clock,
             stop: owner_lifetime,
             diagnostics: owner.diagnostics.clone(),
             storage_failed: AtomicBool::new(false),
@@ -2175,7 +2177,6 @@ mod failure_tests {
             LiveShell {
                 run_id: Some("fixture-run-without-driver".into()),
                 handle: shell.handle.clone(),
-                last_committed_output: None,
             },
         );
         // Model a recovery-wait background shell: no driver remains to stop it.
@@ -2306,48 +2307,8 @@ mod shell_lifecycle_tests;
 mod progress_tests;
 
 impl Control {
-    /// Existing completion hint, not proof of a mutation. Display consumers
-    /// reread saved facts without issuing another Control request.
     pub(crate) fn diagnostics(&self) -> &crate::diagnostics::Diagnostics {
         &self.diagnostics
-    }
-    pub(crate) fn saved_observation_hint(&self) -> &Notify {
-        &self.changed
-    }
-    pub(crate) fn display_output_subscription(&self) -> wait::wakes::Subscription {
-        self.waits
-            .keyed
-            .subscribe([wait::wakes::Key::DisplayOutput])
-    }
-    pub(crate) async fn committed_watch_output_markers(
-        &self,
-        executions: &[String],
-    ) -> Result<Vec<(String, Option<std::time::Instant>)>, ApiError> {
-        if executions.len() > 128 || executions.iter().any(|id| id.is_empty() || id.len() > 256) {
-            return Err(ApiError::new(
-                ErrorCode::InputLimit,
-                "Watch output exceeds128 valid executions",
-            ));
-        }
-        Ok(self
-            .live
-            .output_markers(executions)
-            .await
-            .into_iter()
-            .map(|(id, at)| (id, Some(at)))
-            .collect())
-    }
-    pub(crate) async fn committed_output_markers(
-        &self,
-        executions: &[String],
-    ) -> Result<Vec<(String, std::time::Instant)>, ApiError> {
-        if executions.len() > self.store.config.ui.live_work_rows {
-            return Err(ApiError::new(
-                ErrorCode::InputLimit,
-                "Visible output observation exceeds configured live work rows",
-            ));
-        }
-        Ok(self.live.output_markers(executions).await)
     }
 }
 

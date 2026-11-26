@@ -55,30 +55,15 @@ impl Drop for Browser {
     }
 }
 impl Browser {
-    pub fn output_notified(&mut self) {
+    /// Committed output for a shown Watch shell re-reads that Thread's detail.
+    pub fn output(&mut self, output: &[crate::protocol::EventOutput]) {
         if self
             .scope
             .as_ref()
             .is_some_and(|s| s.visible && s.mode == BrowserMode::Watch)
             && self.resync.is_none()
         {
-            self.output.notify();
-        }
-    }
-    pub fn output_deadline(&self) -> Option<tokio::time::Instant> {
-        self.output.deadline()
-    }
-    pub fn take_output_ids(&mut self, now: tokio::time::Instant) -> Option<Vec<String>> {
-        self.output.take(now)
-    }
-    pub fn output_markers(&mut self, markers: Vec<(String, Option<std::time::Instant>)>) {
-        if self
-            .scope
-            .as_ref()
-            .is_some_and(|s| s.visible && s.mode == BrowserMode::Watch)
-            && self.resync.is_none()
-        {
-            self.detail_dirty.extend(self.output.markers(markers));
+            self.detail_dirty.extend(self.output.changed(output));
         }
     }
     pub fn accept_details(
@@ -109,7 +94,7 @@ impl Browser {
             let shell = facts.work.as_ref().and_then(|work| {
                 work.rows.iter().find_map(|row| match &row.target {
                     crate::ui::live_work::LiveWorkTarget::Shell { execution_id, .. } => {
-                        Some((execution_id.clone(), work.observed_at))
+                        Some(execution_id.clone())
                     }
                     _ => None,
                 })
@@ -1325,7 +1310,12 @@ mod watch_tests {
         .prepare()
     }
     #[test]
-    fn output_hints_dirty_only_current_detail_owner_and_never_metadata_or_hidden_consumers() {
+    fn output_dirties_only_the_current_detail_owner_and_never_metadata_or_hidden_consumers() {
+        let entry = |execution: &str| crate::protocol::EventOutput {
+            thread_id: "owner".into(),
+            execution_id: execution.into(),
+            seq: 1,
+        };
         let mut browser = Browser::default();
         observe(&mut browser, &["a", "b"], &[]);
         let now = tokio::time::Instant::now();
@@ -1336,11 +1326,8 @@ mod watch_tests {
             &ticket,
             &[shell_detail("a", "sa", at), shell_detail("b", "sb", at)],
         );
-        assert_eq!(browser.take_output_ids(now).unwrap(), ["sa", "sb"]);
-        browser.output_markers(vec![
-            ("sa".into(), Some(at + Duration::from_millis(1))),
-            ("sb".into(), Some(at)),
-        ]);
+        browser.detail_dirty.clear();
+        browser.output(&[entry("sa")]);
         assert!(browser.dirty.is_empty());
         assert_eq!(browser.detail_dirty, BTreeSet::from(["a".into()]));
         let refresh = browser.take(now + PERIOD).unwrap();
@@ -1348,19 +1335,9 @@ mod watch_tests {
         assert_eq!(refresh.detail_ids, ["a"]);
         browser.complete(&refresh);
         observe(&mut browser, &["b"], &[]);
-        browser.output_notified();
-        assert!(
-            browser
-                .take_output_ids(now + PERIOD - Duration::from_millis(1))
-                .is_none()
-        );
-        assert_eq!(browser.take_output_ids(now + PERIOD).unwrap(), ["sb"]);
-        browser.output_markers(vec![("sa".into(), Some(at + Duration::from_secs(1)))]);
-        assert_eq!(
-            browser.detail_dirty,
-            BTreeSet::from(["b".into()]),
-            "viewport re-read, not retired shell output"
-        );
+        browser.detail_dirty.clear();
+        browser.output(&[entry("sa")]);
+        assert!(browser.detail_dirty.is_empty(), "retired shell output");
         browser
             .observe_view(
                 1,
@@ -1373,11 +1350,10 @@ mod watch_tests {
                 vec![],
             )
             .unwrap();
-        for _ in 0..40 {
-            browser.output_notified();
-            assert!(browser.output_deadline().is_none());
-        }
-        browser.accept_details(&refresh, &[shell_detail("a", "sa", at)]);
-        assert!(browser.take_output_ids(now + 2 * PERIOD).is_none());
+        browser.output(&[entry("sb")]);
+        assert!(
+            browser.detail_dirty.is_empty(),
+            "a hidden browser reads nothing"
+        );
     }
 }

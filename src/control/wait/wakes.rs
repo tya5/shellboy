@@ -14,14 +14,16 @@ pub(crate) enum Key {
     ThreadUnavailable(String),
     ShellTerminal(String),
     ShellOutput(String),
-    DisplayOutput,
     CallerInput(String),
     Foreground(String),
     Changed(Option<String>),
     Live(Option<String>),
     Reasoning(Option<String>),
     AttemptEnd(Option<String>),
-    Config,
+    /// Committed shell output for `events.wait` callers that include it.
+    Output(Option<String>),
+    /// Owner-wide latest-change marks (config, index, retention).
+    Marks,
 }
 
 impl Key {

@@ -1,4 +1,5 @@
-//! Owner-wide saved Thread hints; live text is not part of this subscription.
+//! Owner-wide saved Thread hints, owner marks and committed output entries; the
+//! selected-Thread preview wait carries live text instead.
 use crate::protocol::{
     ApiError, Command, DEFAULT_WAIT_TIMEOUT_MS, ErrorCode, EventsWaitArgs, EventsWaitResult,
 };
@@ -21,6 +22,7 @@ pub(super) async fn wait_scoped(
     thread: Option<String>,
 ) -> Result<EventsWaitResult, ApiError> {
     let include_text = thread.is_some();
+    let include_output = thread.is_none();
     let timeout_ms = if after.is_none() || more {
         0
     } else {
@@ -35,6 +37,7 @@ pub(super) async fn wait_scoped(
             timeout_ms,
             include_text,
             include_reasoning_activity: false,
+            include_output,
         }),
         None,
     )

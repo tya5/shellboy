@@ -287,6 +287,7 @@ impl<W: Write> Chat<'_, W> {
                 timeout_ms: 0,
                 include_text: false,
                 include_reasoning_activity: false,
+                include_output: false,
             }))
             .await?;
         self.cursor = Some(result.cursor);
@@ -307,6 +308,7 @@ impl<W: Write> Chat<'_, W> {
                     timeout_ms,
                     include_text: false,
                     include_reasoning_activity: false,
+                    include_output: false,
                 }))
                 .await?;
             after = result.cursor;

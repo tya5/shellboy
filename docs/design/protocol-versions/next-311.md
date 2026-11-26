@@ -170,3 +170,20 @@ observation `activity` IDs come from the same owner function.
 `ShellWait` adds `target_thread_id`: the saved Thread of the first
 condition's Run, Turn or first Thread target, so a client can label the wait
 without a usage-aggregating `run.get` or `turn.get`.
+
+## Owner marks and output entries on `events.wait` (slice 4d-3)
+
+`EventsWaitResult` adds required `index_changed` and `retention_changed`, marks
+like `config_changed`: the newest index change (saved state or pause) and the
+newest GC availability change (tombstoned source, raw-output deletion or new
+raw retention generation, managed-file deletion) after the cursor. They have no
+Thread and ignore `thread_ids`.
+
+`include_output` (CLI `events wait --output`) adds `output`, at most 64
+`{thread_id, execution_id, seq}` entries per page: each execution's latest
+committed output batch after the cursor, filtered by `thread_ids`. Output bytes
+stay on `shell.read` and `wait`. Evicting one of the 4096 retained executions
+raises the existing floor, so an older cursor gets `resync_required`.
+
+Owner notifications that concern one Thread are now ordinary `changes`
+entries for it. No operation, field or capability is added for owner state.

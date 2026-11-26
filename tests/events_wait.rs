@@ -34,6 +34,7 @@ async fn raw(
                 timeout_ms,
                 include_text: false,
                 include_reasoning_activity: false,
+                include_output: false,
             }),
         )),
     )

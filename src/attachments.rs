@@ -1661,7 +1661,7 @@ impl AttachmentService {
     pub(crate) async fn collect_managed_observed(
         &self,
         at: chrono::DateTime<chrono::Utc>,
-        availability_changed: Option<Arc<tokio::sync::Notify>>,
+        availability_changed: Option<Arc<crate::control::ChangeClock>>,
     ) -> Result<ManagedGcReport, ApiError> {
         let cutoff = i64::try_from(self.config.retention.clipboard_days)
             .ok()
@@ -1748,7 +1748,7 @@ impl AttachmentService {
                         }
                         tx.commit()?;
                         if availability_transition && let Some(signal) = signal {
-                            signal.notify_one();
+                            signal.record_mark(crate::control::ChangeMark::Retention);
                         }
                         let last = (rows.len() == limit.rows())
                             .then(|| rows.last().map(|r| (r.4.clone(), r.0.clone())))
@@ -1839,7 +1839,7 @@ impl AttachmentService {
                         let tx = db.transaction()?;
                         let changed = tx.execute("UPDATE managed_file SET state='deleted' WHERE id=?1 AND state='deleting'",[row])?;
                         tx.commit()?;
-                        if changed > 0 && let Some(signal) = signal { signal.notify_one(); }
+                        if changed > 0 && let Some(signal) = signal { signal.record_mark(crate::control::ChangeMark::Retention); }
                         Ok(())
                     }).await.map_err(storage_error)?;
                     if matches!(marked, crate::storage::Background::Deferred) {

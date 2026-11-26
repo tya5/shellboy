@@ -1391,7 +1391,6 @@ mod tests {
                     super::super::LiveShell {
                         run_id: None,
                         handle: shell.handle.clone(),
-                        last_committed_output: None,
                     },
                 )
                 .await;

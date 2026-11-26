@@ -1761,6 +1761,7 @@ mod tests {
                     timeout_ms: 600_000,
                     include_text: true,
                     include_reasoning_activity: false,
+                    include_output: false,
                 }),
             )
         };

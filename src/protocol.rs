@@ -1736,9 +1736,16 @@ impl std::fmt::Debug for ConnectionTestArgs {
             .finish()
     }
 }
-args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_text: bool, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_reasoning_activity: bool });
+args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_text: bool, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_reasoning_activity: bool, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_output: bool });
 record!(EventChange {
     thread_id: String,
+    seq: u64
+});
+// Committed shell output after the cursor: the execution's latest output position only.
+// Read the output itself with `shell.read` or `wait`.
+record!(EventOutput {
+    thread_id: String,
+    execution_id: String,
     seq: u64
 });
 record!(EventRecoveryTransition {
@@ -1795,7 +1802,7 @@ record!(EventAttemptEnd {
     #[serde(default, skip_serializing_if = "Option::is_none")] output_limit: Option<AttemptOutputLimit>,
     seq: u64
 });
-record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, config_changed: bool, #[serde(default, skip_serializing_if="Vec::is_empty")] recovery_transitions: Vec<EventRecoveryTransition>, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default, skip_serializing_if="Option::is_none")] attempt_ends: Option<Vec<EventAttemptEnd>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
+record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, config_changed: bool, index_changed: bool, retention_changed: bool, #[serde(default, skip_serializing_if="Vec::is_empty")] recovery_transitions: Vec<EventRecoveryTransition>, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default, skip_serializing_if="Option::is_none")] attempt_ends: Option<Vec<EventAttemptEnd>>, #[serde(default, skip_serializing_if="Option::is_none")] output: Option<Vec<EventOutput>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
 pub const MAX_EVENT_THREAD_FILTER: usize = 64;
 pub const MAX_EVENT_CHANGES: usize = 64;
 /// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.
