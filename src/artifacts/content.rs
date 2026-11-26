@@ -44,6 +44,50 @@ fn unavailable(error: std::io::Error) -> ApiError {
     )
     .details(json!({"reason": "file_unavailable"}))
 }
+fn not_a_file() -> ApiError {
+    ApiError::new(
+        ErrorCode::TargetUnavailable,
+        "Artifact path is not a regular file",
+    )
+    .details(json!({"reason": "not_a_file"}))
+}
+/// Windows device namespaces and reserved device names never name a regular
+/// file, and opening one can block; they are refused before any file access.
+#[cfg(windows)]
+fn is_device(path: &Path) -> bool {
+    let text = path.as_os_str().to_string_lossy().replace('/', "\\");
+    if text.starts_with(r"\\.\") || text.starts_with(r"\\?\") {
+        return true;
+    }
+    path.components().any(|part| {
+        let Component::Normal(name) = part else {
+            return false;
+        };
+        let name = name.to_string_lossy();
+        let stem = name
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches(' ');
+        let upper = stem.to_ascii_uppercase();
+        matches!(
+            upper.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || (upper.len() == 4
+            && (upper.starts_with("COM") || upper.starts_with("LPT"))
+            && matches!(upper.as_bytes()[3], b'1'..=b'9'))
+    })
+}
+#[cfg(not(windows))]
+fn is_device(_: &Path) -> bool {
+    false
+}
+fn refuse_device(path: &Path) -> Result<()> {
+    if is_device(path) {
+        return Err(not_a_file());
+    }
+    Ok(())
+}
 fn outside() -> ApiError {
     refused(
         "path_outside_folder",
@@ -92,16 +136,23 @@ fn source(uri: &str) -> Result<Source> {
                 "A file: URI must name a local absolute path",
             )
         };
-        // Read the raw authority before parsing: URL parsing drops a host in
-        // front of a drive letter, and Windows turns a kept host into a network path.
-        if !local_authority(&uri[name.len() + 1..]) {
+        // Checked on the raw text, because URL parsing drops a host in front
+        // of a drive letter and strips tabs and newlines, and again after
+        // parsing; Windows would turn any kept host into a network path.
+        if uri.contains(['\t', '\n', '\r']) || !local_authority(&uri[name.len() + 1..]) {
             return Err(not_local());
         }
-        return url::Url::parse(uri)
-            .ok()
-            .and_then(|url| url.to_file_path().ok())
+        let url = url::Url::parse(uri).map_err(|_| not_local())?;
+        if url
+            .host_str()
+            .is_some_and(|host| !host.is_empty() && !host.eq_ignore_ascii_case("localhost"))
+        {
+            return Err(not_local());
+        }
+        return url
+            .to_file_path()
             .map(Source::File)
-            .ok_or_else(not_local);
+            .map_err(|_| not_local());
     }
     Err(refused(
         "uri_not_readable",
@@ -118,7 +169,10 @@ enum Target {
 
 fn target(source: Source, path: Option<&str>) -> Result<Target> {
     match (source, path) {
-        (Source::File(file), None) => Ok(Target::File(file)),
+        (Source::File(file), None) => {
+            refuse_device(&file)?;
+            Ok(Target::File(file))
+        }
         (Source::File(_), Some(_)) => Err(refused(
             "path_not_allowed",
             "This artifact version is one file; omit the path",
@@ -135,6 +189,8 @@ fn target(source: Source, path: Option<&str>) -> Result<Target> {
             {
                 return Err(outside());
             }
+            refuse_device(&folder)?;
+            refuse_device(relative)?;
             Ok(Target::InFolder(folder, relative.into()))
         }
     }
@@ -158,6 +214,14 @@ fn resolve(target: Target) -> Result<PathBuf> {
 
 fn read_file(target: Target, limit: u64) -> Result<(u64, String)> {
     let path = resolve(target)?;
+    // Windows has no non-blocking open: check the type first so a special
+    // file is never opened. The opened handle is still checked below.
+    #[cfg(windows)]
+    {
+        if !std::fs::metadata(&path).map_err(unavailable)?.is_file() {
+            return Err(not_a_file());
+        }
+    }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     // A FIFO or device must not block the worker before its type is checked.
@@ -170,11 +234,7 @@ fn read_file(target: Target, limit: u64) -> Result<(u64, String)> {
     // The type comes from the opened handle, which is also the one read below.
     let meta = file.metadata().map_err(unavailable)?;
     if !meta.is_file() {
-        return Err(ApiError::new(
-            ErrorCode::TargetUnavailable,
-            "Artifact path is not a regular file",
-        )
-        .details(json!({"reason": "not_a_file"})));
+        return Err(not_a_file());
     }
     let too_large = |bytes: u64| {
         ApiError::new(
