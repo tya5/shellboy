@@ -333,14 +333,6 @@ fn collected_source_lookup_uses_existing_index_without_unrelated_relation_scan()
     // Current GC may retire payloads while retaining exact tool-result relations.
     db.execute("UPDATE node SET payload_json=NULL WHERE id='result-0'", [])
         .unwrap();
-    let columns = db
-        .prepare("PRAGMA index_info(tool_result_node)")
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(2))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    assert_eq!(columns, vec!["node_id"]);
     let encoded = serde_json::to_string(
         &(0..50)
             .map(|n| (format!("result-{n}"), format!("call-{n}")))

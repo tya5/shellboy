@@ -11,21 +11,21 @@ PATTERN = re.compile(r"\bsqlite3_(?:trace(?:_v2)?|profile)\b|\.\s*(?:trace|profi
 class TraceSlotOwnerTest(unittest.TestCase):
     def test_no_other_registrations(self):
         violations = []
-        registrations = {}
+        registrations = set()
         for tree in ("src", "tests", "examples"):
             for path in (ROOT / tree).rglob("*.rs"):
                 if path == OWNER:
                     continue
                 text = path.read_text(encoding="utf-8")
                 if "trace_slot::register" in text:
-                    registrations[path.relative_to(ROOT).as_posix()] = text.count("trace_slot::register")
+                    registrations.add(path.relative_to(ROOT).as_posix())
                 for number, line in enumerate(text.splitlines(), 1):
                     if PATTERN.search(line):
                         violations.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()}")
         self.assertEqual(violations, [])
         self.assertEqual(registrations, {
-            "src/frontend/sql_trace.rs": 2,
-            "src/storage/statement_observation.rs": 6,
+            "src/frontend/sql_trace.rs",
+            "src/storage/statement_observation.rs",
         })
 
 

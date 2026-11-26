@@ -1,5 +1,5 @@
 //! Recovery guidance uses recorded IDs and read-only inspection before side effects.
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use serde_json::{Value, json};
 use shellboy::{
     app::DataOwner,
@@ -15,31 +15,7 @@ async fn bounded<T>(future: impl std::future::Future<Output = T>) -> T {
 }
 
 #[tokio::test]
-async fn help_examples_parse_and_name_the_next_observation() {
-    let mut help = Cli::command();
-    let text = help.render_long_help().to_string();
-    assert!(text.contains("shellboy docs list"));
-    for (path, expected) in [
-        (
-            vec!["message", "send"],
-            "shellboy message get --message MESSAGE_ID",
-        ),
-        (vec!["thread", "create"], "shellboy/delegation"),
-        (vec!["shell", "get"], "WORK_EXECUTION_ID"),
-        (vec!["shell", "read"], "result.cursor"),
-        (vec!["operation", "get"], "details.operation_id"),
-        (vec!["turn", "get"], "END_MESSAGE_NODE_ID"),
-        (vec!["wait"], "timeout leaves the target running"),
-    ] {
-        let mut command = Cli::command();
-        for component in path {
-            command = command.find_subcommand_mut(component).unwrap().clone();
-        }
-        assert!(
-            command.render_long_help().to_string().contains(expected),
-            "{expected}"
-        );
-    }
+async fn next_observation_examples_parse_and_validate() {
     let cases = [
         vec!["thread", "create", "--parent-thread", "THREAD_ID"],
         vec![

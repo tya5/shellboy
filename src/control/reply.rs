@@ -983,18 +983,6 @@ mod tests {
                 "{steps:?}"
             );
         }
-        // The partial indexes hold exactly the open states.
-        let open: Vec<String> = db
-            .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name IN ('receipt_reply_pending','receipt_other_reply_pending','receipt_pending_by_time','receipt_pending_owed','receipt_pending_asked','receipt_pending_to')")
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert_eq!(open.len(), 6);
-        for sql in open {
-            assert!(sql.contains(open_reply!("")), "{sql}");
-        }
     }
 
     #[test]

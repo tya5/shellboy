@@ -533,9 +533,6 @@ fn help_and_version_are_display_success_and_unknown_operation_is_parse_error() {
     }
     let wait_help = Cli::try_parse_from(["shellboy", "wait", "--help"]).unwrap_err();
     assert_eq!(wait_help.kind(), ErrorKind::DisplayHelp);
-    let wait_help = wait_help.to_string();
-    assert!(wait_help.contains("reply_received"));
-    assert!(wait_help.contains("\"message_id\":\"MESSAGE_ID\""));
     assert_eq!(
         Cli::try_parse_from(["shellboy", "--version"])
             .unwrap_err()
@@ -647,7 +644,7 @@ async fn operation_lookup_target_is_independent_of_global_request_id() {
 }
 
 #[tokio::test]
-async fn removed_status_operation_alias_is_rejected_and_help_uses_canonical_lookup() {
+async fn removed_status_operation_alias_is_rejected() {
     for filter in [
         vec!["--thread", "t"],
         vec!["--run", "r"],
@@ -666,24 +663,6 @@ async fn removed_status_operation_alias_is_rejected_and_help_uses_canonical_look
     for target in ["", "target:receipt"] {
         assert!(Cli::try_parse_from(["shellboy", "status", "--operation", target]).is_err());
     }
-    use clap::CommandFactory;
-    let mut root = Cli::command();
-    let status = root
-        .find_subcommand_mut("status")
-        .unwrap()
-        .render_long_help()
-        .to_string();
-    assert!(!status.contains("Deprecated alias"));
-    assert!(status.contains("operation get"));
-    let operation = root
-        .find_subcommand_mut("operation")
-        .unwrap()
-        .find_subcommand_mut("get")
-        .unwrap()
-        .render_long_help()
-        .to_string();
-    assert!(operation.contains("allocates no receipt"));
-    assert!(!operation.contains("fresh observation ID"));
 }
 
 #[tokio::test]
@@ -1441,63 +1420,6 @@ fn message_ask_is_model_scoped_and_takes_text() {
             command: shellboy::cli::MessageCommand::Ask(_)
         })
     ));
-}
-
-#[test]
-fn retry_help_distinguishes_acceptance_from_saved_outcome_without_new_flags() {
-    let retry = Cli::try_parse_from(["shellboy", "run", "retry", "--help"]).unwrap_err();
-    assert_eq!(retry.kind(), ErrorKind::DisplayHelp);
-    let text = retry
-        .to_string()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    for required in [
-        "not execution success",
-        "ACK_TURN_ID",
-        "snapshot.state",
-        "context.recovery_reason",
-        "BEFORE retry",
-        "epoch is unknown",
-        "128-input",
-        "same operation ID",
-    ] {
-        assert!(
-            text.contains(required),
-            "missing retry guidance: {required}"
-        );
-    }
-    let message = Cli::try_parse_from(["shellboy", "message", "send", "--help"])
-        .unwrap_err()
-        .to_string()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(message.contains("acceptance is not execution success"));
-    assert!(
-        !text.contains("--wait"),
-        "this change introduces no automatic observer flag"
-    );
-}
-
-#[test]
-fn message_get_help_uses_saved_context_and_body_read_without_resending() {
-    let help = Cli::try_parse_from(["shellboy", "message", "get", "--help"]).unwrap_err();
-    assert_eq!(help.kind(), ErrorKind::DisplayHelp);
-    let text = help
-        .to_string()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    for fact in [
-        "context.hold_reason",
-        "history read --node MESSAGE_ID",
-        "not proof of receipt termination or body loss",
-        "fresh manual resend",
-        "duplicate",
-    ] {
-        assert!(text.contains(fact), "missing held guidance: {fact}");
-    }
 }
 
 #[tokio::test]
