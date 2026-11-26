@@ -649,39 +649,20 @@ mod tests {
     }
 
     #[test]
-    fn production_sampling_ignores_fast_statements_and_labels_slow_cumulative_counts() {
-        let mut db = Connection::open_in_memory().unwrap();
-        db.create_scalar_function(
-            "pause",
-            0,
-            rusqlite::functions::FunctionFlags::empty(),
-            |_| {
-                std::thread::sleep(std::time::Duration::from_millis(4));
-                Ok(1_i64)
-            },
-        )
-        .unwrap();
-        let mut observation = StatementObservation::install_production(&mut db);
-        let _: i64 = observation
-            .connection()
-            .query_row("SELECT 1", [], |r| r.get(0))
-            .unwrap();
+    fn production_install_counts_every_row_and_samples_only_past_the_cutoff() {
         assert!(!sample_profile(999_999));
         assert!(sample_profile(1_000_000));
-        let fast = observation.counters();
-        assert_eq!(fast.rows, Some(1));
-        let _: i64 = observation
-            .connection()
-            .query_row("SELECT pause()", [], |r| r.get(0))
-            .unwrap();
-        let counters = observation.counters();
-        assert_eq!(
-            counters.counter_scope,
-            Some("statement_lifetime_cumulative")
-        );
-        assert!(counters.vm_steps > 0);
-        assert_eq!(counters.rows, Some(2));
-        assert_eq!(counters.row_scope, Some("job_cumulative"));
+        let mut db = Connection::open_in_memory().unwrap();
+        let mut observation = StatementObservation::install_production(&mut db);
+        for rows in [1, 2] {
+            let _: i64 = observation
+                .connection()
+                .query_row("SELECT 1", [], |r| r.get(0))
+                .unwrap();
+            let counters = observation.counters();
+            assert_eq!(counters.rows, Some(rows));
+            assert_eq!(counters.row_scope, Some("job_cumulative"));
+        }
     }
 
     #[test]

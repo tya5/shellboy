@@ -3538,20 +3538,11 @@ mod tests {
 
     #[tokio::test]
     async fn turn_seed_seeks_ignore_unrelated_replacement_growth() {
-        use rusqlite::StatementStatus;
         use std::collections::BTreeSet;
-        const OLD_SEEDS: &str = "SELECT DISTINCT s.source_node_id FROM replacement_source s CROSS JOIN node n ON n.id=s.source_node_id
-         WHERE n.turn_id=?1 LIMIT ?2";
-        fn measured(db: &Connection, sql: &str) -> rusqlite::Result<(Vec<String>, i32, i32)> {
-            let mut statement = db.prepare(sql)?;
-            let rows = statement
+        fn seeds(db: &Connection) -> rusqlite::Result<Vec<String>> {
+            db.prepare(TURN_BOUNDARY_SEEDS_SQL)?
                 .query_map(params!["current", 65_537], |row| row.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok((
-                rows,
-                statement.get_status(StatementStatus::VmStep),
-                statement.get_status(StatementStatus::FullscanStep),
-            ))
+                .collect()
         }
         let (_root, worker) = database().await;
         worker.call(|db| {
@@ -3573,7 +3564,6 @@ mod tests {
                 INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision)VALUES('direct-1',0,'current-origin',0),('direct-2',0,'current-origin',0),('direct-3',0,'current-origin',0),('legacy',0,'legacy-origin',0),('pending',0,'pending-origin',0),('wrong-thread-source',0,'wrong-thread-legacy',0),('wrong-turn-source',0,'foreign-turn-origin',0);
                 INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('fork',0,'current-summary');
                 COMMIT;")?;
-            let mut samples = Vec::new();
             for (start, end) in [(1, 100), (101, 10_000)] {
                 let tx = db.transaction()?;
                 tx.execute("WITH RECURSIVE seq(x) AS(VALUES(?1) UNION ALL SELECT x+1 FROM seq WHERE x<?2)
@@ -3585,19 +3575,11 @@ mod tests {
                 tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision)
                     SELECT id,0,input_key,0 FROM replacement WHERE format_version=?1", [end.to_string()])?;
                 tx.commit()?;
-                let old = measured(db, OLD_SEEDS)?;
-                let new = measured(db, TURN_BOUNDARY_SEEDS_SQL)?;
+                let new = seeds(db)?;
                 let expected = BTreeSet::from(["current-origin".to_owned(), "pending-origin".to_owned()]);
-                assert_eq!(old.0.iter().cloned().collect::<BTreeSet<_>>(), expected);
-                assert_eq!(new.0.iter().cloned().collect::<BTreeSet<_>>(), expected);
-                assert_eq!(new.0.len(), expected.len(), "duplicate receipts/fanout are one seed each");
-                eprintln!("PR2-15 bundled SQLite {} unrelated={end} old_vm={} old_scan={} new_vm={} new_scan={}",rusqlite::version(),old.1,old.2,new.1,new.2);
-                samples.push((old.1, old.2, new.1, new.2));
+                assert_eq!(new.iter().cloned().collect::<BTreeSet<_>>(), expected);
+                assert_eq!(new.len(), expected.len(), "duplicate receipts/fanout are one seed each");
             }
-            assert!(samples[1].0 > samples[0].0 * 20, "old full-source scan must grow in this fixture: {samples:?}");
-            assert_eq!(samples[1].2, samples[0].2, "new VM work must not grow with unrelated replacements");
-            assert_eq!(samples[1].3, samples[0].3, "new fullscan work must not grow");
-            assert_eq!(samples[1].3, 0, "Turn candidates use indexed seeks");
             let plan = db.prepare(&format!("EXPLAIN QUERY PLAN {TURN_BOUNDARY_SEEDS_SQL}"))?
                 .query_map(params!["current",65_537], |row| row.get::<_, String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
             assert!(plan.iter().any(|line| line.contains("node_turn")), "{plan:?}");

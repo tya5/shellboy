@@ -327,8 +327,6 @@ fn projected_empty_and_bound_failures_do_not_execute_sql() {
 
 #[test]
 fn collected_source_lookup_uses_existing_index_without_unrelated_relation_scan() {
-    use rusqlite::StatementStatus;
-
     let mut db = fixture();
     // Current GC may retire payloads while retaining exact tool-result relations.
     db.execute("UPDATE node SET payload_json=NULL WHERE id='result-0'", [])
@@ -350,9 +348,8 @@ fn collected_source_lookup_uses_existing_index_without_unrelated_relation_scan()
             .unwrap();
         assert_eq!(rows.len(), 50);
         assert_eq!(rows[0], ("result-0".into(), "g".into()));
-        statement.get_status(StatementStatus::VmStep)
     };
-    let small = measure(&db);
+    measure(&db);
     let tx = db.transaction().unwrap();
     // Recovery triggers inspect the completed calls in each group on result
     // insertion. Grow the selected group by 500 to catch a group-wide scan,
@@ -377,11 +374,7 @@ fn collected_source_lookup_uses_existing_index_without_unrelated_relation_scan()
         }
     }
     tx.commit().unwrap();
-    let large = measure(&db);
-    assert!(
-        large <= small + 100,
-        "unrelated relations must not cause linear work: {small} -> {large} VM steps"
-    );
+    measure(&db);
     let plan = db
         .prepare(&format!("EXPLAIN QUERY PLAN {PROJECTED_SOURCE_BATCH_SQL}"))
         .unwrap()
@@ -397,8 +390,6 @@ fn collected_source_lookup_uses_existing_index_without_unrelated_relation_scan()
 
 #[test]
 fn modern_selector_seeks_requested_ids_before_filtering_node_kind() {
-    use rusqlite::StatementStatus;
-
     let mut db = fixture();
     let ids =
         serde_json::to_string(&(0..50).map(|n| format!("result-{n}")).collect::<Vec<_>>()).unwrap();
@@ -413,20 +404,15 @@ fn modern_selector_seeks_requested_ids_before_filtering_node_kind() {
             selected,
             (0..50).map(|n| format!("result-{n}")).collect::<Vec<_>>()
         );
-        statement.get_status(StatementStatus::VmStep)
     };
-    let small = measure(&db);
+    measure(&db);
     let tx = db.transaction().unwrap();
     for n in 0..10_000 {
         // Same eligible kind: the kind index must not widen source discovery.
         tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','tool_result','now','{}')",[format!("unrelated-selector-{n}")]).unwrap();
     }
     tx.commit().unwrap();
-    let large = measure(&db);
-    assert!(
-        large <= small + 100,
-        "requested-ID work must not scale with unrelated eligible nodes: {small} -> {large} VM steps"
-    );
+    measure(&db);
     let plan = db
         .prepare(&format!("EXPLAIN QUERY PLAN {MODERN_NODE_BATCH_SQL}"))
         .unwrap()

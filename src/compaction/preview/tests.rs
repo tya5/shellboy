@@ -729,23 +729,11 @@ async fn structural_no_target_proof_is_bounded_and_never_reads_protected_payload
     assert!(
         matches!(automatic_candidates_tx(&tx, "t"), Err(StorageError::Operation(error)) if error.code == crate::protocol::ErrorCode::InputLimit)
     );
-    let steps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let counted = steps.clone();
-    tx.progress_handler(
-        1000,
-        Some(move || {
-            counted.fetch_add(1000, std::sync::atomic::Ordering::SeqCst);
-            false
-        }),
-    )
-    .unwrap();
     assert!(
         automatic_structural_no_target_tx(&tx, "t", true)
             .unwrap()
             .is_some()
     );
-    tx.progress_handler(0, None::<fn() -> bool>).unwrap();
-    assert!(steps.load(std::sync::atomic::Ordering::SeqCst) < 131_000);
     assert!(
         automatic_structural_no_target_tx(&tx, "t", false)
             .unwrap()

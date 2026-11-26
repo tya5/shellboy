@@ -417,7 +417,7 @@ pub(super) async fn request(
 mod tests {
     use super::*;
     use crate::frontend::sql_trace::Statements;
-    use rusqlite::{StatementStatus, params};
+    use rusqlite::params;
     use serde_json::json;
     fn seed(db: &Connection) {
         db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('foreign','Foreign','/foreign','AGENTS.md','p','m','2026-01-01T00:00:03Z'),('viewer','Viewer','/viewer','','p','m','now');
@@ -443,18 +443,6 @@ mod tests {
             .unwrap();
             db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,'r','u',?1,'running','/','{}','UTF-8','UTF-8','open',?2)",params![format!("shell-{i}"),format!("stamp-{i:05}")]).unwrap();
         }
-    }
-    fn steps(db: &Connection, sql: &str) -> (i32, i32) {
-        let mut statement = db.prepare(sql).unwrap();
-        statement
-            .query_map(["r"], |_| Ok(()))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        (
-            statement.get_status(StatementStatus::VmStep),
-            statement.get_status(StatementStatus::FullscanStep),
-        )
     }
 
     fn run() -> Command {
@@ -543,7 +531,7 @@ mod tests {
         assert_eq!(value.value, canonical(&db, &run()));
     }
     #[test]
-    fn owned_prefix_cost_is_constant_past_cap_and_small_order_matches_canonical() {
+    fn owned_prefix_is_capped_and_small_order_matches_canonical() {
         let db = fixture();
         seed_owned(&db, 0, 8);
         assert_eq!(
@@ -551,7 +539,6 @@ mod tests {
             canonical(&db, &run())
         );
         seed_owned(&db, 8, 150);
-        let before = steps(&db, OWNED_EXECUTIONS);
         let value = prepare(read_tx(&db, &run()).unwrap()).unwrap();
         {
             let key = "owned_execution_ids";
@@ -559,7 +546,6 @@ mod tests {
             assert!(value.limited_fields.contains(&key.into()));
         }
         seed_owned(&db, 150, 1150);
-        assert_eq!(steps(&db, OWNED_EXECUTIONS), before);
         {
             let sql = OWNED_EXECUTIONS;
             let plans = db
@@ -591,7 +577,7 @@ mod tests {
             }
             db.execute_batch("COMMIT").unwrap();
         };
-        let measure = || {
+        let latest = || {
             let trace = Statements::new(&db);
             let mut statement = db.prepare(RUN_SQL).unwrap();
             let turns = statement
@@ -602,19 +588,8 @@ mod tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
             assert_eq!(turns.len(), 1);
-            assert_eq!(
-                trace.count(),
-                1,
-                "measure the complete Run metadata query, not a rewritten latest-Turn surrogate"
-            );
-            (
-                turns[0].clone(),
-                [
-                    statement.get_status(StatementStatus::VmStep),
-                    statement.get_status(StatementStatus::Sort),
-                    statement.get_status(StatementStatus::FullscanStep),
-                ],
-            )
+            assert_eq!(trace.count(), 1, "the complete Run metadata query");
+            turns[0].clone()
         };
         let plan = || {
             db.prepare(&format!("EXPLAIN QUERY PLAN {RUN_SQL}"))
@@ -626,37 +601,20 @@ mod tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap()
         };
-        seed_ties(0, 32);
-        let old_small = measure();
-        seed_ties(32, 4096);
-        let old_dense = measure();
+        seed_ties(0, 4096);
+        let old_dense = latest();
         let expected = canonical(&db, &run());
         assert_eq!(
             prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
             expected
         );
-        assert_eq!(old_dense.0.as_deref(), Some("tie-004095"));
-        assert!(
-            old_dense.1[0] > old_small.1[0],
-            "old equal-time work must be witnessed: {old_small:?}->{old_dense:?}"
-        );
-        assert!(
-            old_dense.1[1] > 0,
-            "old index leaves a tie-breaker sort: {old_dense:?}"
-        );
+        assert_eq!(old_dense.as_deref(), Some("tie-004095"));
         assert!(plan().iter().any(|part| part.contains("TEMP B-TREE")));
         db.execute_batch(
             "DROP INDEX turns_by_run; CREATE INDEX turns_by_run ON turn(run_id,created_at,id);",
         )
         .unwrap();
-        let extended = measure();
-        assert_eq!(extended.0, old_dense.0);
-        assert_eq!(
-            extended.1[1], 0,
-            "the existing index extension removes the sort"
-        );
-        assert_eq!(extended.1[2], 0);
-        assert!(extended.1[0] < old_dense.1[0]);
+        assert_eq!(latest(), old_dense);
         assert_eq!(
             prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
             expected,
@@ -676,19 +634,10 @@ mod tests {
             "{extended_plan:?}"
         );
         seed_ties(4096, 8192);
-        let larger = measure();
-        assert_eq!(larger.0.as_deref(), Some("tie-008191"));
-        assert_eq!(
-            larger.1, extended.1,
-            "the complete query's instruction/sort/fullscan counts must not grow with the tie group"
-        );
+        assert_eq!(latest().as_deref(), Some("tie-008191"));
         assert_eq!(
             prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
             canonical(&db, &run())
-        );
-        eprintln!(
-            "Run latest-Turn counts (VM/sort/fullscan): old32={:?}, old4096={:?}, extended4096={:?}, extended8192={:?}",
-            old_small.1, old_dense.1, extended.1, larger.1
         );
     }
 

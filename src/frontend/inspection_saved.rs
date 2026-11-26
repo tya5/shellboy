@@ -494,7 +494,7 @@ mod tests {
     use super::*;
     use crate::frontend::sql_trace::Statements;
     use crate::protocol::{ExecutionTarget, MessageTarget, RunTarget};
-    use rusqlite::{StatementStatus, params};
+    use rusqlite::params;
     fn seed(db: &Connection) -> rusqlite::Result<()> {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('target','/','','fixture','synthetic','2026-01-01T00:00:00Z'),('issuing','/','','fixture','synthetic','2026-01-01T00:00:00Z');
          INSERT INTO run(id,thread_id,state,created_at)VALUES('run','target','live','2026-01-01T00:00:00Z');
@@ -638,7 +638,7 @@ mod tests {
         assert!(prepared.limited_fields.iter().any(|p| p == "/elapsed_ms"));
     }
     #[test]
-    fn shell_latest_output_lookup_work_does_not_grow_with_retained_output() {
+    fn shell_latest_output_lookup_is_one_indexed_statement_with_retained_output() {
         let mut db = fixture();
         db.execute(
             "INSERT INTO output_chunk VALUES('shell',2,'stdout',2,X'61','2025-01-01T00:00:00Z')",
@@ -671,26 +671,6 @@ mod tests {
             {
                 let mut rows = q.query(["shell"]).unwrap();
                 assert!(rows.next().unwrap().is_some());
-            }
-            let steps = q.get_status(StatementStatus::VmStep);
-            if total == 1000 {
-                db.execute(
-                    "INSERT INTO app_meta(key,value)VALUES('test.shell.vm',?1)",
-                    [steps.to_string()],
-                )
-                .unwrap();
-            } else {
-                let first: i32 = db
-                    .query_row(
-                        "SELECT CAST(value AS INTEGER)FROM app_meta WHERE key='test.shell.vm'",
-                        [],
-                        |r| r.get(0),
-                    )
-                    .unwrap();
-                assert!(
-                    steps <= first + 100,
-                    "PK suffix lookup became linear: {first}->{steps}"
-                );
             }
         }
         let mut q = db

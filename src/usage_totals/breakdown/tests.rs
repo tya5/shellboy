@@ -313,7 +313,6 @@ fn row_cap_continuation_and_empty_filtered_pages_are_honest() {
     assert!(v["items"].as_array().unwrap().is_empty());
     assert_eq!(v["more"], true);
     assert!(v["next_cursor"].is_string());
-    eprintln!("usage101 capped synthetic elapsed_ms={}", v["elapsed_ms"]);
 }
 #[test]
 fn maximum_groups_and_validation_bounds() {

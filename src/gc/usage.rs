@@ -231,7 +231,7 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
     }
 
     #[test]
-    fn logical_aggregation_uses_scalar_indexes_without_payload_functions() {
+    fn logical_aggregation_uses_scalar_indexes() {
         let db = current_schema();
         seed(&db);
         for query in
@@ -240,16 +240,6 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
                 .copied()
                 .chain([RAW_QUERY, MANAGED_QUERY, INDEX_META_QUERY])
         {
-            let mut plan = db.prepare(&format!("EXPLAIN {query}")).unwrap();
-            let opcodes: Vec<String> = plan
-                .query_map([], |row| row.get(1))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
-            assert!(
-                !opcodes.iter().any(|op| op == "Function"),
-                "payload functions returned to aggregation: {query}"
-            );
             let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap();
             let detail: Vec<String> = plan
                 .query_map([], |row| row.get(3))

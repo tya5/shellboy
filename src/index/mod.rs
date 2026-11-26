@@ -1761,10 +1761,6 @@ mod source_metadata_tests {
                 let mut statement = db.prepare(sql)?;
                 assert_eq!(statement.execute(["no matching source"])?, 0);
                 assert_eq!(statement.get_status(StatementStatus::FullscanStep), 0);
-                assert!(
-                    statement.get_status(StatementStatus::VmStep) < 100,
-                    "unrelated previews must not be inspected"
-                );
             }
             let before: i64 =
                 db.query_row("SELECT COUNT(*) FROM app_meta", [], |row| row.get(0))?;

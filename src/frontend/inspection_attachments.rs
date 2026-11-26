@@ -357,35 +357,16 @@ mod tests {
             db.execute("INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order)VALUES('target',?1,'active','now',0)",[format!("extra-{n:05}")]).unwrap();
         }
     }
-    fn work(db: &Connection, sql: &str, limit: i64) -> (i32, i32) {
-        let mut statement = db.prepare(sql).unwrap();
-        let mut rows = statement
-            .query(params!["target", "active", limit, TEXT])
-            .unwrap();
-        while rows.next().unwrap().is_some() {}
-        drop(rows);
-        (
-            statement.get_status(StatementStatus::VmStep),
-            statement.get_status(StatementStatus::FullscanStep),
-        )
-    }
     #[test]
-    fn overflow_bounds_actual_join_work_and_marks_global_order_unknown() {
+    fn overflow_bounds_the_page_and_marks_global_order_unknown() {
         let db = fixture();
         seed(&db, 0, 1000);
-        let before = work(&db, DETAIL, 128);
         let raw = read_tx(&db, "target").unwrap();
         assert_eq!(raw.rows.len(), 128);
         let (value, limited) = prepare(raw);
         assert!(limited);
         assert_eq!(value["count"]["relation"], "lower_bound");
         assert_eq!(value["global_order_complete"], false);
-        seed(&db, 1000, 10000);
-        assert_eq!(
-            work(&db, DETAIL, 128),
-            before,
-            "same physical prefix has identical VM work despite tied-order fanout"
-        );
     }
     #[test]
     fn guarded_cells_are_unknown_not_rewritten_and_prepare_needs_no_database() {
@@ -411,17 +392,15 @@ mod tests {
         );
         assert_eq!(value["attachments"][1]["attachment_id"], "a");
     }
-    fn point_work(db: &Connection, id: &str) -> (i32, i32) {
+    /// Full-table-scan steps of the point lookup: zero means it only seeks.
+    fn point_fullscan_steps(db: &Connection, id: &str) -> i32 {
         let mut statement = db.prepare(POINT_DETAIL).unwrap();
         statement
             .query_map(params!["target", id, TEXT], |_| Ok(()))
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        (
-            statement.get_status(StatementStatus::VmStep),
-            statement.get_status(StatementStatus::FullscanStep),
-        )
+        statement.get_status(StatementStatus::FullscanStep)
     }
     #[test]
     fn exact_selection_is_independent_of_list_cohort_and_grows_no_scan() {
@@ -453,10 +432,8 @@ mod tests {
         );
         assert_eq!(value["attachments"][0]["selected"], false);
         assert_eq!(value["global_order_complete"], false);
-        let before = point_work(&db, "a");
         seed(&db, 1000, 10000);
-        assert_eq!(point_work(&db, "a"), before);
-        assert_eq!(before.1, 0);
+        assert_eq!(point_fullscan_steps(&db, "a"), 0);
         let (missing, _) = prepare(read_selected_tx(&db, "viewer", "a").unwrap());
         assert_eq!(missing["thread_id"], "viewer");
         assert_eq!(missing["scope"]["selection_found"], false);

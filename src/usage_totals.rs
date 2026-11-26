@@ -5,7 +5,7 @@ use crate::{
     usage,
 };
 use chrono::DateTime;
-use rusqlite::{Connection, OptionalExtension, StatementStatus, functions::FunctionFlags, params};
+use rusqlite::{Connection, OptionalExtension, functions::FunctionFlags, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -102,7 +102,7 @@ impl Attempts {
 
 #[derive(Default)]
 struct Trace {
-    statements: Vec<(String, u64)>,
+    statements: Vec<String>,
 }
 fn error(e: rusqlite::Error) -> ApiError {
     crate::storage::save_error(format!("usage totals read failed: {e}"))
@@ -181,10 +181,7 @@ fn selection(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Select
         .optional()
         .map_err(error)?
         .ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable, "Usage scope is unavailable"))?;
-    trace.statements.push((
-        sql.into(),
-        root_statement.get_status(StatementStatus::VmStep) as u64,
-    ));
+    trace.statements.push(sql.into());
     let mut threads = vec![root];
     let mut complete = true;
     if matches!(scope, Scope::Thread { children: true, .. }) {
@@ -194,7 +191,7 @@ fn selection(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Select
             .map_err(error)?
             .collect::<rusqlite::Result<_>>()
             .map_err(error)?;
-        trace.statements.push(("WITH RECURSIVE selected(id) AS (SELECT id FROM thread WHERE id=?1 AND deleted_at IS NULL UNION SELECT t.id FROM thread t JOIN selected s ON t.parent_thread_id=s.id WHERE t.deleted_at IS NULL LIMIT ?2) SELECT id FROM selected".into(), statement.get_status(StatementStatus::VmStep) as u64));
+        trace.statements.push("WITH RECURSIVE selected(id) AS (SELECT id FROM thread WHERE id=?1 AND deleted_at IS NULL UNION SELECT t.id FROM thread t JOIN selected s ON t.parent_thread_id=s.id WHERE t.deleted_at IS NULL LIMIT ?2) SELECT id FROM selected".into());
         if threads.len() > MAX_LIST_LIMIT as usize {
             threads.truncate(MAX_LIST_LIMIT as usize);
             complete = false;
@@ -306,9 +303,7 @@ fn models(
             group.unknown_start_count += row.get::<_, i64>(meta + 2)? as u64;
         }
     }
-    trace
-        .statements
-        .push((sql, statement.get_status(StatementStatus::VmStep) as u64));
+    trace.statements.push(sql);
     Ok(result)
 }
 fn timing(
@@ -350,9 +345,7 @@ fn timing(
                     number.add(sum, row.get::<_, i64>(if wide { 3 } else { 2 })? as u64);
                 }
             }
-            trace
-                .statements
-                .push((sql, st.get_status(StatementStatus::VmStep) as u64));
+            trace.statements.push(sql);
             Ok(())
         })();
         match result {
@@ -412,9 +405,7 @@ fn compaction_usage(db: &Connection, s: &Selection, trace: &mut Trace) -> rusqli
             total.add_attempt(usage);
         }
     }
-    trace
-        .statements
-        .push((sql, statement.get_status(StatementStatus::VmStep) as u64));
+    trace.statements.push(sql);
     let mut value = json!({"compactions":identities.len(),"malformed_records":skipped});
     if let (Value::Object(target), Value::Object(fields)) = (&mut value, json!(total)) {
         target.extend(fields);
@@ -592,9 +583,7 @@ fn inspect_period(
             .optional()
             .map_err(error)?
             .flatten();
-        trace
-            .statements
-            .push((sql, st.get_status(StatementStatus::VmStep) as u64));
+        trace.statements.push(sql);
         value
     } else {
         None
