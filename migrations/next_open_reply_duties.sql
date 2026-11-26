@@ -2,7 +2,9 @@
 -- stay on state-qualified indexes covering both open states; Run-end settlement
 -- seeks a pending duty by its owner Run: its delivery run_id, or for a duty
 -- reopened after an own ask (reply.reopened_after) the Run that admitted the
--- answer (reply.owner_run_id; none until then).
+-- answer (reply.owner_run_id; none until then). An outcome notice stays
+-- untargeted until a Run admits it; reply_outcome_unadmitted offers it to the
+-- Thread's next runnable Turn.
 DROP INDEX receipt_reply_pending;
 CREATE INDEX receipt_reply_pending ON receipt(target_thread_id)
  WHERE json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask');
@@ -25,5 +27,7 @@ CREATE INDEX receipt_pending_to ON receipt(json_extract(result_json,'$.ask_name'
 DROP INDEX receipt_reply_run_pending;
 CREATE INDEX receipt_reply_owner_pending ON receipt(IIF(json_extract(result_json,'$.reply.reopened_after') IS NULL,run_id,json_extract(result_json,'$.reply.owner_run_id')),state)
  WHERE json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1;
+CREATE INDEX reply_outcome_unadmitted ON event(target_thread_id)
+ WHERE kind='reply_outcome' AND target_run_id IS NULL;
 INSERT INTO schema_migration(version,name) VALUES(67,'next_open_reply_duties');
 PRAGMA user_version=67;

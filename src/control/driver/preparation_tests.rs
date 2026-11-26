@@ -3132,7 +3132,8 @@ async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
         let old_state: String = db.query_row("SELECT state FROM run WHERE id=?1", [&old_run], |r|r.get(0))?;
         assert_eq!(old_state, "stopped");
         let receipt: (String,Option<String>,Option<String>,String,String) = db.query_row("SELECT state,run_id,turn_id,sender_json,result_json FROM receipt WHERE message_node_id=?1", [&reply_node_after], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
-        let event: (String,Option<String>,String) = db.query_row("SELECT kind,target_run_id,payload_ref_json FROM event WHERE id=?1", [format!("reply-outcome-{reply_node_after}")], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        // The notice is untargeted until admitted; its delivery wakes the new Run.
+        let event: (String,Option<String>,String) = db.query_row("SELECT e.kind,d.recipient_id,e.payload_ref_json FROM event e JOIN delivery d ON d.event_id=e.id WHERE e.id=?1 AND e.target_run_id IS NULL AND d.state='pending'", [format!("reply-outcome-{reply_node_after}")], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
         Ok((new_run,path,receipt,event))
     }).await.unwrap();
     assert_eq!(

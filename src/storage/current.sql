@@ -936,5 +936,7 @@ CREATE INDEX receipt_pending_to ON receipt(json_extract(result_json,'$.ask_name'
 DROP INDEX receipt_reply_run_pending;
 CREATE INDEX receipt_reply_owner_pending ON receipt(IIF(json_extract(result_json,'$.reply.reopened_after') IS NULL,run_id,json_extract(result_json,'$.reply.owner_run_id')),state)
  WHERE json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1;
+CREATE INDEX reply_outcome_unadmitted ON event(target_thread_id)
+ WHERE kind='reply_outcome' AND target_run_id IS NULL;
 INSERT INTO schema_migration(version,name) VALUES(67,'next_open_reply_duties');
 PRAGMA user_version=67;
