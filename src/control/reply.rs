@@ -1383,8 +1383,19 @@ mod tests {
                 .unwrap(),
             16
         );
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='target-0' AND json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0)).unwrap(),112);
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id!='target-0' AND json_extract(result_json,'$.reply.state')='pending' AND updated_at=''",[],|r|r.get::<_,i64>(0)).unwrap(),4096);
+        assert_eq!(
+            db.query_row(
+                concat!(
+                    "SELECT count(*) FROM receipt WHERE target_thread_id='target-0' AND ",
+                    open_reply!("")
+                ),
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            112
+        );
+        assert_eq!(db.query_row(concat!("SELECT count(*) FROM receipt WHERE target_thread_id!='target-0' AND updated_at='' AND ", open_reply!("")),[],|r|r.get::<_,i64>(0)).unwrap(),4096);
     }
 
     #[test]
@@ -1407,8 +1418,25 @@ mod tests {
                 deleted_threads_tx(&tx, &["target".into()], "now", &mut Vec::new()).unwrap();
             assert!(wakes.is_empty());
             tx.commit().unwrap();
-            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='recipient_deleted'", [], |r| r.get::<_, i64>(0)).unwrap(), 16);
-            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_, i64>(0)).unwrap(), count as i64 - 16);
+            // Read duties through the owner's open-reply rule: 16 terminalized, the rest still owed.
+            assert_eq!(
+                db.query_row(
+                    concat!("SELECT count(*) FROM receipt WHERE NOT ", open_reply!("")),
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                16
+            );
+            assert_eq!(
+                db.query_row(
+                    concat!("SELECT count(*) FROM receipt WHERE ", open_reply!("")),
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                count as i64 - 16
+            );
         }
     }
 
