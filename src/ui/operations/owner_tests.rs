@@ -139,6 +139,41 @@ fn previously_missing_flags_have_typed_effects() {
     assert!(usage.command(&c.cwd).is_err());
 }
 #[test]
+fn history_read_form_selects_one_display_position_like_the_cli() {
+    let c = context();
+    let position = |values: &[(&str, &str)]| {
+        let mut form = Form::new(OpKind::HistoryRead, &c);
+        for (name, value) in values {
+            set(&mut form, name, value);
+        }
+        form.command(&c.cwd).map(|command| match command {
+            Command::HistoryRead(args) => args.display.map(|display| display.position),
+            other => panic!("unexpected command {other:?}"),
+        })
+    };
+    assert_eq!(position(&[]), Ok(None));
+    assert_eq!(
+        position(&[("display", "true")]),
+        Ok(Some(HistoryDisplayPosition::Tail))
+    );
+    assert_eq!(
+        position(&[("offset", "40")]),
+        Ok(Some(HistoryDisplayPosition::Absolute { offset: 40 }))
+    );
+    assert_eq!(
+        position(&[("from_end", "7")]),
+        Ok(Some(HistoryDisplayPosition::FromEnd { offset: 7 }))
+    );
+    for conflict in [
+        &[("display", "true"), ("offset", "1")][..],
+        &[("offset", "1"), ("from_end", "1")],
+        &[("from_end", "1"), ("parts", "true")],
+        &[("display", "true"), ("end_message_only", "true")],
+    ] {
+        assert!(position(conflict).is_err(), "{conflict:?}");
+    }
+}
+#[test]
 fn all_compact_modes_use_existing_range_validation_and_effect_verbs() {
     let c = context();
     for (mode, from, to) in [
