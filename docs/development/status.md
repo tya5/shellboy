@@ -110,9 +110,11 @@ typed `input_limit`; no shortened history is sent. See the
 
 Positioned node hydration uses one fenced native window with its observation
 and the positioned display extent; its private node read is gone. Window tool
-observations now include saved `shell_ended` notices. Refresh, page, window,
-rebase and saved-message installs still use the private snapshot until the
-open pending-row and field-label questions on #311 are decided; see
+observations include saved `shell_ended` notices, pending rows carry the queue
+facts decided on #311, and outline fields carry path shapes for labels. The
+queue drops "deliver now" and shows `held_by` as the hold reason. Refresh,
+page, window, rebase and saved-message installs still use the private
+snapshot; see
 [the TUI client design](../design/tui-client.md#unit-4e4f-selected-window-client).
 
 ## Core #311 saved change delivery
