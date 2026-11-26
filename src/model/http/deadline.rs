@@ -552,6 +552,31 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn header_deadline_does_not_cut_post_header_silence() {
+        let config = Connection {
+            response_header_timeout_ms: 200,
+            stream_idle_timeout_ms: 2000,
+            ..Connection::default()
+        };
+        let mut deadline = Deadline::new(ApiEndpoint::Responses, &config, "boundary").unwrap();
+        let cancel = CancellationToken::new();
+        deadline
+            .wait_headers(&cancel, std::future::ready(()))
+            .await
+            .unwrap();
+        deadline.received();
+        let (release, body) = tokio::sync::oneshot::channel();
+        let reading = deadline.wait(&cancel, "receiving response body", body);
+        tokio::pin!(reading);
+        assert!(futures_util::poll!(&mut reading).is_pending());
+        // Past the header deadline, inside the body deadline.
+        tokio::time::advance(Duration::from_millis(500)).await;
+        assert!(futures_util::poll!(&mut reading).is_pending());
+        release.send(()).unwrap();
+        reading.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn heartbeat_resets_idle_deadline_on_a_controlled_clock() {
         let config = Connection {
             stream_idle_timeout_ms: 1000,
