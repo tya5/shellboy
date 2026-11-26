@@ -3,7 +3,7 @@
 ## Core #449 opt-in notice for skipped schedule occurrences
 
 Branch `task/core449-schedule-skip-notice`: `schedule add/set --notify skipped`
-saves the notice on the definition (migration `next_schedule_notify`,
+saves the notice on the definition (migration `0068_schedule_notify`,
 `schedule.notify_json`; `--notify none` clears it; `schedule list` shows it).
 An occurrence skipped because the previous execution is still active then sends
 one owner notice from `schedule:<id>` in the transaction that advances

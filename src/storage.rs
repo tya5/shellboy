@@ -90,7 +90,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (65, "0065_run_request_ceiling"),
     (66, "0066_run_stop_settlement_failure"),
     (67, "0067_open_reply_duties"),
-    (68, "next_schedule_notify"),
+    (68, "0068_schedule_notify"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

@@ -359,7 +359,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 68,
-        sql: include_str!("../../migrations/next_schedule_notify.sql"),
+        sql: include_str!("../../migrations/0068_schedule_notify.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
 ];
