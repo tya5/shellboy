@@ -10298,6 +10298,12 @@
             "null"
           ]
         },
+        "notify": {
+          "items": {
+            "$ref": "#/definitions/ScheduleNotify"
+          },
+          "type": "array"
+        },
         "thread_id": {
           "type": [
             "string",
@@ -10310,19 +10316,46 @@
       ],
       "type": "object"
     },
+    "ScheduleNotify": {
+      "description": "An owner notice a timed schedule sends to its Thread (#449). `none` stands alone\nand saves an empty list; the saved list never contains it.",
+      "oneOf": [
+        {
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "skipped",
+          "description": "One ordinary message per occurrence skipped because the previous execution is still active.",
+          "type": "string"
+        }
+      ]
+    },
     "ScheduleSetArgs": {
       "additionalProperties": false,
       "properties": {
         "description": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notify": {
+          "items": {
+            "$ref": "#/definitions/ScheduleNotify"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "schedule_id": {
           "type": "string"
         }
       },
       "required": [
-        "schedule_id",
-        "description"
+        "schedule_id"
       ],
       "type": "object"
     },

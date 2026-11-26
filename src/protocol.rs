@@ -1017,11 +1017,59 @@ args!(ServiceAddArgs { thread_id: Option<String>, cwd: Option<String>, descripti
 args!(ScheduleTarget {
     schedule_id: String
 });
+// Changes a timed schedule's description, notices, or both; at least one is present.
 args!(ScheduleSetArgs {
     schedule_id: String,
-    description: String
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    notify: Option<Vec<ScheduleNotify>>
 });
-args!(ScheduleAddArgs { thread_id: Option<String>, cron: Option<String>, at: Option<String>, in_seconds: Option<u64>, cwd: Option<String>, description: Option<String>, command: String });
+args!(ScheduleAddArgs {
+    thread_id: Option<String>,
+    cron: Option<String>,
+    at: Option<String>,
+    in_seconds: Option<u64>,
+    cwd: Option<String>,
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notify: Vec<ScheduleNotify>,
+    command: String
+});
+/// An owner notice a timed schedule sends to its Thread (#449). `none` stands alone
+/// and saves an empty list; the saved list never contains it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleNotify {
+    /// One ordinary message per occurrence skipped because the previous execution is still active.
+    Skipped,
+    None,
+}
+impl ScheduleNotify {
+    pub const VALUES: &'static [Self] = &[Self::Skipped, Self::None];
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Skipped => "skipped",
+            Self::None => "none",
+        }
+    }
+    /// The saved form: sorted, without duplicates or `none`.
+    pub fn saved(values: &[Self]) -> Result<Vec<Self>, ApiError> {
+        if values.contains(&Self::None) && values.iter().any(|value| *value != Self::None) {
+            return Err(invalid("notify none cannot be combined with other values"));
+        }
+        let mut saved: Vec<Self> = values
+            .iter()
+            .copied()
+            .filter(|value| *value != Self::None)
+            .collect();
+        saved.sort_unstable();
+        saved.dedup();
+        Ok(saved)
+    }
+}
 args!(ThreadTagsArgs {
     #[serde(default = "list_limit")]
     limit: u32,

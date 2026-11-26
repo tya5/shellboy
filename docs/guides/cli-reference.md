@@ -1025,6 +1025,13 @@ For command examples and execution IDs, see the Agent Guide's
 [scheduled checks](agent-guide.md#scheduled-checks) and
 [services](agent-guide.md#services-for-long-running-commands).
 
+`schedule add` and `schedule set` take `--notify VALUE`, repeatable. `skipped`
+sends one ordinary message from `schedule:<id>` to the owning Thread for every
+occurrence skipped because the previous execution is still active; `none`
+stands alone and clears the notices. Without `--notify` a skip only updates
+`last_skipped_at`. `schedule set --schedule ID` needs `--description`,
+`--notify`, or both. `schedule list` shows each schedule's `notify` list.
+
 `shellboy schedule enable --schedule ID` resumes future occurrences. For a
 disabled one-shot whose scheduled time has passed, it returns `invalid_state`
 and leaves the schedule disabled. Use `schedule add` to set a new time.

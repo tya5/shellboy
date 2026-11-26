@@ -945,7 +945,15 @@ impl Command {
             Self::ThreadRewind(a) => a.validate(),
             Self::ThreadArchive(a) | Self::ThreadUnarchive(a) => a.validate(),
             Self::ThreadTag(a) => a.validate(),
-            Self::ScheduleSet(a) => nonempty(&a.schedule_id, "schedule_id"),
+            Self::ScheduleSet(a) => {
+                nonempty(&a.schedule_id, "schedule_id")?;
+                if a.description.is_none() && a.notify.is_none() {
+                    return Err(invalid("schedule set needs description or notify"));
+                }
+                a.notify
+                    .as_deref()
+                    .map_or(Ok(()), |notify| ScheduleNotify::saved(notify).map(drop))
+            }
             Self::ScheduleEnable(a) | Self::ScheduleDisable(a) | Self::ScheduleRemove(a) => {
                 nonempty(&a.schedule_id, "schedule_id")
             }
@@ -959,7 +967,10 @@ impl Command {
             Self::ServiceStart(a) | Self::ServiceStop(a) | Self::ServiceRemove(a) => {
                 nonempty(&a.service_id, "service_id")
             }
-            Self::ScheduleAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::ScheduleAdd(a) => {
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                ScheduleNotify::saved(&a.notify).map(drop)
+            }
             Self::ScheduleList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ThreadTags(a) => a.validate(),
             Self::ThreadCwds(a) => a.validate(),

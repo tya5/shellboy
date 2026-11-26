@@ -215,6 +215,7 @@ pub(crate) enum FieldId {
     At,
     Delay,
     ScheduleDescription,
+    ScheduleNotify,
     ScheduleCommand,
     Service,
 
@@ -516,6 +517,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         label: "説明文",
         help: "予定の説明文を指定します。",
         kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::ScheduleNotify,
+        default_origin: DefaultOrigin::None,
+        label: "通知",
+        help: "予定から Thread へ送る通知です。noneで解除します。",
+        kind: FieldType::Choice,
         discovery: Discovery::None,
     },
     FieldSpec {
@@ -1749,17 +1758,22 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Delay,
             FieldId::Cwd,
             FieldId::ScheduleDescription,
+            FieldId::ScheduleNotify,
             FieldId::ScheduleCommand,
         ],
     },
     OperationSpec {
         id: OperationId::ScheduleSet,
-        label: "予定 · 説明",
-        meaning: "予定の説明文を変更します。",
+        label: "予定 · 変更",
+        meaning: "予定の説明文や通知を変更します。",
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Schedule, FieldId::ScheduleDescription],
+        fields: &[
+            FieldId::Schedule,
+            FieldId::ScheduleDescription,
+            FieldId::ScheduleNotify,
+        ],
     },
     OperationSpec {
         id: OperationId::ScheduleEnable,

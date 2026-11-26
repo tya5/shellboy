@@ -4,7 +4,7 @@ use super::{
     driver::shell_output,
     runtime::{ShellStopIntent, record_shell_stop},
 };
-use crate::protocol::ApiError;
+use crate::protocol::{ApiError, ScheduleNotify};
 use crate::storage::StorageError;
 use chrono::{DateTime, Local, TimeZone, Utc};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -51,37 +51,98 @@ fn occurrence(
     }
 }
 
+#[derive(Default)]
+struct Advanced {
+    shell: Option<DueShell>,
+    notice: Option<super::MutationResult>,
+}
+
 fn advance_due(
+    store: &super::Store,
     tx: &Transaction<'_>,
     now: DateTime<Utc>,
     shell_kind: &str,
-) -> Result<Option<DueShell>, StorageError> {
+) -> Result<Advanced, StorageError> {
     let due = tx.query_row(
-        "SELECT id,thread_id,cwd,command,cron,next_at FROM schedule WHERE enabled=1 AND next_at IS NOT NULL ORDER BY next_at,id LIMIT 1", [],
-        |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,i64>(5)?)),
+        "SELECT id,thread_id,cwd,command,cron,next_at,EXISTS(SELECT 1 FROM json_each(notify_json) WHERE value=?1) FROM schedule WHERE enabled=1 AND next_at IS NOT NULL ORDER BY next_at,id LIMIT 1", [ScheduleNotify::Skipped.as_str()],
+        |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,i64>(5)?,r.get::<_,bool>(6)?)),
     ).optional()?;
-    let Some((schedule, thread, cwd, command, cron, scheduled_at)) = due else {
-        return Ok(None);
+    let Some((schedule, thread, cwd, command, cron, scheduled_at, notify_skipped)) = due else {
+        return Ok(Advanced::default());
     };
     let Occurrence::Due { next, invalid } = occurrence(scheduled_at, cron.as_deref(), now, &Local)
     else {
-        return Ok(None);
+        return Ok(Advanced::default());
     };
-    let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE schedule_id=?1 AND state IN ('starting','running','stopping'))",[&schedule],|r| r.get(0))?;
-    tx.execute("UPDATE schedule SET next_at=?2,last_skipped_at=CASE WHEN ?3 THEN ?4 ELSE last_skipped_at END WHERE id=?1",params![schedule,next,active,scheduled_at])?;
-    if active && !invalid {
-        return Ok(None);
+    let active: Option<String> = tx.query_row("SELECT id FROM shell_execution WHERE schedule_id=?1 AND state IN ('starting','running','stopping') ORDER BY rowid DESC LIMIT 1",[&schedule],|r| r.get(0)).optional()?;
+    tx.execute("UPDATE schedule SET next_at=?2,last_skipped_at=CASE WHEN ?3 THEN ?4 ELSE last_skipped_at END WHERE id=?1",params![schedule,next,active.is_some(),scheduled_at])?;
+    let notice = match &active {
+        Some(execution) if notify_skipped => {
+            skipped_notice(store, tx, &schedule, &thread, scheduled_at, execution)?
+        }
+        _ => None,
+    };
+    if active.is_some() && !invalid {
+        return Ok(Advanced {
+            shell: None,
+            notice,
+        });
     }
     let id = uuid::Uuid::new_v4().to_string();
     let shell = serde_json::json!({"command": command,"kind":shell_kind});
     let at = now.to_rfc3339();
     tx.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,end_reason,output_complete) VALUES(?1,?2,?1,?3,?4,?5,'utf-8','utf-8','closed',?6,?7,?8,?9)",params![id,schedule,if invalid {"failed"} else {"starting"},cwd,shell.to_string(),at,invalid.then_some(&at),invalid.then_some("schedule_recurrence_calculation_failed"),invalid.then_some(false)])?;
-    Ok((!invalid).then(|| DueShell {
-        id,
-        thread,
-        cwd: cwd.into(),
-        command,
-    }))
+    Ok(Advanced {
+        shell: (!invalid).then(|| DueShell {
+            id,
+            thread,
+            cwd: cwd.into(),
+            command,
+        }),
+        notice,
+    })
+}
+
+/// One notice per skipped occurrence, keyed by schedule and scheduled time, in
+/// the transaction that advances `next_at`. An occurrence already noticed (a
+/// re-enabled schedule can meet the same time again) sends nothing.
+fn skipped_notice(
+    store: &super::Store,
+    tx: &Transaction<'_>,
+    schedule: &str,
+    thread: &str,
+    scheduled_at: i64,
+    execution: &str,
+) -> Result<Option<super::MutationResult>, StorageError> {
+    let operation = format!("schedule-skipped:{schedule}:{scheduled_at}");
+    let sent: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM receipt WHERE client_operation_id=?1)",
+        [&operation],
+        |r| r.get(0),
+    )?;
+    if sent {
+        return Ok(None);
+    }
+    let at = DateTime::from_timestamp(scheduled_at, 0)
+        .ok_or(rusqlite::Error::IntegralValueOutOfRange(5, scheduled_at))?
+        .to_rfc3339();
+    let args = crate::protocol::MessageSendArgs {
+        max_model_requests: None,
+        human: false,
+        resume_recovery: false,
+        sender_label: Some(format!("schedule:{schedule}")),
+        thread_id: Some(thread.to_owned()),
+        deliver: crate::protocol::Deliver::Next,
+        text: format!(
+            "Schedule {schedule} skipped {at}: execution {execution} is still running. Inspect: shellboy shell read --execution {execution}. Stop: shellboy shell stop --execution {execution}. Stop these notices: shellboy schedule set --schedule {schedule} --notify none"
+        ),
+    };
+    Ok(Some(store.send_owner_notice(
+        tx,
+        &args,
+        &operation,
+        &super::state::now(),
+    )?))
 }
 
 fn read_deadline(db: &rusqlite::Connection) -> rusqlite::Result<Option<DateTime<Utc>>> {
@@ -104,24 +165,28 @@ pub(super) async fn next_deadline(
 pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<Utc>>, ApiError> {
     let kind = serde_json::to_value(control.store.config.shell.kind).unwrap();
     let owner = control.clone();
-    let (shell, next, expired) = control
+    let wakes = control.waits.keyed.clone();
+    let (advanced, next, expired) = control
         .store
         .database
         .call(move |db| {
             let tx = db.transaction()?;
             if owner.admission.is_closed() {
-                return Ok((None, None, None));
+                return Ok((Advanced::default(), None, None));
             }
             let now = Utc::now();
             let expired: Option<String> = tx.query_row("SELECT s.id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE q.kind='time' AND s.state IN ('starting','running') AND unixepoch(s.started_at)<=?1 ORDER BY s.started_at,s.id LIMIT 1",[now.timestamp()-3600],|r|r.get(0)).optional()?;
             if let Some(id) = &expired {
                 record_shell_stop(&tx,id,ShellStopIntent::ScheduleTimeout)?;
             }
-            let shell = advance_due(&tx, now, kind.as_str().unwrap_or_default())?;
+            let mut advanced = advance_due(&owner.store, &tx, now, kind.as_str().unwrap_or_default())?;
             let next = read_deadline(&tx)?;
             tx.commit()?;
+            if let Some(notice) = &mut advanced.notice {
+                wakes.publish(std::mem::take(&mut notice.wait_keys));
+            }
             Ok((
-                shell,
+                advanced,
                 next,
                 expired,
             ))
@@ -133,7 +198,8 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
     {
         handle.stop();
     }
-    if let Some(shell) = shell {
+    control.apply_effects(advanced.notice).await;
+    if let Some(shell) = advanced.shell {
         spawn_reserved(control, shell).await?;
     }
     Ok(next)
@@ -327,6 +393,10 @@ fn add_definition(
         ));
     }
     let now = Utc::now();
+    let notify = serde_json::to_string(&ScheduleNotify::saved(
+        input.timing.map_or(&[][..], |a| &a.notify),
+    )?)
+    .expect("notice kinds encode");
     let (kind, cron, once, next) = if let Some(a) = input.timing {
         let (once, next) = match (&a.cron, &a.at, a.in_seconds) {
             (Some(cron), None, None) => (None, next_cron(cron, now, &Local)),
@@ -356,7 +426,7 @@ fn add_definition(
     };
     let cwd = PathBuf::from(cwd).join(input.cwd.unwrap_or(""));
     let id = uuid::Uuid::new_v4().to_string();
-    tx.execute("INSERT INTO schedule(id,thread_id,kind,cron,once_at,next_at,enabled,cwd,command,description) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9)",params![id,thread,kind,cron,once,next,cwd.to_string_lossy(),input.command,input.description]).map_err(sql)?;
+    tx.execute("INSERT INTO schedule(id,thread_id,kind,cron,once_at,next_at,enabled,cwd,command,description,notify_json) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,?10)",params![id,thread,kind,cron,once,next,cwd.to_string_lossy(),input.command,input.description,notify]).map_err(sql)?;
     let key = if kind == "service" {
         "service_id"
     } else {
@@ -373,7 +443,7 @@ pub(super) fn list(
     services: bool,
 ) -> Result<serde_json::Value, ApiError> {
     let sql = |e| super::storage_error(StorageError::from(e));
-    let mut query=tx.prepare("SELECT q.id,q.enabled,q.next_at,q.cron,q.once_at,q.cwd,q.command,q.description,q.last_skipped_at,s.id,s.state,s.exit_code,s.end_reason,s.started_at,s.ended_at FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY rowid DESC LIMIT 1) WHERE q.thread_id=?1 AND q.kind=?2 ORDER BY q.id LIMIT 64").map_err(sql)?;
+    let mut query=tx.prepare("SELECT q.id,q.enabled,q.next_at,q.cron,q.once_at,q.cwd,q.command,q.description,q.last_skipped_at,s.id,s.state,s.exit_code,s.end_reason,s.started_at,s.ended_at,q.notify_json FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY rowid DESC LIMIT 1) WHERE q.thread_id=?1 AND q.kind=?2 ORDER BY q.id LIMIT 64").map_err(sql)?;
     let items=query.query_map(params![thread, if services { "service" } else { "time" }],|r| {
         let id:Option<String>=r.get(9)?;
         let latest=if let Some(id)=id {
@@ -389,7 +459,8 @@ pub(super) fn list(
         if services {
             return Ok(serde_json::json!({"service_id":r.get::<_,String>(0)?,"enabled":r.get::<_,bool>(1)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"latest":latest}));
         }
-        Ok(serde_json::json!({"schedule_id":r.get::<_,String>(0)?,"enabled":r.get::<_,bool>(1)?,"next_at":timestamp(2)?,"cron":r.get::<_,Option<String>>(3)?,"at":timestamp(4)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"last_skipped_at":timestamp(8)?,"latest":latest}))
+        let notify: Vec<ScheduleNotify> = serde_json::from_str(&r.get::<_, String>(15)?).map_err(|error| rusqlite::Error::FromSqlConversionFailure(15, rusqlite::types::Type::Text, Box::new(error)))?;
+        Ok(serde_json::json!({"schedule_id":r.get::<_,String>(0)?,"enabled":r.get::<_,bool>(1)?,"next_at":timestamp(2)?,"cron":r.get::<_,Option<String>>(3)?,"at":timestamp(4)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"notify":notify,"last_skipped_at":timestamp(8)?,"latest":latest}))
     }).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
     Ok(serde_json::json!({"thread_id":thread,"items":items}))
 }
@@ -427,7 +498,10 @@ pub(super) fn start_service(
 }
 
 pub(super) enum Change<'a> {
-    Description(&'a str),
+    Definition {
+        description: Option<&'a str>,
+        notify: Option<&'a [ScheduleNotify]>,
+    },
     Enabled(bool),
 }
 
@@ -452,17 +526,31 @@ pub(super) fn change(
             )
         })?;
     match change {
-        Change::Description(text) => {
-            if text.chars().count() > crate::tool_description::MAX_CHARS {
-                return Err(invalid(
-                    "Schedule description exceeds the description limit",
-                ));
+        Change::Definition {
+            description,
+            notify,
+        } => {
+            if let Some(text) = description {
+                if text.chars().count() > crate::tool_description::MAX_CHARS {
+                    return Err(invalid(
+                        "Schedule description exceeds the description limit",
+                    ));
+                }
+                tx.execute(
+                    "UPDATE schedule SET description=NULLIF(?2,'') WHERE id=?1",
+                    params![id, text],
+                )
+                .map_err(sql)?;
             }
-            tx.execute(
-                "UPDATE schedule SET description=NULLIF(?2,'') WHERE id=?1",
-                params![id, text],
-            )
-            .map_err(sql)?;
+            if let Some(notify) = notify {
+                let saved = serde_json::to_string(&ScheduleNotify::saved(notify)?)
+                    .expect("notice kinds encode");
+                tx.execute(
+                    "UPDATE schedule SET notify_json=?2 WHERE id=?1",
+                    params![id, saved],
+                )
+                .map_err(sql)?;
+            }
         }
         Change::Enabled(next_enabled) if next_enabled != enabled => {
             let now = Utc::now();
@@ -570,7 +658,7 @@ impl ServiceSettlement {
                 "Service {id} ended: execution {execution}, {state} ({details}). It will not restart automatically. Restart: shellboy service start --service {id}. Output: shellboy shell read --execution {execution}"
             ),
         };
-        Ok(Some(store.send_service_notice(
+        Ok(Some(store.send_owner_notice(
             tx,
             &args,
             &format!("service-ended:{execution}"),
@@ -1195,6 +1283,7 @@ mod tests {
                     in_seconds: None,
                     cwd: None,
                     description: None,
+                    notify: Vec::new(),
                     command: "sleep 60".into(),
                 }),
             ))
@@ -1573,11 +1662,14 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
+        let store = control.store.clone();
         let reserved = owner
             .db
-            .call(|db| {
+            .call(move |db| {
                 let tx = db.transaction()?;
-                let reserved = advance_due(&tx, Utc::now(), "native")?.unwrap();
+                let reserved = advance_due(&store, &tx, Utc::now(), "native")?
+                    .shell
+                    .unwrap();
                 tx.commit()?;
                 Ok(reserved)
             })
@@ -1670,6 +1762,153 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skipped_occurrence_notifies_only_when_enabled_and_once_per_occurrence() {
+        use crate::{
+            app::DataOwner,
+            protocol::{MessageTarget, ScheduleAddArgs, ScheduleSetArgs, ThreadTarget},
+        };
+        async fn call(control: &Arc<Control>, command: Command) -> serde_json::Value {
+            let result = control
+                .request(Request::new(
+                    format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                    command,
+                ))
+                .await;
+            assert!(result.ok, "{:?}", result.error);
+            result.result.unwrap()
+        }
+        async fn listed(control: &Arc<Control>, thread: &str) -> Vec<serde_json::Value> {
+            call(
+                control,
+                Command::ScheduleList(ThreadTarget {
+                    thread_id: Some(thread.into()),
+                }),
+            )
+            .await["items"]
+                .as_array()
+                .unwrap()
+                .clone()
+        }
+        // Arm every timed schedule's next occurrence at the same past time and
+        // dispatch each due one through the normal path.
+        async fn occur(control: &Arc<Control>, owner: &DataOwner, at: i64) {
+            owner
+                .db
+                .call(move |db| {
+                    db.execute("UPDATE schedule SET next_at=?1 WHERE kind='time'", [at])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            for _ in 0..2 {
+                dispatch(control).await.unwrap();
+            }
+        }
+        async fn notices(owner: &DataOwner, schedule: &str) -> Vec<(String, String)> {
+            let prefix = format!("schedule-skipped:{schedule}:");
+            owner.db.call(move |db| {
+                let mut query = db.prepare("SELECT client_operation_id,message_node_id FROM receipt WHERE substr(client_operation_id,1,length(?1))=?1 ORDER BY client_operation_id")?;
+                Ok(query.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)
+            }).await.unwrap()
+        }
+        let (_root, owner, control, accepted) =
+            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let thread = accepted.thread_id;
+        let hold = if cfg!(windows) {
+            "Start-Sleep -Seconds 600"
+        } else {
+            "exec sleep 600"
+        };
+        let mut ids = Vec::new();
+        for notify in [vec![ScheduleNotify::Skipped], Vec::new()] {
+            let added = call(
+                &control,
+                Command::ScheduleAdd(ScheduleAddArgs {
+                    thread_id: Some(thread.clone()),
+                    cron: Some("0 0 1 1 *".into()),
+                    at: None,
+                    in_seconds: None,
+                    cwd: None,
+                    description: None,
+                    notify,
+                    command: hold.into(),
+                }),
+            )
+            .await;
+            ids.push(added["schedule_id"].as_str().unwrap().to_owned());
+        }
+        let (notified, silent) = (ids[0].clone(), ids[1].clone());
+        let notify_of = |items: &[serde_json::Value], id: &str| {
+            items.iter().find(|item| item["schedule_id"] == id).unwrap()["notify"].clone()
+        };
+        let items = listed(&control, &thread).await;
+        assert_eq!(notify_of(&items, &notified), json!(["skipped"]));
+        assert_eq!(notify_of(&items, &silent), json!([]));
+
+        // The first occurrence starts both; the second finds both still active.
+        occur(&control, &owner, 60).await;
+        let running = listed(&control, &thread).await;
+        occur(&control, &owner, 120).await;
+        let skipped_at = DateTime::from_timestamp(120, 0).unwrap().to_rfc3339();
+        let items = listed(&control, &thread).await;
+        for id in [&notified, &silent] {
+            let item = items
+                .iter()
+                .find(|item| item["schedule_id"] == **id)
+                .unwrap();
+            let before = running
+                .iter()
+                .find(|item| item["schedule_id"] == **id)
+                .unwrap();
+            assert_eq!(item["last_skipped_at"], skipped_at);
+            assert_eq!(
+                item["latest"]["execution_id"],
+                before["latest"]["execution_id"]
+            );
+        }
+        assert!(notices(&owner, &silent).await.is_empty());
+        let sent = notices(&owner, &notified).await;
+        assert_eq!(
+            sent.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>(),
+            [format!("schedule-skipped:{notified}:120")]
+        );
+        let message = call(
+            &control,
+            Command::MessageGet(MessageTarget {
+                message_id: sent[0].1.clone(),
+            }),
+        )
+        .await;
+        assert_eq!(message["thread_id"], thread);
+        assert_eq!(message["sender"]["label"], format!("schedule:{notified}"));
+        assert!(message["turn_id"].is_string(), "the notice wakes a Turn");
+
+        // Meeting the same occurrence again sends nothing new.
+        occur(&control, &owner, 120).await;
+        assert_eq!(notices(&owner, &notified).await, sent);
+
+        // Clearing the setting silences later skips.
+        call(
+            &control,
+            Command::ScheduleSet(ScheduleSetArgs {
+                schedule_id: notified.clone(),
+                description: None,
+                notify: Some(vec![ScheduleNotify::None]),
+            }),
+        )
+        .await;
+        assert_eq!(
+            notify_of(&listed(&control, &thread).await, &notified),
+            json!([])
+        );
+        occur(&control, &owner, 180).await;
+        assert_eq!(notices(&owner, &notified).await, sent);
+        control.close_tool_start_admission();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn scheduled_shell_settlement_preserves_the_execution_and_retires_only_one_shots() {
         use crate::protocol::{
             ExecutionTarget, ScheduleAddArgs, ShellListArgs, ShellReadArgs, ThreadTarget,
@@ -1711,6 +1950,7 @@ mod tests {
                     in_seconds: (!cron).then_some(1),
                     cwd: missing_cwd.then(|| "missing-working-directory".into()),
                     description: None,
+                    notify: Vec::new(),
                     command: command.into(),
                 })))
                 .await;

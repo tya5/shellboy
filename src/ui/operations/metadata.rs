@@ -624,7 +624,7 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ServiceStop => local!(language, "サービス · 停止", "Service · Stop"),
         OperationId::ServiceRemove => local!(language, "サービス · 削除", "Service · Remove"),
         OperationId::ScheduleAdd => local!(language, "予定 · 追加", "Schedule · Add"),
-        OperationId::ScheduleSet => local!(language, "予定 · 説明", "Schedule · Set"),
+        OperationId::ScheduleSet => local!(language, "予定 · 変更", "Schedule · Set"),
         OperationId::ScheduleEnable => local!(language, "予定 · 有効化", "Schedule · Enable"),
         OperationId::ScheduleDisable => local!(language, "予定 · 無効化", "Schedule · Disable"),
         OperationId::ScheduleRemove => local!(language, "予定 · 削除", "Schedule · Remove"),
@@ -888,8 +888,8 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
         ),
         OperationId::ScheduleSet => local!(
             language,
-            "予定の説明文を変更します。",
-            "Set the schedule description."
+            "予定の説明文や通知を変更します。",
+            "Change the schedule description or notices."
         ),
         OperationId::ScheduleEnable => {
             local!(language, "予定を有効にします。", "Enable a schedule.")
@@ -1268,6 +1268,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::At => local!(language, "日時", "Run at"),
         FieldId::Delay => local!(language, "待ち時間", "Delay"),
         FieldId::ScheduleDescription => local!(language, "説明文", "Description"),
+        FieldId::ScheduleNotify => local!(language, "通知", "Notices"),
         FieldId::ScheduleCommand => local!(language, "コマンド", "Command"),
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
@@ -1675,6 +1676,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "予定の説明文を指定します。",
             "Set the schedule description."
+        ),
+        FieldId::ScheduleNotify => local!(
+            language,
+            "予定から Thread へ送る通知です。noneで解除します。",
+            "Set the notices the schedule sends to its Thread; none clears them."
         ),
         FieldId::ScheduleCommand => local!(
             language,

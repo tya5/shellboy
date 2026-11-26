@@ -1,0 +1,19 @@
+# Protocol next (#449)
+
+## Schedule notices
+
+`schedule.add` takes an optional `notify` list of `ScheduleNotify` values
+(`skipped`, `none`); omitted means none. `schedule.set` now changes the
+description, the notices, or both: `description` becomes optional, `notify` is
+optional and replaces the saved list when present, and at least one of them is
+required. `none` stands alone and saves an empty list; combining it with
+another value is `invalid_argument`. Duplicates collapse.
+
+`schedule.list` items carry the saved `notify` list (empty by default; never
+`none`). With `skipped` saved, every occurrence skipped because the previous
+execution is still active sends one ordinary message to the owning Thread
+through normal admission (`Deliver::Next`): sender label `schedule:<id>`,
+`client_operation_id = schedule-skipped:<schedule>:<scheduled_at>` (Unix
+seconds), written in the transaction that advances `next_at` and records
+`last_skipped_at`. An occurrence that already has that receipt sends nothing.
+Migration `next_schedule_notify` adds `schedule.notify_json`.

@@ -1425,7 +1425,10 @@ impl Store {
             Command::ScheduleSet(args) => super::schedule::change(
                 tx,
                 &args.schedule_id,
-                super::schedule::Change::Description(&args.description),
+                super::schedule::Change::Definition {
+                    description: args.description.as_deref(),
+                    notify: args.notify.as_deref(),
+                },
             ),
             Command::ScheduleEnable(args) | Command::ScheduleDisable(args) => {
                 let result = super::schedule::change(
@@ -2122,7 +2125,7 @@ impl Store {
             },
         )
     }
-    pub(super) fn send_service_notice(
+    pub(super) fn send_owner_notice(
         &self,
         tx: &Transaction<'_>,
         args: &MessageSendArgs,
