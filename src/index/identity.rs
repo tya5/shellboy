@@ -453,6 +453,7 @@ fn read_status(
         done: 0,
         failed: 0,
         paused: false,
+        pause_kind: None,
         reason: None,
         paused_at: None,
         pause_id: None,
@@ -467,15 +468,20 @@ fn read_status(
     if let Some(space) = &selected {
         spaces.insert(space.clone());
     }
+    // The endpoint family pause takes precedence over the profile's.
     if let Some(family) = family
         && let Some(pause) = meta(db, &IndexKeys::new(&family).pause())?
     {
         status.paused = true;
+        status.pause_kind = Some(super::pause_reason(&pause));
         status.reason = Some(pause);
     }
     for key in &keys {
         if let Some(pause) = meta(db, &IndexKeys::new(key).pause())? {
             status.paused = true;
+            if status.pause_kind.is_none() {
+                status.pause_kind = Some(super::pause_reason(&pause));
+            }
             if status.reason.is_none() {
                 status.reason = Some(pause);
             }
