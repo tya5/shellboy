@@ -208,7 +208,8 @@ Schema;3 invalid JSON/Schema after the repair cap (raw answer and errors on stde
 starts an owner. Known IDs permit inspection; an uncertain send must be inspected
 by operation ID before resubmission. The timeout begins after input/Schema reads,
 covers all RPCs/repairs and defaults300000ms (1..86400000); owner waits are bounded
-chunks of at most30000ms under that monotonic deadline.
+chunks of at most30000ms under that monotonic deadline, except the reply-duty
+wait, which is one wait for the rest of the deadline (#441).
 
 First-version Schema validation uses serde_json only, not a new dependency. The
 accepted bounded subset is boolean schemas and object schemas using `$schema`
