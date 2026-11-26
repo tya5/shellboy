@@ -49,7 +49,10 @@ bound; unavailable items are not evidence of rejection or delivery.
 
 Opt-in reads accept at most 128 window positions. `tools` reports exact
 node/group/call correlations with saved result and current execution facts;
-`limited_node_ids` reports per-node call coverage limits. `recovery` describes
+`limited_node_ids` reports per-node call coverage limits. `notices` joins each
+saved `shell_ended` notification in the window to its exact execution, call
+and result: `execution_available` is false when the execution is missing, and
+`source_node_id` is absent when the result is missing or reclaimed. `recovery` describes
 saved resume evidence without raw diagnostic records, and `usage` reports
 bounded candidate attempt identities and measured usage. These facts cover
 only items in the returned window. A response that cannot fit the frame
