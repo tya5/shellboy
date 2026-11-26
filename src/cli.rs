@@ -634,11 +634,16 @@ pub enum ServiceCommand {
 pub enum ScheduleCommand {
     /// Add a scheduled shell command.
     Add(ScheduleAddOptions),
+    /// Change a schedule's description, notices, or both.
+    #[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["description", "notify"])))]
     Set {
         #[arg(long = "schedule")]
         schedule_id: String,
         #[arg(long)]
-        description: String,
+        description: Option<String>,
+        /// Owner notice to send to the Thread, repeatable; `none` clears them.
+        #[arg(long, value_enum)]
+        notify: Vec<wire::ScheduleNotify>,
     },
     Enable {
         #[arg(long = "schedule")]
@@ -678,6 +683,9 @@ pub struct ScheduleAddOptions {
     cwd: Option<String>,
     #[arg(long)]
     description: Option<String>,
+    /// Owner notice to send to the Thread, repeatable; `skipped` wakes a Turn per skipped occurrence.
+    #[arg(long, value_enum)]
+    notify: Vec<wire::ScheduleNotify>,
     /// A single shell command string, interpreted by the owner's configured shell.
     #[arg(long, allow_hyphen_values = true)]
     command: String,
@@ -723,14 +731,17 @@ impl From<ScheduleCommand> for wire::Command {
                 in_seconds: a.delay,
                 cwd: a.cwd,
                 description: a.description,
+                notify: a.notify,
                 command: a.command,
             }),
             ScheduleCommand::Set {
                 schedule_id,
                 description,
+                notify,
             } => Self::ScheduleSet(wire::ScheduleSetArgs {
                 schedule_id,
                 description,
+                notify: (!notify.is_empty()).then_some(notify),
             }),
             ScheduleCommand::Enable { schedule_id } => {
                 Self::ScheduleEnable(wire::ScheduleTarget { schedule_id })
@@ -1480,6 +1491,14 @@ impl ValueEnum for wire::ArchivedFilter {
 impl ValueEnum for wire::Deliver {
     fn value_variants<'a>() -> &'a [Self] {
         &[Self::Complete]
+    }
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.as_str()))
+    }
+}
+impl ValueEnum for wire::ScheduleNotify {
+    fn value_variants<'a>() -> &'a [Self] {
+        Self::VALUES
     }
     fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
         Some(clap::builder::PossibleValue::new(self.as_str()))

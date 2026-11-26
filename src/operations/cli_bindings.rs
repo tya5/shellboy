@@ -102,6 +102,7 @@ const MEANINGS: &[Meaning] = &[
             ("delay", FieldId::Delay),
             ("cwd", FieldId::Cwd),
             ("description", FieldId::ScheduleDescription),
+            ("notify", FieldId::ScheduleNotify),
             ("command", FieldId::ScheduleCommand),
         ],
         None,
@@ -112,6 +113,7 @@ const MEANINGS: &[Meaning] = &[
         &[
             ("schedule_id", FieldId::Schedule),
             ("description", FieldId::ScheduleDescription),
+            ("notify", FieldId::ScheduleNotify),
         ],
         None,
     ),

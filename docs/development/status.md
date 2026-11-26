@@ -1,5 +1,15 @@
 # Development status
 
+## Core #449 opt-in notice for skipped schedule occurrences
+
+Branch `task/core449-schedule-skip-notice`: `schedule add/set --notify skipped`
+saves the notice on the definition (migration `next_schedule_notify`,
+`schedule.notify_json`; `--notify none` clears it; `schedule list` shows it).
+An occurrence skipped because the previous execution is still active then sends
+one owner notice from `schedule:<id>` in the transaction that advances
+`next_at`, keyed `schedule-skipped:<schedule>:<scheduled_at>`; a key already
+saved sends nothing. Default stays silent. Not landed.
+
 ## Core #441 exec waits while the reply duty is open
 
 Branch `task/core441-exec-wait-open-duty`: `exec --result reply` classifies the

@@ -415,6 +415,16 @@ For a PowerShell owner, keep the environment reference literal at registration:
 shellboy schedule add --thread THREAD --cron '0 3 * * *' --command 'shellboy message send --thread $env:SHELLBOY_THREAD_ID --text ''Review is needed'''
 ```
 
+An occurrence whose previous execution is still active is skipped; `schedule
+list` shows `last_skipped_at`. To learn about skips without polling, add
+`--notify skipped` to `schedule add` or `schedule set --schedule ID`. Every
+skipped occurrence then sends one message from `schedule:<id>` naming the
+skipped time and the still-active execution, and each message wakes a Turn in
+the owning Thread. Enable it for a job that should finish within its interval;
+leave it off when overlap is expected. On a notice, inspect the execution with
+`shell read --execution EXECUTION_ID`, then stop it, fix the command or lengthen
+the interval. `schedule set --schedule ID --notify none` turns the notices off.
+
 Scheduled commands and model shells receive the selected owner's
 `SHELLBOY_DATA_DIR`, `SHELLBOY_THREAD_ID`, and `SHELLBOY_SOCKET`. You do not need
 `--data-dir` to call `shellboy` from these shells. Scheduled commands do not

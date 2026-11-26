@@ -1,5 +1,19 @@
 # 開発判断
 
+## Schedule skip notices (#449)
+
+Implementation calls the Issue left open. Recheck if a client needs a separate
+update verb or a notice for a skip whose time was already noticed.
+
+- "update" is the existing `schedule set`: it now changes the description, the
+  notices, or both (at least one), instead of adding a second update verb.
+- `none` is a wire value as well as a CLI spelling, so CLI and wire share one
+  enum; it must stand alone and is never saved (the saved list is sorted and
+  deduplicated, empty by default).
+- The notice key is checked before admission: a re-enabled schedule can meet an
+  already-noticed time again, and the receipt key is unique, so that occurrence
+  sends nothing instead of failing the dispatch transaction.
+
 ## Reopened reply duties (#433)
 
 Three calls the owner rule left to the implementation. Recheck if a real flow

@@ -269,6 +269,7 @@ async fn recurring_management_mutations_use_selected_listener_without_fallback()
             in_seconds: Some(3600),
             cwd: None,
             description: None,
+            notify: Vec::new(),
             command: "echo schedule".into(),
         }),
         Command::ServiceAdd(ServiceAddArgs {
@@ -342,6 +343,7 @@ async fn recurring_management_reads_are_instance_fenced_without_fallback() {
                 in_seconds: Some(3600),
                 cwd: None,
                 description: None,
+                notify: Vec::new(),
                 command: "echo schedule".into(),
             }),
             Command::ScheduleList(target()),
