@@ -314,19 +314,14 @@ impl Session {
                     "Wait target became unavailable",
                 ));
             }
-            let delivery: MessageDetails = self
-                .request(
-                    "message",
-                    Command::MessageGet(MessageTarget {
-                        message_id: message.to_owned(),
-                    }),
-                )
-                .await
-                .map_err(|failure| failure.at_deadline(&state))?;
-            state = match reply_outcome(delivery.reply.as_ref())? {
-                ReplyOutcome::Replied(node) => return Ok(node),
-                ReplyOutcome::Open(state) => state,
-            };
+            // The owner's snapshot of this exact message carries its reply
+            // state and node; without one the last observed state stands.
+            if let Some(reply) = reply_snapshot(&wait.snapshot, message) {
+                state = match reply_outcome(Some(&reply))? {
+                    ReplyOutcome::Replied(node) => return Ok(node),
+                    ReplyOutcome::Open(state) => state,
+                };
+            }
         }
     }
     async fn answer(&mut self, mode: ResultMode) -> Result<String, Failure> {
@@ -624,6 +619,14 @@ impl Failure {
         }
     }
 }
+/// The `reply_received` snapshot for one message, in the saved reply shape.
+fn reply_snapshot(snapshot: &Value, message: &str) -> Option<Value> {
+    snapshot["conditions"]
+        .as_array()?
+        .iter()
+        .find(|item| item["type"] == "reply" && item["message_id"] == message)
+        .map(|item| json!({"state": item["state"], "node_id": item["reply_node_id"]}))
+}
 enum ReplyOutcome {
     Replied(Option<String>),
     /// An open duty: `pending` or `awaiting_own_ask`.
@@ -668,6 +671,16 @@ mod reply_mode_tests {
         assert!(
             matches!(reply_outcome(Some(&json!({"state":"replied", "node_id":"reply"}))), Ok(ReplyOutcome::Replied(Some(node))) if node == "reply")
         );
+    }
+
+    #[test]
+    fn wait_snapshot_supplies_the_reply_state_and_node() {
+        let snapshot = json!({"conditions":[{"type":"reply","message_id":"other","state":"replied","reply_node_id":"x"},{"type":"reply","message_id":"m","state":"replied","reply_node_id":"node"}]});
+        assert_eq!(
+            reply_snapshot(&snapshot, "m"),
+            Some(json!({"state":"replied","node_id":"node"}))
+        );
+        assert_eq!(reply_snapshot(&Value::Null, "m"), None);
     }
 
     #[test]

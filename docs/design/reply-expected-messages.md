@@ -522,7 +522,9 @@ for `turn-end`, `turn_id` present), otherwise exit 4 `held`; the message must be
 ends (completed, or stopped or failed with the message applied), exec reads the
 duty. While it is open (`pending`, or `awaiting_own_ask` after the recipient asked
 back, #433) exec keeps waiting with the existing `reply_received` wait, bounded by
-its own `--timeout-ms`, and rereads the duty after each wait. It returns the reply
+its own `--timeout-ms`, and takes the reply state and node from that wait's
+snapshot of the message (a timeout without a snapshot keeps the last observed
+state). It returns the reply
 node once `replied`; a terminal state without a reply (`ignored`, `cancelled`,
 `recipient_deleted`) exits 4 `reply_unavailable`, and the client deadline exits 5
 `timeout`; both messages name the state. No timer or owner behaviour is added.

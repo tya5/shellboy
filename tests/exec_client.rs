@@ -1054,12 +1054,12 @@ fn cli_call(args: &[&str]) -> String {
     tool_call(&command)
 }
 
-/// #441: the recipient asks back and ends its Run; the duty stays open
-/// (`awaiting_own_ask`, #433), so exec keeps waiting until the recipient's
-/// reply after the answer arrives.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reply_mode_waits_while_the_recipient_awaits_its_own_ask() {
-    let mut fixture = Fixture::new().await;
+/// #441: exec in reply mode; the recipient asks back (`--to claude`) and ends
+/// its Run, leaving the duty `awaiting_own_ask` (#433). Returns once exec waits
+/// for that duty's reply: (exec, duty, the recipient's ask).
+async fn exec_waiting_on_an_ask_back(
+    fixture: &mut Fixture,
+) -> (JoinHandle<Output>, String, String) {
     let (accepted, first) = fixture.active().await;
     // A scalar result keeps the model's shell reply free of quoted JSON.
     let schema = fixture.root.path().join("integer.json");
@@ -1133,6 +1133,15 @@ async fn reply_mode_waits_while_the_recipient_awaits_its_own_ask() {
         !child.is_finished(),
         "exec must keep waiting while the duty is open"
     );
+    (child, duty, question)
+}
+
+/// #441: the duty stays open while the recipient awaits its own ask, so exec
+/// keeps waiting until the recipient's reply after the answer arrives.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_mode_waits_while_the_recipient_awaits_its_own_ask() {
+    let mut fixture = Fixture::new().await;
+    let (mut child, duty, question) = exec_waiting_on_an_ask_back(&mut fixture).await;
 
     // The answer starts a later Run, whose model replies to the duty.
     let answered = fixture
@@ -1177,6 +1186,39 @@ async fn reply_mode_waits_while_the_recipient_awaits_its_own_ask() {
         .reply
         .send(answer("Replied."))
         .unwrap();
+    fixture.close().await;
+}
+
+/// #441: a terminal state arriving in the reply wait's own snapshot ends exec
+/// with exit 4 naming it; no further read is needed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_mode_reports_a_cancelled_duty_from_the_wait_snapshot() {
+    let mut fixture = Fixture::new().await;
+    let (child, duty, _) = exec_waiting_on_an_ask_back(&mut fixture).await;
+    let reads = fixture.count("MessageGet");
+    let cancelled = fixture
+        .control
+        .request(Request::new(
+            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            Command::MessageCancel(MessageCancelArgs {
+                message_ids: vec![duty],
+            }),
+        ))
+        .await;
+    assert!(cancelled.ok, "{:?}", cancelled.error);
+    let output = crate::test_watchdog::watchdog("cancelled result", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("reply_unavailable"), "{stderr}");
+    assert!(stderr.contains("cancelled"), "{stderr}");
+    assert_eq!(
+        fixture.count("MessageGet"),
+        reads,
+        "the wait snapshot decides"
+    );
     fixture.close().await;
 }
 
