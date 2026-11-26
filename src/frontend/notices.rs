@@ -321,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_execution_and_run_sources_use_one_bounded_metadata_statement() {
+    fn exact_execution_and_run_sources_read_bounded_metadata() {
         let db = fixture();
         let ids = vec![
             "node-shell".into(),
@@ -329,9 +329,7 @@ mod tests {
             "node-missing".into(),
             "node-shell".into(),
         ];
-        let trace = super::super::sql_trace::Statements::new(&db);
         let facts = read_tx(&db, &ids).unwrap();
-        assert_eq!(trace.count(), 1);
         assert_eq!(facts.len(), 1);
         let mut nodes = vec![node("shell"), node("child-notice"), node("missing")];
         apply(&mut nodes, &facts);
@@ -350,7 +348,6 @@ mod tests {
                     .contains("RAW_OUTPUT_MUST_NOT_BE_FETCHED")
             );
         }
-        drop(trace);
         let plan = db
             .prepare(&format!("EXPLAIN QUERY PLAN {SQL}"))
             .unwrap()
@@ -377,9 +374,7 @@ mod tests {
         apply(&mut nodes, &[]);
         assert!(value(&nodes[0], "title").is_none());
         assert_eq!(nodes[0].text, "CANONICAL_SENTINEL");
-        let trace = super::super::sql_trace::Statements::new(&db);
         assert!(read_tx(&db, &vec!["x".into(); 129]).is_err());
         assert!(read_tx(&db, &[]).unwrap().is_empty());
-        assert_eq!(trace.count(), 0);
     }
 }

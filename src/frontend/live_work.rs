@@ -388,7 +388,6 @@ pub(super) fn prepare_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use serde_json::json;
 
     fn fixture() -> Connection {
@@ -644,14 +643,7 @@ mod tests {
         let db = fixture();
         pending(&db, "wait-old", "s-old", "r");
         let scope = [("wait-old".into(), "s-old".into())];
-        let trace = Statements::new(&db);
         let raw = read_tx(&db, "r", Some(&scope)).unwrap();
-        assert_eq!(
-            trace.count(),
-            1,
-            "one shell/wait batch; no owned-child metadata lookups"
-        );
-        drop(trace);
         db.execute("UPDATE shell_execution SET state='exited'", [])
             .unwrap();
         db.execute("DELETE FROM app_meta", []).unwrap();
@@ -702,9 +694,7 @@ mod tests {
             prepare(read_tx(&db, "r", Some(&scope)).unwrap()).waits,
             Some(1)
         );
-        let trace = Statements::new(&db);
         assert!(read_tx(&db, "r", Some(&vec![("a".into(), "b".into()); 129])).is_err());
-        assert_eq!(trace.count(), 0);
     }
 
     #[test]

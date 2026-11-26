@@ -24,7 +24,6 @@ class TraceSlotOwnerTest(unittest.TestCase):
                         violations.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()}")
         self.assertEqual(violations, [])
         self.assertEqual(registrations, {
-            "src/frontend/sql_trace.rs",
             "src/storage/statement_observation.rs",
         })
 

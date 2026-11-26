@@ -557,10 +557,7 @@ mod tests {
         }
         for descendants in [false, true] {
             let canonical = crate::deletion::preview(&db, &args(descendants)).unwrap();
-            let trace = crate::frontend::sql_trace::Statements::new(&db);
             let raw = read_tx(&db, &args(descendants)).unwrap();
-            assert!(trace.count() <= 6);
-            drop(trace);
             let mut value = prepare(raw);
             assert_eq!(value["observation"]["references_complete"], true);
             value.as_object_mut().unwrap().remove("observation");

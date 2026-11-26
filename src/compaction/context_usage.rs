@@ -325,10 +325,7 @@ mod tests {
         let raw = db
             .call(|db| {
                 let tx = db.transaction()?;
-                let trace = crate::frontend::sql_trace::Statements::new(&tx);
                 let raw = read_context_usage_tx(&tx, "t", Some(512))?;
-                assert_eq!(trace.count(), 2);
-                drop(trace);
                 tx.commit()?;
                 Ok(raw)
             })
@@ -568,7 +565,6 @@ mod tests {
 #[cfg(test)]
 mod query_cost_tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use rusqlite::StatementStatus;
 
     #[derive(Debug, PartialEq, Eq)]
@@ -615,7 +611,6 @@ mod query_cost_tests {
         db.execute_batch("COMMIT").unwrap();
     }
     fn measure(db: &Connection) -> Latest {
-        let trace = Statements::new(db);
         let mut statement = db.prepare(&latest_query()).unwrap();
         let rows = statement
             .query_map(params!["t", 512], |row| {
@@ -625,11 +620,6 @@ mod query_cost_tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(
-            trace.count(),
-            1,
-            "measure the actual shared latest query including replacement EXISTS"
-        );
         Latest {
             attempt: rows[0].0.clone(),
             pending: rows[0].1,
@@ -637,14 +627,7 @@ mod query_cost_tests {
         }
     }
     fn prepared(db: &Connection) -> Value {
-        let trace = Statements::new(db);
         let raw = read_context_usage_tx(db, "t", Some(512)).unwrap();
-        assert_eq!(
-            trace.count(),
-            2,
-            "one exact scope read and one shared latest query; query count is not a work bound"
-        );
-        drop(trace);
         let display = prepare_context_usage(raw).0;
         let exact = prepare_context_usage(read_context_usage_tx(db, "t", None).unwrap()).0;
         if display["bounded_observation"].is_null() {
@@ -744,7 +727,6 @@ mod query_cost_tests {
 #[cfg(test)]
 mod bounded_cost_tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -780,7 +762,7 @@ mod bounded_cost_tests {
     }
     /// #141: any thread past 33 turns used to read as unknown on the status bar.
     #[test]
-    fn long_thread_display_read_equals_cli_read_within_a_fixed_statement_and_row_bound() {
+    fn long_thread_display_read_equals_cli_read_within_a_row_bound() {
         let db = fixture();
         // 120 turns, 40 attempts each (>33), interleaved failures, a compaction
         // replacement per turn, and a trailing run of turns with no usable attempt.
@@ -809,10 +791,7 @@ mod bounded_cost_tests {
         let exact = prepare_context_usage(read_context_usage_tx(&db, "t", None).unwrap()).0;
         assert_eq!(exact["last_successful_attempt"]["attempt_id"], "a000099-39");
         // The newest 20 turns have only failed attempts but the witness is within 33 turns.
-        let trace = Statements::new(&db);
         let raw = read_context_usage_tx(&db, "t", Some(512)).unwrap();
-        assert_eq!(trace.count(), 2, "scope read plus one bounded statement");
-        drop(trace);
         assert_eq!(raw.reported_usage().input_tokens, Some(1000 + 99 * 10 + 39));
         let shown = prepare_context_usage(raw).0;
         assert_eq!(

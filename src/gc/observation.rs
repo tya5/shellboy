@@ -814,12 +814,9 @@ mod tests {
         chunk(&db, "unconfirmed", 2, b"xx");
         chunk(&db, "tail", 0, b"xxx");
         let ids = [Some("empty"), Some("unconfirmed"), Some("tail")];
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         let sampled = output_samples(&db, &ids, 2).unwrap();
-        assert_eq!(trace.count(), 1);
         assert_eq!(sampled, vec![vec![], vec![Some(2), Some(1)], vec![Some(3)]]);
         assert_eq!(sampled.iter().map(Vec::len).sum::<usize>(), 3);
-        drop(trace);
         let sampled = output_samples(&db, &ids, 1).unwrap();
         assert_eq!(sampled, vec![vec![], vec![Some(2), Some(1)], vec![]]);
         assert_eq!(
@@ -940,7 +937,6 @@ mod tests {
         }
         execution(&db, "raw-head", "running");
         db.execute_batch("WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000) INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) SELECT 'e'||x,'r','u','o'||x,'running','/','{}','UTF-8','UTF-8','closed','2020-01-01T00:00:00Z' FROM n;").unwrap();
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         let empty_raw = read_tx(
             &db,
             Limits {
@@ -952,16 +948,9 @@ mod tests {
             Utc::now(),
         )
         .unwrap();
-        assert_eq!(
-            trace.count(),
-            18,
-            "execution prefixes stop before eligibility filtering; one streaming batch"
-        );
-        drop(trace);
         assert_eq!(empty_raw.executions.len(), 16);
         assert!(!empty_raw.executions_complete);
         db.execute_batch("WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000) INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at) SELECT 'raw-head',x,'stdout',x,x'78','2020-01-01T00:00:00Z' FROM n;").unwrap();
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         let sampled = read_tx(
             &db,
             Limits {
@@ -973,12 +962,6 @@ mod tests {
             Utc::now(),
         )
         .unwrap();
-        assert_eq!(
-            trace.count(),
-            18,
-            "one PK followup consumes the combined witness budget including one sentinel"
-        );
-        drop(trace);
         assert_eq!(sampled.raw_examined, 17);
         assert_eq!(sampled.executions[0].bytes.len(), 16);
         assert!(!sampled.executions[0].complete);

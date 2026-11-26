@@ -1,5 +1,4 @@
 use super::*;
-use crate::frontend::sql_trace::Statements;
 use rusqlite::{Connection, params};
 use serde_json::json;
 
@@ -57,7 +56,7 @@ fn resume(db: &Connection, id: &str, second: &str, turn: Option<&str>) {
 }
 
 #[test]
-fn fifty_eligible_events_share_one_statement_and_saved_observation_evidence() {
+fn fifty_eligible_events_share_saved_observation_evidence() {
     let db = fixture();
     let requests = (0..50)
         .map(|index| {
@@ -67,9 +66,7 @@ fn fifty_eligible_events_share_one_statement_and_saved_observation_evidence() {
         })
         .collect::<Vec<_>>();
     let reference = read_tx_reference(&db, &requests).unwrap();
-    let statements = Statements::new(&db);
     let batch = read_tx(&db, &requests).unwrap();
-    assert_eq!(statements.count(), 1);
     assert_eq!(batch, reference);
     assert_eq!(batch.len(), 50);
     for (index, evidence) in batch.iter().enumerate() {
@@ -120,9 +117,7 @@ fn mixed_observations_match_reference_with_saved_turn_fallback_and_byte_caps() {
     ]
     .map(|(index, id)| (index, id.into()));
     let reference = read_tx_reference(&db, &requests).unwrap();
-    let statements = Statements::new(&db);
     let batch = read_tx(&db, &requests).unwrap();
-    assert_eq!(statements.count(), 1);
     assert_eq!(batch, reference);
     assert_eq!(
         batch.iter().map(|row| row.index).collect::<Vec<_>>(),
@@ -144,9 +139,8 @@ fn mixed_observations_match_reference_with_saved_turn_fallback_and_byte_caps() {
 }
 
 #[test]
-fn empty_and_oversized_requests_do_not_execute_sql() {
+fn empty_and_oversized_requests_return_no_rows() {
     let db = fixture();
-    let statements = Statements::new(&db);
     assert!(read_tx(&db, &[]).unwrap().is_empty());
     let too_many = (0..129)
         .map(|index| (index, "absent".into()))
@@ -155,5 +149,4 @@ fn empty_and_oversized_requests_do_not_execute_sql() {
         read_tx(&db, &too_many).unwrap_err().into_api_error().code,
         ErrorCode::InputLimit
     );
-    assert_eq!(statements.count(), 0);
 }

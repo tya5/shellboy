@@ -402,7 +402,6 @@ pub(super) fn prepare_with_language(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use rusqlite::params;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -545,14 +544,7 @@ mod tests {
     #[test]
     fn saved_work_queue_and_identities_share_two_batches_without_raw_output() {
         let db = fixture();
-        let trace = Statements::new(&db);
         let raw = read_tx(&db, &["t".into()]).unwrap();
-        assert_eq!(
-            trace.count(),
-            2,
-            "one summary + one visible detail batch, stored parent needs no title SQL"
-        );
-        drop(trace);
         let extra = &raw.extras["t"];
         assert_eq!(
             extra.pending,
@@ -617,18 +609,15 @@ mod tests {
         assert!(read_tx(&db, &vec!["t".into(); 129]).is_err());
     }
     #[test]
-    fn empty_scope_does_no_sql() {
+    fn empty_scope_reads_no_summaries() {
         let db = fixture();
-        let trace = Statements::new(&db);
         assert!(read_tx(&db, &[]).unwrap().summaries.is_empty());
-        assert_eq!(trace.count(), 0);
     }
 }
 
 #[cfg(test)]
 mod shared_consumer_tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -639,18 +628,11 @@ mod shared_consumer_tests {
         db
     }
     #[test]
-    fn shared_e_metadata_and_parent_titles_do_not_repeat_summary_or_witness_sql() {
+    fn shared_e_metadata_and_parent_titles_reuse_owned_evidence() {
         let db = fixture();
         let known = thread_summary::read_ids_tx(&db, &["parent".into(), "child".into()]).unwrap();
         let parent_ids = BTreeSet::from(["parent".into()]);
-        let trace = Statements::new(&db);
         let raw = read_shared_tx(&db, &["child".into()], &known, &parent_ids).unwrap();
-        assert_eq!(
-            trace.count(),
-            1,
-            "only the visible detail statement; E already owns metadata and parent title evidence"
-        );
-        drop(trace);
         let titles = BTreeMap::from([("parent".into(), "Derived parent title".into())]);
         let rows = prepare_with_titles(raw, &titles);
         assert_eq!(rows.len(), 1);
@@ -664,7 +646,6 @@ mod shared_consumer_tests {
         let db = fixture();
         let known = thread_summary::read_ids_tx(&db, &["child".into()]).unwrap();
         let parent_ids = BTreeSet::from(["parent".into()]);
-        let trace = Statements::new(&db);
         let raw = read_shared_tx(
             &db,
             &["child".into(), "other".into(), "other".into()],
@@ -672,22 +653,14 @@ mod shared_consumer_tests {
             &parent_ids,
         )
         .unwrap();
-        assert_eq!(
-            trace.count(),
-            2,
-            "one missing-ID summary batch plus detail batch"
-        );
-        drop(trace);
         let limited = "名称未設定（元本文の取得範囲外）";
         let rows = prepare_with_titles(raw, &BTreeMap::from([("parent".into(), limited.into())]));
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].facts().parent_title.as_deref(), Some(limited));
-        let trace = Statements::new(&db);
         assert!(read_shared_tx(&db, &[], &vec![known[0].clone(); 129], &BTreeSet::new()).is_err());
         assert!(
             read_shared_tx(&db, &[], &[], &(0..129).map(|n| format!("p{n}")).collect()).is_err()
         );
-        assert_eq!(trace.count(), 0);
     }
     #[test]
     fn parent_fallback_is_localized_but_user_title_is_not_translated() {

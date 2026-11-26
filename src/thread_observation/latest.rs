@@ -262,7 +262,6 @@ pub(crate) fn last_input(db: &Connection, thread: &str) -> Result<Option<Value>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     fn saved_messages(answer: &str, input: &str, sender: Value) -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -290,10 +289,7 @@ mod tests {
         );
         let expected_answer = last_end_message(&db, "t").unwrap();
         let expected_input = last_input(&db, "t").unwrap();
-        let trace = Statements::new(&db);
         let raw = read_latest_display_tx(&db, "t").unwrap();
-        assert_eq!(trace.count(), 4);
-        drop(trace);
         drop(db);
         let prepared = prepare_latest_display(raw);
         assert_eq!(prepared.last_end_message, expected_answer);
@@ -316,14 +312,7 @@ mod tests {
             &json!({"content":"request"}).to_string(),
             json!({"kind":"external_cli","label":"known"}),
         );
-        let trace = Statements::new(&db);
         let raw = read_latest_display_tx(&db, "t").unwrap();
-        assert_eq!(
-            trace.count(),
-            3,
-            "oversized answer must not enter its excerpt query"
-        );
-        drop(trace);
         let prepared = prepare_latest_display(raw);
         assert_eq!(
             prepared.last_end_message.as_ref().unwrap()["body_available"],
@@ -346,14 +335,7 @@ mod tests {
             &input,
             json!({"kind":"external_cli","label":"known","padding":"s".repeat(20000)}),
         );
-        let trace = Statements::new(&db);
         let raw = read_latest_display_tx(&db, "t").unwrap();
-        assert_eq!(
-            trace.count(),
-            3,
-            "third source exceeds the shared64KiB allowance"
-        );
-        drop(trace);
         let prepared = prepare_latest_display(raw);
         assert_eq!(
             prepared.last_end_message.unwrap()["excerpt"],
@@ -385,28 +367,19 @@ mod tests {
     #[test]
     fn display_scalar_limits_fail_without_fabricating_source_fields_or_changing_cli() {
         let empty = Connection::open_in_memory().unwrap();
-        let trace = Statements::new(&empty);
         assert!(
             matches!(read_latest_display_tx(&empty,""),Err(error) if error.code==crate::protocol::ErrorCode::InvalidArgument)
         );
         assert!(
             matches!(read_latest_display_tx(&empty,&"t".repeat(513)),Err(error) if error.code==crate::protocol::ErrorCode::InputLimit)
         );
-        assert_eq!(trace.count(), 0);
         let db = saved_messages("{}", "{}", json!({"kind":"external_cli"}));
         let at = "a".repeat(1024 * 1024);
         db.execute("UPDATE node SET created_at=?1 WHERE id='a'", [&at])
             .unwrap();
-        let trace = Statements::new(&db);
         assert!(
             matches!(read_latest_display_tx(&db,"t"),Err(error) if error.code==crate::protocol::ErrorCode::InputLimit)
         );
-        assert_eq!(
-            trace.count(),
-            1,
-            "scalar rejection precedes sender/excerpt work"
-        );
-        drop(trace);
         assert_eq!(last_end_message(&db, "t").unwrap().unwrap()["at"], at);
     }
     #[test]

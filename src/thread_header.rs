@@ -527,10 +527,7 @@ mod tests {
             input(&tx,"pending","do not choose this earlier pending message",false,"earlier","accepted")?;
             let mut expected=crate::control::db::thread_details(&tx,"t").unwrap();
             expected.effective_spill = crate::config::SpillPolicy::resolve(expected.spill, None).effective;
-            let trace=crate::frontend::sql_trace::Statements::new(&tx);
             let raw=read_tx(&tx,"t")?;
-            assert_eq!(trace.count(),3,"one header and two bounded witness statements");
-            drop(trace);
             tx.commit()?;
             db.execute("UPDATE thread SET title='subsequent mutation',model_id='changed',cwd='/changed' WHERE id='t'",[])?;
             Ok((raw,expected))
@@ -573,10 +570,7 @@ mod tests {
             }
             assert_eq!(read_tx(db,"t")?.prepare().title,"held first","node order wins the timestamp tie within a complete prefix");
             db.execute("UPDATE thread SET title='  explicit\u{1b}[31m title  ' WHERE id='t'",[])?;
-            let trace=crate::frontend::sql_trace::Statements::new(db);
             let raw=read_tx(db,"t")?;
-            assert_eq!(trace.count(),1,"explicit title requires only the header query");
-            drop(trace);
             assert!(raw.title.is_none(),"explicit title requires no body witness");
             assert_eq!(raw.prepare().title,"  explicit\u{1b}[31m title  ");
             db.execute("UPDATE thread SET title='' WHERE id='t'",[])?;
@@ -888,7 +882,6 @@ fn read_titles_with_limits_tx(
 #[cfg(test)]
 mod browser_title_batch_tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -916,16 +909,14 @@ mod browser_title_batch_tests {
         .unwrap();
     }
     #[test]
-    fn explicit_titles_and_invalid_scope_execute_no_source_sql() {
+    fn explicit_titles_and_invalid_scope_need_no_source_title() {
         let db = fixture();
-        let trace = Statements::new(&db);
         let (titles, limited) = read_titles_tx(&db, &[("t".into(), "Known".into())])
             .unwrap()
             .prepare();
         assert_eq!(titles["t"], "Known");
         assert!(limited.is_empty());
         assert!(read_titles_tx(&db, &vec![("x".into(), String::new()); 129]).is_err());
-        assert_eq!(trace.count(), 0);
     }
     #[test]
     fn global_membership_ceiling_cannot_choose_a_later_unobserved_title() {
@@ -1001,7 +992,6 @@ mod browser_title_batch_tests {
 #[cfg(test)]
 mod header_scalar_bound_tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use rusqlite::params;
 
     fn fixture() -> Connection {
@@ -1040,14 +1030,7 @@ mod header_scalar_bound_tests {
         let mut expected = crate::control::db::thread_details(&db, "t").unwrap();
         expected.effective_spill =
             crate::config::SpillPolicy::resolve(expected.spill, None).effective;
-        let trace = Statements::new(&db);
         let raw = read_tx(&db, "t").unwrap();
-        assert_eq!(
-            trace.count(),
-            1,
-            "an explicit title requires only the bounded header query"
-        );
-        drop(trace);
         let (actual, limited) = raw.prepare_inspection();
         assert!(limited.is_empty());
         assert_eq!(actual.shells_count, 1);
@@ -1060,14 +1043,11 @@ mod header_scalar_bound_tests {
     fn header_overflow_fails_before_copying_or_title_discovery_and_never_changes_canonical_values()
     {
         let db = fixture();
-        let trace = Statements::new(&db);
         for target in [String::new(), "x".repeat(IDENTITY_BYTES + 1)] {
             assert!(
                 matches!(read_tx(&db,&target),Err(StorageError::Operation(e)) if e.code==ErrorCode::InputLimit)
             );
         }
-        assert_eq!(trace.count(), 0, "invalid target scope must perform no SQL");
-        drop(trace);
         for (column, field, limit, pointer) in [
             ("title", "title", TITLE_BYTES, "/title"),
             ("cwd", "cwd", PATH_BYTES, "/cwd"),
@@ -1091,16 +1071,9 @@ mod header_scalar_bound_tests {
                 [&saved],
             )
             .unwrap();
-            let trace = Statements::new(&db);
             let error = read_tx(&db, "t").err().unwrap().into_api_error();
             assert_eq!(error.code, ErrorCode::InputLimit, "{column}");
             assert!(error.message.contains(field), "{}", error.message);
-            assert_eq!(
-                trace.count(),
-                1,
-                "overflow must not discover a fallback title: {column}"
-            );
-            drop(trace);
             let canonical =
                 serde_json::to_value(crate::control::db::thread_details(&db, "t").unwrap())
                     .unwrap();

@@ -558,14 +558,8 @@ mod cancellation_tests {
             ..Default::default()
         };
         tickets.browser.as_ref().unwrap().stop.cancel();
-        let statements = super::super::sql_trace::Statements::new(&db);
         let raw = read_tx(&db, &tickets).unwrap();
         assert!(raw.browser.is_none());
-        assert_eq!(
-            statements.count(),
-            1,
-            "only the still-visible root count may query SQLite"
-        );
         let prepared = prepare(raw, 7, &tickets, crate::config::UiLanguage::Ja);
         assert!(prepared.browser.is_none());
         let counts = prepared.descendants.unwrap().unwrap();

@@ -53,8 +53,6 @@ mod management_state;
 mod recovery;
 mod refresh;
 mod selection;
-#[cfg(test)]
-pub(crate) mod sql_trace;
 // Pending selected changes reserve browser facts for their next joint snapshot.
 fn standalone_browser_deadline(
     browser: &browser::Browser,

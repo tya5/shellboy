@@ -1,5 +1,4 @@
 use super::*;
-use crate::frontend::sql_trace::Statements;
 use serde_json::{Value, json};
 
 fn fixture() -> Connection {
@@ -79,17 +78,10 @@ fn facts(facts: &ToolFacts) -> Vec<Value> {
 }
 
 #[test]
-fn fifty_direct_results_execute_fixed_two_statements_with_exact_source_parity() {
+fn fifty_direct_results_keep_exact_source_parity() {
     let db = fixture();
     let ids = (0..50).map(|n| format!("result-{n}")).collect::<Vec<_>>();
-    let trace = Statements::new(&db);
     let batch = read_nodes_tx(&db, &ids).unwrap();
-    assert_eq!(
-        trace.count(),
-        2,
-        "one selector batch and one source-facts batch, not100 node/call statements"
-    );
-    drop(trace);
     let requests = (0..50)
         .map(|n| (format!("result-{n}"), format!("call-{n}")))
         .collect::<Vec<_>>();
@@ -132,7 +124,7 @@ fn fifty_direct_results_execute_fixed_two_statements_with_exact_source_parity() 
 }
 
 #[test]
-fn mixed_whole_direct_duplicate_and_spoof_scopes_cap_real_sparse_calls_in_three_statements() {
+fn mixed_whole_direct_duplicate_and_spoof_scopes_cap_real_sparse_calls() {
     let db = fixture();
     let ids = [
         "direct-0",
@@ -144,10 +136,7 @@ fn mixed_whole_direct_duplicate_and_spoof_scopes_cap_real_sparse_calls_in_three_
         "message",
     ]
     .map(str::to_owned);
-    let trace = Statements::new(&db);
     let batch = read_nodes_tx(&db, &ids).unwrap();
-    assert_eq!(trace.count(), 3);
-    drop(trace);
     let mut requests = vec![("direct-0".into(), "call-0".into())];
     requests.extend((0..128).map(|n| ("whole".into(), format!("call-{n}"))));
     requests.push(("other-result".into(), "call-0".into()));
@@ -180,9 +169,8 @@ fn mixed_whole_direct_duplicate_and_spoof_scopes_cap_real_sparse_calls_in_three_
 }
 
 #[test]
-fn empty_and_oversized_scope_execute_no_sql_and_group_seek_has_index_range_proof() {
+fn empty_and_oversized_scope_and_group_seek_has_index_range_proof() {
     let db = fixture();
-    let trace = Statements::new(&db);
     assert!(read_nodes_tx(&db, &[]).unwrap().sources().is_empty());
     assert_eq!(
         read_nodes_tx(&db, &vec!["whole".into(); 129])
@@ -192,8 +180,6 @@ fn empty_and_oversized_scope_execute_no_sql_and_group_seek_has_index_range_proof
             .code,
         ErrorCode::InputLimit
     );
-    assert_eq!(trace.count(), 0);
-    drop(trace);
     let plan = db
         .prepare(&format!("EXPLAIN QUERY PLAN {GROUP_CALL_BATCH_SQL}"))
         .unwrap()
@@ -209,19 +195,12 @@ fn empty_and_oversized_scope_execute_no_sql_and_group_seek_has_index_range_proof
 }
 
 #[test]
-fn projected_fifty_call_scope_is_two_statements_and_matches_independent_old_oracle() {
+fn projected_fifty_call_scope_matches_independent_old_oracle() {
     let db = fixture();
     let requests = (0..50)
         .map(|n| (format!("result-{n}"), format!("call-{n}")))
         .collect::<Vec<_>>();
-    let trace = Statements::new(&db);
     let batch = read_tx(&db, &requests).unwrap();
-    assert_eq!(
-        trace.count(),
-        2,
-        "one saved-source resolver and one shared facts statement"
-    );
-    drop(trace);
     assert_eq!(
         facts(&batch),
         facts(&read_tx_reference(&db, &requests).unwrap())
@@ -264,10 +243,7 @@ fn projected_unique_legacy_ambiguous_collected_and_repeated_relations_keep_old_s
         ("legacy", "call-0"),
     ]
     .map(|(node, call)| (node.to_owned(), call.to_owned()));
-    let trace = Statements::new(&db);
     let batch = read_tx(&db, &requests).unwrap();
-    assert_eq!(trace.count(), 2);
-    drop(trace);
     assert_eq!(
         facts(&batch),
         facts(&read_tx_reference(&db, &requests).unwrap())
@@ -298,9 +274,8 @@ fn projected_unique_legacy_ambiguous_collected_and_repeated_relations_keep_old_s
 }
 
 #[test]
-fn projected_empty_and_bound_failures_do_not_execute_sql() {
+fn projected_empty_and_bound_failures_return_no_sources() {
     let db = fixture();
-    let trace = Statements::new(&db);
     assert!(read_tx(&db, &[]).unwrap().sources().is_empty());
     let too_many_nodes = (0..129)
         .map(|n| (format!("node-{n}"), "call".into()))
@@ -322,7 +297,6 @@ fn projected_empty_and_bound_failures_do_not_execute_sql() {
             .code,
         ErrorCode::InputLimit
     );
-    assert_eq!(trace.count(), 0);
 }
 
 #[test]

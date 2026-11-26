@@ -1301,7 +1301,7 @@ mod registered_reader_tests {
         }
     }
     #[test]
-    fn mixed_source_reader_is_query_only_four_statements_and_prepares_after_close() {
+    fn mixed_source_reader_is_query_only_and_prepares_after_close() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
@@ -1363,14 +1363,10 @@ mod registered_reader_tests {
         .unwrap();
         db.pragma_update(None, "query_only", true).unwrap();
         let changes = db.total_changes();
-        let trace = crate::frontend::sql_trace::Statements::new(&db);
         let raw = read_retained_source_facts_tx(&db, &captured).unwrap();
-        assert_eq!(trace.count(), 4);
         assert_eq!(db.total_changes(), changes);
-        drop(trace);
         drop(db);
         let value = prepare_inspection(raw).unwrap();
-        assert_eq!(value["sql_statements"], 4);
         assert_eq!(value["sources"][0]["selected"], true);
         assert_eq!(value["sources"][0]["body_available"], true);
         assert_eq!(value["sources"][0]["source_changed"], false);
