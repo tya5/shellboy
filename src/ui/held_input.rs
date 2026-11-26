@@ -406,7 +406,7 @@ mod tests {
 
     fn item(id: &str) -> PendingMessage {
         PendingMessage {
-            held_by: None,
+            held_by: Some(crate::protocol::MessageHeldBy::RecoveryWait),
             message_id: id.into(),
             operation_id: format!("op:{id}"),
             sender_thread: None,
@@ -414,9 +414,7 @@ mod tests {
             completion_scheduled: false,
             created_at: "2026-11-04T00:00:00Z".into(),
             held: true,
-            hold_reason: Some("recovery_wait".into()),
             uncertain: false,
-            now: false,
             excerpt: format!("synthetic {id}"),
             excerpt_truncated: false,
             attachment_count: 0,
@@ -501,17 +499,22 @@ mod tests {
     }
     #[test]
     fn clipped_held_rows_keep_the_state_and_short_reason() {
-        for (reason, uncertain, expected) in [
-            ("recovery_wait", false, "Held | Waiting for recovery"),
+        for (held_by, uncertain, expected) in [
             (
-                "uncertain_path_admission",
+                crate::protocol::MessageHeldBy::RecoveryWait,
+                false,
+                "Held | Waiting for recovery",
+            ),
+            // An unknown hold has no reason text; the row keeps its saved time.
+            (
+                crate::protocol::MessageHeldBy::Unknown,
                 true,
-                "Delivery unknown | Not verified",
+                "Delivery unknown | 2026-11-04T00:00:00Z",
             ),
         ] {
             let mut ui = ui();
             let row = &mut ui.active_view_mut().pending_messages.items[0];
-            row.hold_reason = Some(reason.into());
+            row.held_by = Some(held_by);
             row.uncertain = uncertain;
             row.excerpt = "long message ".repeat(20);
             let buffer = screen(ui.view(), 80, UiLanguage::En);

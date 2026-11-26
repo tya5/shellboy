@@ -48,9 +48,7 @@ pub struct PendingMessage {
     pub completion_scheduled: bool,
     pub created_at: String,
     pub held: bool,
-    pub hold_reason: Option<String>,
     pub uncertain: bool,
-    pub now: bool,
     pub excerpt: String,
     pub excerpt_truncated: bool,
     pub attachment_count: u64,
@@ -87,70 +85,50 @@ impl PendingMessage {
             i18n::local!(language, "反映待ち", "Pending")
         }
     }
-    fn reason(&self, language: UiLanguage) -> Option<&str> {
-        match &self.held_by {
-            Some(crate::protocol::MessageHeldBy::ForegroundShell { .. }) => {
-                return Some(i18n::local!(
-                    language,
-                    "フォアグラウンドのシェル待ち",
-                    "Waiting for foreground shell"
-                ));
-            }
-            Some(crate::protocol::MessageHeldBy::ResponseGeneration) => {
-                return Some(i18n::local!(
-                    language,
-                    "応答生成待ち",
-                    "Waiting for response generation"
-                ));
-            }
-            _ => {}
-        }
-        let reason = self.hold_reason.as_deref()?;
-        Some(match reason {
-            "terminal_before_path_admission" => i18n::local!(
+    /// The saved hold reason is the owner's typed `held_by`.
+    fn reason(&self, language: UiLanguage) -> Option<&'static str> {
+        use crate::protocol::MessageHeldBy as HeldBy;
+        Some(match self.held_by.as_ref()? {
+            HeldBy::ForegroundShell { .. } => i18n::local!(
                 language,
-                "中断前の未反映",
-                "Not delivered before interruption"
+                "フォアグラウンドのシェル待ち",
+                "Waiting for foreground shell"
             ),
-            "uncertain_path_admission" => {
-                i18n::local!(language, "反映を確認できず", "Not verified")
+            HeldBy::ResponseGeneration => {
+                i18n::local!(language, "応答生成待ち", "Waiting for response generation")
             }
-            "previous_instance_interrupted" => i18n::local!(
-                language,
-                "前回の終了で中断",
-                "Interrupted by previous shutdown"
-            ),
-            "stopped" | "stopping" => i18n::local!(language, "停止", "Stopped"),
-            "recovery_wait" => i18n::local!(language, "復旧待ち", "Waiting for recovery"),
-            "run_completion" => i18n::local!(
+            HeldBy::RunCompletion => i18n::local!(
                 language,
                 "作業の完了時に届ける",
                 "Delivered when the Run completes"
             ),
-            _ => reason,
+            HeldBy::RecoveryWait => i18n::local!(language, "復旧待ち", "Waiting for recovery"),
+            HeldBy::Stopping => i18n::local!(language, "停止", "Stopped"),
+            HeldBy::Unknown => return None,
         })
     }
     fn action(&self, language: UiLanguage) -> Option<&'static str> {
-        match self.hold_reason.as_deref()? {
-            "uncertain_path_admission" => Some(i18n::local!(
+        if self.uncertain {
+            return Some(i18n::local!(
                 language,
                 "再送前に操作結果を確認してください",
                 "Check the operation receipt before resending."
-            )),
-            "recovery_wait" => Some(i18n::local!(
+            ));
+        }
+        matches!(
+            self.held_by,
+            Some(crate::protocol::MessageHeldBy::RecoveryWait)
+        )
+        .then(|| {
+            i18n::local!(
                 language,
                 "保留中のターンを確認してください",
                 "Inspect the parked Turn."
-            )),
-            _ => None,
-        }
+            )
+        })
     }
     fn delivery_flags(&self, language: UiLanguage, label: &mut String) {
         let sep = crate::ui::text_width::glyphs::separator();
-        if self.now {
-            label.push_str(sep);
-            label.push_str(i18n::local!(language, "すぐ渡す", "Deliver now"));
-        }
         if self.expect_reply {
             label.push_str(sep);
             label.push_str(crate::presentation::ReplyState::Pending.label(language));
@@ -613,9 +591,7 @@ mod tests {
             sender_thread: None,
             created_at: "2026-10-30T00:00:00Z".into(),
             held: false,
-            hold_reason: None,
             uncertain: false,
-            now: false,
             excerpt: format!("input {id}"),
             excerpt_truncated: false,
             attachment_count: 0,
@@ -1092,7 +1068,7 @@ mod tests {
         ui.select_thread("thread".into());
         let mut foreign = queued("second");
         foreign.sender_thread = Some("other-thread".into());
-        foreign.hold_reason = Some("terminal_before_path_admission".into());
+        foreign.held_by = Some(crate::protocol::MessageHeldBy::Unknown);
         foreign.excerpt = "safe\x1b[2Jtext".into();
         let update = page(
             &mut ui,
@@ -1179,7 +1155,7 @@ mod tests {
         let mut pending = queued("id");
         pending.excerpt = "visible\x1b[2J text".into();
         pending.held = true;
-        pending.hold_reason = Some("terminal_before_path_admission".into());
+        pending.held_by = Some(crate::protocol::MessageHeldBy::Stopping);
         ui.active_view_mut().pending_messages = PendingMessages {
             items: vec![pending],
             total: 1,
@@ -1204,8 +1180,7 @@ mod tests {
             }
             shown.push('\n');
         }
-        assert!(shown.contains("中断前の未反映"));
-        assert!(!shown.contains("terminal_before_path_admission"));
+        assert!(shown.contains("停止"));
         assert!(!shown.contains('\x1b'));
     }
     #[test]
@@ -1279,7 +1254,7 @@ mod language_tests {
     }
     fn item(id: &str) -> PendingMessage {
         PendingMessage {
-            held_by: None,
+            held_by: Some(crate::protocol::MessageHeldBy::RecoveryWait),
             sender_kind: crate::protocol::SenderKind::Human,
             completion_scheduled: false,
             expect_reply: false,
@@ -1288,9 +1263,7 @@ mod language_tests {
             sender_thread: None,
             created_at: "raw-time".into(),
             held: true,
-            hold_reason: Some("recovery_wait".into()),
             uncertain: false,
-            now: true,
             excerpt: "source-preview".into(),
             excerpt_truncated: false,
             attachment_count: 0,
@@ -1337,25 +1310,19 @@ mod language_tests {
                 crate::ui::text_width::terminal_width_observation(),
             ) {
                 (UiLanguage::En, Some(1)) => &[
-                    "Person · Held · Deliver now · Waiting for recovery",
+                    "Person · Held · Waiting for recovery",
                     "1 total / 1 shown",
                     "source-preview",
                 ],
-                (UiLanguage::Ja, Some(1)) => &[
-                    "人 · 保留 · すぐ渡す · 復旧待ち",
-                    "1件 / 表示1件",
-                    "source-preview",
-                ],
+                (UiLanguage::Ja, Some(1)) => {
+                    &["人 · 保留 · 復旧待ち", "1件 / 表示1件", "source-preview"]
+                }
                 (UiLanguage::En, _) => &[
-                    "Person | Held | Deliver now | Waiting for recovery",
+                    "Person | Held | Waiting for recovery",
                     "1 total / 1 shown",
                     "source-preview",
                 ],
-                (UiLanguage::Ja, _) => &[
-                    "人 | 保留 | すぐ渡す | 復旧待ち",
-                    "1件 / 表示1件",
-                    "source-preview",
-                ],
+                (UiLanguage::Ja, _) => &["人 | 保留 | 復旧待ち", "1件 / 表示1件", "source-preview"],
             }
         });
         i18n::verify_screen(
@@ -1458,51 +1425,35 @@ mod language_tests {
         }
     }
     #[test]
-    fn state_projection_preserves_unknown_reasons_and_source_facts() {
+    fn state_projection_shows_only_typed_holds_and_keeps_source_facts() {
         let mut pending = item("raw-message-id");
         pending.sender_thread = Some("原文·👩‍💻-thread".into());
-        pending.hold_reason = Some("raw-原文·👩‍💻-reason".into());
+        pending.held_by = Some(crate::protocol::MessageHeldBy::Unknown);
         pending.excerpt = "source-原文·👩‍💻".into();
         let original = pending.clone();
         for language in [UiLanguage::En, UiLanguage::Ja] {
             for uncertain in [false, true] {
                 for held in [false, true] {
-                    for now in [false, true] {
-                        pending.uncertain = uncertain;
-                        pending.held = held;
-                        pending.now = now;
-                        let before = pending.clone();
-                        let label = pending.label(language);
-                        assert!(label.contains("原文·👩‍💻"));
-                        assert!(label.ends_with(" | raw-原文·👩‍💻-reason"));
-                        if language == UiLanguage::En {
-                            let state = if uncertain {
-                                "Delivery unknown"
-                            } else if held {
-                                "Held"
-                            } else {
-                                "Pending"
-                            };
-                            assert!(label.contains(state));
-                            assert_eq!(label.contains("Deliver now"), now);
-                        } else {
-                            let state = if uncertain {
-                                "反映状況不明"
-                            } else if held {
-                                "保留"
-                            } else {
-                                "反映待ち"
-                            };
-                            assert!(label.contains(state));
-                            assert_eq!(label.contains("すぐ渡す"), now);
-                        }
-                        assert_eq!(pending, before);
-                    }
+                    pending.uncertain = uncertain;
+                    pending.held = held;
+                    let before = pending.clone();
+                    let label = pending.label(language);
+                    assert!(label.contains("原文·👩‍💻"));
+                    let state = match (language, uncertain, held) {
+                        (UiLanguage::En, true, _) => "Delivery unknown",
+                        (UiLanguage::En, false, true) => "Held",
+                        (UiLanguage::En, false, false) => "Pending",
+                        (UiLanguage::Ja, true, _) => "反映状況不明",
+                        (UiLanguage::Ja, false, true) => "保留",
+                        (UiLanguage::Ja, false, false) => "反映待ち",
+                    };
+                    assert!(label.ends_with(state), "{label}");
+                    assert_eq!(pending, before);
                 }
             }
         }
         assert_eq!(pending.excerpt, original.excerpt);
-        assert_eq!(pending.hold_reason, original.hold_reason);
+        assert_eq!(pending.held_by, original.held_by);
         assert_eq!(pending.message_id, original.message_id);
     }
     fn long_pending(ui: &mut UiState) {
@@ -1510,7 +1461,7 @@ mod language_tests {
         let item = &mut ui.view_mut().pending_messages.items[0];
         item.sender_thread = Some("12345678-rest".into());
         item.uncertain = true;
-        item.hold_reason = Some("terminal_before_path_admission".into());
+        item.held_by = Some(crate::protocol::MessageHeldBy::RecoveryWait);
     }
     #[test]
     fn pending_popup_shows_the_full_action_in_both_languages() {
@@ -1519,7 +1470,6 @@ mod language_tests {
                 pending(ui);
                 let row = &mut ui.view_mut().pending_messages.items[0];
                 row.uncertain = true;
-                row.hold_reason = Some("uncertain_path_admission".into());
             },
             |language| match language {
                 UiLanguage::En => &["Check the operation receipt before resending."],
@@ -1533,18 +1483,11 @@ mod language_tests {
             UiLanguage::En => &[
                 "Conversation 12345678",
                 "Delivery unknown",
-                "Deliver now",
-                "Not",
-                "delivered",
-                "before",
-                "interruption",
+                "Waiting",
+                "for",
+                "recovery",
             ],
-            UiLanguage::Ja => &[
-                "会話 12345678",
-                "反映状況不明",
-                "すぐ渡す",
-                "中断前の未反映",
-            ],
+            UiLanguage::Ja => &["会話 12345678", "反映状況不明", "復旧待ち"],
         });
         use crate::ui::text_width::UnicodeWidthStr;
         for observed in [Some(1), Some(2), None] {
