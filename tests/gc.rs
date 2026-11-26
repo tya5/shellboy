@@ -384,6 +384,60 @@ async fn interrupted_raw_collection_resumes_marker_without_incrementing_generati
 }
 
 #[tokio::test]
+async fn raw_retention_deletes_superseded_schedule_runs_and_orphan_markers() {
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("INSERT INTO schedule(id,thread_id,kind,cron,enabled,cwd,command)VALUES('hourly','live','time','0 * * * *',1,'/','true')", [])?;
+        // Insertion order is rowid order: `latest` is what `schedule list` shows.
+        for (id, output) in [("first", true), ("quiet", false), ("pinned", true), ("latest", true)] {
+            db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,started_at,ended_at)VALUES(?1,'hourly',?1,'exited','/','{}','UTF-8','UTF-8','closed',?2,'2020-01-01T00:00:00Z','2020-01-01T00:00:00Z')", params![id, i64::from(output)])?;
+            if output {
+                db.execute("INSERT INTO output_chunk VALUES(?1,0,'stdout',0,x'6f6b','2020-01-01T00:00:00Z')", [id])?;
+            }
+        }
+        db.execute("INSERT INTO runtime_pin VALUES('pin','fixture','shell_output','pinned',0,'now')", [])?;
+        // The execution of a removed definition went with it; its marker stayed.
+        db.execute("INSERT INTO app_meta(key,value)VALUES('raw_tombstone.removed',?1)", [serde_json::json!({"reason":"raw_retention_age","state":"deleted","generation":1}).to_string()])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.raw(
+        "turn-shell",
+        "exited",
+        "2020-01-01T00:00:00Z",
+        vec![1; 8],
+        false,
+    )
+    .await;
+    f.gc.collect(StorageCategory::Raw, now()).await.unwrap();
+    f.db.call(|db| {
+        let column = |sql: &str| -> rusqlite::Result<Vec<String>> {
+            db.prepare(sql)?
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect()
+        };
+        assert_eq!(
+            column("SELECT id FROM shell_execution ORDER BY id")?,
+            ["latest", "pinned", "turn-shell"],
+            "collected older runs go; the latest, a pinned run and Run-owned shells stay"
+        );
+        assert_eq!(
+            column("SELECT key FROM app_meta WHERE key>='raw_tombstone.' AND key<'raw_tombstone/' ORDER BY key")?,
+            ["raw_tombstone.latest", "raw_tombstone.turn-shell"]
+        );
+        assert_eq!(
+            column("SELECT id FROM shell_execution WHERE schedule_id='hourly' ORDER BY rowid DESC LIMIT 1")?,
+            ["latest"]
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn history_keeps_shared_prefix_recursive_sources_live_creator_and_pending_receipts() {
     let f = Fixture::new(Config::default()).await;
     for id in [

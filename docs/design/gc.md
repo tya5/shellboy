@@ -14,6 +14,26 @@ managed画像のdeleting→unlink→deletedとpin/active検査は共有Attachmen
 
 容量は論理live bytesと物理DB/WAL/managed/log bytes、DB再利用可能page bytesを分離する。DELETE直後にOS空き容量が増えると説明せず、自動VACUUMを実行しない（明示コマンドは[末尾の節](#明示的なstorage-vacuum-238)）。物理属性の取得は有限file worker上で実施し、UI/main OS threadから同期stat/走査を呼ばない。logical limit超過は新しい副作用をstorage_limitで保留するための判定として公開し、停止/終端保存/GCは許す。保存済みspaceのsemantic閲覧はquery embeddingだけを生成して許可し、索引pauseを変更しない。索引用の新規embedding停止と閲覧を区別する（[G10](index.md#論理容量上限とsemantic閲覧g10)）。
 
+## Raw markers and Thread-owned executions (#450)
+
+Raw retention owns every `app_meta.raw_tombstone.<execution>` marker. After the
+candidate windows, each non-idle raw pass settles markers from an in-memory key
+cursor that wraps at the end of the key range (restart starts over). Per
+transaction it examines at most 128 markers: a marker whose execution row is
+gone (a removed schedule or service, a deleted Thread) is deleted, and a
+schedule/service execution that raw retention has collected (marker state
+`deleted`, no chunk left, no read pin) and that is not its definition's latest
+execution by rowid is deleted together with its marker. `schedule list` and
+`service list` therefore show the same latest execution as before; only older
+runs go. A pass examines one batch plus one batch per batch of markers it
+created, so the sweep keeps pace with marker creation without rescanning every
+marker on each age deadline; an explicit `storage collect` or a pass that
+resumes `deleting` markers examines every marker from the start of the key range. A Thread-owned
+execution without output is a retention candidate by the same age and capacity
+rule, so a schedule that prints nothing does not keep one row per run either.
+No retention number is added. Run-owned executions and their markers, and the
+detached execution of a spent one-shot, are not deleted.
+
 ## 空き容量の下限（#261）
 
 SSDが満杯になるのは致命的なので、論理量とは別に、データ保存先のボリュームの空きを同じ関門 `require_capacity_tx` で見る。論理データ量の既定は警告40 GiB・上限50 GiB。`limits.disk_free_min_bytes`（既定5 GiB、正の整数）を切ると、論理上限と同じ範囲（model・shell・child・summary・indexの新規作業と下書き受付）を `storage_limit` で保留する。停止・終端記録・観測・GC・`storage collect` は止めない。論理上限と空き不足は `details.reason`（`logical_limit` / `disk_free_low`）で区別し、両方なら論理上限を返す。
