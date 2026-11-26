@@ -47,6 +47,8 @@ struct Fixture {
     wait_conditions: Arc<std::sync::Mutex<Vec<WaitCondition>>>,
     /// While true, the next `message.ask` is refused instead of reaching the owner.
     refuse_next_ask: Arc<std::sync::atomic::AtomicBool>,
+    /// Message ID from the first successful `message.ask` response.
+    first_ask_message: Arc<std::sync::Mutex<Option<String>>>,
 }
 async fn read_request(stream: &mut TcpStream) -> Value {
     let mut bytes = Vec::new();
@@ -138,9 +140,11 @@ impl Fixture {
         let conditions = wait_conditions.clone();
         let refuse_next_ask = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let refuse_ask = refuse_next_ask.clone();
+        let first_ask_message = Arc::new(std::sync::Mutex::new(None::<String>));
+        let first_ask = first_ask_message.clone();
         tokio::spawn(async move {
             let mut sent = false;
-            while let Some(invocation) = receive.recv().await {
+            while let Some(mut invocation) = receive.recv().await {
                 let debug = format!("{:?}", invocation.request.command);
                 log.lock()
                     .unwrap()
@@ -226,8 +230,30 @@ impl Fixture {
                             "unknown field `end_message_only` (synthetic old owner)",
                         ),
                     ));
-                } else if forward.send(invocation).await.is_err() {
-                    break;
+                } else {
+                    if matches!(&invocation.request.command, Command::MessageAsk(_)) {
+                        let (tap, response) = oneshot::channel::<Response<Value>>();
+                        let original = std::mem::replace(&mut invocation.reply, tap);
+                        let first_ask = first_ask.clone();
+                        tokio::spawn(async move {
+                            if let Ok(response) = response.await {
+                                if let Some(id) = response
+                                    .result
+                                    .as_ref()
+                                    .and_then(|r| r["message_id"].as_str())
+                                {
+                                    first_ask
+                                        .lock()
+                                        .unwrap()
+                                        .get_or_insert_with(|| id.to_owned());
+                                }
+                                let _ = original.send(response);
+                            }
+                        });
+                    }
+                    if forward.send(invocation).await.is_err() {
+                        break;
+                    }
                 }
             }
         });
@@ -246,6 +272,7 @@ impl Fixture {
             reply_wait,
             wait_conditions,
             refuse_next_ask,
+            first_ask_message,
         }
     }
     /// Returns once a client asked the owner to wait for this message's reply.
@@ -1071,18 +1098,12 @@ async fn refused_repair_ask_reports_no_earlier_reply_state() {
     fixture
         .refuse_next_ask
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let duty: String = fixture
-        .owner
-        .db
-        .call(|db| {
-            Ok(db.query_row(
-                "SELECT message_node_id FROM receipt WHERE json_extract(result_json,'$.expect_reply')=1",
-                [],
-                |r| r.get(0),
-            )?)
-        })
-        .await
-        .unwrap();
+    let duty = fixture
+        .first_ask_message
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("first ask response carried a message ID");
     first
         .reply
         .send(cli_call(&[
