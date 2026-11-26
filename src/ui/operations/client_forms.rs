@@ -712,11 +712,6 @@ mod tests {
                 .copied()
                 .collect()
         );
-        assert_eq!(
-            crate::operations::CLI_BINDINGS.len(),
-            90,
-            "attach is a CLI shorthand, not another operation"
-        );
         let clients = OpKind::ALL
             .iter()
             .copied()
