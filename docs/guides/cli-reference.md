@@ -1339,7 +1339,8 @@ On add and update, the CLI joins a relative file path, and the relative folder o
 
 - `shellboy-app:/abs/folder` is a web app folder whose entry is `index.html`. `--path` is required and names a file inside the folder, such as `index.html` or `assets/app.js`. A path with `..`, an absolute path, or a link that resolves outside the folder is refused with `details.reason` `path_outside_folder`.
 - A local `file:` URI or an absolute path is that one file. `--path` is refused (`path_not_allowed`).
-- `http:`, `https:`, relative paths, network shares (`\\server\share`, `//server/share`, or a `file:` URI with a host other than `localhost`) and other schemes are refused (`uri_not_readable`); the owner never fetches them.
+- `http:`, `https:`, relative paths, a `file:` URI with a host other than `localhost`, and other schemes are refused (`uri_not_readable`); the owner never fetches them.
+- Whatever the form, the resolved path must be local: a network share (`\\server\share`, `//server/share`), a control character, or on Windows a device name such as `NUL` or `COM1` is refused (`path_not_local`).
 
 A file is returned only up to `limits.attachment_file_bytes`, and never beyond what fits base64-encoded in one 8 MiB reply (a little under 6 MiB); a larger file fails with `input_limit` (`file_too_large`), whose `details.limit_bytes` is the effective limit for that request. A missing or unreadable file is `target_unavailable`.
 

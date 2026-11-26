@@ -119,15 +119,61 @@ fn remote_relative_and_unknown_uris_are_refused_without_access() {
         "file:/\n/remote-host/share/file.txt",
         "file://localhost\r/tmp/file.txt",
         "file:///tmp/fi\nle.txt",
-        // Network shares are not local files, whatever the platform.
-        "\\\\server\\share\\index.html",
-        "//server/share/index.html",
-        "shellboy-app:\\\\server\\share\\app",
-        "shellboy-app://server/share/app",
     ] {
         let error = source(uri).unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidArgument, "{uri}");
         assert_eq!(reason(&error), "uri_not_readable", "{uri}");
+    }
+}
+
+/// Every form resolves to a path first; one local-path rule then refuses it
+/// before any filesystem access.
+fn refused_as_not_local(uri: &str, path: Option<&str>) -> ApiError {
+    let resolved = source(uri).and_then(|source| target(source, path));
+    let Err(error) = resolved else {
+        panic!("{uri} {path:?} was accepted as {resolved:?}");
+    };
+    assert_eq!(error.code, ErrorCode::InvalidArgument, "{uri} {path:?}");
+    error
+}
+
+#[test]
+fn network_shares_and_control_characters_are_refused_in_every_form() {
+    let (_root, folder) = web_app();
+    let uri = app(&folder);
+    // The same rule on every platform, whatever form produced the path.
+    for (uri, path) in [
+        ("//server/share/index.html", None),
+        ("shellboy-app://server/share/app", Some("index.html")),
+        ("file:///C:/tmp/a%0Ab.txt", None),
+        (uri.as_str(), Some("index\n.html")),
+    ] {
+        let error = refused_as_not_local(uri, path);
+        assert_eq!(reason(&error), "path_not_local", "{uri} {path:?}");
+    }
+    // Converters differ per platform (a share, a local path, or no path);
+    // whatever comes out, no network path is ever handed to the filesystem.
+    for uri in [
+        "file:////server/share/x",
+        "file:///%2F%2Fserver/share/x",
+        "\\\\server\\share\\index.html",
+        "shellboy-app:\\\\server\\share\\app",
+    ] {
+        let path = uri.starts_with(APP_SCHEME).then_some("index.html");
+        match source(uri).and_then(|source| target(source, path)) {
+            Err(error) => assert!(
+                ["path_not_local", "uri_not_readable"].contains(&reason(&error)),
+                "{uri}"
+            ),
+            Ok(Target::File(file)) => {
+                let text = file.to_string_lossy();
+                assert!(
+                    !text.starts_with("//") && !text.starts_with("\\\\"),
+                    "{uri} -> {text}"
+                );
+            }
+            Ok(other) => panic!("{uri} resolved to {other:?}"),
+        }
     }
 }
 
@@ -248,17 +294,21 @@ fn windows_device_names_and_namespaces_are_refused_before_any_open() {
         "com².txt",
         "LPT³",
     ] {
-        let error = read(&uri, Some(path), LIMIT).unwrap_err();
-        assert_eq!(reason(&error), "not_a_file", "{path}");
+        let error = refused_as_not_local(&uri, Some(path));
+        assert_eq!(reason(&error), "path_not_local", "{path}");
     }
-    let error = read(r"C:\work\CON", None, LIMIT).unwrap_err();
-    assert_eq!(reason(&error), "not_a_file");
-    // Device namespaces are refused with network shares, before any access.
-    for uri in [r"\\.\NUL", r"\\?\C:\Windows\win.ini"] {
-        let error = read(uri, None, LIMIT).unwrap_err();
-        assert_eq!(reason(&error), "uri_not_readable", "{uri}");
+    for uri in [
+        r"C:\work\CON",
+        r"\\.\NUL",
+        r"\\?\C:\Windows\win.ini",
+        // Percent-decoding a file: URI must not slip a device name past the rule.
+        "file:///C:/work/%4EUL",
+        "file:///C:/work/COM%C2%B9.txt",
+    ] {
+        let error = refused_as_not_local(uri, None);
+        assert_eq!(reason(&error), "path_not_local", "{uri}");
     }
     let device_folder = format!("{APP_SCHEME}:{}", folder.join("aux").display());
-    let error = read(&device_folder, Some("index.html"), LIMIT).unwrap_err();
-    assert_eq!(reason(&error), "not_a_file");
+    let error = refused_as_not_local(&device_folder, Some("index.html"));
+    assert_eq!(reason(&error), "path_not_local");
 }
