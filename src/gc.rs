@@ -162,8 +162,16 @@ impl CollectionReport {
 /// whether the next pass must start from the oldest execution again.
 #[derive(Default)]
 struct RawCursor {
+    /// Where the next pass resumes: the oldest retained or pin-held
+    /// candidate, or the end of the last pass when none was left.
     after: Option<(String, i64)>,
+    /// The oldest retained output's age deadline. `None` is unknown (a new
+    /// owner, or nothing retained when the last pass ended), so the next raw
+    /// signal scans from `after` instead of idling (#451).
     due: Option<DateTime<Utc>>,
+    /// A pinned or not-yet-startable candidate was skipped; the next raw
+    /// signal retries it from `after`.
+    held: bool,
     rescan: bool,
 }
 #[derive(Debug, Serialize)]
@@ -780,9 +788,9 @@ impl GcService {
         }
     }
     /// Raw retention in bounded windows over `shell_terminal_time`. The total
-    /// comes from the schema22 counter. Without a capacity excess, a due age
-    /// deadline, pending tombstones or an explicit rescan, the pass is idle
-    /// without touching any execution row.
+    /// comes from the schema22 counter. With a known future age deadline and
+    /// no capacity excess, held candidate, pending tombstone or explicit
+    /// rescan, the pass is idle without touching any execution row.
     async fn collect_raw(
         &self,
         requester: &mut BackgroundRequester,
@@ -809,9 +817,9 @@ impl GcService {
         };
         let (mut after, rescan) = {
             let mut cursor = self.raw_cursor.lock().expect("raw cursor");
-            let due = cursor.due.is_some_and(|due| due <= at);
+            let waiting = cursor.due.is_some_and(|due| due > at);
             let rescan = std::mem::take(&mut cursor.rescan) || marked;
-            if !rescan && !due && total <= cap {
+            if !rescan && waiting && !cursor.held && total <= cap {
                 report.raw_due = cursor.due;
                 return Ok(());
             }
@@ -824,7 +832,8 @@ impl GcService {
         let mut eligible_bytes = 0u64;
         let mut next_due: Option<DateTime<Utc>> = None;
         let mut resume: Option<(String, i64)> = None;
-        loop {
+        let mut held = false;
+        'scan: loop {
             let cursor = after.clone();
             let unit = requester
                 .unit(RAW_UNIT, move |db, limit| {
@@ -855,11 +864,14 @@ impl GcService {
             let more = window.len() == RAW_UNIT.get() as usize;
             for candidate in window {
                 after = (candidate.order_key.clone(), candidate.rowid);
-                if candidate.pinned
-                    || candidate.bytes == 0
-                        && !candidate.marked
-                        && !candidate.unsettled_thread_owned
-                {
+                if candidate.bytes == 0 && !candidate.marked && !candidate.unsettled_thread_owned {
+                    continue;
+                }
+                // The next pass resumes at the first candidate it must see again.
+                let here = (candidate.order_key.clone(), candidate.rowid - 1);
+                if candidate.pinned {
+                    held = true;
+                    resume.get_or_insert(here);
                     continue;
                 }
                 eligible_bytes += candidate.bytes;
@@ -879,7 +891,12 @@ impl GcService {
                                 .and_then(chrono::Duration::try_days)
                                 .and_then(|days| e.checked_add_signed(days))
                         });
-                        resume = Some((candidate.order_key.clone(), candidate.rowid - 1));
+                    }
+                    resume.get_or_insert(here);
+                    if !rescan {
+                        // Executions are in end-time order: none after the
+                        // oldest retained one is expired either.
+                        break 'scan;
                     }
                     continue;
                 }
@@ -906,6 +923,8 @@ impl GcService {
                 };
                 if !started {
                     report.deferred = true;
+                    held = true;
+                    resume.get_or_insert(here);
                     continue;
                 }
                 if !candidate.marked {
@@ -959,7 +978,10 @@ impl GcService {
         }
         let mut cursor = self.raw_cursor.lock().expect("raw cursor");
         cursor.due = next_due;
-        cursor.after = resume;
+        // With nothing retained, later outputs end after this pass's last
+        // position, so the next pass reads only those.
+        cursor.after = resume.or(Some(after));
+        cursor.held = held;
         cursor.rescan |= rescan && report.deferred_kinds.contains(Work::Raw);
         report.raw_due = next_due;
         Ok(())
@@ -2307,6 +2329,138 @@ mod tests {
         .unwrap();
         gc.collect_kinds(set, chrono::Utc::now()).await.unwrap();
         assert_eq!(runs().await, 1, "only the definition's latest run stays");
+        db.shutdown().await.unwrap();
+    }
+
+    /// #451: a maintenance raw pass under the cap ages output out with no
+    /// explicit collect (and the marker owner it signals settles a superseded
+    /// schedule run it collected, #450), then the deadline it reports drives
+    /// the next pass, and output that ends after nothing was left retained
+    /// still ages out.
+    #[tokio::test]
+    async fn maintenance_raw_passes_age_out_output_under_the_cap_without_a_collect() {
+        use super::{Work, WorkSet};
+        use chrono::TimeZone;
+        use std::sync::Arc;
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(temp.path().join("fixture.db"))
+            .await
+            .unwrap();
+        let config = crate::config::Config::default();
+        assert!(config.retention.tool_raw_days > 0);
+        let attachments = Arc::new(crate::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = super::GcService::new(
+            db.clone(),
+            Arc::new(config.clone()),
+            temp.path().to_owned(),
+            attachments,
+        );
+        db.call(|db| {
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let output = |id: &'static str, ended: chrono::DateTime<chrono::Utc>| {
+            let db = db.clone();
+            let ended = ended.to_rfc3339();
+            async move {
+                db.call(move |db| {
+                    db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,started_at,ended_at)VALUES(?1,'r','u',?1,'exited','/','{}','UTF-8','UTF-8','closed',1,?2,?2)", params![id, ended])?;
+                    db.execute("INSERT INTO output_chunk VALUES(?1,0,'stdout',0,x'6f7574707574',?2)", params![id, ended])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            }
+        };
+        let retained = |id: &'static str| {
+            let db = db.clone();
+            async move {
+                db.call(move |db| {
+                    Ok(db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM output_chunk WHERE execution_id=?1)",
+                        [id],
+                        |r| r.get::<_, bool>(0),
+                    )?)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let kind = |work| {
+            let mut set = WorkSet::default();
+            set.insert(work);
+            set
+        };
+        let raw = || kind(Work::Raw);
+        let days = chrono::Duration::days(config.retention.tool_raw_days as i64);
+        let old = chrono::Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let recent = old + days;
+        output("old", old).await;
+        output("recent", recent).await;
+        // Two runs of an hourly schedule, both past the retention.
+        db.call(move |db| {
+            db.execute("INSERT INTO schedule(id,thread_id,cron,enabled,cwd,command)VALUES('hourly','t','0 * * * *',1,'/','true')", [])?;
+            for id in ["hourly-first", "hourly-latest"] {
+                db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,started_at,ended_at)VALUES(?1,'hourly',?1,'exited','/','{}','UTF-8','UTF-8','closed',1,'2020-01-01T00:00:00+00:00','2020-01-01T00:00:00+00:00')", [id])?;
+                db.execute("INSERT INTO output_chunk VALUES(?1,0,'stdout',0,x'6f7574707574','2020-01-01T00:00:00+00:00')", [id])?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        // The marker owner's startup sweep finds nothing settled yet.
+        gc.collect_kinds(kind(Work::RawMarkers), old).await.unwrap();
+        db.signals().take_seen();
+        // A fresh owner, well under the cap: the first signalled pass sees the
+        // expired output without a collect and reports the next deadline.
+        let first = gc
+            .collect_kinds(raw(), recent + chrono::Duration::hours(1))
+            .await
+            .unwrap();
+        assert!(first.raw_bytes_collected > 0);
+        assert!(!retained("old").await && retained("recent").await);
+        // Collection signals the marker owner, which settles the superseded
+        // schedule run; its latest stays.
+        assert!(db.signals().take_seen().contains(Work::RawMarkers));
+        gc.collect_kinds(kind(Work::RawMarkers), recent)
+            .await
+            .unwrap();
+        let runs: Vec<String> = db
+            .call(|db| {
+                Ok(db
+                    .prepare(
+                        "SELECT id FROM shell_execution WHERE schedule_id='hourly' ORDER BY id",
+                    )?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(runs, ["hourly-latest"]);
+        let due = first.raw_due.expect("the retained output's age deadline");
+        assert_eq!(due, recent + days);
+        // Before the deadline a pass is idle; at it, the output goes.
+        let early = gc
+            .collect_kinds(raw(), due - chrono::Duration::hours(1))
+            .await
+            .unwrap();
+        assert_eq!(early.raw_bytes_collected, 0);
+        assert!(retained("recent").await);
+        gc.collect_kinds(raw(), due).await.unwrap();
+        assert!(!retained("recent").await);
+        // Nothing is retained now; output that ends later still ages out.
+        let later = due + chrono::Duration::hours(1);
+        output("later", later).await;
+        let pass = gc.collect_kinds(raw(), later + days).await.unwrap();
+        assert!(pass.raw_bytes_collected > 0);
+        assert!(!retained("later").await);
         db.shutdown().await.unwrap();
     }
 

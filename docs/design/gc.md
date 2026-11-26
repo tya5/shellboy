@@ -14,6 +14,26 @@ managed画像のdeleting→unlink→deletedとpin/active検査は共有Attachmen
 
 容量は論理live bytesと物理DB/WAL/managed/log bytes、DB再利用可能page bytesを分離する。DELETE直後にOS空き容量が増えると説明せず、自動VACUUMを実行しない（明示コマンドは[末尾の節](#明示的なstorage-vacuum-238)）。物理属性の取得は有限file worker上で実施し、UI/main OS threadから同期stat/走査を呼ばない。logical limit超過は新しい副作用をstorage_limitで保留するための判定として公開し、停止/終端保存/GCは許す。保存済みspaceのsemantic閲覧はquery embeddingだけを生成して許可し、索引pauseを変更しない。索引用の新規embedding停止と閲覧を区別する（[G10](index.md#論理容量上限とsemantic閲覧g10)）。
 
+## Raw age deadline (#451)
+
+The GC service's raw cursor owns the age deadline: the oldest retained
+output's `ended + tool_raw_days`, which the pass reports as `raw_due` and the
+maintenance loop keeps as its existing Raw deadline (no new timer). A pass is
+idle only while that deadline is known and in the future, the raw total is
+within `tool_raw_bytes`, no `deleting` marker is pending, no skipped pinned
+candidate waits and no explicit collect asked for a rescan. An unknown deadline
+means scan: a new owner (startup marks Raw) scans from the start once and
+learns the deadline without a cap excess or `storage collect`; a pass that
+leaves nothing retained records its last position, so the next raw signal (a
+Run end or saved shell completion) reads only outputs that ended later. The
+next pass resumes at the first candidate it must see again: the oldest retained
+output, or an earlier one skipped because a read pin held it or its marker
+could not start. Executions are visited in `(COALESCE(ended_at,started_at),
+rowid)` order, so an age-only pass (no rescan, total within the cap) stops at
+the oldest retained output, and an output that ends later sorts after that
+position; one saved with an earlier end time (a clock moved back) waits for
+the next start or explicit collect.
+
 ## Raw markers and Thread-owned executions (#450)
 
 Raw retention owns every `app_meta.raw_tombstone.<execution>` marker; one
