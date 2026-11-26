@@ -209,10 +209,20 @@ Layout stays client-side. A saved payload group
 selects the exact owner call; the group is shown only when the owner confirms
 that call. Links come from the same extent text and Markdown walk as before.
 
-Still open before the refresh, page, window and rebase installs move: pending
-rows carry no hold reason, path-admission uncertainty, delivery mode or
-completion schedule, which the queue rows show; outline fields carry no
-payload-shaped labels; window recovery reasons are 256-character excerpts.
+Window pending rows carry the saved sender, open reply duty, path-admission
+uncertainty, run-completion schedule (a saved `complete` delivery) and the
+#423 `held_by`, which is the queue row's only hold reason; the queue no longer
+shows a "deliver now" mark. Outline fields carry a typed path shape (object key,
+array index, collection count) and the client renders their labels. A window
+recovery reason is a 256-character excerpt; when it is cut short the event text
+points at the F6 source node, whose original holds the full reason, and claims
+nothing more without one. Reasoning ranges are clipped to each display page, so
+an anchor inside reasoning that starts before the extent can differ (recorded
+gap, not yet witnessed).
+
+The refresh, page, window, rebase and saved-message installs still use the
+private snapshot; their move also needs human duties from the combined
+`message.list` and known-draft settlement through `operation.get`.
 
 ### Draft save and selected view
 
