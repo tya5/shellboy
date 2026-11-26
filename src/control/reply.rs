@@ -24,12 +24,13 @@ macro_rules! open_reply {
 }
 pub(crate) use open_reply;
 
-/// A duty's owner Run: the Run that receives the answer or outcome of the ask
-/// it awaited, once reopened; otherwise its delivery Run. Delivery provenance
-/// (`receipt.run_id`) never changes. Matches index `receipt_reply_owner_pending`.
+/// A duty's owner Run: its delivery Run, or once reopened after an own ask, the
+/// Run that admitted that ask's answer or outcome (none until one does).
+/// Delivery provenance (`receipt.run_id`) never changes. Matches index
+/// `receipt_reply_owner_pending`.
 macro_rules! duty_run {
     () => {
-        "COALESCE(json_extract(result_json,'$.reply.owner_run_id'),run_id)"
+        "IIF(json_extract(result_json,'$.reply.reopened_after') IS NULL,run_id,json_extract(result_json,'$.reply.owner_run_id'))"
     };
 }
 
@@ -44,6 +45,20 @@ pub(crate) fn model_thread_identity(sender: &crate::protocol::MessageSender) -> 
         .filter(|id| !id.is_empty())
 }
 
+/// Open asks a model Thread sent (?1), on their directional partial index. The
+/// rewind preview reads the same projection.
+macro_rules! asked_by {
+    () => {
+        "json_extract(r.sender_json,'$.thread_id')=?1 AND json_extract(r.sender_json,'$.kind')='model'"
+    };
+}
+pub(crate) const OPEN_ASKED_FROM: &str = concat!(
+    "FROM receipt r INDEXED BY receipt_pending_asked WHERE ",
+    open_reply!("r."),
+    " AND ",
+    asked_by!()
+);
+
 fn pending_direction<'a>(
     owed_by: Option<&'a str>,
     asked_by: Option<&'a str>,
@@ -56,11 +71,7 @@ fn pending_direction<'a>(
             thread,
         )
     } else if let Some(thread) = asked_by {
-        (
-            "receipt_pending_asked",
-            "json_extract(r.sender_json,'$.thread_id')=?1 AND json_extract(r.sender_json,'$.kind')='model'",
-            thread,
-        )
+        ("receipt_pending_asked", asked_by!(), thread)
     } else if let Some(name) = to {
         (
             "receipt_pending_to",
@@ -533,7 +544,7 @@ pub(crate) fn complete_tx(
         }
         // A reopened duty already had its one wake: the answer or outcome of
         // the ask it awaited.
-        if reply.get("reminded_at").is_some() || reply.get("owner_run_id").is_some() {
+        if reply.get("reminded_at").is_some() || reply.get("reopened_after").is_some() {
             if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1
                 { keys.push(Key::Reply(message.clone())); if let Some(thread) = outcome_tx(db, &message, &sender, "ignored", at)? { wakes.push(thread); } }
         } else {
@@ -698,18 +709,37 @@ pub(crate) fn cancellation_wakes_tx(
     Ok(wakes)
 }
 
-/// The asker Thread's ask just became terminal and its answer or outcome was
-/// delivered in this transaction. Every duty the Thread awaited on that ask is
-/// owed again, by the Thread's Run that receives the delivery (live, newly
-/// started, or stopping when the delivery is held). The duty keeps its
-/// delivery Run and Turn.
+/// The asker Thread's ask just became terminal and this transaction saved its
+/// answer or outcome for the asker. Every duty the Thread awaited on that ask is
+/// owed again (`reply.reopened_after` names the ask) but has no owner Run until
+/// a Run admits that answer or outcome (`claim_reopened_tx`), so no Run's end or
+/// stop settles it before then. The duty keeps its delivery Run and Turn.
 const REOPEN_AWAITING: &str = concat!(
-    "UPDATE receipt INDEXED BY receipt_pending_owed SET result_json=json_set(json_remove(result_json,'$.reply.blocking_message_id'),'$.reply.state','pending','$.reply.owner_run_id',(SELECT r.id FROM run r WHERE r.thread_id=?2 AND r.state IN ('live','stopping'))),updated_at=?3 WHERE target_thread_id=?2 AND json_extract(result_json,'$.ask_name') IS NULL AND ",
+    "UPDATE receipt INDEXED BY receipt_pending_owed SET result_json=json_set(json_remove(result_json,'$.reply.blocking_message_id','$.reply.owner_run_id'),'$.reply.state','pending','$.reply.reopened_after',?1),updated_at=?3 WHERE target_thread_id=?2 AND json_extract(result_json,'$.ask_name') IS NULL AND ",
     open_reply!(""),
     " AND json_extract(result_json,'$.reply.state')='awaiting_own_ask' AND json_extract(result_json,'$.reply.blocking_message_id')=?1"
 );
 fn reopen_awaiting_tx(db: &Connection, ask: &str, asker: &str, at: &str) -> rusqlite::Result<()> {
     db.execute(REOPEN_AWAITING, params![ask, asker, at])?;
+    Ok(())
+}
+
+/// The Run that admits a reopened duty's answer (the reply node on the
+/// Thread's selected path) or its outcome notice (a delivery to this Run)
+/// becomes the duty's owner Run.
+const CLAIM_REOPENED: &str = concat!(
+    "UPDATE receipt INDEXED BY receipt_pending_owed SET result_json=json_set(result_json,'$.reply.owner_run_id',?2),updated_at=?3 WHERE target_thread_id=?1 AND json_extract(result_json,'$.ask_name') IS NULL AND ",
+    open_reply!(""),
+    " AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.reply.reopened_after') IS NOT NULL AND json_extract(result_json,'$.reply.owner_run_id') IS NULL AND (EXISTS(SELECT 1 FROM receipt q JOIN thread_path p ON p.node_id=json_extract(q.result_json,'$.reply.node_id') AND p.thread_id=?1 WHERE q.message_node_id=json_extract(receipt.result_json,'$.reply.reopened_after')) OR EXISTS(SELECT 1 FROM delivery d WHERE d.event_id='reply-outcome-'||json_extract(receipt.result_json,'$.reply.reopened_after') AND d.recipient_id=?2))"
+);
+/// Called by Turn preparation after it admitted this Run's input and notices.
+pub(crate) fn claim_reopened_tx(
+    db: &Connection,
+    thread: &str,
+    run: &str,
+    at: &str,
+) -> rusqlite::Result<()> {
+    db.execute(CLAIM_REOPENED, params![thread, run, at])?;
     Ok(())
 }
 
@@ -919,6 +949,10 @@ mod tests {
         reads.push(("receipt_pending_owed", AWAITING_OWED.into()));
         reads.push(("receipt_pending_asked", LATER_OWN_ASK.into()));
         reads.push(("receipt_pending_owed", REOPEN_AWAITING.into()));
+        reads.push(("receipt_pending_owed", CLAIM_REOPENED.into()));
+        for sql in crate::history::rewind::pending_replies_sent_sql() {
+            reads.push(("receipt_pending_asked", sql));
+        }
         reads.push(("receipt_reply_owner_pending", RUN_DUTIES.into()));
         for (index, sql) in reads {
             let steps = plan(&sql);

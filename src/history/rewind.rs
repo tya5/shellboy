@@ -482,19 +482,24 @@ fn find_chain(
 
 /// Reply-expected messages this Thread sent that are still unanswered: their
 /// replies can land in the Thread after the rewind.
+/// Count and page queries, both on the reply owner's indexed asked-by lookup.
+pub(crate) fn pending_replies_sent_sql() -> [String; 2] {
+    let from = crate::control::reply::OPEN_ASKED_FROM;
+    [
+        format!("SELECT count(*) {from}"),
+        format!(
+            "SELECT r.message_node_id,r.target_thread_id,r.created_at {from} ORDER BY r.created_at,r.id LIMIT ?2"
+        ),
+    ]
+}
+
 fn pending_replies_sent(tx: &Transaction<'_>, thread: &str) -> Result<Value, ApiError> {
-    const WHERE: &str = concat!(
-        "FROM receipt WHERE ",
-        crate::control::reply::open_reply!(""),
-        " AND json_extract(sender_json,'$.thread_id')=?1"
-    );
+    let [count_sql, page_sql] = pending_replies_sent_sql();
     let count: i64 = tx
-        .query_row(&format!("SELECT count(*) {WHERE}"), [thread], |r| r.get(0))
+        .query_row(&count_sql, [thread], |r| r.get(0))
         .map_err(sql_error)?;
     let items = tx
-        .prepare(&format!(
-            "SELECT message_node_id,target_thread_id,created_at {WHERE} ORDER BY created_at,rowid LIMIT ?2"
-        ))
+        .prepare(&page_sql)
         .map_err(sql_error)?
         .query_map(params![thread, LIST_LIMIT], |r| {
             Ok(json!({
