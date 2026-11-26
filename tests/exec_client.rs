@@ -39,6 +39,10 @@ struct Fixture {
     /// While true, every `events.wait` that carries a cursor is answered (after a short
     /// pause) with `timeout` and the same cursor, as if the owner had sent no hint.
     swallow_hints: Arc<std::sync::atomic::AtomicBool>,
+    /// Message IDs of every `reply_received` wait the owner received, signalled
+    /// through `reply_wait`.
+    reply_waits: Arc<std::sync::Mutex<Vec<String>>>,
+    reply_wait: Arc<tokio::sync::Notify>,
 }
 async fn read_request(stream: &mut TcpStream) -> Value {
     let mut bytes = Vec::new();
@@ -123,6 +127,9 @@ impl Fixture {
         let resync_next = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let swallow_hints = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (log, resync, swallow) = (seen.clone(), resync_next.clone(), swallow_hints.clone());
+        let reply_waits = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let reply_wait = Arc::new(tokio::sync::Notify::new());
+        let (waits, waited) = (reply_waits.clone(), reply_wait.clone());
         tokio::spawn(async move {
             let mut sent = false;
             while let Some(invocation) = receive.recv().await {
@@ -130,6 +137,14 @@ impl Fixture {
                 log.lock()
                     .unwrap()
                     .push(debug.split('(').next().unwrap_or_default().to_owned());
+                if let Command::Wait(args) = &invocation.request.command {
+                    for condition in &args.conditions {
+                        if let WaitCondition::ReplyReceived { message_id } = condition {
+                            waits.lock().unwrap().push(message_id.clone());
+                            waited.notify_waiters();
+                        }
+                    }
+                }
                 if let Command::EventsWait(a) = &invocation.request.command
                     && let Some(cursor) = a.after.clone()
                     && swallow.load(std::sync::atomic::Ordering::SeqCst)
@@ -206,7 +221,31 @@ impl Fixture {
             seen,
             resync_next,
             swallow_hints,
+            reply_waits,
+            reply_wait,
         }
+    }
+    /// Returns once a client asked the owner to wait for this message's reply.
+    async fn reply_wait_issued(&self, message: &str) {
+        crate::test_watchdog::watchdog("tests/exec_client.rs: reply_wait_issued", async {
+            loop {
+                let issued = self.reply_wait.notified();
+                tokio::pin!(issued);
+                issued.as_mut().enable();
+                if self
+                    .reply_waits
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|id| id == message)
+                {
+                    break;
+                }
+                issued.await;
+            }
+        })
+        .await
+        .unwrap();
     }
     fn count(&self, name: &str) -> usize {
         self.seen
@@ -1052,32 +1091,44 @@ async fn reply_mode_waits_while_the_recipient_awaits_its_own_ask() {
         .reply
         .send(answer("Asked Claude; waiting."))
         .unwrap();
+    // The saved Run-ended fact, then one read of the duty it left open.
     let run = accepted.run_id.clone().unwrap();
+    let ended = crate::test_watchdog::watchdog(
+        "recipient Run ended",
+        fixture.control.request(Request::new(
+            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            Command::Wait(WaitArgs {
+                after: None,
+                conditions: vec![WaitCondition::RunEnded {
+                    run_id: run.clone(),
+                }],
+                timeout_ms: 60_000,
+            }),
+        )),
+    )
+    .await
+    .unwrap();
+    assert!(ended.ok, "{:?}", ended.error);
+    assert_eq!(ended.result.unwrap()["status"], "satisfied");
     let saved = duty.clone();
-    let question: String = crate::test_watchdog::watchdog("awaiting own ask", async {
-        loop {
-            let (saved, run) = (saved.clone(), run.clone());
-            let settled: Option<String> = fixture.owner.db.call(move |db| {
-                let completed: bool = db.query_row("SELECT state='completed' FROM run WHERE id=?1", [&run], |r| r.get(0))?;
-                let awaiting: Option<String> = db.query_row("SELECT json_extract(result_json,'$.reply.blocking_message_id') FROM receipt WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='awaiting_own_ask'", [&saved], |r| r.get(0)).ok();
-                Ok(awaiting.filter(|_| completed))
-            }).await.unwrap();
-            if let Some(question) = settled {
-                break question;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .unwrap();
-    // exec read the open duty after the Run completed and is still waiting.
-    crate::test_watchdog::watchdog("exec reads the open duty", async {
-        while fixture.count("MessageGet") == 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .unwrap();
+    let (run_state, reply_state, question): (String, String, String) = fixture
+        .owner
+        .db
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT (SELECT state FROM run WHERE id=?2),json_extract(r.result_json,'$.reply.state'),json_extract(r.result_json,'$.reply.blocking_message_id') FROM receipt r WHERE r.message_node_id=?1",
+                [&saved, &run],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        (run_state.as_str(), reply_state.as_str()),
+        ("completed", "awaiting_own_ask")
+    );
+    // exec classified the duty as open and now waits for its reply.
+    fixture.reply_wait_issued(&duty).await;
     assert!(
         !child.is_finished(),
         "exec must keep waiting while the duty is open"
