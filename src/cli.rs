@@ -2322,6 +2322,7 @@ impl Cli {
                 }),
                 HistoryCommand::Window(a) => C::HistoryWindow(wire::HistoryWindowArgs {
                     include_observation: false,
+                    observe_node_ids: Vec::new(),
                     items: false,
                     thread_id: a.thread_id,
                     ordinal: a.ordinal,

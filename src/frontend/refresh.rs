@@ -1,8 +1,10 @@
-//! One current-view snapshot on the existing finite read/progress admission.
+//! The selected current view from the native owner: header, one window
+//! observation with its display extents and queue, and the bounded pinned
+//! tool nodes' facts from the same observation.
 use super::*;
-use crate::storage::StorageError;
-use history_reader::{HistoryInfo, RawHistory};
-use rusqlite::Connection;
+use history_reader::{Anchor, Page};
+use native_history::Owner;
+use native_page::KnownSubmission;
 
 pub(super) struct Query {
     pub data_dir: std::path::PathBuf,
@@ -15,27 +17,15 @@ pub(super) struct Query {
     pub render_width: u16,
     pub language: crate::config::UiLanguage,
     pub tool_scope: Option<ToolObservation>,
+    pub known: Vec<KnownSubmission>,
 }
 
-struct RawVisible {
-    details: Arc<header::RawHeader>,
-    history: RawHistory,
-    before_cursor: Result<Option<String>, ApiError>,
-    sources: message_metadata::SourceFacts,
-    tools: tools::ToolFacts,
-    recovery: Vec<recovery::Evidence>,
-    usage: Vec<usage::Observation>,
-    received: Option<received::RawSnapshot>,
-    activity: activity::RawProjection,
-    index_pause: Option<crate::index::PauseReason>,
-    context_usage: crate::ui::ContextUsage,
-    tool_scope: Option<ToolObservation>,
-    observed_at: std::time::Instant,
-}
-struct ProjectedVisible {
+/// Pinned tool nodes outside the window share its observation, at most 128.
+const TOOL_SCOPE_NODES: usize = 128;
+
+struct Current {
     details: ThreadDetails,
-    nodes: Vec<UiNode>,
-    info: HistoryInfo,
+    page: Page,
     before_cursor: Option<String>,
     received: Option<received::Prepared>,
     activity: activity::Projection,
@@ -43,141 +33,125 @@ struct ProjectedVisible {
     tool_scope: Option<ToolObservation>,
 }
 
-#[cfg(test)]
-fn read_visible_tx(
-    db: &Connection,
+#[allow(clippy::too_many_arguments)]
+async fn read_current(
+    control: &Control,
+    owner: &Owner<'_>,
     thread: &str,
-    tool_scope: Option<ToolObservation>,
-    waits: Option<&[(String, String)]>,
-    sequence: u64,
-) -> Result<RawVisible, StorageError> {
-    read_visible_tx_limited(
-        db,
-        thread,
-        tool_scope,
-        waits,
-        sequence,
-        3,
-        header::read_tx(db, thread).map(Arc::new),
-    )
-}
-
-fn read_visible_tx_limited(
-    db: &Connection,
-    thread: &str,
-    tool_scope: Option<ToolObservation>,
-    waits: Option<&[(String, String)]>,
-    sequence: u64,
-    limit: usize,
-    details: Result<Arc<header::RawHeader>, StorageError>,
-) -> Result<RawVisible, StorageError> {
+    render_width: u16,
+    language: crate::config::UiLanguage,
+    known: &[KnownSubmission],
+    mut tool_scope: Option<ToolObservation>,
+    stop: CancellationToken,
+) -> Result<Current, ApiError> {
     if tool_scope
         .as_ref()
-        .is_some_and(|scope| scope.nodes.len() > 128)
+        .is_some_and(|scope| scope.nodes.len() > TOOL_SCOPE_NODES)
     {
         return Err(ApiError::new(
             ErrorCode::InputLimit,
             "Visible tool source scope exceeds its node bound",
-        )
-        .into());
+        ));
     }
-    let details = details?;
-    let (mut history, before_cursor) = history_reader::query_current_tx(db, thread)?;
-    let page_ids = history.source_ids().map(str::to_owned).collect::<Vec<_>>();
-    let mut sources = message_metadata::read_tx(db, Some(thread), &page_ids)?;
-    let mut tools = tools::read_nodes_tx(db, &page_ids)?;
-    if let Some(scope) = &tool_scope {
-        let ids = scope
-            .nodes
-            .iter()
-            .map(|node| node.node_id.clone())
-            .collect::<Vec<_>>();
-        sources.append(message_metadata::read_tx(db, Some(thread), &ids)?)?;
-        tools.append(tools::read_nodes_tx(db, &ids)?);
-    }
-    let recovery = recovery::read_tx(db, &history.event_requests())?;
-    let usage = usage::read_tx(db, &history.assistant_requests())?;
-    let received = received::query_tx(
-        db,
-        thread,
-        received::Scope {
-            selection_revision: history.info().revision,
-            view_revision: None,
+    let details = super::native_header(owner.data_dir, owner.instance, thread).await?;
+    let pinned = tool_scope
+        .as_ref()
+        .map(|scope| {
+            scope
+                .nodes
+                .iter()
+                .map(|node| node.node_id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let page = history_reader::read_page(
+        control,
+        owner,
+        render_width,
+        known,
+        history_reader::Metadata::Snapshot(stop.clone()),
+        history_reader::window_args(thread, Anchor::Tail, 49, 0, pinned),
+        None,
+        |items| 0..items.len(),
+        |_| None,
+    )
+    .await?;
+    let before_cursor = history_reader::before_cursor(thread, page.info.first, page.info.revision)?;
+    let read_revision = page.info.read_revision;
+    let target = thread.to_owned();
+    let selection_revision = page.info.revision;
+    let pinned_ids = tool_scope
+        .as_ref()
+        .map(|scope| {
+            scope
+                .nodes
+                .iter()
+                .map(|node| node.node_id.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    // Read-only snapshot reads: they never wait behind the owner's writer.
+    let raw = snapshot::read(
+        control.store.database.path().to_path_buf(),
+        stop.clone(),
+        move |db| {
+            let sources = message_metadata::read_tx(db, Some(&target), &pinned_ids)?;
+            let received = received::query_tx(
+                db,
+                &target,
+                received::Scope {
+                    selection_revision,
+                    view_revision: None,
+                },
+            )?;
+            // Existing bounded display read; a limit error is an unknown value.
+            let usage = match crate::compaction::context_usage::read_context_usage_tx(
+                db,
+                &target,
+                Some(512),
+            ) {
+                Ok(raw) => raw.reported_usage().into(),
+                Err(crate::storage::StorageError::Operation(_)) => Default::default(),
+                Err(error) => return Err(error),
+            };
+            Ok((sources, received, usage))
         },
-    )?;
-    let activity = activity::read_tx_with_limit(db, thread, waits, limit)?;
-    // Existing bounded display read; a limit error is an unknown value, not a failed view.
-    let context_usage =
-        match crate::compaction::context_usage::read_context_usage_tx(db, thread, Some(512)) {
-            Ok(raw) => raw.reported_usage().into(),
-            Err(StorageError::Operation(_)) => Default::default(),
-            Err(error) => return Err(error),
-        };
-    // Admission order belongs to the whole paired observation, not read completion.
-    history.set_read_revision(sequence);
-    Ok(RawVisible {
-        details,
-        history,
-        before_cursor,
-        sources,
-        tools,
-        recovery,
-        usage,
-        received,
-        activity,
-        context_usage,
-        tool_scope,
-        index_pause: None,
-        observed_at: std::time::Instant::now(),
-    })
-}
-
-fn project(
-    raw: RawVisible,
-    width: u16,
-    language: crate::config::UiLanguage,
-) -> Result<ProjectedVisible, ApiError> {
-    let RawVisible {
-        details,
-        history,
-        before_cursor,
-        sources,
-        tools,
-        recovery,
-        usage,
-        received,
-        activity,
-        context_usage,
-        mut tool_scope,
-        index_pause,
-        observed_at,
-    } = raw;
-    let (mut nodes, info, _) = history.project_page(width, None, language);
-    message_metadata::apply(&mut nodes, &sources);
-    tools::apply(&mut nodes, &tools);
-    recovery::apply(&mut nodes, recovery, language);
-    usage::apply(&mut nodes, usage);
+    )
+    .await;
+    let (sources, received, context_usage) = checked_storage(control, raw).await?;
     if let Some(scope) = &mut tool_scope {
-        message_metadata::apply(&mut scope.nodes, &sources);
-        tools::apply(&mut scope.nodes, &tools);
-        for node in &mut scope.nodes {
-            node.presentation.read_revision = info.read_revision;
-        }
+        let tools = page.observation.tools.clone();
+        let mut nodes = std::mem::take(&mut scope.nodes);
+        nodes = presentation_work(move || {
+            message_metadata::apply(&mut nodes, &sources);
+            tools::reset_observations(&mut nodes);
+            tools::apply_window(&mut nodes, &tools);
+            for node in &mut nodes {
+                node.presentation.read_revision = read_revision;
+            }
+            nodes
+        })
+        .await?;
+        scope.nodes = nodes;
     }
-    let mut received = received.map(|snapshot| received::prepare(snapshot, width, language));
-    if let Some(prepared) = &mut received {
-        for (_, node) in &mut prepared.nodes {
-            node.presentation.read_revision = info.read_revision;
-        }
-    }
-    let mut activity = activity::prepare(activity);
-    activity.snapshot.index_pause = index_pause;
-    activity.observed_at = observed_at;
-    Ok(ProjectedVisible {
+    let received = match received {
+        Some(snapshot) => Some(
+            presentation_work(move || {
+                let mut prepared = received::prepare(snapshot, render_width, language);
+                for (_, node) in &mut prepared.nodes {
+                    node.presentation.read_revision = read_revision;
+                }
+                prepared
+            })
+            .await?,
+        ),
+        None => None,
+    };
+    let activity = activity::read_cancellable(control, thread, stop).await?;
+    Ok(Current {
         details: details.prepare_for_ui(language),
-        nodes,
-        info,
-        before_cursor: before_cursor?,
+        page,
+        before_cursor,
         received,
         activity,
         context_usage,
@@ -205,11 +179,16 @@ pub(super) async fn run(
         render_width,
         language,
         tool_scope,
+        known,
     } = query;
     let _permit = permit;
+    let owner = Owner {
+        data_dir: &data_dir,
+        instance: &instance_id,
+    };
     tokio::select! {biased;_=stop.cancelled()=>{},_=async {
+        let receipts = native_page::receipts(&owner, &ids).await;
         if !visible || generation.is_none() {
-            let receipts=receipt_states(&control,ids).await;
             let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:None,epoch,generation}).await;
             return;
         }
@@ -217,59 +196,36 @@ pub(super) async fn run(
         let tool_revision=tool_scope.as_ref().map(|scope|scope.revision);
         let Ok(_progress_permit)=progress_slots.acquire_owned().await else {
             let error=ApiError::new(ErrorCode::InvalidState,"Current-view progress admission is closed");
-            let receipts=receipt_states(&control,ids).await;
             if let Some(revision)=tool_revision {
                 update(&updates,UiUpdate::ToolFacts {thread_id:thread.clone(),generation,revision,result:Err(error.to_string())}).await;
             }
             let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(Err(error)),epoch,generation:Some(generation)}).await;
             return;
         };
-        let target=thread.clone();
-        let waits=control.pending_wait_sources();
-        let limit=control.store.config.ui.live_work_rows;
-        let index=control.index.clone();
-        let holds=control.message_holds();
-        let details = super::native_header(&data_dir, &instance_id, &thread).await.map(Arc::new).map_err(StorageError::from);
-        let read=snapshot::read_sequenced(
-            control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
-            let receipts = receipt_states_tx(db, &ids)?;
-            let visible = read_visible_tx_limited(db, &target, tool_scope, waits.as_deref(), sequence, limit, details).and_then(|mut raw| {
-                raw.history.project_message_holds(db, &holds)?;
-                raw.index_pause = index.read_display_pause(db)?;
-                Ok(raw)
-            });
-            Ok((receipts, visible))
-        }).await;
+        let current = read_current(&control, &owner, &thread, render_width, language, &known, tool_scope, stop.clone()).await;
         drop(_progress_permit);
-        let (receipts, visible) = match checked_storage(&control, read).await {
-            Ok(((receipts, visible), _)) => (Ok(receipts), visible.map_err(snapshot::storage_error)),
-            Err(error) => (Err(error.clone()), Err(error)),
-        };
         let result=async {
-            let raw=checked_storage(&control,visible).await?;
-            // Rendering, sender/model-error JSON, decoding and timestamp work
-            // begin only after the readonly snapshot released its transaction.
-            let mut frame=presentation_work(move || project(raw,render_width,language)).await??;
-            let page_len=frame.nodes.len();
-            if let Some(scope)=&mut frame.tool_scope {frame.nodes.append(&mut scope.nodes);}
+            let Current {details, page, before_cursor, received, activity, context_usage, mut tool_scope} = current?;
+            let Page {mut nodes, info, ..} = page;
+            let page_len=nodes.len();
+            if let Some(scope)=&mut tool_scope {nodes.append(&mut scope.nodes);}
             // Raw previews are owned by visible UI items, not every Changed snapshot.
-            streams::seal_nodes(&mut frame.nodes).await?;
-            if let Some(scope)=&mut frame.tool_scope {scope.nodes=frame.nodes.split_off(page_len);}
-            let received=frame.received.map(|received|Box::new(UiUpdate::IncompleteResponses {
+            streams::seal_nodes(&mut nodes).await?;
+            if let Some(scope)=&mut tool_scope {scope.nodes=nodes.split_off(page_len);}
+            let received=received.map(|received|Box::new(UiUpdate::IncompleteResponses {
                 thread_id:thread.clone(),generation,selection_revision:received.selection_revision,
                 view_revision:None,root_revision:received.root_revision,nodes:received.nodes,
             }));
-            let info=frame.info;
             update(&updates,UiUpdate::CurrentView {
-                generation,details:frame.details,context_usage:frame.context_usage,
+                generation,details,context_usage,
                 history:Box::new(UiUpdate::History {
-                    thread_id:thread.clone(),generation,nodes:frame.nodes,pending:info.pending,
-                    read_revision:info.read_revision,before_cursor:frame.before_cursor,append:false,
+                    thread_id:thread.clone(),generation,nodes,pending:info.pending,
+                    read_revision:info.read_revision,before_cursor,append:false,
                     first_ordinal:info.first,selection_revision:info.revision,total_nodes:info.total,
                 }),
-                received,tool_facts:frame.tool_scope,committed:info.committed,
+                received,tool_facts:tool_scope,committed:info.committed,
             }).await;
-            Ok(frame.activity)
+            Ok(activity)
         }.await;
         let result=checked_storage(&control,result).await;
         if let Err(error)=&result {
@@ -285,15 +241,114 @@ pub(super) async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::StorageError;
     use crate::{
         app::DataOwner,
         presentation::{BlockKind, InputSource, NodePresentation, ToolPresentation},
     };
+    use rusqlite::Connection;
     use serde_json::json;
 
-    #[test]
-    fn oversized_paused_scope_is_rejected_before_any_unbounded_source_query() {
-        let db = Connection::open_in_memory().unwrap();
+    fn items(window: &crate::protocol::HistoryWindow) -> Vec<(String, String)> {
+        window
+            .items
+            .iter()
+            .map(|item| (item.node_id.clone(), item.kind.clone()))
+            .collect()
+    }
+
+    struct Observed {
+        receipts: Result<Vec<(String, ReceiptStatus)>, ApiError>,
+        progress: Option<Result<activity::Projection, ApiError>>,
+        view: Option<(
+            ThreadDetails,
+            crate::ui::ContextUsage,
+            Box<UiUpdate>,
+            Option<ToolObservation>,
+        )>,
+    }
+
+    /// One native current-view refresh, collected from its outputs.
+    async fn refresh(
+        control: &Arc<Control>,
+        data_dir: &std::path::Path,
+        ids: Vec<String>,
+        tool_scope: Option<ToolObservation>,
+    ) -> Observed {
+        let (updates, received) = std::sync::mpsc::sync_channel(64);
+        let (sender, mut results) = mpsc::channel(8);
+        let permit = Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap();
+        crate::test_watchdog::watchdog(
+            "native current view",
+            run(
+                Query {
+                    data_dir: data_dir.to_path_buf(),
+                    instance_id: control.store.instance_id.clone(),
+                    thread: "t".into(),
+                    ids,
+                    generation: Some(1),
+                    visible: true,
+                    epoch: 0,
+                    render_width: 80,
+                    language: crate::config::UiLanguage::Ja,
+                    tool_scope,
+                    known: Vec::new(),
+                },
+                control.clone(),
+                updates,
+                sender,
+                CancellationToken::new(),
+                Arc::new(Semaphore::new(1)),
+                permit,
+            ),
+        )
+        .await
+        .unwrap();
+        let mut observed = Observed {
+            receipts: Ok(Vec::new()),
+            progress: None,
+            view: None,
+        };
+        while let Ok(result) = results.try_recv() {
+            if let BackgroundResult::Refreshed {
+                receipts, progress, ..
+            } = result
+            {
+                observed.receipts = receipts;
+                observed.progress = progress;
+            }
+        }
+        observed.view = received.try_iter().find_map(|update| match update {
+            UiUpdate::CurrentView {
+                details,
+                context_usage,
+                history,
+                tool_facts,
+                ..
+            } => Some((details, context_usage, history, tool_facts)),
+            _ => None,
+        });
+        observed
+    }
+
+    async fn served(
+        root: &tempfile::TempDir,
+    ) -> (DataOwner, Arc<Control>, crate::ipc::LocalServer) {
+        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+            .await
+            .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let (rpc, dispatcher) = mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(dispatcher));
+        control.start().await.unwrap();
+        (owner, control, server)
+    }
+
+    #[tokio::test]
+    async fn oversized_paused_scope_is_rejected_before_any_owner_read() {
+        let root = tempfile::tempdir().unwrap();
+        let (owner, control, server) = served(&root).await;
         let scope = ToolObservation {
             revision: 7,
             view_revision: 3,
@@ -304,17 +359,12 @@ mod tests {
                 })
                 .collect(),
         };
-        let error = read_visible_tx(
-            &db,
-            "not-read",
-            Some(scope),
-            Some(&[]),
-            message_queue::read_revision(),
-        )
-        .err()
-        .unwrap()
-        .into_api_error();
+        let observed = refresh(&control, &owner.loaded.data_dir, vec![], Some(scope)).await;
+        let error = observed.progress.unwrap().err().unwrap();
         assert_eq!(error.code, ErrorCode::InputLimit);
+        assert!(observed.view.is_none());
+        server.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -363,7 +413,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let old = crate::frontend::read_window_facts(&tx, &window.items).unwrap();
+        let old = crate::frontend::read_window_facts(&tx, &items(&window), &[]).unwrap();
         assert!(
             old.tools
                 .calls
@@ -376,7 +426,7 @@ mod tests {
         tx.commit().unwrap();
         let later = observed_window(&read).unwrap();
         assert_eq!(later.revision, window.revision);
-        let fresh = crate::frontend::read_window_facts(&read, &later.items).unwrap();
+        let fresh = crate::frontend::read_window_facts(&read, &items(&later), &[]).unwrap();
         assert!(
             fresh
                 .tools
@@ -417,11 +467,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn current_page_queue_paused_facts_and_activity_are_owned_one_snapshot() {
+    async fn current_page_queue_paused_facts_and_activity_share_one_observation() {
         let root = tempfile::tempdir().unwrap();
-        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
-            .await
-            .unwrap();
+        let (owner, control, server) = served(&root).await;
         owner.db.call(|db| {
             let tx=db.transaction()?;
             tx.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','before','/','','p','m','now');
@@ -458,62 +506,54 @@ mod tests {
                 ..Default::default()
             }],
         };
-        let (raw, receipts, admitted_sequence) = owner
-            .db
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let receipts = receipt_states_tx(&tx, &["queued".into()])?;
-                let admitted_sequence = message_queue::read_revision();
-                let raw = read_visible_tx(&tx, "t", Some(scope), Some(&[]), admitted_sequence)?;
-                tx.commit()?;
-                Ok((raw, receipts, admitted_sequence))
-            })
-            .await
-            .unwrap();
-        assert_eq!(receipts, [("queued".into(), ReceiptStatus::Held)]);
-        owner.db.call(|db| {
-            db.execute_batch("UPDATE thread SET title='later',model_id='later-model' WHERE id='t'; UPDATE receipt SET state='cancelled' WHERE message_node_id='queued';")?;Ok(())
-        }).await.unwrap();
-        let frame = presentation_work(move || project(raw, 80, crate::config::UiLanguage::Ja))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(frame.details.title, "before");
-        assert_eq!(frame.details.model, "m");
+        let observed = refresh(
+            &control,
+            &owner.loaded.data_dir,
+            vec!["queued".into()],
+            Some(scope),
+        )
+        .await;
         assert_eq!(
-            frame.context_usage,
+            observed.receipts.unwrap(),
+            [("queued".into(), ReceiptStatus::Held)]
+        );
+        let (details, context_usage, history, scope) = observed.view.unwrap();
+        assert_eq!(details.title, "before");
+        assert_eq!(details.model, "m");
+        assert_eq!(
+            context_usage,
             crate::ui::ContextUsage {
                 input_tokens: Some(140),
                 cached_tokens: Some(120),
                 output_tokens: Some(20)
             }
         );
-        assert_eq!(frame.info.pending.total, 1);
-        assert_eq!(frame.info.pending.items[0].message_id, "queued");
-        assert!(admitted_sequence > 0);
-        assert_eq!(frame.info.read_revision, admitted_sequence);
+        let UiUpdate::History {
+            nodes,
+            pending,
+            read_revision,
+            ..
+        } = *history
+        else {
+            panic!("selected history")
+        };
+        assert_eq!(pending.total, 1);
+        assert_eq!(pending.items[0].message_id, "queued");
+        assert!(read_revision > 0);
         assert!(
-            frame
-                .nodes
+            nodes
                 .iter()
-                .all(|node| node.presentation.read_revision == frame.info.read_revision)
+                .all(|node| node.presentation.read_revision == read_revision)
         );
-        let input = frame
-            .nodes
-            .iter()
-            .find(|node| node.node_id == "input")
-            .unwrap();
+        let input = nodes.iter().find(|node| node.node_id == "input").unwrap();
         assert_eq!(
             input.presentation.input_source,
             InputSource::Unknown,
             "explicit CLI label does not confer human-band authority"
         );
-        let scope = frame.tool_scope.unwrap();
+        let scope = scope.unwrap();
         assert_eq!((scope.revision, scope.view_revision), (7, 3));
-        assert_eq!(
-            scope.nodes[0].presentation.read_revision,
-            frame.info.read_revision
-        );
+        assert_eq!(scope.nodes[0].presentation.read_revision, read_revision);
         assert_eq!(
             scope.nodes[0].presentation.blocks[0]
                 .tool
@@ -523,11 +563,11 @@ mod tests {
                 .as_deref(),
             Some("g")
         );
-        assert!(frame.received.unwrap().nodes.is_empty());
         assert_eq!(
-            frame.activity.snapshot.phase,
+            observed.progress.unwrap().unwrap().snapshot.phase,
             crate::activity::ActivityPhase::Completed
         );
+        server.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
 
@@ -550,19 +590,19 @@ mod tests {
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn source_kind_filters_match_existing_recovery_and_usage_projections() {
+        const ADOPTED: &str = "00000000-0000-4000-8000-00000000000a";
+        const FAILED: &str = "00000000-0000-4000-8000-0000000000ff";
         let root = tempfile::tempdir().unwrap();
-        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
-            .await
-            .unwrap();
-        let raw=owner.db.call(|db| {
+        let (owner, control, server) = served(&root).await;
+        owner.db.call(|db| {
             let tx=db.transaction()?;
             tx.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','saved','/','','p','m','2026-01-01T00:00:00Z');
                 INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:03Z');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:03Z');
-                INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'a','u',0,0,'p','m',0,'completed','{}','{\"input_tokens_details\":{\"cached_tokens\":17}}','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z');
                 INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('resume','context_changed','{}','t','{\"kind\":\"recovery_resumed\",\"change\":{\"run_id\":\"r\",\"turn_id\":\"u\"}}','2026-01-01T00:00:02Z');")?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES('conversation','t',?1,'u',0,0,'p','m',0,'completed','{}','{\"input_tokens_details\":{\"cached_tokens\":17}}','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z')",[ADOPTED])?;
             let failure=json!({"error":crate::model::ModelError::new("provider","saved failure")}).to_string();
-            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),'failed','u',0,0,'p','m',0,'failed','{}',?1,'2026-01-01T00:00:00Z','2026-01-01T00:00:01Z')",[failure])?;
+            tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at,ended_at)VALUES('conversation','t',?1,'u',0,0,'p','m',0,'failed','{}',?2,'2026-01-01T00:00:00Z','2026-01-01T00:00:01Z')",rusqlite::params![FAILED,failure])?;
             for (ordinal,id,kind,payload) in [
                 (0,"actual-event","event",json!({"event_id":"resume"})),
                 (1,"spoof-assistant","assistant_response",json!({"event_id":"resume","text":"paid assistant response"})),
@@ -570,26 +610,33 @@ mod tests {
             ] {
                 crate::history::append_node(&tx,"t",id,Some("u"),kind,&payload,"2026-01-01T00:00:02Z")?;
                 if kind!="event" {
-                    tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('a',?1,'message','completed','{}',?2)",rusqlite::params![ordinal,id])?;
+                    tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES(?1,?2,'message','completed','{}',?3)",rusqlite::params![ADOPTED,ordinal,id])?;
                 }
             }
-            let raw=read_visible_tx(&tx,"t",None,Some(&[]),message_queue::read_revision())?;
-            assert_eq!(raw.recovery.len(),1,"a non-event carrying event_id is not a recovery observation");
-            tx.commit()?;Ok(raw)
+            tx.commit()?;Ok(())
         }).await.unwrap();
-        let frame = presentation_work(move || project(raw, 80, crate::config::UiLanguage::Ja))
-            .await
-            .unwrap()
-            .unwrap();
-        let event = frame
-            .nodes
+        let observed = refresh(&control, &owner.loaded.data_dir, vec![], None).await;
+        let (_, _, history, _) = observed.view.unwrap();
+        let UiUpdate::History { nodes, .. } = *history else {
+            panic!("selected history")
+        };
+        // Page projection follows the owner's configured UI language.
+        let resumed = match control.store.config.ui.language {
+            crate::config::UiLanguage::Ja => "復旧再開",
+            crate::config::UiLanguage::En => "Resume",
+        };
+        let event = nodes
             .iter()
             .find(|node| node.node_id == "actual-event")
             .unwrap();
-        assert!(event.presentation.title.starts_with("復旧再開"));
+        assert!(
+            event.presentation.title.starts_with(resumed),
+            "{}",
+            event.presentation.title
+        );
         for id in ["spoof-assistant", "plain-assistant"] {
-            let node = frame.nodes.iter().find(|node| node.node_id == id).unwrap();
-            assert!(!node.presentation.title.starts_with("復旧再開"));
+            let node = nodes.iter().find(|node| node.node_id == id).unwrap();
+            assert!(!node.presentation.title.starts_with(resumed));
             assert!(
                 !node
                     .presentation
@@ -606,8 +653,10 @@ mod tests {
                 "both existing assistant projector kinds retain exact adopted usage"
             );
         }
+        server.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn selected_snapshot_reflects_persisted_index_pause_and_clear() {
         let root = tempfile::tempdir().unwrap();
@@ -685,6 +734,7 @@ mod tests {
                         render_width: 80,
                         language: crate::config::UiLanguage::Ja,
                         tool_scope: None,
+                        known: Vec::new(),
                     },
                     control.clone(),
                     updates,
@@ -776,6 +826,7 @@ mod tests {
                     render_width: 80,
                     language: crate::config::UiLanguage::Ja,
                     tool_scope: None,
+                    known: Vec::new(),
                 },
                 control.clone(),
                 updates,
@@ -969,9 +1020,7 @@ mod tests {
     #[tokio::test]
     async fn pending_automatic_title_does_not_claim_selected_path_admission() {
         let root = tempfile::tempdir().unwrap();
-        let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
-            .await
-            .unwrap();
+        let (owner, control, server) = served(&root).await;
         owner.db.call(|db| {
             let tx=db.transaction()?;
             tx.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','','/','','p','m','now');
@@ -980,42 +1029,41 @@ mod tests {
             shellboy_fixture_input(&tx,"saved pending title",false)?;
             tx.commit()?;Ok(())
         }).await.unwrap();
-        let path = owner.db.path().to_path_buf();
-        let (before, before_sequence) =
-            snapshot::read_sequenced(path.clone(), CancellationToken::new(), |db, sequence| {
-                read_visible_tx(db, "t", None, Some(&[]), sequence)
-            })
-            .await
-            .unwrap();
+        let history = |observed: Observed| {
+            let (details, _, history, _) = observed.view.unwrap();
+            let UiUpdate::History {
+                nodes,
+                pending,
+                read_revision,
+                ..
+            } = *history
+            else {
+                panic!("selected history")
+            };
+            (details, nodes, pending, read_revision)
+        };
+        let (before, nodes, pending, before_sequence) =
+            history(refresh(&control, &owner.loaded.data_dir, vec![], None).await);
+        assert_eq!(before.title, "saved pending title");
+        assert!(nodes.is_empty());
+        assert_eq!(pending.items[0].message_id, "saved pending title");
         owner.db.call(|db| {
             let tx=db.transaction()?;
             assert_eq!(crate::history::append_existing_nodes(&tx,"t",0,&["saved pending title".into()],"now")?,1);
             tx.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id='saved pending title'",[])?;
             tx.commit()?;Ok(())
         }).await.unwrap();
-        let (after, after_sequence) =
-            snapshot::read_sequenced(path, CancellationToken::new(), |db, sequence| {
-                read_visible_tx(db, "t", None, Some(&[]), sequence)
-            })
-            .await
-            .unwrap();
-        let before = project(before, 80, crate::config::UiLanguage::Ja).unwrap();
-        assert_eq!(before.details.title, "saved pending title");
-        assert!(before.nodes.is_empty());
-        assert_eq!(
-            before.info.pending.items[0].message_id,
-            "saved pending title"
-        );
-        let after = project(after, 80, crate::config::UiLanguage::Ja).unwrap();
-        assert_eq!(after.details.title, "saved pending title");
+        let (after, nodes, pending, after_sequence) =
+            history(refresh(&control, &owner.loaded.data_dir, vec![], None).await);
+        assert_eq!(after.title, "saved pending title");
         assert!(
-            after
-                .nodes
+            nodes
                 .iter()
                 .any(|node| node.role == "user" && node.text.contains("saved pending title"))
         );
-        assert_eq!(after.info.pending.total, 0);
+        assert_eq!(pending.total, 0);
         assert!(after_sequence > before_sequence);
+        server.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
 }

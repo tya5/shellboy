@@ -1,10 +1,5 @@
 //! Saved attempt usage for F6; never infer the attempt from the latest Turn.
-use crate::{
-    control::Control,
-    presentation::{PresentationField, PresentationKind},
-    protocol::ApiError,
-    ui::UiNode,
-};
+use crate::{presentation::PresentationField, ui::UiNode};
 use std::collections::HashMap;
 
 use crate::presentation::fields::{
@@ -50,14 +45,14 @@ pub(super) struct Observation {
 impl Observation {
     pub(super) fn into_window(
         self,
-        items: &[crate::protocol::HistorySnippet],
+        items: &[(String, String)],
     ) -> crate::protocol::HistoryWindowUsage {
         use crate::model::wire_bytes::Category;
         use crate::protocol::{
             HistoryWindowInputBytes, HistoryWindowUsage, HistoryWindowUsageSource,
         };
         HistoryWindowUsage {
-            node_id: items[self.index].node_id.clone(),
+            node_id: items[self.index].0.clone(),
             sources: self
                 .sources
                 .into_iter()
@@ -76,18 +71,6 @@ impl Observation {
                 .collect(),
         }
     }
-}
-
-pub(super) fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
-    nodes
-        .iter()
-        .enumerate()
-        .filter(|(_, node)| {
-            node.presentation.kind == PresentationKind::Assistant
-                && !node.presentation.provisional_stream
-        })
-        .map(|(index, node)| (index, node.node_id.clone()))
-        .collect()
 }
 
 pub(super) fn read_tx(
@@ -130,21 +113,6 @@ pub(super) fn read_tx(
             sources: sources.get(node).cloned().unwrap_or_default(),
         })
         .collect())
-}
-
-pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
-    let requests = requests(nodes);
-    if requests.is_empty() {
-        return Ok(());
-    }
-    let observations = control
-        .store
-        .database
-        .call(move |db| read_tx(db, &requests))
-        .await
-        .map_err(|error| error.into_api_error())?;
-    apply(nodes, observations);
-    Ok(())
 }
 
 /// Apply the selected window's adopted-attempt usage to the nodes it names.

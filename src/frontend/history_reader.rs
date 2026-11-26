@@ -1,12 +1,15 @@
-//! Bounded saved-history query, projection, enrichment and delivery.
+//! Selected-history pages, positioned windows and node hydration from the
+//! native owner: one fenced window observation plus positioned display reads.
+use super::native_history::{Owner, SelectedWindow};
+use super::native_page::KnownSubmission;
 use super::*;
-use crate::storage::StorageError;
-use rusqlite::{Connection, OptionalExtension};
+use crate::protocol::{HistoryDisplayPosition, HistoryWindowArgs};
 
 pub(super) struct HistoryReader<'a> {
     control: &'a Control,
     updates: &'a dyn UpdateTarget,
     width: u16,
+    known: Vec<KnownSubmission>,
 }
 pub(super) struct Reply {
     thread: String,
@@ -56,13 +59,8 @@ impl WindowReply {
         )
         .await;
     }
-    async fn deliver(
-        &self,
-        updates: &dyn UpdateTarget,
-        nodes: Vec<UiNode>,
-        info: HistoryInfo,
-        anchor: ViewAnchor,
-    ) {
+    async fn deliver(&self, updates: &dyn UpdateTarget, page: Page, anchor: ViewAnchor) {
+        let Page { nodes, info, .. } = page;
         stream_commits(
             updates,
             &self.target.thread,
@@ -112,118 +110,289 @@ pub(super) struct HistoryInfo {
     pub(super) total: u64,
     pub(super) committed: Vec<(String, String)>,
     pub(super) pending: PendingMessages,
+    /// The owner's observation admission order for this selected window.
     pub(super) read_revision: u64,
 }
-pub(super) struct RawHistory {
-    rows: Vec<PathNode>,
-    info: HistoryInfo,
+
+/// A page cap shared with the window positions the TUI requests.
+const PAGE_NODES: u32 = 50;
+
+/// Where a window is anchored: the path's end, one exact ordinal, or a node.
+pub(super) enum Anchor {
+    Tail,
+    Ordinal(u64),
+    Node(String),
 }
-impl RawHistory {
-    pub(super) fn project_message_holds(
-        &mut self,
-        db: &Connection,
-        owner: &crate::control::message_delivery::MessageHolds,
-    ) -> rusqlite::Result<()> {
-        message_queue::project_holds(db, owner, &mut self.info.pending)
-    }
 
-    /// Borrow only the identities in this bounded page, without cloning payloads.
-    pub(super) fn source_ids(&self) -> impl Iterator<Item = &str> {
-        self.rows.iter().map(|row| row.node.id.as_str())
+pub(super) fn window_args(
+    thread: &str,
+    anchor: Anchor,
+    before: u32,
+    after: u32,
+    observe_node_ids: Vec<String>,
+) -> HistoryWindowArgs {
+    let (ordinal, node_id) = match anchor {
+        Anchor::Tail => (None, None),
+        Anchor::Ordinal(ordinal) => (Some(ordinal), None),
+        Anchor::Node(node) => (None, Some(node)),
+    };
+    HistoryWindowArgs {
+        thread_id: thread.to_owned(),
+        include_observation: true,
+        observe_node_ids,
+        items: false,
+        ordinal,
+        node_id,
+        expect_node_id: None,
+        before,
+        after,
+        excerpt_chars: 0,
     }
+}
 
-    pub(super) fn info(&self) -> &HistoryInfo {
-        &self.info
-    }
-    pub(super) fn set_read_revision(&mut self, read_revision: u64) {
-        self.info.read_revision = read_revision;
-    }
+/// One projected selected page with the facts and queue it was read with.
+pub(super) struct Page {
+    pub(super) nodes: Vec<UiNode>,
+    pub(super) info: HistoryInfo,
+    pub(super) anchor: Option<ViewAnchor>,
+    pub(super) observation: crate::protocol::HistoryWindowObservation,
+}
 
-    pub(super) fn assistant_requests(&self) -> Vec<(usize, String)> {
-        self.rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| matches!(row.node.kind.as_str(), "assistant_response" | "assistant"))
-            .map(|(index, row)| (index, row.node.id.clone()))
-            .collect()
+fn display_position(position: NodePosition) -> HistoryDisplayPosition {
+    match position {
+        NodePosition::At(offset) => HistoryDisplayPosition::Absolute {
+            offset: offset as u64,
+        },
+        NodePosition::FromEnd(offset) => HistoryDisplayPosition::FromEnd {
+            offset: offset as u64,
+        },
     }
+}
 
-    pub(super) fn event_requests(&self) -> Vec<(usize, String)> {
-        self.rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.node.kind == "event")
-            .map(|(index, row)| (index, row.node.id.clone()))
-            .collect()
-    }
+/// How a page reads its saved source metadata: the history worker's enrichment
+/// with branch and compaction markers, or the current view's read-only snapshot
+/// that never waits behind the owner's writer.
+pub(super) enum Metadata {
+    Enriched,
+    Snapshot(CancellationToken),
+}
 
-    /// Project on the existing finite presentation worker, never the DB worker.
-    pub(super) fn project_page(
-        self,
-        width: u16,
-        anchor: Option<ViewAnchor>,
-        language: crate::config::UiLanguage,
-    ) -> (Vec<UiNode>, HistoryInfo, Option<ViewAnchor>) {
-        self.project(width, language, |_, row| {
-            anchor
-                .as_ref()
-                .filter(|anchor| anchor.node_id.as_deref() == Some(&row.node.id))
-                .map(|anchor| NodePosition::At(anchor.char_offset))
+/// Read and project one selected window. `wanted` names the node whose
+/// extent follows a source position; every other node shows its tail.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn read_page(
+    control: &Control,
+    owner: &Owner<'_>,
+    width: u16,
+    known: &[KnownSubmission],
+    metadata: Metadata,
+    args: HistoryWindowArgs,
+    expected_revision: Option<u64>,
+    keep: impl FnOnce(&[crate::protocol::HistorySnippet]) -> std::ops::Range<usize>,
+    wanted: impl Fn(&crate::protocol::HistorySnippet) -> Option<NodePosition>,
+) -> Result<Page, ApiError> {
+    let thread = args.thread_id.clone();
+    let window = owner
+        .selected(args, expected_revision, keep, |source| {
+            wanted(source).map_or(HistoryDisplayPosition::Tail, display_position)
         })
-    }
+        .await?;
+    project_page(
+        control, owner, width, known, metadata, &thread, window, wanted,
+    )
+    .await
+}
 
-    // Called only on the existing finite presentation worker. Choose an offset
-    // before consuming each row, then normalize the resulting canonical anchor.
-    fn project(
-        self,
-        width: u16,
-        language: crate::config::UiLanguage,
-        mut position: impl FnMut(usize, &PathNode) -> Option<NodePosition>,
-    ) -> (Vec<UiNode>, HistoryInfo, Option<ViewAnchor>) {
-        let mut anchor = None;
-        let read_revision = self.info.read_revision;
-        let nodes = self
-            .rows
+#[allow(clippy::too_many_arguments)]
+async fn project_page(
+    control: &Control,
+    owner: &Owner<'_>,
+    width: u16,
+    known: &[KnownSubmission],
+    metadata: Metadata,
+    thread: &str,
+    window: SelectedWindow,
+    wanted: impl Fn(&crate::protocol::HistorySnippet) -> Option<NodePosition>,
+) -> Result<Page, ApiError> {
+    let SelectedWindow {
+        revision,
+        total,
+        observation,
+        nodes,
+    } = window;
+    let pending = super::native_page::queue(owner, thread, &observation.pending, known).await?;
+    let first = nodes
+        .first()
+        .map_or(0, |node| node.source.selection.ordinal);
+    let anchor = nodes.iter().find_map(|node| {
+        wanted(&node.source).map(|position| ViewAnchor {
+            node_id: Some(node.source.node_id.clone()),
+            char_offset: position.offset(node.display.total_chars as usize),
+        })
+    });
+    let language = control.store.config.ui.language;
+    let mut projected = presentation_work(move || {
+        nodes
             .into_iter()
-            .enumerate()
-            .map(|(index, row)| {
-                let wanted = position(index, &row);
-                let mut node = row.node.into_ui_node(wanted, width, language);
-                stamp_source(&mut node, read_revision);
-                if let Some(wanted) = wanted {
-                    anchor = Some(ViewAnchor {
-                        node_id: Some(node.node_id.clone()),
-                        char_offset: wanted.offset(node.total_chars),
-                    });
-                }
-                node
+            .map(|node| {
+                node.display
+                    .into_ui_node(node.source.node_id, width, language)
             })
-            .collect();
-        (nodes, self.info, anchor)
+            .collect::<Vec<_>>()
+    })
+    .await?;
+    match metadata {
+        Metadata::Enriched => {
+            message_metadata::enrich(control, Some(thread), &mut projected).await?
+        }
+        Metadata::Snapshot(stop) => {
+            let ids = projected
+                .iter()
+                .map(|node| node.node_id.clone())
+                .collect::<Vec<_>>();
+            let viewed = thread.to_owned();
+            let facts = snapshot::read(
+                control.store.database.path().to_path_buf(),
+                stop,
+                move |db| message_metadata::read_tx(db, Some(&viewed), &ids),
+            )
+            .await;
+            let facts = checked_storage(control, facts).await?;
+            projected = presentation_work(move || {
+                message_metadata::apply(&mut projected, &facts);
+                projected
+            })
+            .await?;
+        }
+    }
+    let (mut projected, observation) = presentation_work(move || {
+        native_history::apply_observation(&mut projected, &observation, language);
+        (projected, observation)
+    })
+    .await?;
+    streams::seal_nodes(&mut projected).await?;
+    stamp_sources(&mut projected, observation.read_sequence);
+    let committed = observation
+        .committed_attempts
+        .iter()
+        .filter(|binding| projected.iter().any(|node| node.node_id == binding.node_id))
+        .map(|binding| (binding.attempt_id.clone(), binding.node_id.clone()))
+        .collect();
+    Ok(Page {
+        nodes: projected,
+        info: HistoryInfo {
+            first,
+            revision,
+            total,
+            committed,
+            pending,
+            read_revision: observation.read_sequence,
+        },
+        anchor,
+        observation,
+    })
+}
+
+/// A client-local continuation for the page before `first` at `revision`.
+pub(super) fn before_cursor(
+    thread: &str,
+    first: u64,
+    revision: u64,
+) -> Result<Option<String>, ApiError> {
+    (first > 0)
+        .then(|| {
+            PageCursor {
+                version: 1,
+                scope: "ui_history".into(),
+                filter: thread.into(),
+                last_sort_key: first.to_string(),
+                watermark: 0,
+                revision,
+                encoding: None,
+            }
+            .encode()
+        })
+        .transpose()
+}
+
+fn decode_before(thread: &str, token: &str) -> Result<(u64, u64), ApiError> {
+    use base64::Engine;
+    let cursor = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(token)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<PageCursor>(&bytes).ok())
+        .filter(|cursor| {
+            cursor.version == 1 && cursor.scope == "ui_history" && cursor.filter == thread
+        })
+        .ok_or_else(expired_history_cursor)?;
+    let first = cursor
+        .last_sort_key
+        .parse::<u64>()
+        .map_err(|_| expired_history_cursor())?;
+    Ok((first, cursor.revision))
+}
+
+/// The selected Thread no longer exists for this client view.
+fn unavailable(error: ApiError) -> ApiError {
+    if error.code == ErrorCode::ThreadNotFound {
+        ApiError::new(
+            ErrorCode::TargetUnavailable,
+            "The selected Thread is no longer available",
+        )
+    } else {
+        error
     }
 }
+
+fn not_on_path(error: &ApiError) -> bool {
+    error.code == ErrorCode::CursorExpired && error.message == "node is not on the selected path"
+}
+
 impl<'a> HistoryReader<'a> {
     pub(super) fn new(control: &'a Control, updates: &'a dyn UpdateTarget, width: u16) -> Self {
         Self {
             control,
             updates,
             width,
+            known: Vec::new(),
         }
+    }
+    /// Draft operations this client submitted to the page's Thread and has not
+    /// yet seen settled; the installed queue settles them by exact receipt.
+    pub(super) fn with_submissions(mut self, known: Vec<KnownSubmission>) -> Self {
+        self.known = known;
+        self
+    }
+    fn owner(&self) -> Owner<'_> {
+        Owner {
+            data_dir: compose_data_dir(self.control),
+            instance: &self.control.store.instance_id,
+        }
+    }
+    async fn page_at(
+        &self,
+        args: HistoryWindowArgs,
+        expected_revision: Option<u64>,
+        wanted: impl Fn(&crate::protocol::HistorySnippet) -> Option<NodePosition>,
+    ) -> Result<Page, ApiError> {
+        read_page(
+            self.control,
+            &self.owner(),
+            self.width,
+            &self.known,
+            Metadata::Enriched,
+            args,
+            expected_revision,
+            |items| 0..items.len(),
+            wanted,
+        )
+        .await
+        .map_err(unavailable)
     }
     pub(super) async fn saved(
         control: &Control,
         width: u16,
-        draft_id: String,
-        revision: u64,
-        generation: u64,
-        value: &Value,
-    ) -> Result<UiUpdate, ApiError> {
-        let result = Self::saved_inner(control, width, draft_id, revision, generation, value).await;
-        checked_storage(control, result).await
-    }
-    async fn saved_inner(
-        control: &Control,
-        width: u16,
+        known: Vec<KnownSubmission>,
         draft_id: String,
         revision: u64,
         generation: u64,
@@ -233,27 +402,25 @@ impl<'a> HistoryReader<'a> {
             .as_str()
             .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Accepted input has no Thread"))?
             .to_owned();
-        let target = thread.clone();
-        let holds = control.message_holds();
-        let (raw, before_cursor) = control
-            .store
-            .database
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let (mut raw, cursor) = query_page_tx(&tx, &target, None, None)?;
-                raw.project_message_holds(&tx, &holds)?;
-                let cursor = cursor.map_err(StorageError::from)?;
-                tx.commit()?;
-                Ok((raw, cursor))
-            })
-            .await
-            .map_err(storage_error)?;
-        let language = control.store.config.ui.language;
-        let (mut nodes, info, _) =
-            presentation_work(move || raw.project_page(width, None, language)).await?;
-        message_metadata::enrich(control, Some(&thread), &mut nodes).await?;
-        streams::enrich(control, &mut nodes, width).await?;
-        stamp_sources(&mut nodes, info.read_revision);
+        let owner = Owner {
+            data_dir: compose_data_dir(control),
+            instance: &control.store.instance_id,
+        };
+        let page = read_page(
+            control,
+            &owner,
+            width,
+            &known,
+            Metadata::Enriched,
+            window_args(&thread, Anchor::Tail, PAGE_NODES - 1, 0, Vec::new()),
+            None,
+            |items| 0..items.len(),
+            |_| None,
+        )
+        .await
+        .map_err(unavailable)?;
+        let before_cursor = before_cursor(&thread, page.info.first, page.info.revision)?;
+        let Page { nodes, info, .. } = page;
         let history = UiUpdate::History {
             thread_id: thread.clone(),
             generation,
@@ -284,47 +451,120 @@ impl<'a> HistoryReader<'a> {
         reply: &WindowReply,
         anchor: ViewAnchor,
     ) -> Result<(), ApiError> {
-        let thread = reply.target.thread.clone();
+        let thread = &reply.target.thread;
         let wanted_offset = anchor.char_offset;
-        let holds = self.control.message_holds();
-        let result = self
-            .control
-            .store
-            .database
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let (mut raw, ordinal) = query_rebase(&tx, &thread, &anchor)?;
-                raw.info.pending = message_queue::query(&tx, &thread)?;
-                raw.project_message_holds(&tx, &holds)?;
-                raw.info.read_revision = message_queue::read_revision();
-                tx.commit()?;
-                Ok((raw, ordinal))
-            })
-            .await
-            .map_err(storage_error);
-        let (raw, ordinal) = checked_storage(self.control, result).await?;
-        let width = self.width;
-        let language = self.control.store.config.ui.language;
-        let (mut nodes, info, anchor) = presentation_work(move || {
-            raw.project(width, language, |index, row| {
-                if Some(row.ordinal) == ordinal {
-                    Some(NodePosition::At(wanted_offset))
-                } else if ordinal.is_none() && index == 0 {
-                    Some(NodePosition::At(0))
-                } else {
-                    None
+        let anchored = match &anchor.node_id {
+            Some(node) => {
+                let target = node.clone();
+                match self
+                    .page_at(
+                        window_args(
+                            thread,
+                            Anchor::Node(node.clone()),
+                            10,
+                            PAGE_NODES - 11,
+                            Vec::new(),
+                        ),
+                        None,
+                        move |source| {
+                            (source.node_id == target).then_some(NodePosition::At(wanted_offset))
+                        },
+                    )
+                    .await
+                {
+                    Err(error) if not_on_path(&error) => None,
+                    result => Some(result?),
                 }
-            })
-        })
-        .await?;
-        message_metadata::enrich(self.control, Some(&reply.target.thread), &mut nodes).await?;
-        let enriched = streams::enrich(self.control, &mut nodes, self.width).await;
-        checked_storage(self.control, enriched).await?;
-        stamp_sources(&mut nodes, info.read_revision);
-        let selection_revision = info.revision;
-        reply
-            .deliver(self.updates, nodes, info, anchor.unwrap_or_default())
-            .await;
+            }
+            None => None,
+        };
+        let page = match anchored {
+            Some(page) => page,
+            // The anchor left the selected path: show the latest page from its start.
+            None => {
+                let first = std::sync::OnceLock::new();
+                self.page_at(
+                    window_args(thread, Anchor::Tail, PAGE_NODES - 1, 0, Vec::new()),
+                    None,
+                    move |source| {
+                        (first.get_or_init(|| source.node_id.clone()) == &source.node_id)
+                            .then_some(NodePosition::At(0))
+                    },
+                )
+                .await?
+            }
+        };
+        let anchor = page.anchor.clone().unwrap_or_default();
+        let selection_revision = page.info.revision;
+        reply.deliver(self.updates, page, anchor).await;
+        received::refresh(
+            self.control,
+            self.updates,
+            thread,
+            reply.target.generation,
+            self.width,
+            received::Scope {
+                selection_revision,
+                view_revision: Some(reply.view_revision),
+            },
+        )
+        .await
+    }
+    pub(super) async fn window(
+        &self,
+        reply: &WindowReply,
+        request: WindowRequest,
+    ) -> Result<(), ApiError> {
+        let WindowRequest {
+            ordinal,
+            position,
+            expected_revision,
+        } = request;
+        let page = self
+            .page_at(
+                window_args(
+                    &reply.target.thread,
+                    Anchor::Ordinal(ordinal),
+                    10,
+                    PAGE_NODES - 11,
+                    Vec::new(),
+                ),
+                Some(expected_revision),
+                move |source| (source.selection.ordinal == ordinal).then_some(position),
+            )
+            .await
+            .map_err(|error| {
+                // Past the end of an unchanged path: the ordinal is gone. Past
+                // the end of a changed path: the requested selection expired.
+                let unchanged = error
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.get("revision"))
+                    .and_then(Value::as_u64)
+                    == Some(expected_revision);
+                if error.code == ErrorCode::CursorExpired
+                    && error.message == "position is past the end of the selected path"
+                {
+                    if unchanged {
+                        ApiError::new(
+                            ErrorCode::TargetUnavailable,
+                            "Requested history ordinal is no longer selected",
+                        )
+                    } else {
+                        expired_history_cursor()
+                    }
+                } else {
+                    error
+                }
+            })?;
+        let anchor = page.anchor.clone().ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::TargetUnavailable,
+                "Requested history ordinal is no longer selected",
+            )
+        })?;
+        let selection_revision = page.info.revision;
+        reply.deliver(self.updates, page, anchor).await;
         received::refresh(
             self.control,
             self.updates,
@@ -336,69 +576,7 @@ impl<'a> HistoryReader<'a> {
                 view_revision: Some(reply.view_revision),
             },
         )
-        .await?;
-        Ok(())
-    }
-    pub(super) async fn window(
-        &self,
-        reply: &WindowReply,
-        request: WindowRequest,
-    ) -> Result<(), ApiError> {
-        let result = async {
-            let thread = reply.target.thread.clone();
-            let ordinal = request.ordinal;
-            let position = request.position;
-            let holds = self.control.message_holds();
-            let raw = self
-                .control
-                .store
-                .database
-                .call(move |db| {
-                    let tx = db.transaction()?;
-                    let mut raw = query_window(&tx, &thread, &request)?;
-                    raw.info.pending = message_queue::query(&tx, &thread)?;
-                    raw.project_message_holds(&tx, &holds)?;
-                    raw.info.read_revision = message_queue::read_revision();
-                    tx.commit()?;
-                    Ok(raw)
-                })
-                .await
-                .map_err(storage_error)?;
-            let width = self.width;
-            let language = self.control.store.config.ui.language;
-            let (mut nodes, info, anchor) = presentation_work(move || {
-                raw.project(width, language, |_, row| {
-                    (row.ordinal as u64 == ordinal).then_some(position)
-                })
-            })
-            .await?;
-            message_metadata::enrich(self.control, Some(&reply.target.thread), &mut nodes).await?;
-            streams::enrich(self.control, &mut nodes, self.width).await?;
-            stamp_sources(&mut nodes, info.read_revision);
-            let anchor = anchor.ok_or_else(|| {
-                ApiError::new(
-                    ErrorCode::TargetUnavailable,
-                    "Requested history ordinal is no longer selected",
-                )
-            })?;
-            let selection_revision = info.revision;
-            reply.deliver(self.updates, nodes, info, anchor).await;
-            received::refresh(
-                self.control,
-                self.updates,
-                &reply.target.thread,
-                reply.target.generation,
-                self.width,
-                received::Scope {
-                    selection_revision,
-                    view_revision: Some(reply.view_revision),
-                },
-            )
-            .await?;
-            Ok(())
-        }
-        .await;
-        checked_storage(self.control, result).await
+        .await
     }
     pub(super) async fn page(
         &self,
@@ -406,74 +584,110 @@ impl<'a> HistoryReader<'a> {
         before: Option<String>,
         anchor: Option<ViewAnchor>,
     ) -> Result<(), ApiError> {
-        let result = async {
-            let thread = reply.thread.clone();
-            let append = before.is_some();
-            let db_anchor = anchor.clone();
-            let holds = self.control.message_holds();
-            let (raw, before_cursor) = self
-                .control
-                .store
-                .database
-                .call(move |db| {
-                    let tx = db.transaction()?;
-                    let (mut raw, cursor) = query_page_tx(&tx, &thread, before, db_anchor)?;
-                    raw.project_message_holds(&tx, &holds)?;
-                    tx.commit()?;
-                    Ok((raw, cursor))
-                })
+        let thread = &reply.thread;
+        let append = before.is_some();
+        let page = if let Some(token) = before {
+            let (first, revision) = match decode_before(thread, &token) {
+                Ok(cursor) => cursor,
+                // An unavailable Thread outranks a continuation it cannot own.
+                Err(expired) => {
+                    self.owner()
+                        .window(window_args(thread, Anchor::Tail, 0, 0, Vec::new()))
+                        .await
+                        .map_err(unavailable)?;
+                    return Err(expired);
+                }
+            };
+            let last = first.checked_sub(1).ok_or_else(expired_history_cursor)?;
+            self.page_at(
+                window_args(thread, Anchor::Ordinal(last), PAGE_NODES - 1, 0, Vec::new()),
+                Some(revision),
+                |_| None,
+            )
+            .await?
+        } else {
+            let anchored = match anchor.as_ref().and_then(|anchor| anchor.node_id.clone()) {
+                // The page is the last 50 nodes ending at most 49 after a
+                // saved reading anchor.
+                Some(node) => match read_page(
+                    self.control,
+                    &self.owner(),
+                    self.width,
+                    &self.known,
+                    Metadata::Enriched,
+                    window_args(
+                        thread,
+                        Anchor::Node(node.clone()),
+                        PAGE_NODES - 1,
+                        PAGE_NODES - 1,
+                        Vec::new(),
+                    ),
+                    None,
+                    |items| {
+                        let at = items.iter().position(|item| item.node_id == node);
+                        let end = at.map_or(items.len(), |at| {
+                            (at + PAGE_NODES as usize).min(items.len())
+                        });
+                        end.saturating_sub(PAGE_NODES as usize)..end
+                    },
+                    |_| None,
+                )
                 .await
-                .map_err(storage_error)?;
-            let width = self.width;
-            let language = self.control.store.config.ui.language;
-            let (mut nodes, info, _) =
-                presentation_work(move || raw.project_page(width, anchor, language)).await?;
-            message_metadata::enrich(self.control, Some(&reply.thread), &mut nodes).await?;
-            streams::enrich(self.control, &mut nodes, self.width).await?;
-            stamp_sources(&mut nodes, info.read_revision);
-            let before_cursor = before_cursor?;
-            stream_commits(
-                self.updates,
-                &reply.thread,
-                reply.generation,
-                info.committed,
-            )
-            .await;
-            update(
-                self.updates,
-                UiUpdate::History {
-                    thread_id: reply.thread.clone(),
-                    generation: reply.generation,
-                    nodes,
-                    pending: info.pending,
-                    read_revision: info.read_revision,
-                    before_cursor,
-                    append,
-                    first_ordinal: info.first,
-                    selection_revision: info.revision,
-                    total_nodes: info.total,
+                .map_err(unavailable)
+                {
+                    Err(error) if not_on_path(&error) => None,
+                    result => Some(result?),
                 },
-            )
-            .await;
-            received::refresh(
-                self.control,
-                self.updates,
-                &reply.thread,
-                reply.generation,
-                self.width,
-                received::Scope {
-                    selection_revision: info.revision,
-                    view_revision: None,
-                },
-            )
-            .await?;
-            Ok(())
-        }
+                None => None,
+            };
+            match anchored {
+                Some(page) => page,
+                None => {
+                    self.page_at(
+                        window_args(thread, Anchor::Tail, PAGE_NODES - 1, 0, Vec::new()),
+                        None,
+                        |_| None,
+                    )
+                    .await?
+                }
+            }
+        };
+        let before_cursor = before_cursor(thread, page.info.first, page.info.revision)?;
+        let Page { nodes, info, .. } = page;
+        let selection_revision = info.revision;
+        stream_commits(self.updates, thread, reply.generation, info.committed).await;
+        update(
+            self.updates,
+            UiUpdate::History {
+                thread_id: thread.clone(),
+                generation: reply.generation,
+                nodes,
+                pending: info.pending,
+                read_revision: info.read_revision,
+                before_cursor,
+                append,
+                first_ordinal: info.first,
+                selection_revision,
+                total_nodes: info.total,
+            },
+        )
         .await;
-        checked_storage(self.control, result).await
+        received::refresh(
+            self.control,
+            self.updates,
+            thread,
+            reply.generation,
+            self.width,
+            received::Scope {
+                selection_revision,
+                view_revision: None,
+            },
+        )
+        .await
     }
     /// Bounded selected-item facts. No off-page body is installed into history
-    /// and no shell output bytes are read. All saved/current facts share one job.
+    /// and no shell output bytes are read. Each source projects from its owner
+    /// display extent at offset 0; current execution facts are one saved read.
     pub(super) async fn links(
         &self,
         node_ids: Vec<String>,
@@ -488,10 +702,29 @@ impl<'a> HistoryReader<'a> {
             ));
         }
         let result = async {
-            let (rows, read_revision, observed_at) = self.control.store.database.call(move |db| {
+            let owner = self.owner();
+            let mut displays = Vec::with_capacity(node_ids.len());
+            for id in &node_ids {
+                use crate::protocol::HistoryDisplayNode as Node;
+                let display = match owner
+                    .display(id, None, HistoryDisplayPosition::Absolute { offset: 0 })
+                    .await
+                {
+                    Ok(display) => Some(display).filter(|display| {
+                        !matches!(display.outline.node, Node::Reclaimed { .. } | Node::HiddenAdmission)
+                    }),
+                    Err(error) if error.code == ErrorCode::TargetUnavailable => None,
+                    Err(error) => return Err(error),
+                };
+                displays.push(display);
+            }
+            let available = node_ids
+                .iter()
+                .zip(&displays)
+                .map(|(id, display)| (id.clone(), display.is_some()))
+                .collect::<Vec<_>>();
+            let (current, read_revision, observed_at) = self.control.store.database.call(move |db| {
                 let tx = db.transaction()?;
-                let mut rows = Vec::with_capacity(node_ids.len());
-                let mut query = tx.prepare("SELECT id,kind,CASE WHEN length(CAST(payload_json AS BLOB))<=98304 THEN payload_json END,deleted_reason,output_limit_attempt_id IS NOT NULL FROM node WHERE id=?1")?;
                 // Node/group identity constrains every call; a matching call ID
                 // elsewhere can never supply current lifecycle facts.
                 let mut tools = tx.prepare(r"
@@ -509,25 +742,27 @@ impl<'a> HistoryReader<'a> {
                          OR EXISTS(SELECT 1 FROM tool_result r WHERE r.node_id=?1
                             AND r.group_id=c.group_id AND r.call_id=c.call_id))
                     ORDER BY c.ordinal,c.call_id LIMIT 17")?;
-                for id in node_ids {
-                    let row = query.query_row([&id], |row|Ok(RawNode {
-                        id:row.get(0)?,kind:row.get(1)?,payload:row.get(2)?,reason:row.get(3)?,received_recovery_wait:false,output_limited:row.get(4)?,
-                    })).optional()?;
-                    let current = if row.as_ref().is_some_and(|row|row.payload.is_some() && row.reason.is_none()) { tools.query_map([&id], |row| Ok((
+                let mut current = Vec::with_capacity(available.len());
+                for (id, available) in available {
+                    current.push(if available { tools.query_map([&id], |row| Ok((
                         row.get::<_,Option<String>>(0)?,row.get::<_,Option<String>>(1)?,
                         row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,
                         row.get::<_,Option<bool>>(4)?,row.get::<_,Option<i64>>(5)?,
                         row.get::<_,bool>(6)?,
-                    )))?.collect::<Result<Vec<_>,_>>()? } else {Vec::new()};
-                    rows.push((id,row,current));
+                    )))?.collect::<Result<Vec<_>,_>>()? } else {Vec::new()});
                 }
-                drop(query);
                 drop(tools);
                 let read_revision=message_queue::read_revision();
                 let observed_at=chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
                 tx.commit()?;
-                Ok((rows,read_revision,observed_at))
+                Ok((current,read_revision,observed_at))
             }).await.map_err(storage_error)?;
+            let rows = node_ids
+                .into_iter()
+                .zip(displays)
+                .zip(current)
+                .map(|((id, display), current)| (id, display, current))
+                .collect::<Vec<_>>();
             let width=self.width;
             let language = self.control.store.config.ui.language;
             presentation_work(move || {
@@ -538,15 +773,11 @@ impl<'a> HistoryReader<'a> {
                         node_id:node_id.clone(),kind:Default::default(),fields:vec![],links:vec![],
                         unavailable_reason:Some(reason.into()),
                     };
-                    let Some(row)=row.filter(|row| row.payload.is_some() && row.reason.is_none()) else {
+                    let Some(display)=row else {
                         sources.push(unavailable(local!(language, "出典が削除・回収済み、または取得上限を超えています。O 原文で確認", "Source was deleted, collected, or exceeds the retrieval limit. Press O for the original")));
                         continue;
                     };
-                    if row.payload.as_deref().is_none_or(|payload|serde_json::from_str::<Value>(payload).is_err()) {
-                        sources.push(unavailable(local!(language, "出典の形式を確認できません。O 原文で確認", "Source format is unavailable. Press O for the original")));
-                        continue;
-                    }
-                    let mut node=row.into_ui_node(Some(NodePosition::At(0)),width,language);
+                    let mut node=display.into_ui_node(node_id.clone(),width,language);
                     let mut fields=Vec::new();
                     let field=|key:String,label:&str,value:String| crate::presentation::PresentationField {
                         key,label:label.into(),value,display:None,value_omitted:false,
@@ -581,8 +812,8 @@ impl<'a> HistoryReader<'a> {
         checked_storage(self.control, result).await
     }
 
-    /// Hydrate one node at a source offset from the owner: its extent by ID and,
-    /// unless it is a received response, the selected window's facts for it.
+    /// Hydrate one node at a source offset from the owner: its extent by ID and
+    /// the selected window's facts for it, ordered by that observation.
     pub(super) async fn node(
         &self,
         node_id: String,
@@ -590,18 +821,17 @@ impl<'a> HistoryReader<'a> {
         viewed_thread: &str,
     ) -> Result<UiNode, ApiError> {
         let result = async {
-            let (display, observation) = native_history::Owner {
-                data_dir: compose_data_dir(self.control),
-                instance: &self.control.store.instance_id,
-            }
-            .node(
-                viewed_thread,
-                &node_id,
-                crate::protocol::HistoryDisplayPosition::Absolute {
-                    offset: offset as u64,
-                },
-            )
-            .await?;
+            let (display, observation) = self
+                .owner()
+                .node(
+                    viewed_thread,
+                    &node_id,
+                    HistoryDisplayPosition::Absolute {
+                        offset: offset as u64,
+                    },
+                )
+                .await
+                .map_err(unavailable)?;
             let width = self.width;
             let language = self.control.store.config.ui.language;
             let mut node =
@@ -612,19 +842,17 @@ impl<'a> HistoryReader<'a> {
                 std::slice::from_mut(&mut node),
             )
             .await?;
-            if let Some(observation) = observation {
-                node = presentation_work(move || {
-                    native_history::apply_observation(
-                        std::slice::from_mut(&mut node),
-                        &observation,
-                        language,
-                    );
-                    node
-                })
-                .await?;
-            }
+            let (mut node, read_sequence) = presentation_work(move || {
+                native_history::apply_observation(
+                    std::slice::from_mut(&mut node),
+                    &observation,
+                    language,
+                );
+                (node, observation.read_sequence)
+            })
+            .await?;
             streams::seal_nodes(std::slice::from_mut(&mut node)).await?;
-            stamp_source(&mut node, message_queue::read_revision());
+            stamp_source(&mut node, read_sequence);
             node.presentation.anchor_window = true;
             Ok(node)
         }
@@ -637,238 +865,10 @@ fn stamp_source(node: &mut UiNode, read_revision: u64) {
     node.presentation.read_revision = read_revision;
     node.presentation.body_evicted = false;
 }
-fn stamp_sources(nodes: &mut [UiNode], read_revision: u64) {
+pub(super) fn stamp_sources(nodes: &mut [UiNode], read_revision: u64) {
     for node in nodes {
         stamp_source(node, read_revision);
     }
-}
-fn live_thread_revision(db: &Connection, thread: &str) -> Result<i64, StorageError> {
-    crate::history::selection_revision(db, thread, crate::history::ThreadScope::Live)
-        .optional()?
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::TargetUnavailable,
-                "The selected Thread is no longer available",
-            )
-            .into()
-        })
-}
-fn query_rebase(
-    db: &Connection,
-    thread: &str,
-    anchor: &ViewAnchor,
-) -> Result<(RawHistory, Option<i64>), StorageError> {
-    let revision = live_thread_revision(db, thread)?;
-    let total = history_total(db, thread)?;
-    let ordinal = anchor
-        .node_id
-        .as_ref()
-        .map(|id| {
-            db.query_row(
-                "SELECT ordinal FROM thread_path WHERE thread_id=?1 AND node_id=?2",
-                rusqlite::params![thread, id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-        })
-        .transpose()?
-        .flatten();
-    let first = ordinal.map_or_else(
-        || total.saturating_sub(50).max(0),
-        |position| position.saturating_sub(10).max(0),
-    );
-    let rows = history_rows(db, thread, PathRange::From(first))?;
-    let committed = crate::history::committed_attempt_bindings(
-        db,
-        rows.iter()
-            .filter(|row| row.node.kind == "assistant_response")
-            .map(|row| row.node.id.as_str()),
-    )?;
-    let first = rows.first().map_or(0, |row| row.ordinal as u64);
-    Ok((
-        RawHistory {
-            rows,
-            info: HistoryInfo {
-                first,
-                revision: revision as u64,
-                total: total as u64,
-                committed,
-                pending: PendingMessages::default(),
-                read_revision: 0,
-            },
-        },
-        ordinal,
-    ))
-}
-fn query_window(
-    db: &Connection,
-    thread: &str,
-    request: &WindowRequest,
-) -> Result<RawHistory, StorageError> {
-    let revision = live_thread_revision(db, thread)? as u64;
-    if revision != request.expected_revision {
-        return Err(expired_history_cursor().into());
-    }
-    let total = history_total(db, thread)? as u64;
-    let first = request.ordinal.saturating_sub(10);
-    let rows = history_rows(db, thread, PathRange::From(first as i64))?;
-    let committed = crate::history::committed_attempt_bindings(
-        db,
-        rows.iter()
-            .filter(|row| row.node.kind == "assistant_response")
-            .map(|row| row.node.id.as_str()),
-    )?;
-    Ok(RawHistory {
-        rows,
-        info: HistoryInfo {
-            first,
-            revision,
-            total,
-            committed,
-            pending: PendingMessages::default(),
-            read_revision: 0,
-        },
-    })
-}
-/// Read one bounded history page and its pending-message projection in the
-/// caller's existing transaction. The caller owns commit and presentation work.
-pub(super) fn query_page_tx(
-    db: &Connection,
-    thread: &str,
-    before: Option<String>,
-    anchor: Option<ViewAnchor>,
-) -> Result<(RawHistory, Result<Option<String>, ApiError>), StorageError> {
-    let (mut raw, cursor) = query_page_unstamped_tx(db, thread, before, anchor)?;
-    raw.set_read_revision(message_queue::read_revision());
-    Ok((raw, cursor))
-}
-
-/// The combined current-view transaction stamps once after every fact read.
-pub(super) fn query_current_tx(
-    db: &Connection,
-    thread: &str,
-) -> Result<(RawHistory, Result<Option<String>, ApiError>), StorageError> {
-    query_page_unstamped_tx(db, thread, None, None)
-}
-
-fn query_page_unstamped_tx(
-    db: &Connection,
-    thread: &str,
-    before: Option<String>,
-    anchor: Option<ViewAnchor>,
-) -> Result<(RawHistory, Result<Option<String>, ApiError>), StorageError> {
-    let revision = live_thread_revision(db, thread)?;
-    let total = history_total(db, thread)?;
-    let upper = if let Some(cursor) = before {
-        PageCursor::decode(&cursor, "ui_history", thread, revision as u64, None)
-            .map_err(|_| StorageError::from(expired_history_cursor()))?
-            .last_sort_key
-            .parse::<i64>()
-            .map_err(|_| StorageError::from(expired_history_cursor()))?
-    } else if let Some(node) = anchor.as_ref().and_then(|anchor| anchor.node_id.as_ref()) {
-        db.query_row(
-            "SELECT ordinal+50 FROM thread_path WHERE thread_id=?1 AND node_id=?2",
-            rusqlite::params![thread, node],
-            |row| row.get(0),
-        )
-        .optional()?
-        .unwrap_or(i64::MAX)
-    } else {
-        i64::MAX
-    };
-    let rows = history_rows(db, thread, PathRange::Before(upper))?;
-    let cursor = rows
-        .first()
-        .filter(|row| row.ordinal > 0)
-        .map(|row| {
-            PageCursor {
-                version: 1,
-                scope: "ui_history".into(),
-                filter: thread.into(),
-                last_sort_key: row.ordinal.to_string(),
-                watermark: 0,
-                revision: revision as u64,
-                encoding: None,
-            }
-            .encode()
-        })
-        .transpose();
-    let first = rows.first().map_or(0, |row| row.ordinal as u64);
-    let committed = crate::history::committed_attempt_bindings(
-        db,
-        rows.iter()
-            .filter(|row| row.node.kind == "assistant_response")
-            .map(|row| row.node.id.as_str()),
-    )?;
-    Ok((
-        RawHistory {
-            rows,
-            info: HistoryInfo {
-                first,
-                revision: revision as u64,
-                total: total as u64,
-                committed,
-                pending: message_queue::query(db, thread)?,
-                read_revision: 0,
-            },
-        },
-        cursor,
-    ))
-}
-// Stream events carry model-attempt IDs; only the persisted output ledger can
-// reconcile them with selected conversation nodes. Query only this bounded page
-// and decline ambiguous attempt mappings rather than guessing from body text.
-struct PathNode {
-    ordinal: i64,
-    node: RawNode,
-}
-enum PathRange {
-    From(i64),
-    Before(i64),
-}
-fn history_total(db: &rusqlite::Connection, thread: &str) -> rusqlite::Result<i64> {
-    db.query_row(
-        "SELECT COALESCE(MAX(ordinal)+1,0) FROM thread_path WHERE thread_id=?1",
-        [thread],
-        |row| row.get(0),
-    )
-}
-fn history_rows(
-    db: &rusqlite::Connection,
-    thread: &str,
-    range: PathRange,
-) -> rusqlite::Result<Vec<PathNode>> {
-    let (sql, bound) = match range {
-        PathRange::From(bound) => (
-            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END,n.output_limit_attempt_id IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 ORDER BY p.ordinal LIMIT 50",
-            bound,
-        ),
-        PathRange::Before(bound) => (
-            "SELECT p.ordinal,n.id,n.kind,n.payload_json,n.deleted_reason,CASE WHEN n.kind='incomplete_response' THEN EXISTS(SELECT 1 FROM turn u WHERE u.id=n.turn_id AND u.state='recovery_wait') ELSE 0 END,n.output_limit_attempt_id IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal<?2 ORDER BY p.ordinal DESC LIMIT 50",
-            bound,
-        ),
-    };
-    let mut rows = db
-        .prepare(sql)?
-        .query_map(rusqlite::params![thread, bound], raw_node_row)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    if matches!(range, PathRange::Before(_)) {
-        rows.reverse();
-    }
-    Ok(rows)
-}
-fn raw_node_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PathNode> {
-    Ok(PathNode {
-        ordinal: row.get(0)?,
-        node: RawNode {
-            id: row.get(1)?,
-            kind: row.get(2)?,
-            payload: row.get(3)?,
-            reason: row.get(4)?,
-            received_recovery_wait: row.get(5)?,
-            output_limited: row.get(6)?,
-        },
-    })
 }
 
 #[cfg(test)]
@@ -883,6 +883,9 @@ mod detail_link_tests {
             .await
             .unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, receive) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(receive));
         owner.db.call(|db| {
             db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
             for group in ["g","other"] {
@@ -959,6 +962,7 @@ mod detail_link_tests {
         );
         assert!(second.sources[1].unavailable_reason.is_some());
         assert!(second.sources[1].links.is_empty());
+        server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
@@ -970,6 +974,9 @@ mod detail_link_tests {
             .await
             .unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, receive) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(receive));
         owner.db.call(|db| {
             let call=json!({"text":"[call source](https://example.test/call)"}).to_string();
             let result=json!({"item":{"type":"function_call_output","call_id":"call","output":json!({"status":"exited","exit_code":0,"output":"https://example.test/result"}).to_string()}}).to_string();
@@ -1008,7 +1015,14 @@ mod detail_link_tests {
                 ErrorCode::InvalidArgument
             );
         }
-        for id in ["large", "deleted", "absent"] {
+        // Positioned display pages have no whole-payload limit: a large source
+        // is available; reclaimed and absent sources are not.
+        let large = reader
+            .links(vec!["call".into(), "large".into()])
+            .await
+            .unwrap();
+        assert!(large.sources[1].unavailable_reason.is_none());
+        for id in ["deleted", "absent"] {
             let snapshot = reader.links(vec!["call".into(), id.into()]).await.unwrap();
             assert_eq!(snapshot.sources[0].node_id, "call");
             assert!(snapshot.sources[0].unavailable_reason.is_none());
@@ -1017,6 +1031,7 @@ mod detail_link_tests {
             assert!(unavailable.unavailable_reason.is_some());
             assert!(unavailable.fields.is_empty() && unavailable.links.is_empty());
         }
+        server.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
 }
@@ -1026,22 +1041,31 @@ mod read_stamping_tests {
     use super::*;
     use serde_json::json;
 
-    fn rows() -> Vec<PathNode> {
-        [
-            ("text", "user", json!({"role":"user","content":[{"type":"input_text","text":"synthetic source"}]})),
-            ("tool", "tool_result", json!({"item":{"type":"function_call_output","call_id":"synthetic-call","output":json!({"status":"cancelled","executed":false,"reason":"human_turn_interrupted","message":"Not executed"}).to_string()}})),
-            ("tool_finished", "tool_result", json!({"item":{"type":"function_call_output","call_id":"finished-call","output":json!({"status":"exited","exit_code":0,"output":"synthetic tool output"}).to_string()}})),
+    fn rows() -> Vec<(&'static str, &'static str, Value)> {
+        vec![
+            (
+                "text",
+                "user",
+                json!({"role":"user","content":[{"type":"input_text","text":"synthetic source"}]}),
+            ),
+            (
+                "tool",
+                "tool_result",
+                json!({"item":{"type":"function_call_output","call_id":"synthetic-call","output":json!({"status":"cancelled","executed":false,"reason":"human_turn_interrupted","message":"Not executed"}).to_string()}}),
+            ),
+            (
+                "tool_finished",
+                "tool_result",
+                json!({"item":{"type":"function_call_output","call_id":"finished-call","output":json!({"status":"exited","exit_code":0,"output":"synthetic tool output"}).to_string()}}),
+            ),
             ("empty", "event", json!({"text":""})),
-        ].into_iter().enumerate().map(|(ordinal,(id,kind,payload))|PathNode {
-            ordinal:ordinal as i64,
-            node:RawNode{id:id.into(),kind:kind.into(),payload:Some(payload.to_string()),reason:None,received_recovery_wait:false,output_limited:false},
-        }).collect()
+        ]
     }
 
     #[tokio::test]
-    async fn shared_page_query_pairs_pending_and_keeps_bounded_borrowed_source_identities() {
+    async fn native_page_pairs_pending_with_one_observation_and_continues_before_it() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
-        let (raw, cursor) = owner.db.call(|db| {
+        owner.db.call(|db| {
             let tx = db.transaction()?;
             for ordinal in 0..51 {
                 crate::history::append_node(
@@ -1051,72 +1075,68 @@ mod read_stamping_tests {
             }
             tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES('pending','user','now',?1)", [json!({"role":"user","content":[{"type":"input_text","text":"waiting"}]}).to_string()])?;
             tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,updated_at,path_admission)VALUES('receipt','operation','null','thread','pending','held','now','now','unadmitted')", [])?;
-            let page = query_page_tx(&tx, "thread", None, None)?;
             tx.commit()?;
-            Ok(page)
+            Ok(())
         }).await.unwrap();
-        assert!(cursor.unwrap().is_some());
-        assert_eq!(raw.info.first, 1);
-        assert_eq!(raw.info.total, 51);
-        assert_eq!(raw.info.pending.total, 1);
-        assert_eq!(raw.info.pending.items[0].message_id, "pending");
-        assert!(raw.info.read_revision > 0);
-        let ids = raw.source_ids().collect::<Vec<_>>();
-        assert_eq!(ids.len(), 50);
-        assert_eq!(ids.first().copied(), Some("source-1"));
-        assert_eq!(ids.last().copied(), Some("source-50"));
-        assert!(std::ptr::eq(ids[0].as_ptr(), raw.rows[0].node.id.as_ptr()));
-        let revision = raw.info.read_revision;
-        let (nodes, info, anchor) = presentation_work(move || {
-            raw.project_page(
-                80,
-                Some(ViewAnchor {
-                    node_id: Some("source-25".into()),
-                    char_offset: 2,
-                }),
-                crate::config::UiLanguage::Ja,
-            )
-        })
-        .await
-        .unwrap();
+        let (updates, incoming) = std::sync::mpsc::sync_channel(32);
+        let reader = HistoryReader::new(&control, &updates, 80);
+        reader
+            .page(&Reply::new("thread", 1), None, None)
+            .await
+            .unwrap();
+        let history = |incoming: &std::sync::mpsc::Receiver<UiUpdate>| loop {
+            if let UiUpdate::History {
+                nodes,
+                pending,
+                read_revision,
+                before_cursor,
+                first_ordinal,
+                total_nodes,
+                append,
+                ..
+            } = incoming.try_recv().unwrap()
+            {
+                break (
+                    nodes,
+                    pending,
+                    read_revision,
+                    before_cursor,
+                    first_ordinal,
+                    total_nodes,
+                    append,
+                );
+            }
+        };
+        let (nodes, pending, revision, cursor, first, total, append) = history(&incoming);
+        assert_eq!((first, total, append), (1, 51, false));
         assert_eq!(nodes.len(), 50);
-        assert_eq!(anchor.unwrap().node_id.as_deref(), Some("source-25"));
-        assert_eq!(info.read_revision, revision);
-        assert_eq!(info.pending.items[0].message_id, "pending");
+        assert_eq!(nodes.first().unwrap().node_id, "source-1");
+        assert_eq!(nodes.last().unwrap().node_id, "source-50");
+        assert_eq!(pending.total, 1);
+        assert_eq!(pending.items[0].message_id, "pending");
+        assert!(revision > 0);
         assert!(
             nodes
                 .iter()
                 .all(|node| node.presentation.read_revision == revision)
         );
+        reader
+            .page(&Reply::new("thread", 1), cursor, None)
+            .await
+            .unwrap();
+        let (older, _, later, cursor, first, _, append) = history(&incoming);
+        assert_eq!((first, append, cursor), (0, true, None));
+        assert_eq!(
+            older
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>(),
+            ["source-0"]
+        );
+        assert!(later > revision, "the owner orders each observation");
         control.shutdown().await.unwrap();
         server.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
-    }
-
-    #[test]
-    fn projected_source_windows_inherit_the_paired_snapshot_and_empty_is_not_evicted() {
-        let raw = RawHistory {
-            rows: rows(),
-            info: HistoryInfo {
-                first: 0,
-                revision: 1,
-                total: 4,
-                committed: vec![],
-                pending: PendingMessages::default(),
-                read_revision: 73,
-            },
-        };
-        let (nodes, info, _) = raw.project(80, crate::config::UiLanguage::Ja, |_, _| None);
-        assert_eq!(nodes.len(), 4);
-        assert_eq!(info.read_revision, 73);
-        for node in &nodes {
-            assert_eq!(node.presentation.read_revision, 73);
-            assert!(!node.presentation.body_evicted);
-        }
-        assert_eq!(
-            nodes[3].total_chars, 0,
-            "a known empty canonical body remains a successful read"
-        );
     }
 
     #[test]
@@ -1154,16 +1174,8 @@ mod read_stamping_tests {
             .db
             .call(|db| {
                 let tx = db.transaction()?;
-                for row in rows() {
-                    crate::history::append_node(
-                        &tx,
-                        "thread",
-                        &row.node.id,
-                        None,
-                        &row.node.kind,
-                        &serde_json::from_str::<Value>(row.node.payload.as_ref().unwrap()).unwrap(),
-                        "now",
-                    )?;
+                for (id, kind, payload) in rows() {
+                    crate::history::append_node(&tx, "thread", id, None, kind, &payload, "now")?;
                 }
                 tx.commit()?;
                 Ok(())

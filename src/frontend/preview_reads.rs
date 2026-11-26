@@ -156,9 +156,14 @@ mod terminal_refresh_tests {
         let mut stamp = None;
         for _ in 0..3 {
             let mut nodes = vec![original.clone()];
-            super::super::streams::enrich(&control, &mut nodes, 80)
-                .await
-                .unwrap();
+            crate::frontend::window_facts::apply_saved(
+                &control,
+                &mut nodes,
+                crate::config::UiLanguage::Ja,
+            )
+            .await
+            .unwrap();
+            super::super::streams::seal_nodes(&mut nodes).await.unwrap();
             assert!(nodes[0].presentation.blocks.iter().any(|block| {
                 block
                     .tool
