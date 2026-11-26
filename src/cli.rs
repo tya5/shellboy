@@ -812,9 +812,15 @@ pub fn scheduled_command_argument_error(
             received.extend(words);
             break;
         }
-        if !skip_scheduled_option(add, word, &mut words) {
-            received.push(word);
+        if skip_scheduled_option(add, word, &mut words) {
+            continue;
         }
+        // An unknown option before any program word is a misspelled flag;
+        // Clap's own diagnostic explains it better than the --command hint.
+        if received.is_empty() && word.starts_with('-') && word != "-" {
+            return None;
+        }
+        received.push(word);
     }
     if !received.contains(&argument) && argument != "--" {
         return None;
