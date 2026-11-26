@@ -228,6 +228,38 @@ Still private and separate from these reads: message metadata, branch and
 compaction markers, the received-response snapshot, activity and index pause,
 context usage, and the detail panel's current tool executions.
 
+### Unit 4d cutover gaps
+
+`frontend::run` cannot stop owning `Control` until every remaining private
+read or wake below goes through the owner protocol. Recorded at the 4d
+checkpoint (4a–4g stacked); not a mechanism proposal.
+
+Existing reads cover these (migration only): context usage
+(`thread.get` `context_usage`), the branch list (`thread.branches`), the
+in-process command dispatch (`Thread` create/set, the management fallback) over
+the selected endpoint, index pause value (`index.status` `paused`/`reason`),
+compaction markers (`compact.list` plus node provenance `attempt_id`), the
+detail panel's current executions (`history.window` `observe_node_ids`;
+parity of its has-output bit is unchecked), and
+the received snapshot (`history.received` with positioned `history.read`).
+
+No protocol read or wake fact exists for these:
+
+- Revisit (run-completion delivery) source of a saved input. Node provenance
+  and `message.get` carry sender and reply state but not the delivery reason.
+- Branch markers for the visible nodes. `thread.branches` pages the family at
+  most 200 Threads per page, so a marker for one visible node can need every page.
+- Wait-to-shell relations for live work. The owner's pending wait registry is
+  in memory; the saved run wait reason has no waited execution.
+- Wakes that `events.wait` does not report: index saved/pause change, storage
+  availability change, management owner-state hint, and committed output
+  across the visible and watched executions (`wait` `shell_output` covers one
+  exact execution cursor).
+- Management inspections answered in process with client-only payloads
+  (index coverage window, storage physical sample, lifecycle, saved, operation,
+  attachment and deletion inspections). The protocol records lack, for
+  example, the index coverage window.
+
 ### Draft save and selected view
 
 `draft.save` checks the live Thread and editing draft revision, then commits

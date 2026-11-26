@@ -37,6 +37,15 @@ retention. A request beyond the bound enters existing Turn recovery with a
 typed `input_limit`; no shortened history is sent. See the
 [replay design](../design/replay-cache.md#resend-assembly-limit-385).
 
+## Core #311 client cutover (4d) checkpoint
+
+The cutover is not started in code. 4c (`draft.list`, submitted outcome on
+the draft record) and 4g (`attachment.reload`) are restacked on 4e/4f. The
+TUI still owns `Control`: several private reads and wakes have no protocol
+read yet. They are listed in
+[the TUI client design](../design/tui-client.md#unit-4d-cutover-gaps);
+resume when each has an approved owner read.
+
 ## Core #311 selected history client (4e/4f)
 
 The TUI's selected view, history pages, windows, rebases, saved-message
