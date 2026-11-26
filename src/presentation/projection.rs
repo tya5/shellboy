@@ -61,8 +61,17 @@ pub(crate) fn project_display(
         }
         _ => {}
     }
+    // Provisional labels match the saved-field walk until the shapes rename them.
     let field = |f: &crate::protocol::HistoryDisplayField| PresentationField {
         key: f.path.clone(),
+        label: if matches!(
+            f.shape.last(),
+            Some(crate::protocol::HistoryDisplayPathSegment::Count)
+        ) {
+            format!("{} 件数", f.path)
+        } else {
+            short(&f.path, 256)
+        },
         value: f.value.clone(),
         value_omitted: f.omitted,
         ..Default::default()
@@ -136,7 +145,14 @@ pub(crate) fn project_display(
         fallback_window(&mut p, text, base, fallback, structured);
     }
     envelopes::apply(&mut p, kind, base, walk.envelopes.into_iter());
-    limits::finish(&mut p, &Value::Null);
+    // Labels that depend on the saved payload come from the owner's path shapes.
+    let shapes = outline
+        .fields
+        .iter()
+        .chain(outline.blocks.iter().flat_map(|block| &block.fields))
+        .map(|field| (field.path.as_str(), field.shape.as_slice()))
+        .collect::<std::collections::HashMap<_, _>>();
+    limits::finish_shaped(&mut p, &shapes);
     p
 }
 

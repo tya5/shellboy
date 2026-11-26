@@ -405,6 +405,95 @@ pub(crate) fn human_label_for(
     label
 }
 
+/// The saved payload's shape along one field pointer, as `human_label_for`
+/// navigates it: object keys, array positions, and `Count` after a collection.
+pub(crate) fn path_shape(
+    pointer: &str,
+    root: &Value,
+) -> Vec<crate::protocol::HistoryDisplayPathSegment> {
+    use crate::protocol::HistoryDisplayPathSegment as Segment;
+    let mut shape = Vec::new();
+    let mut value = root;
+    for key in pointer
+        .trim_start_matches('/')
+        .split('/')
+        .map(crate::json_pointer::unescape_segment)
+    {
+        if let Value::Array(items) = value
+            && let Ok(position) = key.parse::<usize>()
+        {
+            value = items.get(position).unwrap_or(&Value::Null);
+            shape.push(Segment::Index {
+                index: position as u64,
+            });
+        } else {
+            value = value.get(key.as_str()).unwrap_or(&Value::Null);
+            shape.push(Segment::Key { key });
+        }
+        if value.is_array() {
+            shape.push(Segment::Count);
+        }
+    }
+    shape
+}
+
+/// Render a field label from its path shape, as `human_label_for` renders it
+/// from the payload. Item names use the collection, not the item's contents.
+pub(crate) fn shape_label(
+    shape: &[crate::protocol::HistoryDisplayPathSegment],
+    language: crate::config::UiLanguage,
+) -> String {
+    use crate::protocol::HistoryDisplayPathSegment as Segment;
+    let steps = shape
+        .iter()
+        .enumerate()
+        .filter(|(_, segment)| !matches!(segment, Segment::Count))
+        .collect::<Vec<_>>();
+    let mut labels = Vec::new();
+    let mut collection = "";
+    for (position, (index, segment)) in steps.iter().enumerate() {
+        match segment {
+            Segment::Index { index: item } => {
+                let name = match language {
+                    crate::config::UiLanguage::Ja => item_name(&Value::Null, collection).to_owned(),
+                    crate::config::UiLanguage::En => match collection {
+                        "answers" => "Answer".into(),
+                        "items" | "output" => "Item".into(),
+                        "messages" => "Message".into(),
+                        "nodes" => "Node".into(),
+                        "runs" => "Run".into(),
+                        "tools" => "Tool".into(),
+                        "attachments" => "Attachment".into(),
+                        "threads" => "Thread".into(),
+                        "turns" => "Turn".into(),
+                        other => english_key(other),
+                    },
+                };
+                labels.push(format!("{name} {}", item + 1));
+            }
+            Segment::Key { key } => {
+                collection = key;
+                let collection_value = matches!(shape.get(index + 1), Some(Segment::Count));
+                if !collection_value || position + 1 == steps.len() {
+                    labels.push(match language {
+                        crate::config::UiLanguage::Ja => field_name(key).to_owned(),
+                        crate::config::UiLanguage::En => english_key(key),
+                    });
+                }
+            }
+            Segment::Count => {}
+        }
+    }
+    let mut label = labels.join(" › ");
+    if matches!(shape.last(), Some(Segment::Count)) {
+        label.push_str(match language {
+            crate::config::UiLanguage::Ja => "（件数）",
+            crate::config::UiLanguage::En => " (count)",
+        });
+    }
+    label
+}
+
 /// Stable semantic sections; presentation labels are never parsed as machine keys.
 pub(crate) fn group_label(
     pointer: &str,
