@@ -290,14 +290,10 @@ impl Session {
                 .as_millis()
                 .min(30_000) as u64;
             if remaining == 0 {
-                return Err(Failure::new(
-                    5,
-                    "timeout",
-                    format!(
-                        "Client deadline expired while the reply duty is {state}; no target was stopped"
-                    ),
-                ));
+                return Err(duty_timeout(&state));
             }
+            // The deadline can also expire inside either request below; this
+            // path owns that diagnostic, naming the last observed open state.
             let wait: WaitResult = self
                 .request(
                     "wait",
@@ -309,7 +305,8 @@ impl Session {
                         timeout_ms: remaining,
                     }),
                 )
-                .await?;
+                .await
+                .map_err(|failure| failure.at_deadline(&state))?;
             if wait.status == WaitStatus::Unavailable {
                 return Err(Failure::new(
                     4,
@@ -324,7 +321,8 @@ impl Session {
                         message_id: message.to_owned(),
                     }),
                 )
-                .await?;
+                .await
+                .map_err(|failure| failure.at_deadline(&state))?;
             state = match reply_outcome(delivery.reply.as_ref())? {
                 ReplyOutcome::Replied(node) => return Ok(node),
                 ReplyOutcome::Open(state) => state,
@@ -609,6 +607,23 @@ impl Session {
         ))
     }
 }
+fn duty_timeout(state: &str) -> Failure {
+    Failure::new(
+        5,
+        "timeout",
+        format!("Client deadline expired while the reply duty is {state}; no target was stopped"),
+    )
+}
+impl Failure {
+    /// A client-deadline failure during the reply wait names the open duty state.
+    fn at_deadline(self, state: &str) -> Self {
+        if self.code == 5 && self.status == "timeout" {
+            duty_timeout(state)
+        } else {
+            self
+        }
+    }
+}
 enum ReplyOutcome {
     Replied(Option<String>),
     /// An open duty: `pending` or `awaiting_own_ask`.
@@ -653,6 +668,21 @@ mod reply_mode_tests {
         assert!(
             matches!(reply_outcome(Some(&json!({"state":"replied", "node_id":"reply"}))), Ok(ReplyOutcome::Replied(Some(node))) if node == "reply")
         );
+    }
+
+    #[test]
+    fn deadline_inside_the_reply_wait_names_the_open_state() {
+        let failure =
+            Failure::new(5, "timeout", "Client deadline expired").at_deadline("awaiting_own_ask");
+        assert_eq!((failure.code, failure.status), (5, "timeout"));
+        assert!(
+            failure.message.contains("awaiting_own_ask"),
+            "{}",
+            failure.message
+        );
+        assert!(failure.message.contains("no target was stopped"));
+        let other = Failure::new(6, "owner_error", "lost").at_deadline("pending");
+        assert_eq!((other.code, other.message.as_str()), (6, "lost"));
     }
 }
 
