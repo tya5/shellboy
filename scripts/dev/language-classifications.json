@@ -7016,5 +7016,10 @@
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalogue translation of history.read FieldId::DisplayFromEnd through metadata_id. Command field values are unchanged.",
     "source_tokens_sha256": "2382f0ded8b720199b530955a3f4251b2669bc93f5195f2b914a98dfc978e7ad"
+  },
+  "src/operations.rs:6bdf82c7272c75a5:1": {
+    "category": "a",
+    "reason": "Japanese AttachmentReload catalogue label paired with English \"Attachment · Reload\" in src/ui/operations/metadata.rs::operation_label_for (same OperationId arm; rustfmt wraps that arm in a block, so the automatic same-ID pairing does not match it).",
+    "source_tokens_sha256": "4019372a836fc5c6495cb23ca7c5b8d556eab1ceb34c8753c7d5d1a86f4b19a7"
   }
 }
