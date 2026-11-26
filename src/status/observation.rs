@@ -200,8 +200,14 @@ pub(crate) fn point_sql(kind: Kind) -> String {
     } else {
         "NULL,NULL".into()
     };
+    // The same saved Run fact `run.get` reads; the run table admits it only while stopping.
+    let stop_settlement = if kind == Kind::Run {
+        "r.stop_settlement_failure"
+    } else {
+        "NULL"
+    };
     format!(
-        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{detail},{recovery},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
+        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{detail},{recovery},{stop_settlement},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
     )
 }
 
@@ -267,14 +273,14 @@ pub(crate) fn read_status_tx(
                 }
                 continue;
             }
-            if row.get_ref(27)?.as_str_or_null().ok().flatten().is_some() {
+            if row.get_ref(28)?.as_str_or_null().ok().flatten().is_some() {
                 result.limited.push(Limited {
                     id: id.into(),
                     reason: "canonical_metadata_unconfirmed",
                 });
                 continue;
             }
-            let borrowed = (1..27)
+            let borrowed = (1..28)
                 .map(|column| {
                     row.get_ref(column)
                         .map(|v| v.as_str_or_null().ok().flatten())
@@ -549,6 +555,9 @@ fn canonical_item(
                     .and_then(crate::compaction::discard::decode)
             })
             .flatten(),
+        stop_settlement_failure: crate::readback::decode_stop_settlement_failure(
+            get(26).as_deref(),
+        )?,
         instruction_warnings: if fact.key.kind == Kind::Run {
             crate::instructions::decode_warnings(get(23).as_deref())
         } else {
@@ -768,6 +777,7 @@ mod tests {
                   UPDATE receipt SET result_json='{"deliver":"complete"}' WHERE id='receipt';
                   UPDATE shell_execution SET shell_json='{"completion":{"elapsed_ms":99}}' WHERE id='s';
                   INSERT INTO output_chunk VALUES('s',2,'stderr',0,X'62','2026-11-01T00:00:00.5Z');
+                  UPDATE run SET state='stopping',ended_at=NULL,stop_settlement_failure='storage' WHERE id='r';
                 "#).unwrap();
             }
             let args = crate::protocol::StatusArgs {
@@ -778,6 +788,16 @@ mod tests {
             };
             let canonical = super::super::snapshot(&db, &args, "fixture").unwrap();
             assert_eq!(canonical.page.items.len(), 5);
+            let run = canonical
+                .page
+                .items
+                .iter()
+                .find(|item| item.kind == "run")
+                .unwrap();
+            assert_eq!(
+                run.stop_settlement_failure,
+                changed.then_some(crate::protocol::RunStopSettlementFailure::Storage)
+            );
             let mut budget = TextBudget::default();
             let raw = read_status_tx(&db, &retained_keys(), &mut budget).unwrap();
             assert_eq!(raw.statements, 5);
