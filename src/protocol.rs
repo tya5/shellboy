@@ -1317,7 +1317,21 @@ record!(HistoryWindowObservation {
 });
 record!(HistoryWindowTools {
     calls: Vec<HistoryWindowToolCall>,
-    limited_node_ids: Vec<String>
+    limited_node_ids: Vec<String>,
+    notices: Vec<HistoryWindowNotice>
+});
+// A saved `shell_ended` notification node joined to its exact execution, call
+// and result. `source_node_id` is absent when the result is missing or reclaimed.
+record!(HistoryWindowNotice {
+    node_id: String,
+    execution_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")] execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] background: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")] description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] source_node_id: Option<String>
 });
 record!(HistoryWindowToolCall {
     node_id: String, group_id: String, call_id: String, ordinal: u32,

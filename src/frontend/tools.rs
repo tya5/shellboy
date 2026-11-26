@@ -73,6 +73,7 @@ impl ToolFacts {
         crate::protocol::HistoryWindowTools {
             calls: self.sources,
             limited_node_ids: self.truncated_nodes,
+            notices: self.notices,
         }
     }
     #[cfg(test)]
