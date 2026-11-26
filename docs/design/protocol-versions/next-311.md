@@ -41,8 +41,11 @@ owners or independent header and sidebar calls.
 
 A pending observation returns up to 128 items ordered by saved receipt
 creation and row identity. Each returned row includes its creation time, a
-512-character message preview with a truncation indicator, and attachment count.
-Sender identity stays on `message.get`. The owner examines at most 129 rows per pending
+512-character message preview with a truncation indicator, attachment count,
+the saved `sender`, `expect_reply` for an open reply duty, `admission_uncertain`
+when path admission was not confirmed, `completion_scheduled` for a saved
+`complete` delivery, and the typed `held_by` from #423 as its hold reason.
+The owner examines at most 129 rows per pending
 receipt state before applying the selected-path exclusion. If that prefix
 cannot prove completeness, `total_exact` is false and `total` is a lower
 bound; unavailable items are not evidence of rejection or delivery.

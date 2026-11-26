@@ -889,6 +889,10 @@ mod tests {
         assert_eq!(observation.pending.items[0].excerpt, "held-paired");
         assert!(!observation.pending.items[0].excerpt_truncated);
         assert_eq!(observation.pending.items[0].attachment_count, 0);
+        let row = &observation.pending.items[0];
+        assert_eq!(row.sender.kind, crate::protocol::SenderKind::ExternalCli);
+        assert_eq!(row.sender.label.as_deref(), Some("human"));
+        assert!(!row.expect_reply && !row.admission_uncertain && !row.completion_scheduled);
         assert_eq!(
             observation.pending.items[0].held_by,
             Some(crate::protocol::MessageHeldBy::Unknown)
@@ -896,6 +900,25 @@ mod tests {
         assert_eq!(observation.activity.run_id.as_deref(), Some("r"));
         assert_eq!(observation.activity.turn_id.as_deref(), Some("u"));
         assert!(observation.committed_attempts.is_empty());
+        owner.db.call(|db| {
+            db.execute("UPDATE receipt SET path_admission='unknown',result_json='{\"deliver\":\"complete\",\"reply\":{\"state\":\"pending\"}}' WHERE message_node_id='held-paired'", [])?;
+            Ok(())
+        }).await.unwrap();
+        let response = crate::ipc::call_selected_operation(
+            &owner.loaded.data_dir,
+            &control.store.instance_id,
+            Command::HistoryWindow(
+                serde_json::from_value(json!({"thread_id": "t", "include_observation": true}))
+                    .unwrap(),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+        let window: crate::protocol::HistoryWindow =
+            serde_json::from_value(response.result.unwrap()).unwrap();
+        let row = &window.observation.unwrap().pending.items[0];
+        assert!(row.expect_reply && row.admission_uncertain && row.completion_scheduled);
 
         server.shutdown().await.unwrap();
         dispatcher.await.unwrap();
