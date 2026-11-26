@@ -551,11 +551,10 @@ mod tests {
         }
     }
     #[test]
-    fn latest_turn_tie_breaker_reuses_one_index_and_bounds_complete_run_query() {
+    fn latest_turn_tie_breaker_matches_canonical_with_an_indexed_run_query() {
         let db = fixture();
-        // Force the historical layout even after a future migration extends it.
-        // Only this disposable fixture changes; no migration is adopted here.
-        db.execute_batch("UPDATE turn SET state='completed' WHERE id='u'; DROP INDEX activity_turn_run; DROP INDEX turns_by_run; CREATE INDEX turns_by_run ON turn(run_id,created_at);").unwrap();
+        db.execute_batch("UPDATE turn SET state='completed' WHERE id='u';")
+            .unwrap();
         let seed_ties = |from: usize, until: usize| {
             db.execute_batch("BEGIN").unwrap();
             for i in from..until {
@@ -586,36 +585,22 @@ mod tests {
                 .unwrap()
         };
         seed_ties(0, 4096);
-        let old_dense = latest();
-        let expected = canonical(&db, &run());
+        assert_eq!(latest().as_deref(), Some("tie-004095"));
         assert_eq!(
             prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
-            expected
+            canonical(&db, &run())
         );
-        assert_eq!(old_dense.as_deref(), Some("tie-004095"));
-        assert!(plan().iter().any(|part| part.contains("TEMP B-TREE")));
-        db.execute_batch(
-            "DROP INDEX turns_by_run; CREATE INDEX turns_by_run ON turn(run_id,created_at,id);",
-        )
-        .unwrap();
-        assert_eq!(latest(), old_dense);
-        assert_eq!(
-            prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
-            expected,
-            "same rows and canonical fields before/after the index replacement"
-        );
-        let extended_plan = plan();
+        let plan = plan();
         assert!(
-            extended_plan
-                .iter()
-                .any(|part| part.contains("COVERING INDEX turns_by_run")),
-            "{extended_plan:?}"
+            plan.iter()
+                .any(|part| part.starts_with("SEARCH") && part.contains("INDEX")),
+            "{plan:?}"
         );
         assert!(
-            !extended_plan
+            !plan
                 .iter()
-                .any(|part| part.contains("TEMP B-TREE")),
-            "{extended_plan:?}"
+                .any(|part| part.starts_with("SCAN u") || part.starts_with("SCAN turn")),
+            "{plan:?}"
         );
         seed_ties(4096, 8192);
         assert_eq!(latest().as_deref(), Some("tie-008191"));

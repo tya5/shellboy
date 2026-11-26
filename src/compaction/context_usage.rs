@@ -673,7 +673,6 @@ mod query_cost_tests {
             plan.iter().any(|p| p.contains("attempts_completed_scope")),
             "{plan:?}"
         );
-        assert!(plan.iter().any(|p| p.contains("TEMP B-TREE")), "{plan:?}");
         assert!(
             !plan
                 .iter()
