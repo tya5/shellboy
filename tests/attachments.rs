@@ -764,6 +764,71 @@ async fn fork_selection_sharing_and_path_reattachment_keep_managed_image_active(
     f.db.shutdown().await.unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_clipboard_save_cancelled_after_its_insert_was_admitted_releases_the_pin() {
+    let f = Fixture::new(Config::default()).await;
+    // Hold the DB worker so the save's insert is admitted but not yet run.
+    let (open, gate) = std::sync::mpsc::channel::<()>();
+    let held =
+        f.db.try_call(move |_| {
+            let _ = gate.recv();
+            Ok(())
+        })
+        .unwrap();
+    {
+        let save = f.service.save_clipboard_pixels(
+            ClipboardPixels {
+                width: 1,
+                height: 1,
+                rgba: vec![255, 0, 0, 255],
+            },
+            CancellationToken::new(),
+        );
+        let mut save = std::pin::pin!(save);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        // One poll admits the insert; leaving the scope cancels the caller.
+        assert!(
+            std::future::Future::poll(save.as_mut(), &mut context).is_pending(),
+            "the save waits on its admitted insert"
+        );
+    }
+    open.send(()).unwrap();
+    held.receive().await.unwrap();
+    // The insert commits after the cancellation; its pin must still go.
+    f.wait_pins(0).await;
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn startup_removes_crash_left_temporary_images_but_not_a_live_save() {
+    let f = Fixture::new(Config::default()).await;
+    let tmp = f.path.join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    for name in ["crashed.png.tmp", "live.png.tmp", "unrelated.tmp"] {
+        std::fs::write(tmp.join(name), b"partial").unwrap();
+    }
+    let live = f
+        .path
+        .join("managed/clipboard/live.png")
+        .to_string_lossy()
+        .into_owned();
+    f.db.call(move |db| {
+        db.execute("INSERT INTO managed_file(id,absolute_path,state,created_at)VALUES('live',?1,'creating','now')", [live])?;
+        db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES('live-pin','instance-test','managed_file','live',0,'now')", [])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.service.restart_cleanup().await.unwrap();
+    assert!(!tmp.join("crashed.png.tmp").exists());
+    assert!(
+        tmp.join("live.png.tmp").exists(),
+        "a save of this instance keeps its file"
+    );
+    assert!(tmp.join("unrelated.tmp").exists());
+    f.db.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn saved_unsent_draft_protects_managed_image_after_runtime_pins_are_cleared() {
     let fixture = Fixture::new(Config::default()).await;

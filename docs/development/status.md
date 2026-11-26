@@ -1,5 +1,18 @@
 # Development status
 
+## Core #450 items 1, 4 and 7: long-running growth
+
+Branch `task/core450-growth-1-4-7`. (1) A Turn with an unchanged instruction
+observation references the previous Turn's snapshot row; history GC's
+`instructions` stage deletes snapshots no Turn references (migration
+`next_instruction_snapshot_turns` adds the Turn index). (4) Raw GC deletes
+`raw_tombstone` markers whose execution is gone and collected, superseded
+schedule/service executions with their markers; the latest execution of each
+definition stays. (7) Every `runtime_pin` row belongs to a `PinLease` created
+before its insert, so failed and cancelled paths release it; startup removes
+crash-left `tmp/*.png.tmp`. Not landed. Raw age retention not arming without a
+collect or capacity excess is #451; items 2, 3, 5, 6 and 8 remain.
+
 ## Core #449 opt-in notice for skipped schedule occurrences
 
 Branch `task/core449-schedule-skip-notice`: `schedule add/set --notify skipped`

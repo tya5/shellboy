@@ -40,6 +40,7 @@ pub mod program_status;
 pub mod protocol;
 pub mod rag;
 pub mod request_inspect;
+mod runtime_pin;
 pub mod serve;
 pub mod shell;
 pub mod startup;

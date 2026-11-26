@@ -36,13 +36,15 @@ impl SelectionRow {
 pub(super) struct SelectionSnapshot {
     pub(super) revision: i64,
     pub(super) selected: Vec<Selected>,
-    pub(super) pin_ids: Vec<String>,
+    /// Pin rows inserted under the caller's lease prefix.
+    pub(super) pinned: usize,
 }
 pub(super) fn snapshot_selection_tx(
     tx: &Transaction<'_>,
     thread: &str,
     instance: &str,
     expected_revision: Option<i64>,
+    pins: &str,
 ) -> Result<SelectionSnapshot, StorageError> {
     let revision =
         crate::history::selection_revision(tx, thread, crate::history::ThreadScope::Live)
@@ -58,7 +60,7 @@ pub(super) fn snapshot_selection_tx(
     }
     let mut statement=tx.prepare("SELECT a.id,a.absolute_path,a.input_kind,s.protected,s.state,s.reason,m.id,m.state,(SELECT z.content_hash FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND z.state='sent' AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1),a.source_node_id,n.payload_json,(SELECT z.state FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1) FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path LEFT JOIN node n ON n.id=a.source_node_id WHERE s.thread_id=?1 AND (COALESCE(s.reason,'')<>'context_replacement' OR EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) OR NOT EXISTS(SELECT 1 FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND z.state='excluded' AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted')) AND NOT (s.state='excluded' AND COALESCE(s.reason,'')='context_replacement' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) AND n.id IS NOT NULL AND (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL)) AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.node_id=a.source_node_id AND d.thread_id=s.thread_id AND d.status<>'applied') ORDER BY s.selected_order,a.id")?;
     let mut selected = Vec::new();
-    let mut pins = Vec::new();
+    let mut pinned = 0;
     let mut detached_count = 0;
     for row in statement.query_map([&thread], SelectionRow::from_row)? {
         let SelectionRow {
@@ -133,9 +135,9 @@ pub(super) fn snapshot_selection_tx(
             ));
         }
         if active && let Some(managed) = &managed {
-            let pin = super::id();
+            let pin = crate::runtime_pin::pin_id(pins, pinned);
+            pinned += 1;
             tx.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,?2,'managed_file',?3,?4,?5)",params![pin,instance,managed,revision,now()])?;
-            pins.push(pin);
         }
         selected.push(Selected {
             id,
@@ -159,6 +161,6 @@ pub(super) fn snapshot_selection_tx(
     Ok(SelectionSnapshot {
         revision,
         selected,
-        pin_ids: pins,
+        pinned,
     })
 }
