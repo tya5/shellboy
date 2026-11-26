@@ -2740,10 +2740,20 @@ record!(HistoryDisplayTool {
     status: Option<String>,
     exit_code: Option<i64>
 });
+/// One step of a field path through the saved payload. `count` follows a
+/// step whose value is a collection, so a client can name items and counts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HistoryDisplayPathSegment {
+    Key { key: String },
+    Index { index: u64 },
+    Count,
+}
 record!(HistoryDisplayField {
     path: String,
     value: String,
-    omitted: bool
+    omitted: bool,
+    shape: Vec<HistoryDisplayPathSegment>
 });
 record!(HistoryDisplayLink {
     range: HistoryDisplayRange,

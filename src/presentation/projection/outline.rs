@@ -97,7 +97,7 @@ pub(crate) fn display_outline(
                 .flatten();
             let fields = envelope
                 .as_ref()
-                .map_or_else(Vec::new, |value| budget.fields(value));
+                .map_or_else(Vec::new, |value| budget.fields(value, payload));
             blocks.push(Block {
                 range: Range { start, end },
                 role,
@@ -139,7 +139,7 @@ pub(crate) fn display_outline(
     let fields = if matches!(node, Node::HiddenAdmission | Node::Received) {
         Vec::new()
     } else {
-        budget.fields(payload)
+        budget.fields(payload, payload)
     };
     let mut links = Vec::new();
     if !matches!(node, Node::HiddenAdmission) {
@@ -190,7 +190,8 @@ impl Budget {
         true
     }
 
-    fn fields(&mut self, value: &Value) -> Vec<Field> {
+    /// Labels follow the saved payload's shape (`root`), as in a payload projection.
+    fn fields(&mut self, value: &Value, root: &Value) -> Vec<Field> {
         let candidates = fields_of_value(value);
         self.limited |= candidates.len() == MAX_FIELDS;
         candidates
@@ -206,6 +207,7 @@ impl Budget {
                 }
                 self.fields += 1;
                 Some(Field {
+                    shape: crate::presentation::fields::path_shape(&field.key, root),
                     path: field.key,
                     value: field.value,
                     omitted: field.value_omitted,
