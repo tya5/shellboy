@@ -523,16 +523,17 @@ ends (completed, or stopped or failed with the message applied), exec classifies
 the saved reply duty from `message get` with the owner's single open-state rule
 (`control::reply::is_open`); a duty that already ended is returned without a
 wait. Only while it is open (`pending`, or `awaiting_own_ask` after the recipient
-asked back, #433) exec waits with the existing `reply_received` wait, bounded by
-its own `--timeout-ms`, and classifies that wait's snapshot of the message the
-same way; there is no retry or fallback read. An `interrupted` wait (input for
-the calling Thread) ends exec's observation with exit 5 `interrupted`, leaving the
-target and its duty untouched; a wait result the owner never produces for this
-condition, including a missing snapshot, is `owner_error` (exit 6). Exec returns
-the reply node once `replied`; a terminal state without a reply (`ignored`,
-`cancelled`, `recipient_deleted`) exits 4 `reply_unavailable`, and the client
-deadline exits 5 `timeout`; these messages name the state. No timer or owner
-behaviour is added.
+asked back, #433) exec submits one `reply_received` wait for the rest of its
+`--timeout-ms` (no slices, no re-arm, no retry or fallback read) and classifies
+that wait's snapshot of the message the same way. A wait that times out with the
+duty open is exec's deadline result (exit 5 `timeout`); an `interrupted` wait
+(input for the calling Thread) ends exec's observation with exit 5
+`interrupted`, leaving the target and its duty untouched. Both name the state
+from that snapshot. A wait result the owner never produces for this condition,
+including a missing snapshot, is `owner_error` (exit 6). Exec returns the reply
+node once `replied`; a terminal state without a reply (`ignored`, `cancelled`,
+`recipient_deleted`) exits 4 `reply_unavailable`, naming the state. No timer or
+owner behaviour is added.
 
 **Which end message.** Both modes read the saved end message of a Turn: the
 last assistant node of a Turn that completed normally. A Turn ended by Esc

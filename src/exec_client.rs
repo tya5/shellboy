@@ -271,73 +271,68 @@ impl Session {
         )
         .map_err(|_| Failure::new(6, "owner_error", "Owner returned an invalid typed result"))
     }
-    /// `--result reply`: the saved duty, then each `reply_received` snapshot,
-    /// is classified by the owner's open-state rule; only an open duty is
-    /// waited on, up to the client deadline (#441).
+    /// `--result reply`: the saved duty is classified by the owner's open-state
+    /// rule; only an open duty gets one `reply_received` wait for the rest of
+    /// the client deadline, whose snapshot of the message decides (#441).
     async fn await_reply(
         &mut self,
         message: &str,
         saved: Option<&Value>,
     ) -> Result<Option<String>, Failure> {
-        let mut reply = saved
-            .cloned()
+        let saved = saved
             .ok_or_else(|| Failure::new(4, "reply_unavailable", "No reply outcome was saved"))?;
-        loop {
-            let Some(state) = reply["state"]
-                .as_str()
-                .filter(|state| crate::control::reply::is_open(Some(state)))
-                .map(str::to_owned)
-            else {
-                return ended_reply(reply["state"].as_str(), reply["node_id"].as_str());
-            };
-            let remaining = self
-                .deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .min(30_000) as u64;
-            if remaining == 0 {
-                return Err(duty_timeout(&state));
+        let Some(state) = open_state(saved) else {
+            return ended_reply(saved["state"].as_str(), saved["node_id"].as_str());
+        };
+        let remaining = self
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
+        if remaining == 0 {
+            return Err(duty_timeout(state));
+        }
+        // The deadline can also expire inside the wait request before the
+        // owner answers; this path owns that diagnostic, naming the saved state.
+        let wait: WaitResult = self
+            .request(
+                "wait",
+                Command::Wait(WaitArgs {
+                    after: None,
+                    conditions: vec![WaitCondition::ReplyReceived {
+                        message_id: message.to_owned(),
+                    }],
+                    timeout_ms: remaining,
+                }),
+            )
+            .await
+            .map_err(|failure| failure.at_deadline(state))?;
+        if wait.status == WaitStatus::Unavailable {
+            return Err(Failure::new(
+                4,
+                "execution_unavailable",
+                "Wait target became unavailable",
+            ));
+        }
+        // The owner's snapshot of this exact message carries its reply state
+        // and node with every other result.
+        let reply = reply_snapshot(&wait.snapshot, message).ok_or_else(impossible_reply_wait)?;
+        let Some(state) = open_state(&reply) else {
+            return ended_reply(reply["state"].as_str(), reply["node_id"].as_str());
+        };
+        match wait.status {
+            WaitStatus::Timeout => Err(duty_timeout(state)),
+            // Input for the calling Thread ends this observation; the target
+            // and its duty continue.
+            WaitStatus::Interrupted => Err(Failure::new(
+                5,
+                "interrupted",
+                format!(
+                    "Reply wait was interrupted by input for the calling Thread while the reply duty is {state}; no target was stopped"
+                ),
+            )),
+            WaitStatus::Satisfied | WaitStatus::RecoveryWait | WaitStatus::Unavailable => {
+                Err(impossible_reply_wait())
             }
-            // The deadline can also expire inside the wait request; this path
-            // owns that diagnostic, naming the last observed open state.
-            let wait: WaitResult = self
-                .request(
-                    "wait",
-                    Command::Wait(WaitArgs {
-                        after: None,
-                        conditions: vec![WaitCondition::ReplyReceived {
-                            message_id: message.to_owned(),
-                        }],
-                        timeout_ms: remaining,
-                    }),
-                )
-                .await
-                .map_err(|failure| failure.at_deadline(&state))?;
-            match wait.status {
-                WaitStatus::Satisfied | WaitStatus::Timeout => {}
-                // Input for the calling Thread ends this observation; the
-                // target and its duty continue.
-                WaitStatus::Interrupted => {
-                    return Err(Failure::new(
-                        5,
-                        "interrupted",
-                        format!(
-                            "Reply wait was interrupted by input for the calling Thread while the reply duty is {state}; no target was stopped"
-                        ),
-                    ));
-                }
-                WaitStatus::Unavailable => {
-                    return Err(Failure::new(
-                        4,
-                        "execution_unavailable",
-                        "Wait target became unavailable",
-                    ));
-                }
-                WaitStatus::RecoveryWait => return Err(impossible_reply_wait()),
-            }
-            // The owner's snapshot of this exact message carries its reply
-            // state and node; a finished wait always includes it.
-            reply = reply_snapshot(&wait.snapshot, message).ok_or_else(impossible_reply_wait)?;
         }
     }
     async fn answer(&mut self, mode: ResultMode) -> Result<String, Failure> {
@@ -642,6 +637,12 @@ fn reply_snapshot(snapshot: &Value, message: &str) -> Option<Value> {
         .iter()
         .find(|item| item["type"] == "reply" && item["message_id"] == message)
         .map(|item| json!({"state": item["state"], "node_id": item["reply_node_id"]}))
+}
+/// The duty's state while the owner's single open-state rule holds it open.
+fn open_state(reply: &Value) -> Option<&str> {
+    reply["state"]
+        .as_str()
+        .filter(|state| crate::control::reply::is_open(Some(state)))
 }
 /// The result of a duty that is no longer open.
 fn ended_reply(state: Option<&str>, node: Option<&str>) -> Result<Option<String>, Failure> {

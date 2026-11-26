@@ -1222,6 +1222,177 @@ async fn reply_mode_reports_a_cancelled_duty_from_the_wait_snapshot() {
     fixture.close().await;
 }
 
+async fn model_request(fixture: &mut Fixture) -> Incoming {
+    crate::test_watchdog::watchdog("model request", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap()
+}
+async fn reply_state(fixture: &Fixture, duty: &str) -> String {
+    let duty = duty.to_owned();
+    fixture
+        .owner
+        .db
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",
+                [duty],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+/// #441: input for the Thread whose shell runs exec interrupts the reply wait.
+/// exec exits 5 naming the state from the wait's own snapshot (the duty was
+/// reopened after exec read it) and leaves the duty open.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_mode_interruption_names_the_snapshot_state_and_leaves_the_duty_open() {
+    let mut fixture = Fixture::new().await;
+    let created = fixture
+        .control
+        .request(Request::new(
+            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_thread_id: None,
+            }),
+        ))
+        .await;
+    assert!(created.ok, "{:?}", created.error);
+    let recipient = created.result.unwrap()["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let schema = fixture.root.path().join("integer.json");
+    std::fs::write(&schema, br#"{"type":"integer"}"#).unwrap();
+    // The caller's model runs exec in its own shell, so exec carries its Origin.
+    let (caller, first) = fixture.active().await;
+    first
+        .reply
+        .send(cli_call(&[
+            "exec",
+            "--result",
+            "reply",
+            "--schema",
+            schema.to_str().unwrap(),
+            "--thread",
+            &recipient,
+            "work",
+        ]))
+        .unwrap();
+    // The recipient asks back and ends its Run with the duty awaiting that ask.
+    model_request(&mut fixture)
+        .await
+        .reply
+        .send(cli_call(&[
+            "message",
+            "ask",
+            "--to",
+            "claude",
+            "--text",
+            "Which option?",
+        ]))
+        .unwrap();
+    model_request(&mut fixture)
+        .await
+        .reply
+        .send(answer("Asked Claude; waiting."))
+        .unwrap();
+    let target = recipient.clone();
+    let duty: String = fixture
+        .owner
+        .db
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.expect_reply')=1",
+                [target],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    // exec saw the Run end with the duty open and now waits for its reply.
+    fixture.reply_wait_issued(&duty).await;
+    assert_eq!(reply_state(&fixture, &duty).await, "awaiting_own_ask");
+    let saved = duty.clone();
+    let question: String = fixture
+        .owner
+        .db
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT json_extract(result_json,'$.reply.blocking_message_id') FROM receipt WHERE message_node_id=?1",
+                [saved],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    // The answer reopens the duty for a later recipient Run, held here.
+    let answered = fixture
+        .control
+        .request(Request::new(
+            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            Command::MessageReply(MessageReplyArgs {
+                message_id: question,
+                text: "Option A".into(),
+                sender_label: None,
+            }),
+        ))
+        .await;
+    assert!(answered.ok, "{:?}", answered.error);
+    let held = model_request(&mut fixture).await;
+    assert_eq!(reply_state(&fixture, &duty).await, "pending");
+    // Input for the caller's Thread interrupts exec's wait.
+    let input = fixture
+        .control
+        .request(Request::new(
+            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            Command::MessageSend(MessageSendArgs {
+                max_model_requests: None,
+                resume_recovery: false,
+                human: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(caller.thread_id.clone()),
+                text: "new input".into(),
+            }),
+        ))
+        .await;
+    assert!(input.ok, "{:?}", input.error);
+    let after = model_request(&mut fixture).await;
+    let body = after.body.to_string();
+    assert!(body.contains("interrupted"), "{body}");
+    assert!(body.contains("while the reply duty is pending"), "{body}");
+    assert_eq!(
+        reply_state(&fixture, &duty).await,
+        "pending",
+        "the duty stays open"
+    );
+    after.reply.send(answer("Handled.")).unwrap();
+    // The held recipient Run replies, then ends.
+    held.reply
+        .send(cli_call(&[
+            "message",
+            "reply",
+            "--message",
+            &duty,
+            "--text",
+            "42",
+        ]))
+        .unwrap();
+    model_request(&mut fixture)
+        .await
+        .reply
+        .send(answer("Replied."))
+        .unwrap();
+    fixture.close().await;
+}
+
 // ---- shellboy chat: thin client over the same owner RPCs ----
 
 fn chat_command(fixture: &Fixture, args: &[&str]) -> tokio::process::Command {
