@@ -1360,6 +1360,8 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "Summary character limit (empty = configured)"
         ),
         FieldId::IndexScope => local!(language, "索引対象範囲", "Index scope"),
+        FieldId::IndexCoverage => local!(language, "索引の網羅状況", "Index coverage"),
+        FieldId::IndexCoverageCursor => local!(language, "網羅状況の続きcursor", "Coverage cursor"),
         FieldId::Space => local!(language, "索引領域ID", "Index space ID"),
         FieldId::Threads => local!(language, "索引対象Thread ID", "Thread IDs to index"),
         FieldId::Sources => local!(
@@ -1933,6 +1935,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "summaryだけで指定できます。完成した要約の文字数上限です。",
             "Only for summary. Maximum length of the completed summary."
         ),
+        FieldId::IndexCoverage => local!(language, "選択範囲の索引の網羅状況を返します。", "Report index coverage for the selection."),
+        FieldId::IndexCoverageCursor => local!(language, "前回の網羅状況から続きを取得します。", "Continue from the previous coverage cursor."),
         FieldId::IndexScope => local!(
             language,
             "threads/allを指定します。実行時は現在のpreviewと明示対象の規則を保持します。",
