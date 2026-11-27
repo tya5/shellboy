@@ -43,7 +43,7 @@ use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
 use update_delivery::{BufferedUpdates, UpdateTarget};
 mod management;
 mod management_state;
-pub(crate) mod recovery;
+mod recovery;
 mod refresh;
 mod selection;
 #[cfg(test)]
@@ -54,9 +54,9 @@ mod streaming;
 mod streams;
 #[cfg(test)]
 use streaming::StreamBody;
-pub(crate) mod notices;
-pub(crate) mod tools;
-pub(crate) mod usage;
+mod notices;
+mod tools;
+mod usage;
 mod watch_page;
 mod watch_read;
 mod window_facts;
