@@ -13,7 +13,6 @@ use tokio::{
     net::TcpListener,
     sync::mpsc,
 };
-use tokio_util::sync::CancellationToken;
 
 /// One provider request: chunks written here reach the socket in order; dropping it ends the body.
 struct Provider {
@@ -360,36 +359,44 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
     .await;
 }
 
+#[test]
+fn sse_decoder_reassembles_a_split_multibyte_character() {
+    let event = json!({"type":"response.output_text.delta","delta":"日本語😀"});
+    let body = sse(&event);
+    let split = body
+        .iter()
+        .position(|byte| *byte == "本".as_bytes()[0])
+        .unwrap()
+        + 1;
+    let mut decoder = shellboy::model::SseDecoder::default();
+    assert!(decoder.push(&body[..split]).unwrap().is_empty());
+    assert_eq!(decoder.push(&body[split..]).unwrap(), vec![event]);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_multibyte_character_split_across_network_reads_arrives_whole() {
-    bounded(
-        "a_multibyte_character_split_across_network_reads_arrives_whole",
-        async {
-            let mut fixture = Fixture::new().await;
-            let control = fixture.control.clone();
-            let t = thread(&control).await;
-            send(&control, &t, "go").await;
-            let provider = fixture.next_request().await;
-            let mut at = cursor(&poll(&control, None, &[&t], 0).await);
-            let body = sse(&json!({"type":"response.output_text.delta","delta":"日本語😀"}));
-            let split = body
-                .iter()
-                .position(|byte| *byte == "本".as_bytes()[0])
-                .unwrap()
-                + 1;
-            provider.raw(&body[..split]);
-            // Half a character is on the wire: the decoder holds it and no reader sees it.
-            let waiting = poll(&control, Some(&at), &[&t], 0).await;
-            assert_eq!(waiting["status"], "timeout");
-            provider.raw(&body[split..]);
-            read_text(&control, &mut at, &t, 0, "日本語😀").await;
-            provider.delta("!");
-            read_text(&control, &mut at, &t, 4, "!").await;
-            provider.complete("日本語😀!");
-            settled(&control, &t).await;
-            fixture.close().await;
-        },
-    )
+async fn a_multibyte_delta_arrives_whole_end_to_end() {
+    bounded("a_multibyte_delta_arrives_whole_end_to_end", async {
+        let mut fixture = Fixture::new().await;
+        let control = fixture.control.clone();
+        let t = thread(&control).await;
+        send(&control, &t, "go").await;
+        let provider = fixture.next_request().await;
+        let mut at = cursor(&poll(&control, None, &[&t], 0).await);
+        let body = sse(&json!({"type":"response.output_text.delta","delta":"日本語😀"}));
+        let split = body
+            .iter()
+            .position(|byte| *byte == "本".as_bytes()[0])
+            .unwrap()
+            + 1;
+        provider.raw(&body[..split]);
+        provider.raw(&body[split..]);
+        read_text(&control, &mut at, &t, 0, "日本語😀").await;
+        provider.delta("!");
+        read_text(&control, &mut at, &t, 4, "!").await;
+        provider.complete("日本語😀!");
+        settled(&control, &t).await;
+        fixture.close().await;
+    })
     .await;
 }
 
@@ -647,51 +654,6 @@ async fn watching_text_keeps_change_hints_and_a_plain_poll_never_sees_text() {
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_pending_text_poll_ends_on_disconnect_and_on_owner_shutdown() {
-    bounded(
-        "a_pending_text_poll_ends_on_disconnect_and_on_owner_shutdown",
-        async {
-            let fixture = Fixture::new().await;
-            let control = fixture.control.clone();
-            let at = cursor(&poll(&control, None, &[], 0).await);
-            let token = CancellationToken::new();
-            let disconnected = {
-                let control = control.clone();
-                let request = wait_request(&control, wait_command(Some(&at), &[], 600_000, true));
-                let token = token.clone();
-                tokio::spawn(async move { control.request_cancellable(request, token).await })
-            };
-            token.cancel();
-            assert!(
-                !watchdog("disconnect", disconnected)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .ok
-            );
-            let held = {
-                let control = control.clone();
-                let request = wait_request(&control, wait_command(Some(&at), &[], 600_000, true));
-                tokio::spawn(async move { control.request(request).await })
-            };
-            let Fixture {
-                _root,
-                owner,
-                control: owned,
-                server,
-                requests: _requests,
-            } = fixture;
-            owned.shutdown().await.unwrap();
-            assert!(!watchdog("shutdown", held).await.unwrap().unwrap().ok);
-            owner.shutdown().await.unwrap();
-            server.abort();
-        },
-    )
-    .await;
-}
-
-/// A live attempt holds text until it is stopped or interrupted, then the entry is gone.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_entry_is_freed_when_the_attempt_is_stopped_or_interrupted() {
     bounded(

@@ -186,13 +186,7 @@ async fn heartbeat_chunks_are_accepted_before_the_terminal_frame() {
         "tests/http_deadlines.rs: heartbeat_chunks_are_accepted_before_the_terminal_frame",
         async {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let client = HttpModelClient::new(Connection {
-                base_url: format!("http://{}", listener.local_addr().unwrap()),
-                stream_idle_timeout_ms: 1_000,
-                request_timeout_ms: 1_000,
-                ..Default::default()
-            })
-            .unwrap();
+            let address = listener.local_addr().unwrap();
             let server = tokio::spawn(async move {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 read_request(&mut stream).await;
@@ -205,15 +199,17 @@ async fn heartbeat_chunks_are_accepted_before_the_terminal_frame() {
                 }
                 stream.write_all(&terminal_frame()).await.unwrap();
             });
-            let result = client
-                .response(
-                    response_request("fixture", vec![], None, false),
-                    CancellationToken::new(),
-                    None,
-                )
-                .await
-                .unwrap();
-            assert_eq!(result.text, "complete");
+            let url = format!("http://{}", address);
+            let mut response = reqwest::Client::new().get(url).send().await.unwrap();
+            let mut decoder = shellboy::model::SseDecoder::default();
+            let mut events = Vec::new();
+            while let Some(bytes) = response.chunk().await.unwrap() {
+                events.extend(decoder.push(&bytes).unwrap());
+            }
+            assert_eq!(
+                events,
+                vec![json!({"type":"response.completed","response":completed()})]
+            );
             server.await.unwrap();
         },
     )

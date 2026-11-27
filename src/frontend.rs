@@ -3503,13 +3503,7 @@ async fn run_client(
                     generation,
                     pause_notification_epoch,
                 }) => {
-                    if selection.accepts_initial_activity(&thread_id, generation, epoch, pause_notification_epoch) {
-                        selection
-                            .publish_activity(&updates, thread_id, generation, epoch, result)
-                            .await
-                    } else if selection.accepts(&thread_id, generation, epoch) {
-                        dirty_threads.insert(thread_id);
-                    }
+                    selection.handle_initial_activity(&updates, &mut dirty_threads, (thread_id, generation, epoch, pause_notification_epoch), result).await;
                 }
                 Some(BackgroundResult::Sent {
                     generation, projection,

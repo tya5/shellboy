@@ -1116,6 +1116,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn registered_events_wait_disconnects_and_drains_without_a_receipt() {
+        use crate::protocol::{Command, EventsWaitArgs, Request};
+        use tokio_util::sync::CancellationToken;
+        for include_text in [false, true] {
+            let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+            let command = |after| {
+                Command::EventsWait(EventsWaitArgs {
+                    after,
+                    thread_ids: vec![],
+                    timeout_ms: 600_000,
+                    include_text,
+                    include_reasoning_activity: false,
+                })
+            };
+            let baseline = control
+                .request(Request::new(
+                    control.store.operation_epoch.mint(),
+                    command(None),
+                ))
+                .await;
+            let at = baseline.result.unwrap()["cursor"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            for disconnect in [true, false] {
+                assert!(control.waits.keyed.is_empty());
+                let token = CancellationToken::new();
+                let poll = tokio::spawn({
+                    let control = control.clone();
+                    let token = token.clone();
+                    let request = Request::new(
+                        control.store.operation_epoch.mint(),
+                        command(Some(at.clone())),
+                    );
+                    async move { control.request_cancellable(request, token).await }
+                });
+                crate::test_watchdog::watchdog("events.wait keyed registration", async {
+                    while control.waits.keyed.is_empty() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                let receipts: i64 = control.store.database.call(|db| Ok(db.query_row(
+                    "SELECT (SELECT count(*) FROM operation_receipt)+(SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%')", [], |row| row.get(0),
+                )?)).await.unwrap();
+                assert_eq!(receipts, 0);
+                if disconnect {
+                    token.cancel();
+                } else {
+                    control.shutdown().await.unwrap();
+                }
+                let response =
+                    crate::test_watchdog::watchdog("registered events.wait terminates", poll)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                assert!(!response.ok);
+                assert!(control.waits.keyed.is_empty());
+            }
+            server.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn a_delta_and_its_poll_wake_only_text_waiters_until_a_shutdown_drain() {
         use crate::protocol::{Command, EventsWaitArgs, Request};
         use futures_util::FutureExt;

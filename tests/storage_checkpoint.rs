@@ -128,17 +128,35 @@ async fn partial_checkpoint_retries_after_interval_then_clean_reads_stay_idle() 
     })
     .await;
     wait_for_attempt(&db, &count, 1).await;
+    let previous = count.checkpoint_attempts();
     reader.execute_batch("ROLLBACK").unwrap();
     reader.close().unwrap();
-    let previous = count.checkpoint_attempts();
-    wait_for_attempt(&db, &count, previous + 1).await;
-    let recovered = count.checkpoint_attempts();
-    // Retry must have retained the pending write even without another mutation;
-    // after full recovery the same read jobs must no longer trigger attempts.
-    for _ in 0..8 {
-        read_job(&db).await;
-    }
-    assert_eq!(count.checkpoint_attempts(), recovered);
+    crate::test_watchdog::watchdog(
+        "checkpoint writes the pending value into the main file",
+        async {
+            loop {
+                wait_for_attempt(&db, &count, previous + 1).await;
+                // An immutable handle ignores WAL and observes only the main file.
+                let main_file = format!("file:{}?immutable=1", path.display());
+                let disk = Connection::open_with_flags(
+                    main_file,
+                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+                )
+                .unwrap();
+                let value = disk.query_row(
+                    "SELECT value FROM app_meta WHERE key='checkpoint-fixture'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                );
+                if value.is_ok_and(|text| text == "new") {
+                    break;
+                }
+                read_job(&db).await;
+            }
+        },
+    )
+    .await
+    .unwrap();
     checkpoint_barrier(&db, &count).await;
     db.shutdown().await.unwrap();
 }

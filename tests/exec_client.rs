@@ -23,6 +23,7 @@ struct Incoming {
     body: Value,
     reply: oneshot::Sender<String>,
 }
+type FollowGate = oneshot::Sender<(EventsWaitArgs, oneshot::Sender<()>)>;
 struct Fixture {
     root: tempfile::TempDir,
     owner: DataOwner,
@@ -33,6 +34,7 @@ struct Fixture {
     mock: JoinHandle<()>,
     /// Every command the owner received, in order (name only), for client-behaviour tests.
     seen: Arc<std::sync::Mutex<Vec<String>>>,
+    follow_gate: Arc<std::sync::Mutex<Option<FollowGate>>>,
     /// While true, the next `events.wait` that carries a cursor is answered with a
     /// synthetic `resync_required` instead of reaching the owner.
     resync_next: Arc<std::sync::atomic::AtomicBool>,
@@ -130,6 +132,8 @@ impl Fixture {
         let (forward, requests) = mpsc::channel(16);
         tokio::spawn(control.clone().serve(requests));
         let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let follow_gate = Arc::new(std::sync::Mutex::new(None::<FollowGate>));
+        let gate = follow_gate.clone();
         let resync_next = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let swallow_hints = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (log, resync, swallow) = (seen.clone(), resync_next.clone(), swallow_hints.clone());
@@ -149,6 +153,26 @@ impl Fixture {
                 log.lock()
                     .unwrap()
                     .push(debug.split('(').next().unwrap_or_default().to_owned());
+                if let Command::EventsWait(args) = &invocation.request.command
+                    && args.after.is_some()
+                    && args.timeout_ms > 0
+                {
+                    let held = gate.lock().unwrap().take();
+                    if let Some(held) = held {
+                        let (release, released) = oneshot::channel();
+                        let (tap, actual) = oneshot::channel();
+                        let args = args.clone();
+                        let reply = std::mem::replace(&mut invocation.reply, tap);
+                        held.send((args, release)).unwrap();
+                        tokio::spawn(async move {
+                            if let Ok(actual) = actual.await
+                                && released.await.is_ok()
+                            {
+                                let _ = reply.send(actual);
+                            }
+                        });
+                    }
+                }
                 if let Command::Wait(args) = &invocation.request.command {
                     conditions
                         .lock()
@@ -265,6 +289,7 @@ impl Fixture {
             stop,
             mock,
             seen,
+            follow_gate,
             resync_next,
             swallow_hints,
             reply_waits,
@@ -2397,34 +2422,48 @@ async fn run_chat_in_process(
     (signal, task)
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::test]
 async fn chat_follow_reads_the_turn_after_the_wait_returns() {
     let mut fixture = Fixture::new().await;
+    let (gate, held) = oneshot::channel();
+    *fixture.follow_gate.lock().unwrap() = Some(gate);
     let (_signal, task) = run_chat_in_process(&fixture, b"long work\n").await;
-    let pending = crate::test_watchdog::watchdog("chat idle request", fixture.incoming.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    crate::test_watchdog::watchdog("chat begins following events", async {
-        while fixture.count("EventsWait") < 2 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    let before_turn_reads = fixture.count("TurnGet");
+    let pending =
+        crate::test_watchdog::watchdog("chat open provider request", fixture.incoming.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    let (args, release) =
+        crate::test_watchdog::watchdog("chat's cursor-bearing follow request", held)
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(args.thread_ids.len(), 1);
+    assert!(args.after.is_some());
+    assert!(args.timeout_ms > 0);
+    let before = fixture.count("TurnGet");
     pending.reply.send(answer("done")).unwrap();
-    let (result, out) = crate::test_watchdog::watchdog("chat idle end", task)
-        .await
-        .unwrap()
-        .unwrap();
+    tokio::time::pause();
+    let at = tokio::time::Instant::now();
+    assert_eq!(
+        fixture.count("TurnGet"),
+        before,
+        "the follow response is still held"
+    );
+    release.send(()).unwrap();
+    // Keep Tokio's clock frozen while the wall-clock watchdog bounds a hang.
+    let watchdog = crate::test_watchdog::Deadline::new("chat finishes after the follow response");
+    while !task.is_finished() {
+        watchdog.check();
+        tokio::task::yield_now().await;
+    }
+    let (result, out) = task.await.unwrap();
+    assert_eq!(tokio::time::Instant::now(), at);
+    tokio::time::resume();
     let out = String::from_utf8(out).unwrap();
     assert_eq!(result.unwrap(), 0, "{out}");
     assert!(out.contains("done"), "{out}");
-    assert!(
-        fixture.count("TurnGet") > before_turn_reads,
-        "the held wait returned on the change and chat read the Turn"
-    );
+    assert!(fixture.count("TurnGet") > before);
     fixture.close().await;
 }
 
