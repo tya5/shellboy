@@ -118,7 +118,7 @@ operation fingerprints stay unchanged. It takes the settings-free path (no
 `profile_revision`/`reasoning_epoch` change, no settings-change event). It
 records a context entry `thread_parent` with before/after, and reports `T`, the
 old parent and the new parent in `changed_threads` so the TUI lineage cache and
-the Web UI refresh both sides.
+an IPC client refreshes both sides.
 
 **Checks, in the write transaction (single DB worker, so concurrent moves
 serialize):**
@@ -229,7 +229,7 @@ for bulk, or not found) per ID; idempotent under client operation receipts.
 
 **Bulk archive by age/state/filter** is done by *selecting with list, then
 archiving by IDs*: the model reads `thread list` JSON (it already has `state`,
-`activity`, `updated_at`, `last_end_message`) and passes IDs; the Web UI
+`activity`, `updated_at`, `last_end_message`) and passes IDs; an IPC client
 multi-selects. This keeps one bounded write path and makes every archive an
 explicit ID set, with no filter-driven writes that could catch unexpected
 Threads. Nothing archives automatically. A later opt-in "auto-archive finished
@@ -283,7 +283,7 @@ Bulk "archive everything with tag X" is `thread list --tag X` then
 
 `thread.pinned_at TEXT`. Pinned Threads are listed separately, not re-sorted into
 the main order (re-sorting would change the cursor key): `thread list --pinned`
-returns pinned Threads (bounded page, by `pinned_at DESC`), and the TUI/Web UI
+returns pinned Threads (bounded page, by `pinned_at DESC`), and the TUI and IPC clients
 show that page above the normal list. Pin and archive are independent; an
 archived Thread is hidden even if pinned (open question: unpin on archive).
 
@@ -299,7 +299,7 @@ updated. No new table, worker, queue or event kind; changes publish the existing
 
 Data layer (shared by CLI, TUI and IPC clients through the existing local IPC):
 
-| Web UI gesture | Operation |
+| Client gesture | Operation |
 |---|---|
 | drag Thread onto Thread | `thread.set {thread_id, parent_id: P}` |
 | drag Thread to the root area | `thread.set {thread_id, parent_id: ""}` |
@@ -418,7 +418,7 @@ Follows §3 with these concrete choices (decision D-222-2).
 - Bounds: the walk (1,024 steps) is the only loop; one UPDATE and one context row per call;
   `thread.set` stays in the writer-bound exemption list because the call is O(1,024) at most.
 - Not done: ownership transfer of live Runs (stop/retry have no authority check since #256, so a move changes only notices and the stop cascade), a TUI move key
-  or drag gesture, moving several Threads in one call (use one call per Thread; the Web UI
+  or drag gesture, moving several Threads in one call (use one call per Thread; an IPC client
   can repeat it).
 
 ## Stage 3 as implemented (tags and the cwd filter, migration 34)

@@ -3974,7 +3974,7 @@ screen in an IPC client.
   reader. Later candidates are in the design only, not on the wire. Recheck when a real need for a live value
   appears.
 - **No standalone edit path.** It would write with no receipt or record, and the user's request was for the
-  owner. Uncertain: a first-time user with no owner must edit by hand, as today. Recheck if the Web UI needs to
+  owner. Uncertain: a first-time user with no owner must edit by hand, as today. Recheck if an IPC client needs to
   edit before an owner exists.
 - **`extra_body` shows top-level names only.** Provider options are opaque by design, so no leaf is known to be
   safe; useful ones like `thinking.type` are hidden too. Recheck if the settings screen needs them, and then by
@@ -4062,7 +4062,7 @@ Weaker judgments, with their recheck conditions:
   so it never receives text or `status:"text"`.
 - `status --memory` does not report this buffer; add it if the bound ever needs watching in the field.
 
-Recheck plan B when: poll round trips or connection cost visibly limit smoothness in the Web client.
+Recheck plan B when: poll round trips or connection cost visibly limit smoothness in an IPC client.
 
 ## D-243-3: Two landed #243 tests fixed; the product code was not the cause (2026-11-07)
 
@@ -4107,7 +4107,7 @@ capture) although it records no context entry. Impact: `ThreadSummary` and `Thre
 `ThreadListArgs` gains optional `tags` and `cwd` (both skipped when empty, so existing operation fingerprints are
 unchanged). Recheck when: tag sets with hundreds of thousands of members appear (a count-bounded or covering
 `(tag, updated_at)` index may then be needed), a TUI filter is asked for, models create near-duplicate spellings
-(a suggestion or case-folding rule), or the Web UI needs `tags` on browser rows.
+(a suggestion or case-folding rule), or an IPC client needs `tags` on browser rows.
 ## D-269: Connection setup, stages A and B (2026-11-07)
 
 Issue #269, for an IPC client's first-run screen. The issue fixed the main shape (a stored key per connection, environment
@@ -4280,7 +4280,7 @@ Decision: models use `message ask` for a human decision, one question per messag
 Recheck when: the receipt query plan changes, either recipient kind starts sharing notification behavior, or the UI adds a cross-Thread inbox.
 ## D-244-2: Protocol 3 external-client contract and generated schema (2026-11-07)
 
-The Web UI is an independent RPC client. Keep request argument records strict so
+An IPC client is an independent RPC client. Keep request argument records strict so
 unknown input cannot be silently ignored, while adding a distinct tolerant
 `record!` macro for output records so future additive result fields are ignored.
 `Hello`/`Welcome`/`Endpoint` also ignore additive metadata; protocol versions

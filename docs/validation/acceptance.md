@@ -10696,7 +10696,7 @@ historical downgrade fixtures drop the new table and index first. The operation 
 operation palette tests cover `thread.tag`, `thread.tags` and `thread.cwds` (69 operations). Not verified: Windows/Linux
 local runs (CI is recorded with the final SHA), a real terminal (no PTY capture of the palette forms), tag
 filters on a very large real database or a tag with hundreds of thousands of members, concurrent tagging
-while an owner serves a Web UI, `events.wait` clients receiving the changed-Thread hints from a running
+while an owner serves an IPC client, `events.wait` clients receiving the changed-Thread hints from a running
 owner (the change set is asserted on the store result), a tag change through the operation palette form
 end to end, tags on fork and rewind results (not inherited by construction, only `create --parent` is tested),
 and the real upgrade of a user database from schema 33 to 34 (only the synthetic checker fixture).
@@ -10811,7 +10811,7 @@ On macOS, the synthetic temporary-database history execution-link test passed:
 list/window equality, unchanged existing fields, missing/invalid/sanitized labels,
 and identical indexed and unindexed query plans. The history-window module
 passed 7 tests; `cargo check --tests`, formatting, test layout, and language audit
-passed. Linux and Windows validation is pending CI; no real Web UI or user data
+passed. Linux and Windows validation is pending CI; no real IPC client or user data
 was used.
 
 ## #269 stage C: live connection validation (2026-11-07)
@@ -11452,7 +11452,10 @@ Local macOS validation: `cargo check --tests --locked`, shell integration suite
 and shell lifecycle unit tests 9 passed. These are synthetic subprocess/mock
 provider fixtures, not user stores or real-provider tests. Windows-specific
 initial-input/default-EOF and repeated-EOF rejection tests were added but not
-executed locally. Cross-OS CI remains an integration gate.
+executed locally. An external IPC client source at `ba265c4771c824bb2b65c5f76dca912320cf4f10`
+was searched for shell EOF/write and `Closed` success dependencies; none were
+found in its tracked source/tests/scripts. Local `rg` was unavailable, so this
+search used `git grep`. Cross-OS CI remains an integration gate.
 ## #284 selected request-history diagnostics (WIP)
 
 Synthetic-only implementation; no private owner, history, or database was read.
@@ -12265,7 +12268,7 @@ Local verification on the #325 worktree: pinned `cargo fmt`, `cargo check --test
 The first exact-SHA CI (`44905626185`, SHA `c67c646ac0f0e25533a6b6de75ad3b22dca47141`) exposed test-ratchet updates required for the additional read-only operation and capability, the new `not_found` CLI lookup result, and a legacy tool-repair test using short IDs at CLI boundaries. These tests were updated and pass focused local reruns. The compact-list count selector failed in that full CI run but passed four focused local repetitions; its cause remains unestablished. Do not treat the c67 RED as evidence for a later SHA.
 ## Core #326 IPC final frames
 
-Purpose checks cover typed replies for owner-side failures, clean EOF without a reply, typed failure on extra peer input or a peer read error, final-frame lifetime, and accepted replies surviving fatal listener failure. Core checks do not establish Windows named-pipe delivery to an IPC client.
+Purpose checks cover typed replies for owner-side failures, clean EOF without a reply, typed failure on extra peer input or a peer read error, final-frame lifetime, and accepted replies surviving fatal listener failure. Core checks do not establish Windows named-pipe delivery to an IPC client; the three exact-pair Windows cases must be verified against the same Core SHA.
 
 ## Core #327 attachment list pages (verification pending)
 
