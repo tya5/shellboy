@@ -150,14 +150,33 @@ async fn stream_timeout_retains_partial_text_and_public_model_events() {
             )
             .await;
             let (sender, mut events) = mpsc::channel(4);
-            let failure = client
-                .response(
-                    response_request("fixture", vec![], None, false),
-                    CancellationToken::new(),
-                    Some(sender),
-                )
-                .await
-                .unwrap_err();
+            let watchdog = crate::test_watchdog::Deadline::new("client observes partial delta");
+            tokio::time::pause();
+            let at = tokio::time::Instant::now();
+            let response = tokio::spawn(async move {
+                client
+                    .response(
+                        response_request("fixture", vec![], None, false),
+                        CancellationToken::new(),
+                        Some(sender),
+                    )
+                    .await
+            });
+            // Keep the runtime runnable so it cannot auto-advance while the
+            // real socket delivers the first delta.
+            let observed = loop {
+                watchdog.check();
+                match events.try_recv() {
+                    Ok(event) => break event,
+                    Err(mpsc::error::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(error) => panic!("stream ended before the delta: {error}"),
+                }
+            };
+            assert_eq!(observed, event);
+            assert_eq!(tokio::time::Instant::now(), at);
+            tokio::time::advance(std::time::Duration::from_millis(500)).await;
+            let failure = response.await.unwrap().unwrap_err();
+            tokio::time::resume();
             assert_eq!(failure.error.kind, "timeout");
             assert_eq!(failure.partial_text, "already received");
             assert!(failure.facts.received == shellboy::model::http::ResponseReceived::Output);
@@ -167,7 +186,6 @@ async fn stream_timeout_retains_partial_text_and_public_model_events() {
                     .message
                     .contains("connections.deadline_fixture.stream_idle_timeout_ms")
             );
-            assert_eq!(events.recv().await.unwrap(), event);
             assert!(
                 events.recv().await.is_none(),
                 "transport observations leaked into public model events"
@@ -199,17 +217,31 @@ async fn heartbeat_chunks_are_accepted_before_the_terminal_frame() {
                 }
                 stream.write_all(&terminal_frame()).await.unwrap();
             });
-            let url = format!("http://{}", address);
-            let mut response = reqwest::Client::new().get(url).send().await.unwrap();
-            let mut decoder = shellboy::model::SseDecoder::default();
-            let mut events = Vec::new();
-            while let Some(bytes) = response.chunk().await.unwrap() {
-                events.extend(decoder.push(&bytes).unwrap());
-            }
+            let client = HttpModelClient::for_connection(
+                "deadline_fixture",
+                Connection {
+                    base_url: format!("http://{address}/v1"),
+                    stream_idle_timeout_ms: 0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let (sender, mut events) = mpsc::channel(4);
+            let response = client
+                .response(
+                    response_request("fixture", vec![], None, false),
+                    CancellationToken::new(),
+                    Some(sender),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.text, "complete");
+            assert_eq!(response.raw["id"], completed()["id"]);
             assert_eq!(
-                events,
-                vec![json!({"type":"response.completed","response":completed()})]
+                events.recv().await.unwrap(),
+                json!({"type":"response.completed","response":completed()})
             );
+            assert!(events.recv().await.is_none());
             server.await.unwrap();
         },
     )

@@ -136,19 +136,26 @@ async fn partial_checkpoint_retries_after_interval_then_clean_reads_stay_idle() 
         async {
             loop {
                 wait_for_attempt(&db, &count, previous + 1).await;
-                // An immutable handle ignores WAL and observes only the main file.
+                // Read only the main file, on the writer lane: no checkpoint
+                // can write the file while this immutable handle is open.
                 let main_file = format!("file:{}?immutable=1", path.display());
-                let disk = Connection::open_with_flags(
-                    main_file,
-                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-                )
-                .unwrap();
-                let value = disk.query_row(
-                    "SELECT value FROM app_meta WHERE key='checkpoint-fixture'",
-                    [],
-                    |row| row.get::<_, String>(0),
-                );
-                if value.is_ok_and(|text| text == "new") {
+                let value = db
+                    .call(move |_| {
+                        let disk = Connection::open_with_flags(
+                            main_file,
+                            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+                        )?;
+                        Ok(disk
+                            .query_row(
+                                "SELECT value FROM app_meta WHERE key='checkpoint-fixture'",
+                                [],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .ok())
+                    })
+                    .await
+                    .unwrap();
+                if value.as_deref() == Some("new") {
                     break;
                 }
                 read_job(&db).await;
