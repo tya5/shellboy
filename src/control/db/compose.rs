@@ -36,8 +36,14 @@ pub(super) fn save(
                 "Draft Thread is not available",
             )
         })?;
-    if expected_thread_revision.is_some_and(|expected| u64::try_from(revision).ok() != Some(expected)) {
-        return Err(crate::protocol::ApiError::precondition_changed("thread_revision", Some(serde_json::json!(revision)), "Selected history changed"));
+    if expected_thread_revision
+        .is_some_and(|expected| u64::try_from(revision).ok() != Some(expected))
+    {
+        return Err(crate::protocol::ApiError::precondition_changed(
+            "thread_revision",
+            Some(serde_json::json!(revision)),
+            "Selected history changed",
+        ));
     }
     if let Some(message) = expected_source_message {
         let present: bool = tx.query_row(
@@ -47,7 +53,11 @@ pub(super) fn save(
             params![thread, message], |row| row.get(0),
         ).map_err(sql_error)?;
         if !present {
-            return Err(crate::protocol::ApiError::precondition_changed("source_message", Some(Value::Null), "Original user request is unavailable"));
+            return Err(crate::protocol::ApiError::precondition_changed(
+                "source_message",
+                Some(Value::Null),
+                "Original user request is unavailable",
+            ));
         }
     }
     if !follow_tail

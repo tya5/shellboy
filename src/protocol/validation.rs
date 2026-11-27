@@ -532,9 +532,12 @@ const MAX_CONFIG_FIELD_BYTES: usize = 512;
 const MAX_CONFIG_VALUE_BYTES: usize = 128 * 1024;
 impl ConfigSetArgs {
     fn validate(&self) -> Result<(), ApiError> {
-        if self.expected_hash.as_ref().is_some_and(|hash| hash.len() != 64
-            || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
-        {
+        if self.expected_hash.as_ref().is_some_and(|hash| {
+            hash.len() != 64
+                || !hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }) {
             return Err(invalid(
                 "expected_hash must be file.content_hash from config.get",
             ));
@@ -937,7 +940,10 @@ impl Command {
                 optional_nonempty(a.turn_id.as_deref(), "turn_id")
             }
             Self::DraftSubmit(a) => {
-                optional_nonempty(a.expected_source_message.as_deref(), "expected_source_message")?;
+                optional_nonempty(
+                    a.expected_source_message.as_deref(),
+                    "expected_source_message",
+                )?;
                 if a.expected_source_message.is_some() && a.draft.edit.is_none() {
                     return Err(invalid("expected_source_message requires an edited draft"));
                 }
@@ -981,7 +987,10 @@ impl Command {
             }
             Self::DraftSave(a) => {
                 nonempty(&a.thread_id, "thread_id")?;
-                optional_nonempty(a.expected_source_message.as_deref(), "expected_source_message")?;
+                optional_nonempty(
+                    a.expected_source_message.as_deref(),
+                    "expected_source_message",
+                )?;
                 nonempty(&a.draft.draft_id, "draft_id")
             }
             Self::ModelList(a) => a.validate(),

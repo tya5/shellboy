@@ -586,7 +586,14 @@ pub fn apply_with_replace(
     before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
     replace: impl FnOnce(&Path, &Path, bool) -> std::io::Result<()>,
 ) -> Result<Applied, ApiError> {
-    apply_runtime(path, Some(expected_hash), changes, before_replace, replace, None)
+    apply_runtime(
+        path,
+        Some(expected_hash),
+        changes,
+        before_replace,
+        replace,
+        None,
+    )
 }
 
 pub(crate) fn apply_live(
