@@ -1588,6 +1588,17 @@ async fn a_stored_key_change_wakes_a_config_wait_and_a_refused_one_does_not() {
             assert_eq!(seen["config_changed"], marks);
             cursor = seen["cursor"].as_str().map(str::to_owned);
         }
+
+        // A hand-edited entry with a blank key reports no stored key, so setting
+        // one there makes the key appear and marks.
+        std::fs::write(
+            root.path().join("credentials.toml"),
+            "[connections.proxy]\napi_key = \"\"\n",
+        )
+        .unwrap();
+        call(&control, set("proxy", KEY)).await.unwrap();
+        let seen = call(&control, wait(cursor.take())).await.unwrap();
+        assert_eq!(seen["config_changed"], true);
     })
     .await
     .unwrap();
