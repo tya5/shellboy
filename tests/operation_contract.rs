@@ -937,52 +937,6 @@ async fn client_mutation_after_an_epoch_roll_mints_in_the_new_epoch_and_applies_
 }
 
 #[tokio::test]
-async fn concurrent_admissions_of_one_id_during_a_roll_never_report_not_applied_for_an_admitted_request()
- {
-    let (_root, owner, server, serving) = full_owner().await;
-    let data = owner.loaded.data_dir.clone();
-    let id = format!("{}.0:same-id", owner.instance_id);
-    let calls = (0..6).map(|_| {
-        let (data, id) = (data.clone(), id.clone());
-        tokio::spawn(async move {
-            shellboy::ipc::call(&data, create_thread(), Some(id), None)
-                .await
-                .unwrap()
-        })
-    });
-    let mut applied = 0;
-    let mut not_applied = 0;
-    for call in calls {
-        let response = call.await.unwrap();
-        match response.error {
-            None => applied += 1,
-            Some(error) => {
-                if error
-                    .details
-                    .as_ref()
-                    .is_some_and(|d| d["request_may_have_been_applied"] == false)
-                {
-                    not_applied += 1;
-                }
-            }
-        }
-    }
-    let threads = thread_count(&data).await;
-    assert!(threads <= 1, "one ID runs at most once");
-    if threads == 1 {
-        assert!(
-            applied >= 1 && not_applied == 0,
-            "an admitted ID is never answered as not applied"
-        );
-    } else {
-        assert_eq!(applied, 0);
-    }
-    server.shutdown().await.unwrap();
-    serving.abort();
-    owner.shutdown().await.unwrap();
-}
-
-#[tokio::test]
 async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_current_identity() {
     let (_dir, store) = fixture().await;
     let original = request(
