@@ -227,6 +227,13 @@ impl Session {
         let end_message_read =
             matches!(&command,Command::HistoryRead(args)if args.end_message_only);
         self.progress.stage = stage;
+        // IDs come only from this request's handshake announcement: entering a
+        // stage drops the previous request's ID, a new send drops the previous
+        // send's. The create ID and an ambiguous send's ID are kept.
+        self.progress.operation_id = None;
+        if stage == "send" {
+            self.progress.send_operation_id = None;
+        }
         if Instant::now() >= self.deadline {
             return Err(Failure::new(
                 5,
@@ -910,6 +917,36 @@ pub async fn execute(
             failure.status,
             json!({"message":failure.message,"error":failure.api}),
         ),
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_id_tests {
+    use super::*;
+    #[tokio::test]
+    async fn a_stage_that_never_reaches_the_handshake_reports_no_stale_ids() {
+        let mut session = Session {
+            data: PathBuf::new(),
+            origin: None,
+            deadline: Instant::now(),
+            progress: Progress {
+                operation_id: Some("old.0:request".into()),
+                send_operation_id: Some("old.0:send".into()),
+                create_operation_id: Some("old.0:create".into()),
+                ..Default::default()
+            },
+        };
+        let failed: Result<Value, Failure> = session
+            .request("send", Command::Status(Default::default()))
+            .await;
+        assert!(failed.is_err());
+        let progress = &session.progress;
+        assert_eq!(progress.stage, "send");
+        assert!(progress.operation_id.is_none() && progress.send_operation_id.is_none());
+        assert_eq!(
+            progress.create_operation_id.as_deref(),
+            Some("old.0:create")
+        );
     }
 }
 

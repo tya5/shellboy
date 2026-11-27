@@ -162,7 +162,16 @@ pub struct Store {
     usage_context: crate::usage_totals::ReadContext,
     /// Receipt-collection background requester, shared by clones of this Store.
     background: Arc<tokio::sync::Mutex<crate::storage::BackgroundRequester>>,
+    /// Test-only owner-side point between a completed reclamation pass and its
+    /// final admission job.
+    #[cfg(test)]
+    pass_gate: Arc<std::sync::Mutex<Option<PassGate>>>,
 }
+#[cfg(test)]
+type PassGate = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
 
 #[derive(Clone)]
 struct AgentsPlan {
@@ -215,6 +224,8 @@ impl Store {
             instance_id,
             usage_diagnostics: None,
             usage_context: crate::usage_totals::ReadContext::default(),
+            #[cfg(test)]
+            pass_gate: Arc::default(),
         }
     }
 
@@ -358,6 +369,14 @@ impl Store {
         loop {
             let attempt = operation.clone();
             let (result, pressure, changes) = if after.is_none() && !dirty {
+                #[cfg(test)]
+                {
+                    let gate = self.pass_gate.lock().unwrap().take();
+                    if let Some((reached, release)) = gate {
+                        let _ = reached.send(());
+                        let _ = release.await;
+                    }
+                }
                 let facts = PassFacts {
                     changes: observed.expect("completed pass"),
                     epoch: pass_epoch.clone().expect("completed pass"),
@@ -726,7 +745,17 @@ impl Store {
         let config = self.config.clone();
         self.database
             .call(move |db| {
-                if !epoch.admits(&operation) {
+                // Epoch expiry fences unknown work only: an operation that
+                // already holds a pending reservation (an admitted edit) is
+                // authorized by it and is never refused after a roll.
+                let admitted: bool = db
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM operation_receipt WHERE operation_id=?1 AND state='pending')",
+                        [&operation],
+                        |row| row.get(0),
+                    )
+                    .map_err(StorageError::from)?;
+                if !admitted && !epoch.admits(&operation) {
                     return Err(StorageError::from(error(
                         ErrorCode::OperationExpired,
                         "Draft submission has no active owner operation identity",
@@ -4326,6 +4355,88 @@ mod receipt_wait_tests {
             [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?)),
         )?)).await.unwrap();
         assert_eq!(saved, ("current".into(), false, "reading".into()));
+        db.shutdown().await.unwrap();
+    }
+
+    const FILL_FINISHED: &str = "INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,result_ref_json)VALUES(?1,'current','\"'||hex(zeroblob(4194304))||'\"','hash','completed','2000-01-01',0,'0')";
+
+    fn create_request(id: &str) -> Request {
+        Request::new(
+            id,
+            Command::ThreadCreate(ThreadCreateArgs {
+                connection: None,
+                cwd: None,
+                agents: None,
+                model: None,
+                effort: None,
+                parent_thread_id: None,
+            }),
+        )
+    }
+
+    async fn thread_count(db: &DbWorker) -> i64 {
+        db.call(|db| Ok(db.query_row("SELECT count(*) FROM thread", [], |r| r.get(0))?))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn duplicate_admitted_before_the_final_decision_is_never_answered_not_applied() {
+        let (_root, db, store) = fixture().await;
+        db.call(|db| {
+            for n in 1..=31 {
+                db.execute(FILL_FINISHED, [format!("current.0:filler-{n}")])?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let (reached_tx, reached_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        *store.pass_gate.lock().unwrap() = Some((reached_tx, release_rx));
+        let first = {
+            let store = store.clone();
+            tokio::spawn(async move { store.execute(create_request("current.0:same"), None).await })
+        };
+        // The first call completed its pass over a full budget and is parked
+        // before its final admission job.
+        crate::test_watchdog::watchdog("first call reaches its pass end", reached_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        db.call(|db| {
+            db.execute(
+                "DELETE FROM operation_receipt WHERE operation_id='current.0:filler-1'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let second = store
+            .execute(create_request("current.0:same"), None)
+            .await
+            .unwrap();
+        release_tx.send(()).unwrap();
+        let first = first.await.unwrap().unwrap();
+        assert_eq!(first.result["thread_id"], second.result["thread_id"]);
+        assert_eq!(thread_count(&db).await, 1);
+        // Restore the full budget; a never-admitted ID now rolls the epoch.
+        db.call(|db| {
+            db.execute(FILL_FINISHED, ["current.0:filler-1"])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let other = store
+            .execute(create_request("current.0:other"), None)
+            .await
+            .unwrap_err();
+        let details = other.details.unwrap();
+        assert_eq!(details["reason"], "operation_epoch_rolled");
+        assert_eq!(details["request_may_have_been_applied"], false);
+        assert_eq!(store.operation_epoch.current(), "current.1");
+        assert_eq!(thread_count(&db).await, 1);
         db.shutdown().await.unwrap();
     }
 

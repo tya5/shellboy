@@ -869,6 +869,29 @@ fn submission(op: &str, source: &str, revision: u64, text: &str) -> DraftSubmiss
     }
 }
 #[tokio::test]
+async fn epoch_roll_refuses_new_draft_work_but_not_an_admitted_edit() {
+    let (_root, store) = store().await;
+    let admitted = "fixture.0:edit";
+    assert!(matches!(
+        store
+            .reserve_internal(admitted.into(), json!({"test":"edit"}))
+            .await
+            .unwrap(),
+        crate::control::db::RuntimeReservation::New
+    ));
+    store.operation_epoch.roll();
+    store
+        .prepare_draft_submission(admitted, Some("t"), &submission(admitted, "e", 1, "x"))
+        .await
+        .unwrap();
+    let fresh = "fixture.0:new";
+    let refused = store
+        .prepare_draft_submission(fresh, Some("t"), &submission(fresh, "e", 1, "x"))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::OperationExpired);
+}
+#[tokio::test]
 async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_without_touching_newer_editable_draft()
  {
     let (root, store) = store().await;
