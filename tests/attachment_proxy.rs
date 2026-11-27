@@ -7,7 +7,11 @@ use std::{sync::Arc, time::Duration};
 async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;
@@ -46,7 +50,7 @@ async fn historical_image_replays_at_its_source_with_local_luna() {
     let file = root.path().join("synthetic-blue.png");
     std::fs::write(&file,STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAeklEQVR4nO3PUQkAIBTAwBfCYGY3kSH8OITBAtxm7fN1wwUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWPHYBtHVhHjkcFvgAAAAASUVORK5CYII=").unwrap()).unwrap();
     let accepted=control.send_draft(
-        format!("{}:{}",control.store.instance_id,uuid::Uuid::new_v4()),
+        format!("{}:{}",control.store.operation_epoch.current(),uuid::Uuid::new_v4()),
         ThreadCreateArgs{ agents: None,connection:None,cwd:None,model:None,effort:None,parent_thread_id:None},None,
         "This is a synthetic attachment compatibility check. Do not call tools. Briefly describe the image color.".into(),
         vec![AttachmentInput{path:file,kind:AttachmentKind::Image}],

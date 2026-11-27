@@ -38,7 +38,7 @@ async fn accept(store: &Store, op: &str, revision: i64) -> Value {
     store
         .execute_with_plan(
             Request::new(
-                format!("instance:{op}"),
+                format!("instance.0:{op}"),
                 Command::AttachmentAdd(AttachmentAddArgs {
                     thread_id: Some("thread".into()),
                     path: attachment_path().to_str().unwrap().into(),
@@ -141,7 +141,7 @@ async fn recovery_and_stopping_hold_and_fork_does_not_copy_unapplied_attachment(
     store
         .execute(
             Request::new(
-                "instance:fork",
+                "instance.0:fork",
                 Command::ThreadFork(ThreadForkArgs {
                     agents: None,
                     thread_id: "thread".into(),
@@ -188,7 +188,7 @@ async fn draft_source_exists_with_ordered_refs_in_same_acceptance_transaction() 
     let (_root, store) = fixture().await;
     let result = store
         .send_draft(
-            "instance:draft".into(),
+            "instance.0:draft".into(),
             ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -218,7 +218,7 @@ async fn stopping_holds_existing_acceptance_and_thread_deletion_cancels_without_
     store
         .execute(
             Request::new(
-                "instance:stop",
+                "instance.0:stop",
                 Command::RunStop(RunTarget {
                     run_id: "run".into(),
                 }),
@@ -244,7 +244,7 @@ async fn stopping_holds_existing_acceptance_and_thread_deletion_cancels_without_
     store
         .execute(
             Request::new(
-                "instance:delete",
+                "instance.0:delete",
                 Command::ThreadDelete(ThreadDeleteArgs {
                     preview_marker: None,
                     thread_id: "thread".into(),
@@ -294,7 +294,7 @@ async fn foreign_shell_origin_waits_for_its_own_group_even_when_target_is_idle()
     let accepted = store
         .execute_with_plan(
             Request::new(
-                "instance:cross",
+                "instance.0:cross",
                 Command::AttachmentAdd(AttachmentAddArgs {
                     thread_id: Some("thread".into()),
                     path: attachment_path().to_str().unwrap().into(),
@@ -369,7 +369,7 @@ async fn earlier_human_receipt_precedes_cli_source_and_later_human_stays_pending
     let before = store
         .execute(
             Request::new(
-                "instance:before",
+                "instance.0:before",
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -389,7 +389,7 @@ async fn earlier_human_receipt_precedes_cli_source_and_later_human_stays_pending
     let after = store
         .execute(
             Request::new(
-                "instance:after",
+                "instance.0:after",
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -441,7 +441,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
     let initial = store
         .execute(
             Request::new(
-                "instance:initial",
+                "instance.0:initial",
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -462,7 +462,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
     store
         .execute(
             Request::new(
-                "instance:stop-old",
+                "instance.0:stop-old",
                 Command::RunStop(RunTarget {
                     run_id: run.clone(),
                 }),
@@ -483,7 +483,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
     let next = store
         .execute(
             Request::new(
-                "instance:new-run",
+                "instance.0:new-run",
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -537,7 +537,7 @@ async fn terminated_foreign_origin_incomplete_group_does_not_block_live_target()
     store
         .execute(
             Request::new(
-                "instance:target-start",
+                "instance.0:target-start",
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -564,7 +564,7 @@ async fn terminated_foreign_origin_incomplete_group_does_not_block_live_target()
     store
         .execute_with_plan(
             Request::new(
-                "instance:foreign-will-stop",
+                "instance.0:foreign-will-stop",
                 Command::AttachmentAdd(AttachmentAddArgs {
                     thread_id: Some("thread".into()),
                     path: attachment_path().to_str().unwrap().into(),

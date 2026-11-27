@@ -135,7 +135,9 @@ impl Failure {
 struct Session {
     data: PathBuf,
     origin: Option<Origin>,
-    instance: String,
+    /// Operation epoch read from the probe's handshake-minted ID; every later
+    /// ID is minted before sending so its progress can name it (#450).
+    epoch: String,
     deadline: Instant,
     progress: Progress,
 }
@@ -190,7 +192,7 @@ impl Session {
                 ApiError::new(ErrorCode::InvalidState, "Owner rejected connection probe")
             })));
         }
-        self.instance = response
+        self.epoch = response
             .operation_id
             .split_once(':')
             .map(|(id, _)| id.to_owned())
@@ -199,7 +201,7 @@ impl Session {
                 Failure::new(
                     6,
                     "owner_error",
-                    "Owner probe returned no instance-scoped operation ID",
+                    "Owner probe returned no epoch-scoped operation ID",
                 )
             })?;
         Ok(())
@@ -247,7 +249,7 @@ impl Session {
                 "Client deadline expired; no target was stopped",
             ));
         }
-        let operation = format!("{}:exec-{}", self.instance, uuid::Uuid::new_v4());
+        let operation = format!("{}:exec-{}", self.epoch, uuid::Uuid::new_v4());
         self.progress.operation_id = Some(operation.clone());
         if stage == "send" {
             self.progress.send_operation_id = Some(operation.clone());
@@ -873,7 +875,7 @@ pub async fn execute(
     let mut session = Session {
         data: data.into(),
         origin,
-        instance: String::new(),
+        epoch: String::new(),
         deadline: Instant::now() + Duration::from_millis(options.timeout_ms),
         progress: Progress {
             thread_id: options.thread_id.clone(),

@@ -11790,6 +11790,10 @@
         "observed_at": {
           "type": "string"
         },
+        "operation_epoch": {
+          "description": "Prefix that new operation IDs must carry (`<instance_id>.<n>`).",
+          "type": "string"
+        },
         "receipt_budget": {
           "$ref": "#/definitions/ReceiptBudget"
         },
@@ -11799,6 +11803,7 @@
       },
       "required": [
         "instance_id",
+        "operation_epoch",
         "observed_at",
         "scope",
         "consistency",
@@ -14228,6 +14233,10 @@
         "instance_id": {
           "type": "string"
         },
+        "operation_epoch": {
+          "description": "Prefix that new operation IDs carry; read at each handshake (#450).",
+          "type": "string"
+        },
         "owner_version": {
           "maxLength": 128,
           "type": [
@@ -14243,7 +14252,8 @@
       },
       "required": [
         "protocol_version",
-        "instance_id"
+        "instance_id",
+        "operation_epoch"
       ],
       "title": "Welcome",
       "type": "object"

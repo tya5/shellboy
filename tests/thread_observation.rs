@@ -11,7 +11,11 @@ use tokio::{
 async fn call(control: &Arc<Control>, command: Command) -> Value {
     let result = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;

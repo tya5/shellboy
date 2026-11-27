@@ -71,7 +71,7 @@ mod tests {
         crate::test_watchdog::watchdog("guarded Run mutation and cleanup", async {
             let (_root, store) = fixture().await;
             let first = store
-                .execute_expected_run("fixture:stop".into(), expected(), RunAction::Stop)
+                .execute_expected_run("fixture.0:stop".into(), expected(), RunAction::Stop)
                 .await
                 .unwrap();
             assert_eq!(first.stop_runs, ["r"]);
@@ -80,7 +80,7 @@ mod tests {
                 ("stopping".into(), "recovery_wait".into(), 5)
             );
             let replay = store
-                .execute_expected_run("fixture:stop".into(), expected(), RunAction::Stop)
+                .execute_expected_run("fixture.0:stop".into(), expected(), RunAction::Stop)
                 .await
                 .unwrap();
             assert_eq!(replay.result, first.result);
@@ -89,7 +89,7 @@ mod tests {
             changed.turn_generation = Some(5);
             assert_eq!(
                 store
-                    .execute_expected_run("fixture:stop".into(), changed, RunAction::Stop)
+                    .execute_expected_run("fixture.0:stop".into(), changed, RunAction::Stop)
                     .await
                     .unwrap_err()
                     .code,
@@ -127,7 +127,7 @@ mod tests {
             let before = state(&store).await;
             assert!(
                 store
-                    .execute_expected_run(format!("fixture:bad-{case}"), guard, RunAction::Stop)
+                    .execute_expected_run(format!("fixture.0:bad-{case}"), guard, RunAction::Stop)
                     .await
                     .is_err()
             );
@@ -141,14 +141,14 @@ mod tests {
         crate::test_watchdog::watchdog("guarded Run mutation and cleanup", async {
             let (_root, store) = fixture().await;
             let first = store
-                .execute_expected_run("fixture:retry".into(), expected(), RunAction::Retry)
+                .execute_expected_run("fixture.0:retry".into(), expected(), RunAction::Retry)
                 .await
                 .unwrap();
             assert_eq!(first.quiet_wake_threads, ["t"]);
             assert!(first.stop_runs.is_empty());
             assert_ne!(state(&store).await.1, "recovery_wait");
             let replay = store
-                .execute_expected_run("fixture:retry".into(), expected(), RunAction::Retry)
+                .execute_expected_run("fixture.0:retry".into(), expected(), RunAction::Retry)
                 .await
                 .unwrap();
             no_effects(&replay);
@@ -156,7 +156,7 @@ mod tests {
             current.turn_generation = Some(5);
             assert!(
                 store
-                    .execute_expected_run("fixture:retry-again".into(), current, RunAction::Retry)
+                    .execute_expected_run("fixture.0:retry-again".into(), current, RunAction::Retry)
                     .await
                     .is_err(),
                 "exact identity alone cannot retry a non-recovery Turn"
@@ -176,7 +176,7 @@ mod tests {
             assert!(
                 store
                     .execute_expected_run(
-                        "fixture:unexpected-turn".into(),
+                        "fixture.0:unexpected-turn".into(),
                         guard.clone(),
                         RunAction::Stop
                     )
@@ -192,7 +192,7 @@ mod tests {
                 .await
                 .unwrap();
             let stopped = store
-                .execute_expected_run("fixture:no-turn".into(), guard, RunAction::Stop)
+                .execute_expected_run("fixture.0:no-turn".into(), guard, RunAction::Stop)
                 .await
                 .unwrap();
             assert_eq!(stopped.stop_runs, ["r"]);
@@ -208,7 +208,7 @@ mod tests {
         store.database.call(|db|{db.execute_batch("CREATE TRIGGER reject_guarded_stop BEFORE UPDATE OF state ON run BEGIN SELECT RAISE(ABORT,'synthetic rollback'); END;")?;Ok(())}).await.unwrap();
         assert!(
             store
-                .execute_expected_run("fixture:rollback".into(), expected(), RunAction::Stop)
+                .execute_expected_run("fixture.0:rollback".into(), expected(), RunAction::Stop)
                 .await
                 .is_err()
         );

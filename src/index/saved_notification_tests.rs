@@ -323,7 +323,10 @@ async fn actual_control_index_retry_receipt_replay_does_not_clear_new_pause_or_n
         .await
         .unwrap();
     let request = Request::new(
-        format!("{}:index-notification-retry", owner.instance_id),
+        format!(
+            "{}:index-notification-retry",
+            owner.operation_epoch.current()
+        ),
         Command::IndexRetry(IndexArgs::default()),
     );
     let first = control.request(request.clone()).await;

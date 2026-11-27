@@ -17,7 +17,7 @@ async fn fixture() -> (tempfile::TempDir, Store) {
     (root, store)
 }
 fn request(command: Command) -> Request {
-    Request::new(format!("fixture:{}", uuid::Uuid::new_v4()), command)
+    Request::new(format!("fixture.0:{}", uuid::Uuid::new_v4()), command)
 }
 fn send(expected: bool) -> Command {
     if expected {

@@ -155,7 +155,7 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
     let (send, receive) = tokio::sync::mpsc::channel(16);
     let server = LocalServer::bind(&owner, send).await.unwrap();
     let task = tokio::spawn(control.clone().serve(receive));
-    let operation = format!("{}:cli-fixture", owner.instance_id);
+    let operation = format!("{}:cli-fixture", owner.operation_epoch.current());
     async fn cli(directory: &std::path::Path, args: &[&str]) -> (bool, Value) {
         let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .arg("--data-dir")
@@ -275,7 +275,7 @@ async fn actual_cli_connects_to_owner_and_durable_retransmission_does_not_create
     .unwrap();
     let index_before = index_state(&control).await;
     assert_eq!(index_before, (0, 0, 1));
-    let preview_operation = format!("{}:cost-preview", owner.instance_id);
+    let preview_operation = format!("{}:cost-preview", owner.operation_epoch.current());
     let preview_args = [
         "--operation-id",
         &preview_operation,
@@ -420,7 +420,7 @@ async fn cross_data_directory_sender_label(verb: &str) {
         .store
         .execute(
             Request::new(
-                format!("{}:create", owner.instance_id),
+                format!("{}:create", owner.operation_epoch.current()),
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
                     connection: None,
@@ -1042,6 +1042,7 @@ async fn chat_missing_capability_uses_the_same_typed_cli_envelope_as_message_get
                     owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     instance_id: "fixture".into(),
+                    operation_epoch: "fixture.0".into(),
                     capabilities: vec![],
                 },
             )

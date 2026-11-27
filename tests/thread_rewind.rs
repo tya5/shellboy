@@ -124,7 +124,7 @@ impl Fixture {
         caller: Option<Origin>,
     ) -> Result<Value, ApiError> {
         let request = Request::new(
-            format!("instance:{}", uuid::Uuid::new_v4()),
+            format!("instance.0:{}", uuid::Uuid::new_v4()),
             Command::ThreadRewind(ThreadRewindArgs {
                 thread_id: thread.map(str::to_owned),
                 node_id: node.into(),
@@ -223,7 +223,7 @@ async fn rewind_cuts_the_path_and_keeps_the_tail_as_a_child_thread() {
         .store
         .execute(
             Request::new(
-                format!("instance:{}", uuid::Uuid::new_v4()),
+                format!("instance.0:{}", uuid::Uuid::new_v4()),
                 Command::ThreadSet(Box::new(ThreadSetArgs {
                     thread_id: Some("T".into()),
                     spill: Some("on".into()),
@@ -318,7 +318,7 @@ async fn unadmitted_input_is_delivered_once_on_the_rewound_path() {
     // A real human send starts the next Run and invokes resume recovery. It must
     // append the older accepted input to the selected path before the new prompt.
     let request = Request::new(
-        format!("instance:{}", uuid::Uuid::new_v4()),
+        format!("instance.0:{}", uuid::Uuid::new_v4()),
         Command::MessageSend(MessageSendArgs {
             max_model_requests: None,
             human: true,

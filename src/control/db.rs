@@ -149,6 +149,8 @@ pub struct Store {
     pub startup_cwd: PathBuf,
     pub(crate) instructions: crate::instructions::InstructionLoader,
     pub instance_id: String,
+    /// Shared with the IPC server through the data owner (#450).
+    pub operation_epoch: Arc<super::receipt::OperationEpoch>,
     pub(crate) usage_diagnostics: Option<crate::diagnostics::Diagnostics>,
     usage_context: crate::usage_totals::ReadContext,
     /// Receipt-collection background requester, shared by clones of this Store.
@@ -202,6 +204,7 @@ impl Store {
             database,
             config,
             startup_cwd,
+            operation_epoch: super::receipt::OperationEpoch::new(&instance_id),
             instance_id,
             usage_diagnostics: None,
             usage_context: crate::usage_totals::ReadContext::default(),
@@ -218,6 +221,7 @@ impl Store {
         let mut after = 0;
         loop {
             let instance = self.instance_id.clone();
+            let epoch = self.operation_epoch.clone();
             // Waiting admissions can interleave between maintenance windows.
             let window = self
                 .background
@@ -227,7 +231,8 @@ impl Store {
                     let tx = db.transaction()?;
                     let result =
                         super::receipt::under_pressure(&tx, &instance).and_then(|pressure| {
-                            super::receipt::collect_window(&tx, &instance, pressure, after, window)
+                            let epoch = epoch.current();
+                            super::receipt::collect_window(&tx, &epoch, pressure, after, window)
                         });
                     if result.is_ok() {
                         tx.commit()?;
@@ -312,7 +317,7 @@ impl Store {
             }
             if after.is_none() {
                 if !dirty {
-                    return result;
+                    return self.roll_epoch(result).await;
                 }
                 after = Some(0);
                 dirty = false;
@@ -337,7 +342,7 @@ impl Store {
                     }
                     observed = Some(changes);
                 }
-                let instance = self.instance_id.clone();
+                let epoch = self.operation_epoch.clone();
                 let cursor = after.expect("unfinished pass");
                 let unit = requester
                     .unit(super::receipt::COLLECT_WINDOW, move |db, window| {
@@ -345,7 +350,11 @@ impl Store {
                         let result = {
                             let tx = db.transaction()?;
                             match super::receipt::collect_window(
-                                &tx, &instance, true, cursor, window,
+                                &tx,
+                                &epoch.current(),
+                                true,
+                                cursor,
+                                window,
                             ) {
                                 Ok(window) => {
                                     tx.commit()?;
@@ -372,6 +381,23 @@ impl Store {
                     crate::storage::Background::Deferred => tokio::task::yield_now().await,
                 }
             }
+        }
+    }
+
+    /// A full pass without outside writes still left no room. When finished
+    /// identities of the current epoch hold the space, move to the next epoch
+    /// so the ordinary old-prefix rule can reclaim them, and tell the caller
+    /// that this request was not applied (#450).
+    async fn roll_epoch<T: Send + 'static>(&self, refusal: Result<T>) -> Result<T> {
+        let epoch = self.operation_epoch.clone();
+        let rolled = self
+            .database
+            .call(move |db| Ok(epoch.roll_if_reclaimable(db)))
+            .await
+            .map_err(StorageError::into_api_error)??;
+        match refusal {
+            Err(error) if rolled => Err(super::receipt::epoch_rolled(error)),
+            refusal => refusal,
         }
     }
 
@@ -620,9 +646,7 @@ impl Store {
     ) -> Result<Option<MutationResult>> {
         let operation = operation_id.to_owned();
         let fingerprint = fingerprint.to_owned();
-        let active = operation_id
-            .split_once(':')
-            .is_some_and(|(instance, nonce)| instance == self.instance_id && !nonce.is_empty());
+        let epoch = self.operation_epoch.clone();
         self.database
             .call(move |db| {
                 if let Some(saved) =
@@ -630,7 +654,7 @@ impl Store {
                 {
                     return Ok(Some(saved));
                 }
-                if !active {
+                if !epoch.admits(&operation) {
                     return Err(StorageError::from(error(
                         ErrorCode::OperationExpired,
                         "Unknown draft operation belongs to an earlier owner",
@@ -647,10 +671,7 @@ impl Store {
         thread_id: Option<&str>,
         submission: &DraftSubmission,
     ) -> Result<()> {
-        if !operation_id
-            .split_once(':')
-            .is_some_and(|(instance, nonce)| instance == self.instance_id && !nonce.is_empty())
-        {
+        if !self.operation_epoch.admits(operation_id) {
             return Err(error(
                 ErrorCode::OperationExpired,
                 "Draft submission has no active owner operation identity",
@@ -863,6 +884,7 @@ impl Store {
         admission: Admission,
     ) -> Result<RuntimeReservation> {
         let instance_id = self.instance_id.clone();
+        let epoch = self.operation_epoch.clone();
         self.receipt_job(None, None, move|db,pressure| {
             let tx=db.transaction()?;
             let saved:Option<(String,Option<String>)>=tx.query_row("SELECT request_hash,result_ref_json FROM operation_receipt WHERE operation_id=?1",[&operation_id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
@@ -879,8 +901,7 @@ impl Store {
                 }else{RuntimeReservation::Pending};
                 return Ok(Ok(result));
             }
-            let valid=operation_id.split_once(':').is_some_and(|(instance,nonce)|instance==instance_id && !nonce.is_empty());
-            if !valid {return Ok(Err(error(ErrorCode::OperationExpired,"unknown operation from an earlier instance cannot execute")));}
+            if !epoch.admits(&operation_id) {return Ok(Err(error(ErrorCode::OperationExpired,"unknown operation from an earlier operation epoch cannot execute")));}
             if let Some(error)=preflight {return Ok(Err(error));}
             if let Err(error)=super::receipt::reserve(&tx,&instance_id,&operation_id,&serde_json::to_string(&caller.as_ref().map(|origin|origin.identity())).unwrap(),&fingerprint,&chrono::Utc::now().to_rfc3339(),admission) {
                 if error.code==ErrorCode::StorageLimit {tx.commit()?; *pressure=true;}
@@ -1176,16 +1197,10 @@ impl Store {
         if let Some(saved) = saved_operation(&tx, operation_id, fingerprint)? {
             return Ok(saved);
         }
-        let Some((instance, nonce)) = operation_id.split_once(':') else {
+        if !self.operation_epoch.admits(operation_id) {
             return Err(error(
                 ErrorCode::OperationExpired,
-                "operation ID has no active instance prefix",
-            ));
-        };
-        if instance != self.instance_id || nonce.is_empty() {
-            return Err(error(
-                ErrorCode::OperationExpired,
-                "unknown operation from an earlier instance cannot execute",
+                "unknown operation from an earlier operation epoch cannot execute",
             ));
         }
         let now = chrono::Utc::now().to_rfc3339();
@@ -4172,7 +4187,7 @@ mod receipt_wait_tests {
         let thread = store
             .execute(
                 Request::new(
-                    "current:thread",
+                    "current.0:thread",
                     Command::ThreadCreate(ThreadCreateArgs {
                         connection: None,
                         cwd: None,
@@ -4199,7 +4214,7 @@ mod receipt_wait_tests {
         };
         store
             .execute(
-                Request::new("current:save", Command::DraftSave(args.clone())),
+                Request::new("current.0:save", Command::DraftSave(args.clone())),
                 None,
             )
             .await
@@ -4233,7 +4248,7 @@ mod receipt_wait_tests {
         args.anchor.node_id = Some("reading".into());
         store
             .execute(
-                Request::new("current:after-append", Command::DraftSave(args.clone())),
+                Request::new("current.0:after-append", Command::DraftSave(args.clone())),
                 None,
             )
             .await
@@ -4244,7 +4259,7 @@ mod receipt_wait_tests {
         displaced.draft.text = "must not persist".into();
         let refused = store
             .execute(
-                Request::new("current:displaced", Command::DraftSave(displaced)),
+                Request::new("current.0:displaced", Command::DraftSave(displaced)),
                 None,
             )
             .await
@@ -4255,7 +4270,7 @@ mod receipt_wait_tests {
         args.follow_tail = true;
         let refused = store
             .execute(
-                Request::new("current:stale", Command::DraftSave(args)),
+                Request::new("current.0:stale", Command::DraftSave(args)),
                 None,
             )
             .await
@@ -4276,7 +4291,7 @@ mod receipt_wait_tests {
                 tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES(?1,'old','null','hash','pending','2000-01-01',0)", [format!("old:pending:{i}")])?;
             }
             for i in 0..30 {
-                tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES(?1,'current','null','hash','pending','2000-01-01',?2)", params![format!("current:pending:{i}"), MAX_OUTCOME_BYTES as i64])?;
+                tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES(?1,'current','null','hash','pending','2000-01-01',?2)", params![format!("current.0:pending:{i}"), MAX_OUTCOME_BYTES as i64])?;
             }
             tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES('current:last','current','null','hash','pending','2000-01-01',?1)", [last_reserved as i64])?;
             tx.commit()?;
@@ -4287,7 +4302,7 @@ mod receipt_wait_tests {
     #[test]
     fn request_fingerprint_is_canonical_and_reused() {
         let request = Request::new(
-            "current:hash",
+            "current.0:hash",
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -4324,14 +4339,14 @@ mod receipt_wait_tests {
         let waiting_store = store.clone();
         let task = tokio::spawn(async move {
             waiting_store
-                .reserve_internal("current:new".into(), json!({"test":1}))
+                .reserve_internal("current.0:new".into(), json!({"test":1}))
                 .await
         });
         tokio::task::yield_now().await;
         let present = db
             .call(|db| {
                 Ok(db.query_row(
-                    "SELECT count(*) FROM operation_receipt WHERE operation_id='current:new'",
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id='current.0:new'",
                     [],
                     |row| row.get::<_, i64>(0),
                 )?)
@@ -4362,7 +4377,7 @@ mod receipt_wait_tests {
         assert!(matches!(result, RuntimeReservation::New));
         assert!(matches!(
             store
-                .reserve_internal("current:new".into(), json!({"test":1}))
+                .reserve_internal("current.0:new".into(), json!({"test":1}))
                 .await
                 .unwrap(),
             RuntimeReservation::Pending
@@ -4408,7 +4423,7 @@ mod receipt_wait_tests {
                     match super::super::receipt::reserve(
                         &tx,
                         "current",
-                        "current:new",
+                        "current.0:new",
                         "null",
                         "hash",
                         "now",
@@ -4474,7 +4489,7 @@ mod receipt_wait_tests {
             Ok(())
         }).await.unwrap();
         let request = Request::new(
-            "current:execute",
+            "current.0:execute",
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -4582,7 +4597,7 @@ mod receipt_wait_tests {
         db.take_background_steps();
         let error = crate::test_watchdog::watchdog(
             "receipt admission completes",
-            store.reserve_internal("current:new".into(), json!({"test":2})),
+            store.reserve_internal("current.0:new".into(), json!({"test":2})),
         )
         .await
         .unwrap()
@@ -4595,7 +4610,7 @@ mod receipt_wait_tests {
         let rows = db
             .call(|db| {
                 Ok(db.query_row(
-                    "SELECT count(*) FROM operation_receipt WHERE operation_id='current:new'",
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id='current.0:new'",
                     [],
                     |row| row.get::<_, i64>(0),
                 )?)
@@ -4613,20 +4628,20 @@ mod receipt_wait_tests {
         db.call(|db| {
             let body = json!({"result":"x".repeat(6 * 1024 * 1024)}).to_string();
             for i in 0..2 {
-                db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,'current','null','hash','completed','2000-01-01',?2,0)", params![format!("current:done:{i}"), &body])?;
+                db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,'current','null','hash','completed','2000-01-01',?2,0)", params![format!("current.0:done:{i}"), &body])?;
             }
             Ok(())
         }).await.unwrap();
         db.take_background_steps();
         let result = crate::test_watchdog::watchdog(
             "receipt admission completes",
-            store.reserve_internal("current:new".into(), json!({"test":3})),
+            store.reserve_internal("current.0:new".into(), json!({"test":3})),
         )
         .await
         .unwrap()
         .unwrap();
         assert!(matches!(result, RuntimeReservation::New));
-        let expired = db.call(|db| Ok(db.query_row("SELECT count(*) FROM operation_receipt WHERE operation_id LIKE 'current:done:%' AND result_ref_json='0'", [], |row| row.get::<_, i64>(0))?)).await.unwrap();
+        let expired = db.call(|db| Ok(db.query_row("SELECT count(*) FROM operation_receipt WHERE operation_id LIKE 'current.0:done:%' AND result_ref_json='0'", [], |row| row.get::<_, i64>(0))?)).await.unwrap();
         assert_eq!(
             expired, 2,
             "both individually valid bodies must be reclaimed"
@@ -4651,7 +4666,7 @@ mod receipt_wait_tests {
                 db.execute("UPDATE operation_receipt SET state='completed' WHERE operation_id='old:pending:0'", [])?;
             }
             let tx = db.transaction()?;
-            let result = super::super::receipt::reserve(&tx, "current", "current:new", "null", "hash", "now", Admission::Normal);
+            let result = super::super::receipt::reserve(&tx, "current", "current.0:new", "null", "hash", "now", Admission::Normal);
             match result {
                 Ok(()) => { tx.commit()?; Ok(Ok(())) }
                 Err(error) if error.code == ErrorCode::StorageLimit => { tx.commit()?; *pressure = true; Ok(Err(error)) }
@@ -4689,7 +4704,7 @@ mod agents_reference_tests {
         (root, store)
     }
     fn req(command: Command) -> Request {
-        Request::new(format!("fixture:{}", uuid::Uuid::new_v4()), command)
+        Request::new(format!("fixture.0:{}", uuid::Uuid::new_v4()), command)
     }
     fn create(agents: Option<&str>, cwd: Option<&str>, parent: Option<String>) -> Command {
         Command::ThreadCreate(ThreadCreateArgs {
@@ -4802,7 +4817,7 @@ mod agents_reference_tests {
                             sender_label: None,
                         },
                         None,
-                        "fixture:reply",
+                        "fixture.0:reply",
                         "now",
                     )
                     .map_err(StorageError::from)?;
@@ -5386,7 +5401,7 @@ mod agents_reference_tests {
         let (_root, store) = fixture().await;
         let accepted = store
             .send_new_thread(
-                format!("fixture:{}", uuid::Uuid::new_v4()),
+                format!("fixture.0:{}", uuid::Uuid::new_v4()),
                 ThreadCreateArgs {
                     agents: None,
                     connection: None,
@@ -5560,7 +5575,7 @@ mod draft_recovery_revision_tests {
             };
             let rejected = store
                 .send_draft_content(
-                    "fixture:stale-draft".into(),
+                    "fixture.0:stale-draft".into(),
                     args.clone(),
                     Some("t".into()),
                     crate::attachments::DraftContent::appended("new".into(), file_count),
@@ -5598,7 +5613,7 @@ mod draft_recovery_revision_tests {
             .unwrap();
             let accepted = store
                 .send_draft_content(
-                    "fixture:resume-draft".into(),
+                    "fixture.0:resume-draft".into(),
                     args,
                     Some("t".into()),
                     crate::attachments::DraftContent::appended("new".into(), file_count),
@@ -5669,7 +5684,7 @@ mod message_acknowledgement_state_tests {
         for command in ["message.send", "message.ask"] {
             let request: Request = serde_json::from_value(json!({
                 "command":command, "args":{"thread_id":"t","text":"never admitted","deliver":"now"},
-                "operation_id":format!("fixture:{command}"), "protocol_version":crate::protocol::PROTOCOL_VERSION,
+                "operation_id":format!("fixture.0:{command}"), "protocol_version":crate::protocol::PROTOCOL_VERSION,
             })).unwrap();
             let refusal = store.execute(request, None).await.unwrap_err();
             assert_eq!(refusal.code, ErrorCode::InvalidArgument);
@@ -5701,7 +5716,7 @@ mod message_acknowledgement_state_tests {
             "fixture".into(),
         );
         let request = Request::new(
-            "fixture:typed-ack",
+            "fixture.0:typed-ack",
             Command::MessageSend(MessageSendArgs {
                 max_model_requests: None,
                 human: false,
@@ -5719,7 +5734,7 @@ mod message_acknowledgement_state_tests {
         store
             .execute(
                 Request::new(
-                    "fixture:cancel-ack",
+                    "fixture.0:cancel-ack",
                     Command::MessageCancel(MessageCancelArgs {
                         message_ids: vec![accepted.message_id.clone()],
                     }),
@@ -5731,7 +5746,7 @@ mod message_acknowledgement_state_tests {
         let current = store
             .execute(
                 Request::new(
-                    "fixture:get-ack",
+                    "fixture.0:get-ack",
                     Command::MessageGet(MessageTarget {
                         message_id: accepted.message_id.clone(),
                     }),
@@ -5781,7 +5796,7 @@ mod message_acknowledgement_state_tests {
         let accepted = store
             .execute(
                 Request::new(
-                    "fixture:question-admission",
+                    "fixture.0:question-admission",
                     Command::MessageAsk(MessageAskArgs {
                         human: false,
                         sender_label: None,
@@ -5901,7 +5916,7 @@ mod thread_deletion_notification_tests {
                 root.path().into(),
                 owner.instance_id.clone(),
             );
-            let request = delete(&owner.instance_id, descendants);
+            let request = delete(&owner.operation_epoch.current(), descendants);
             let first = store.execute(request.clone(), None).await.unwrap();
             let targets = first
                 .changed_threads
@@ -5965,7 +5980,7 @@ mod thread_deletion_notification_tests {
                 owner.instance_id.clone(),
             );
             store
-                .execute(delete(&owner.instance_id, false), None)
+                .execute(delete(&owner.operation_epoch.current(), false), None)
                 .await
                 .unwrap();
             let states = owner
@@ -6034,8 +6049,8 @@ mod thread_deletion_notification_tests {
             owner.instance_id.clone(),
         );
         let failed = Request::new(
-            format!("{}:delete-rollback", owner.instance_id),
-            delete(&owner.instance_id, false).command,
+            format!("{}:delete-rollback", owner.operation_epoch.current()),
+            delete(&owner.operation_epoch.current(), false).command,
         );
         assert!(store.execute(failed, None).await.is_err());
         owner
@@ -6060,7 +6075,7 @@ mod thread_deletion_notification_tests {
             .await
             .unwrap();
         store
-            .execute(delete(&owner.instance_id, false), None)
+            .execute(delete(&owner.operation_epoch.current(), false), None)
             .await
             .unwrap();
         let job = owner
@@ -6255,7 +6270,7 @@ mod thread_deletion_notification_tests {
             owner.instance_id.clone(),
         );
         store
-            .execute(delete(&owner.instance_id, false), None)
+            .execute(delete(&owner.operation_epoch.current(), false), None)
             .await
             .unwrap();
         let remaining: Vec<String> = owner.db.call(|db| Ok(db.prepare("SELECT key FROM app_meta WHERE key GLOB 'compact.automatic_*' ORDER BY key")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)).await.unwrap();
@@ -6284,7 +6299,7 @@ mod thread_deletion_notification_tests {
                 Ok(())
             }).await.unwrap();
             let mut events = control.subscribe();
-            let request = delete(&owner.instance_id, mode != 0);
+            let request = delete(&owner.operation_epoch.current(), mode != 0);
             let response = control.request(request.clone()).await;
             assert_eq!(response.ok, mode < 2, "mode={mode}, {response:?}");
             if mode >= 2 {
@@ -6404,7 +6419,7 @@ mod independent_run_notification_tests {
                 _ => Some(parent_origin()),
             };
             let request = Request::new(
-                "fixture:new-child",
+                "fixture.0:new-child",
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     human: false,
@@ -6444,7 +6459,7 @@ mod independent_run_notification_tests {
                     let second = store
                         .execute(
                             Request::new(
-                                "fixture:existing-child",
+                                "fixture.0:existing-child",
                                 Command::MessageSend(MessageSendArgs {
                                     max_model_requests: None,
                                     human: false,
@@ -6594,7 +6609,7 @@ mod driverless_child_stop_notification_tests {
             let mut events = control.subscribe();
             let response = control
                 .request(Request::new(
-                    format!("{}:stop-hidden-child", owner.instance_id),
+                    format!("{}:stop-hidden-child", owner.operation_epoch.current()),
                     Command::RunStop(RunTarget {
                         run_id: "run-3".into(),
                     }),
@@ -6624,7 +6639,7 @@ mod driverless_child_stop_notification_tests {
             assert_eq!(child_notifications, 2);
             let get = || {
                 control.request(Request::new(
-                    format!("{}:get-child-stop", owner.instance_id),
+                    format!("{}:get-child-stop", owner.operation_epoch.current()),
                     Command::RunGet(RunTarget {
                         run_id: "run-3".into(),
                     }),
@@ -6639,7 +6654,7 @@ mod driverless_child_stop_notification_tests {
             let work_row = || async {
                 let status = control
                     .request(Request::new(
-                        format!("{}:status-child-stop", owner.instance_id),
+                        format!("{}:status-child-stop", owner.operation_epoch.current()),
                         Command::Status(StatusArgs {
                             run_id: Some("run-3".into()),
                             all: true,
@@ -6694,7 +6709,7 @@ mod driverless_child_stop_notification_tests {
             if fail_drain {
                 let retry = control
                     .request(Request::new(
-                        format!("{}:settle-hidden-child", owner.instance_id),
+                        format!("{}:settle-hidden-child", owner.operation_epoch.current()),
                         Command::RunStop(RunTarget {
                             run_id: "run-3".into(),
                         }),
@@ -6756,7 +6771,10 @@ mod browser_creation_notification_tests {
     async fn standalone_create_and_fork_publish_exact_postcommit_ids_without_replay_events() {
         let (_root, owner, control) = fixture().await;
         let mut events = control.subscribe();
-        let create = Request::new(format!("{}:standalone-create", owner.instance_id), create());
+        let create = Request::new(
+            format!("{}:standalone-create", owner.operation_epoch.current()),
+            create(),
+        );
         let first = control.request(create.clone()).await;
         assert!(first.ok, "{first:?}");
         let id = first.result.as_ref().unwrap()["thread_id"]
@@ -6787,7 +6805,7 @@ mod browser_creation_notification_tests {
             .await
             .unwrap();
         let fork = Request::new(
-            format!("{}:standalone-fork", owner.instance_id),
+            format!("{}:standalone-fork", owner.operation_epoch.current()),
             Command::ThreadFork(ThreadForkArgs {
                 agents: None,
                 thread_id: id,
@@ -6816,7 +6834,7 @@ mod browser_creation_notification_tests {
         let mut events = control.subscribe();
         let response = control
             .request(Request::new(
-                format!("{}:rolled-back-create", owner.instance_id),
+                format!("{}:rolled-back-create", owner.operation_epoch.current()),
                 create(),
             ))
             .await;
@@ -7152,7 +7170,7 @@ mod retry_tracking_diagnosis_287 {
             "fixture".into(),
         );
         let command = Command::RunRetry(RunTarget { run_id: "r".into() });
-        let request = Request::new("fixture:retry", command.clone());
+        let request = Request::new("fixture.0:retry", command.clone());
         let accepted = store.execute(request.clone(), None).await.unwrap().result;
         let hint: Value = serde_json::from_str(
             accepted["recovery_hint"]
@@ -7180,7 +7198,7 @@ mod retry_tracking_diagnosis_287 {
             .await
             .unwrap();
         let next = store
-            .execute(Request::new("fixture:next-unit", command), None)
+            .execute(Request::new("fixture.0:next-unit", command), None)
             .await
             .unwrap()
             .result;

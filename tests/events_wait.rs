@@ -24,7 +24,11 @@ async fn raw(
     let response = watchdog(
         "events.wait",
         control.request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::EventsWait(EventsWaitArgs {
                 after: after.map(str::to_owned),
                 thread_ids: threads.iter().map(|id| (*id).to_owned()).collect(),
@@ -149,7 +153,11 @@ fn until_saved<'a>(
 async fn command(control: &Arc<Control>, command: Command) -> Result<Value, ApiError> {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;
@@ -347,7 +355,11 @@ async fn long_poll_ends_on_disconnect_and_on_owner_shutdown() {
     let at = baseline(&control).await;
     let request_for = |control: &Arc<Control>| {
         Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::EventsWait(EventsWaitArgs {
                 after: Some(at.clone()),
                 thread_ids: vec![],

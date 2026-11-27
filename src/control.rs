@@ -48,6 +48,7 @@ pub(crate) mod request_parts {
 pub(crate) mod compaction_test_fixture;
 pub mod output;
 pub(crate) mod receipt;
+pub use receipt::OperationEpoch;
 pub mod replay;
 pub(crate) mod reply;
 pub(crate) mod revisit;
@@ -449,6 +450,7 @@ impl Control {
             startup_cwd,
             owner.instance_id.clone(),
         );
+        store.operation_epoch = owner.operation_epoch.clone();
         store.usage_diagnostics = Some(owner.diagnostics.clone());
         store.index.set_diagnostics(owner.diagnostics.clone());
         store.clients.set_diagnostics(owner.diagnostics.clone());
@@ -1842,7 +1844,7 @@ mod failure_tests {
             let send = tokio::spawn(async move {
                 sending
                     .send_draft(
-                        format!("{}:barrier-send", sending.store.instance_id),
+                        format!("{}:barrier-send", sending.store.operation_epoch.current()),
                         ThreadCreateArgs {
                             agents: None,
                             connection: None,
@@ -1877,7 +1879,7 @@ mod failure_tests {
             assert!(!prepare.is_finished());
             let rejected = control
                 .request(Request::new(
-                    format!("{}:late", control.store.instance_id),
+                    format!("{}:late", control.store.operation_epoch.current()),
                     Command::ThreadCreate(ThreadCreateArgs {
                         agents: None,
                         connection: None,
@@ -1961,7 +1963,10 @@ mod failure_tests {
         let control = Control::new(&owner, root.path().into());
         let accepted = control
             .send_draft(
-                format!("{}:capture-recovery", control.store.instance_id),
+                format!(
+                    "{}:capture-recovery",
+                    control.store.operation_epoch.current()
+                ),
                 ThreadCreateArgs {
                     agents: None,
                     connection: None,
@@ -2100,7 +2105,11 @@ mod failure_tests {
         let control = Control::new(&owner, root.path().into());
         let req = |command| {
             Request::new(
-                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    control.store.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 command,
             )
         };
@@ -2254,7 +2263,10 @@ mod failure_tests {
             deliver: Deliver::Next,
             sender_label: Some("human owner".into()),
         });
-        let mut forged = Request::new(format!("{}:forged", owner.instance_id), command.clone());
+        let mut forged = Request::new(
+            format!("{}:forged", owner.operation_epoch.current()),
+            command.clone(),
+        );
         let mut bad = origin.clone();
         bad.token = "not-issued".into();
         forged.origin = Some(bad);
@@ -2265,7 +2277,10 @@ mod failure_tests {
                 .unwrap()
                 .contains("not-issued")
         );
-        let mut valid = Request::new(format!("{}:valid", owner.instance_id), command);
+        let mut valid = Request::new(
+            format!("{}:valid", owner.operation_epoch.current()),
+            command,
+        );
         valid.origin = Some(origin.clone());
         let accepted = control.request(valid).await;
         assert!(accepted.ok, "{:?}", accepted.error);

@@ -540,7 +540,11 @@ fn request(
         let response = match crate::test_watchdog::watchdog(
             "tests/response_retries.rs: request",
             control.request(Request::new(
-                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    control.store.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 command,
             )),
         )
@@ -1221,7 +1225,11 @@ async fn reduced_and_unreducible_inputs_share_the_eight_retry_budget() {
         let detail = f
             .control
             .request(Request::new(
-                format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    f.control.store.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::TurnGet(TurnTarget {
                     turn_id: f.accepted.turn_id.clone().unwrap(),
                 }),
@@ -1311,7 +1319,11 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
     let edit = f
         .control
         .request(Request::new(
-            format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                f.control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
                 thread_id: Some(thread.clone()),
@@ -1329,7 +1341,7 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
             let result = f
                 .control
                 .request(Request::new(
-                    format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
+                    format!("{}:{}", f.control.store.operation_epoch.current(), uuid::Uuid::new_v4()),
                     Command::OperationGet(shellboy::protocol::OperationTarget {
                         operation_id: operation.clone(),
                     }),
@@ -1355,7 +1367,11 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
     let changed = f
         .control
         .request(Request::new(
-            format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                f.control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some(thread),
                 model: Some("changed-model".into()),
@@ -1367,7 +1383,11 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
     let retried = f
         .control
         .request(Request::new(
-            format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                f.control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::RunRetry(RunTarget {
                 run_id: f.accepted.run_id.clone().unwrap(),
             }),
@@ -1703,7 +1723,11 @@ async fn unreducible_explicit_overflow_recovers_without_any_resend() {
     let detail = f
         .control
         .request(Request::new(
-            format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                f.control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::TurnGet(TurnTarget {
                 turn_id: f.accepted.turn_id.clone().unwrap(),
             }),

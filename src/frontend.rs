@@ -170,7 +170,11 @@ async fn update(sender: &(impl UpdateTarget + ?Sized), mut value: UiUpdate) {
 
 fn operation(control: &Control, command: Command) -> Request {
     Request::new(
-        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+        format!(
+            "{}:{}",
+            control.store.operation_epoch.current(),
+            uuid::Uuid::new_v4()
+        ),
         command,
     )
 }
@@ -1721,7 +1725,7 @@ async fn run_client(
                             revision,
                             operation_id: format!(
                                 "{}:{}",
-                                control.store.instance_id,
+                                control.store.operation_epoch.current(),
                                 uuid::Uuid::new_v4()
                             ),
                             message_id: None,
@@ -2331,7 +2335,7 @@ async fn run_client(
                             revision,
                             operation_id: format!(
                                 "{}:{}",
-                                control.store.instance_id,
+                                control.store.operation_epoch.current(),
                                 uuid::Uuid::new_v4()
                             ),
                             message_id: None,
@@ -4303,7 +4307,11 @@ async fn save_draft(
     anchor: ViewAnchor,
     follow_tail: bool,
 ) -> Result<(), ApiError> {
-    let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
+    let operation = format!(
+        "{}:{}",
+        control.store.operation_epoch.current(),
+        uuid::Uuid::new_v4()
+    );
     compose_call::<crate::protocol::Accepted>(
         control,
         Command::DraftSave(crate::protocol::DraftSaveArgs {

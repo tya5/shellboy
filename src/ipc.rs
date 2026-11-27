@@ -35,6 +35,8 @@ pub struct Hello {
 pub struct Welcome {
     pub protocol_version: u32,
     pub instance_id: String,
+    /// Prefix that new operation IDs carry; read at each handshake (#450).
+    pub operation_epoch: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(
@@ -169,7 +171,7 @@ fn peer_read_outcome(read: std::io::Result<usize>, operation_id: &str) -> Connec
 
 async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
-    instance: String,
+    epoch: std::sync::Arc<crate::control::OperationEpoch>,
     requests: mpsc::Sender<Invocation>,
     stop: CancellationToken,
     work: server::WorkAdmission,
@@ -191,7 +193,8 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
                     .iter()
                     .map(|s| (*s).to_owned())
                     .collect(),
-                instance_id: instance,
+                instance_id: epoch.instance().to_owned(),
+                operation_epoch: epoch.current(),
             },
         )
         .await?;
@@ -394,13 +397,13 @@ pub async fn call_cli_wait(
         Some(endpoint) => endpoint,
         None => read_endpoint(data_dir).await?,
     };
-    let operation = operation_id
-        .unwrap_or_else(|| format!("{}:{}", endpoint.instance_id, uuid::Uuid::new_v4()));
-    retry_cli_wait(args, &operation, |args| {
+    // Without a caller ID the first handshake mints one in the owner's current
+    // operation epoch; definite admission refusals reuse that ID.
+    retry_cli_wait(args, operation_id, |args, operation| {
         connect(
             endpoint.clone(),
             Command::Wait(args),
-            Some(operation.clone()),
+            operation,
             origin.clone(),
         )
     })
@@ -409,11 +412,11 @@ pub async fn call_cli_wait(
 
 async fn retry_cli_wait<F, Fut>(
     mut args: crate::protocol::WaitArgs,
-    operation: &str,
+    mut operation: Option<String>,
     mut attempt: F,
 ) -> Result<Response<Value>, ApiError>
 where
-    F: FnMut(crate::protocol::WaitArgs) -> Fut,
+    F: FnMut(crate::protocol::WaitArgs, Option<String>) -> Fut,
     Fut: std::future::Future<Output = Result<Response<Value>, ApiError>>,
 {
     use std::time::Duration;
@@ -426,7 +429,7 @@ where
     loop {
         let elapsed = started.elapsed();
         let remaining = budget.saturating_sub(elapsed);
-        if refusals != 0 && remaining.is_zero() {
+        if let (Some(operation), true) = (&operation, refusals != 0 && remaining.is_zero()) {
             let result = crate::protocol::WaitResult {
                 status: crate::protocol::WaitStatus::Timeout,
                 matched: Vec::new(),
@@ -449,7 +452,8 @@ where
         if refusals != 0 {
             args.timeout_ms = remaining.as_millis() as u64;
         }
-        let mut response = attempt(args.clone()).await?;
+        let mut response = attempt(args.clone(), operation.clone()).await?;
+        operation.get_or_insert_with(|| response.operation_id.clone());
         let refused = response.error.as_ref().is_some_and(|error| {
             error.code == ErrorCode::InvalidState
                 && error.details.as_ref().is_some_and(|details| {
@@ -736,7 +740,8 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
         })));
     }
     let mut request = Request::new(
-        operation_id.unwrap_or_else(|| format!("{}:{}", welcome.instance_id, uuid::Uuid::new_v4())),
+        operation_id
+            .unwrap_or_else(|| format!("{}:{}", welcome.operation_epoch, uuid::Uuid::new_v4())),
         command,
     );
     request.origin = origin;
@@ -815,7 +820,7 @@ mod frame_delivery_tests {
         let (requests, _incoming) = mpsc::channel(1);
         let task = tokio::spawn(serve_connection(
             server,
-            "version-owner".into(),
+            crate::control::OperationEpoch::new("version-owner"),
             requests,
             CancellationToken::new(),
             server::WorkAdmission::new(),
@@ -833,6 +838,7 @@ mod frame_delivery_tests {
             .unwrap()
             .unwrap();
         assert_eq!(welcome.instance_id, "version-owner");
+        assert_eq!(welcome.operation_epoch, "version-owner.0");
         assert_eq!(
             welcome.owner_version,
             build_owner_version(option_env!("SHELLBOY_BUILD_GIT_SHA"))
@@ -928,6 +934,7 @@ mod frame_delivery_tests {
                         .map(|s| (*s).to_owned())
                         .collect(),
                     instance_id: "instance".into(),
+                    operation_epoch: "instance.0".into(),
                 },
             )
             .await
@@ -967,6 +974,7 @@ mod frame_delivery_tests {
                         .map(|s| (*s).to_owned())
                         .collect(),
                     instance_id: "instance".into(),
+                    operation_epoch: "instance.0".into(),
                 },
             )
             .await
@@ -1014,7 +1022,7 @@ mod frame_delivery_tests {
         let control = crate::control::Control::new(&owner, root.path().into());
         let mut selected = endpoint();
         selected.instance_id.clone_from(&control.store.instance_id);
-        let operation = format!("{}:lost-draft", selected.instance_id);
+        let operation = format!("{}:lost-draft", control.store.operation_epoch.current());
         let submit = Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
             thread_id: None,
             selection_revision: None,
@@ -1044,6 +1052,7 @@ mod frame_delivery_tests {
                     protocol_version: PROTOCOL_VERSION,
                     capabilities: Vec::new(),
                     instance_id: backend.store.instance_id.clone(),
+                    operation_epoch: backend.store.operation_epoch.current(),
                 },
             )
             .await
@@ -1159,6 +1168,7 @@ mod frame_delivery_tests {
                             .map(|s| (*s).to_owned())
                             .collect(),
                         instance_id: "instance".into(),
+                        operation_epoch: "instance.0".into(),
                     },
                 )
                 .await
@@ -1266,6 +1276,7 @@ mod frame_delivery_tests {
                         .map(|s| (*s).to_owned())
                         .collect(),
                     instance_id: "replacement-instance".into(),
+                    operation_epoch: "replacement-instance.0".into(),
                 },
             )
             .await
@@ -1303,6 +1314,7 @@ mod frame_delivery_tests {
                         .map(|s| (*s).to_owned())
                         .collect(),
                     instance_id: "instance".into(),
+                    operation_epoch: "instance.0".into(),
                 },
             )
             .await
@@ -1358,6 +1370,7 @@ mod frame_delivery_tests {
                     protocol_version: PROTOCOL_VERSION,
                     capabilities: vec!["future.capability".into()],
                     instance_id: "instance".into(),
+                    operation_epoch: "instance.0".into(),
                 },
             )
             .await
@@ -1396,6 +1409,7 @@ mod frame_delivery_tests {
                     protocol_version: PROTOCOL_VERSION - 1,
                     capabilities: Vec::new(),
                     instance_id: "instance".into(),
+                    operation_epoch: "instance.0".into(),
                 },
             )
             .await
@@ -1440,7 +1454,7 @@ mod frame_delivery_tests {
             let (requests, mut incoming) = mpsc::channel(1);
             let task = tokio::spawn(serve_connection(
                 server,
-                "instance".into(),
+                crate::control::OperationEpoch::new("instance"),
                 requests,
                 CancellationToken::new(),
                 server::WorkAdmission::new(),
@@ -1472,7 +1486,7 @@ mod frame_delivery_tests {
         let (requests, mut incoming) = mpsc::channel(1);
         let task = tokio::spawn(serve_connection(
             server,
-            "instance".into(),
+            crate::control::OperationEpoch::new("instance"),
             requests,
             CancellationToken::new(),
             server::WorkAdmission::new(),
@@ -1509,7 +1523,7 @@ mod frame_delivery_tests {
         let (requests, mut incoming) = mpsc::channel(1);
         let task = tokio::spawn(serve_connection(
             server,
-            "instance".into(),
+            crate::control::OperationEpoch::new("instance"),
             requests,
             CancellationToken::new(),
             server::WorkAdmission::new(),
@@ -1598,6 +1612,7 @@ mod frame_delivery_tests {
                         .map(|s| (*s).to_owned())
                         .collect(),
                     instance_id: "instance".into(),
+                    operation_epoch: "instance.0".into(),
                 },
             )
             .await
@@ -1674,7 +1689,7 @@ mod frame_delivery_tests {
                     let status = Command::Status(Default::default());
                     while let Ok(permit) = work.try_acquire(&status) { permits.push(permit); }
                 }
-                let task = tokio::spawn(serve_connection(server_stream, "instance".into(), requests, stop, work));
+                let task = tokio::spawn(serve_connection(server_stream, crate::control::OperationEpoch::new("instance"), requests, stop, work));
                 let frame = match case {
                     "decode" => serde_json::json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"instance:test","command":"no.such.command","args":{}}),
                     "validation" => serde_json::to_value(Request::new("instance:test", Command::ThreadList(crate::protocol::ThreadListArgs { limit: 0, ..Default::default() }))).unwrap(),
@@ -1717,7 +1732,7 @@ mod frame_delivery_tests {
             let (requests, mut incoming) = mpsc::channel(1);
             let task = tokio::spawn(serve_connection(
                 stream,
-                "instance".into(),
+                crate::control::OperationEpoch::new("instance"),
                 requests,
                 CancellationToken::new(),
                 server::WorkAdmission::new(),
@@ -1767,7 +1782,7 @@ mod frame_delivery_tests {
             // Both the request and EOF are ready before the owner polls the transport.
             let task = tokio::spawn(serve_connection(
                 stream,
-                "instance".into(),
+                crate::control::OperationEpoch::new("instance"),
                 requests,
                 CancellationToken::new(),
                 server::WorkAdmission::new(),
@@ -1862,7 +1877,7 @@ mod frame_delivery_tests {
                         stream,
                         fail: fail.clone(),
                     },
-                    "instance".into(),
+                    crate::control::OperationEpoch::new("instance"),
                     requests,
                     CancellationToken::new(),
                     server::WorkAdmission::new(),
@@ -1904,7 +1919,7 @@ mod frame_delivery_tests {
             let stop = CancellationToken::new();
             let task = tokio::spawn(serve_connection(
                 stream,
-                "instance".into(),
+                crate::control::OperationEpoch::new("instance"),
                 requests,
                 stop.clone(),
                 server::WorkAdmission::new(),
@@ -1940,7 +1955,7 @@ mod frame_delivery_tests {
             let (requests, mut incoming) = mpsc::channel(1);
             let task = tokio::spawn(serve_connection(
                 stream,
-                "instance".into(),
+                crate::control::OperationEpoch::new("instance"),
                 requests,
                 CancellationToken::new(),
                 server::WorkAdmission::new(),
@@ -1985,7 +2000,7 @@ mod frame_delivery_tests {
                 let (mut client, stream) = tokio::io::duplex(4096);
                 let (requests, mut incoming) = mpsc::channel(1);
                 let stop = CancellationToken::new();
-                let connection = serve_connection(stream, "instance".into(), requests, stop.clone(), server::WorkAdmission::new());
+                let connection = serve_connection(stream, crate::control::OperationEpoch::new("instance"), requests, stop.clone(), server::WorkAdmission::new());
                 tokio::pin!(connection);
                 let peer = async {
                     let mut frame = status_frame();
@@ -2025,6 +2040,7 @@ mod frame_delivery_tests {
                     owner_version: None,
                     protocol_version: PROTOCOL_VERSION,
                     instance_id: "instance".into(),
+                    operation_epoch: "instance.0".into(),
                     capabilities: Vec::new(),
                 },
             )
@@ -2077,7 +2093,7 @@ mod frame_delivery_tests {
                 let (requests, mut incoming) = mpsc::channel(1);
                 let task = tokio::spawn(serve_connection(
                     server,
-                    "instance".into(),
+                    crate::control::OperationEpoch::new("instance"),
                     requests,
                     CancellationToken::new(),
                     server::WorkAdmission::new(),

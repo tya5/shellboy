@@ -245,7 +245,11 @@ async fn live_connections_default_deletion_is_rejected_before_writing() {
         let bytes = std::fs::read(root.path().join("config.toml")).unwrap();
         let response = control
             .request(Request::new(
-                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    control.store.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::ConfigSet(ConfigSetArgs {
                     expected_hash: got["file"]["content_hash"].as_str().unwrap().into(),
                     changes: vec![
@@ -317,7 +321,7 @@ async fn live_connections_catalog_removal_keeps_its_start_generation() {
         assert_eq!(result["connection"],"catalog");
         assert_eq!(result["api"],"chat_completions");
         assert_eq!(result["models"],json!(["catalog-model"]));
-        let missing=control.request(Request::new(format!("{}:{}",control.store.instance_id,uuid::Uuid::new_v4()),
+        let missing=control.request(Request::new(format!("{}:{}",control.store.operation_epoch.current(),uuid::Uuid::new_v4()),
             Command::ModelList(shellboy::protocol::ModelListArgs {connection:Some("catalog".into()),thread_id:None}))).await;
         assert_eq!(missing.error.unwrap().code,ErrorCode::ConfigInvalid);
         server.await.unwrap();

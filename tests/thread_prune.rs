@@ -512,7 +512,7 @@ async fn command_prunes_the_caller_by_default_and_signals_the_existing_gc() {
         .unwrap();
     let request = |args: ThreadPruneArgs| {
         Request::new(
-            format!("instance:{}", uuid::Uuid::new_v4()),
+            format!("instance.0:{}", uuid::Uuid::new_v4()),
             Command::ThreadPrune(args),
         )
     };

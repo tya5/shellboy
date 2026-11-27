@@ -311,7 +311,7 @@ mod tests {
             .store
             .execute(
                 Request::new(
-                    format!("{}:create", owner.instance_id),
+                    format!("{}:create", owner.operation_epoch.current()),
                     Command::ThreadCreate(ThreadCreateArgs {
                         agents: None,
                         connection: None,
@@ -333,7 +333,7 @@ mod tests {
             .store
             .execute(
                 Request::new(
-                    format!("{}:send", owner.instance_id),
+                    format!("{}:send", owner.operation_epoch.current()),
                     Command::MessageSend(MessageSendArgs {
                         max_model_requests: None,
                         resume_recovery: false,
@@ -371,7 +371,7 @@ mod tests {
                 .unwrap();
             let ack = if wire {
                 let request = Request::new(
-                    format!("{}:turn-interrupt", owner.instance_id),
+                    format!("{}:turn-interrupt", owner.operation_epoch.current()),
                     Command::TurnInterrupt(crate::protocol::TurnTarget {
                         turn_id: turn.clone(),
                     }),
@@ -469,7 +469,7 @@ mod tests {
             .store
             .execute(
                 Request::new(
-                    format!("{}:held-before-question", owner.instance_id),
+                    format!("{}:held-before-question", owner.operation_epoch.current()),
                     Command::MessageSend(MessageSendArgs {
                         max_model_requests: None,
                         resume_recovery: false,
@@ -505,7 +505,7 @@ mod tests {
             .store
             .execute(
                 Request::new(
-                    format!("{}:held-frontier-question", owner.instance_id),
+                    format!("{}:held-frontier-question", owner.operation_epoch.current()),
                     Command::MessageAsk(MessageAskArgs {
                         human: false,
                         sender_label: None,
@@ -524,7 +524,7 @@ mod tests {
             .store
             .execute(
                 Request::new(
-                    format!("{}:held-frontier-reply", owner.instance_id),
+                    format!("{}:held-frontier-reply", owner.operation_epoch.current()),
                     Command::MessageReply(MessageReplyArgs {
                         message_id: question_id.clone(),
                         text: "R depends on Q".into(),

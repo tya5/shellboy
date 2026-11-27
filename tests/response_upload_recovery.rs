@@ -16,7 +16,11 @@ async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = crate::test_watchdog::watchdog(
         "tests/response_upload_recovery.rs: request",
         control.request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         )),
     )

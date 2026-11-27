@@ -7,7 +7,11 @@ use std::{sync::Arc, time::Duration};
 async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;

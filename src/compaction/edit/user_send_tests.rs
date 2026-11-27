@@ -24,7 +24,11 @@ async fn accepted_user_message_fences_new_owner_scope_without_revising_selection
             .store
             .execute(
                 Request::new(
-                    format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                    format!(
+                        "{}:{}",
+                        control.store.operation_epoch.current(),
+                        uuid::Uuid::new_v4()
+                    ),
                     Command::ThreadCreate(ThreadCreateArgs {
                         agents: None,
                         cwd: None,
@@ -74,7 +78,11 @@ async fn accepted_user_message_fences_new_owner_scope_without_revising_selection
             .store
             .execute(
                 Request::new(
-                    format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                    format!(
+                        "{}:{}",
+                        control.store.operation_epoch.current(),
+                        uuid::Uuid::new_v4()
+                    ),
                     Command::MessageSend(MessageSendArgs {
                         max_model_requests: None,
                         resume_recovery: false,

@@ -91,7 +91,7 @@ async fn denied_temporary_bases_use_data_directory_and_cli_locator() {
     };
     let server = LocalServer::start(
         listener,
-        owner.instance_id.clone(),
+        owner.operation_epoch.clone(),
         send,
         files,
         owner.ipc_refusals.clone(),

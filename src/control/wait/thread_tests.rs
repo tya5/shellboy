@@ -192,7 +192,7 @@ async fn runtime_thread_delete_wakes_parked_thread_and_reply_waits() {
         control.waits.parked.notified().await;
         let response = control.request(Request {
             protocol_version: PROTOCOL_VERSION,
-            operation_id: format!("{}:delete-recipient", owner.instance_id),
+            operation_id: format!("{}:delete-recipient", owner.operation_epoch.current()),
             command: Command::ThreadDelete(ThreadDeleteArgs { thread_id: "recipient".into(), descendants: false, preview_marker: None }),
             origin: None,
         }).await;

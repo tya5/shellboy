@@ -60,7 +60,7 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
           INSERT INTO node(id,kind,created_at,payload_json)VALUES('source','user','now','{\"role\":\"user\",\"content\":\"SOURCE_ATTACHMENT_SENTINEL\"}');
           INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('late','source','/SHELLBOY_SYNTHETIC_NO_FILE_PROBE','file','external','now');
           INSERT INTO attachment_selection(thread_id,attachment_id,state,reason,selected_at,selected_order)VALUES('actual','late','excluded','explicitly removed','now',99999);
-          INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('fixture:attachment','fixture','null','hash','completed','{\"result\":{\"thread_id\":\"actual\",\"attachment_id\":\"late\",\"source_node_id\":\"source\"}}','now');")?;
+          INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('fixture.0:attachment','fixture','null','hash','completed','{\"result\":{\"thread_id\":\"actual\",\"attachment_id\":\"late\",\"source_node_id\":\"source\"}}','now');")?;
         for i in 0..150 {
             let id = format!("early-{i:04}");
             db.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES(?1,'source','/SHELLBOY_SYNTHETIC_NO_FILE_PROBE','file','external','now')", [&id])?;
@@ -114,12 +114,12 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
     );
     actions
         .send(UiAction::Manage(Command::OperationGet(OperationTarget {
-            operation_id: "fixture:attachment".into(),
+            operation_id: "fixture.0:attachment".into(),
         })))
         .await
         .unwrap();
     let (request, _) = report(&mut incoming, |fields| {
-        field(fields, "/operation_id") == Some("fixture:attachment")
+        field(fields, "/operation_id") == Some("fixture.0:attachment")
     })
     .await;
     actions

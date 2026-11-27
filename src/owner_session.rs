@@ -227,7 +227,7 @@ mod tests {
             let (send, receive) = tokio::sync::mpsc::channel(4);
             let server = LocalServer::bind(&owner, send).await.unwrap();
             let dispatch = tokio::spawn(control.clone().serve(receive));
-            let operation = format!("{}:ordered-wait", owner.instance_id);
+            let operation = format!("{}:ordered-wait", owner.operation_epoch.current());
             let key = format!("wait.pending.{operation}");
             let mut client = tokio::spawn(async move {
                 crate::ipc::call(&data, Command::Wait(WaitArgs {

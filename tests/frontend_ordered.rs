@@ -117,7 +117,11 @@ async fn settled(control: &Control, thread: &str) {
 async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageSend(MessageSendArgs {
                 max_model_requests: None,
                 resume_recovery: false,

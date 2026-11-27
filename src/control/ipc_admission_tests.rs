@@ -25,7 +25,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     let mut clients = Vec::new();
     for number in 0..32 {
         let data = owner.loaded.data_dir.clone();
-        let operation = format!("{}:wait-{number}", owner.instance_id);
+        let operation = format!("{}:wait-{number}", owner.operation_epoch.current());
         clients.push(tokio::spawn(async move {
             crate::ipc::call(
                 &data,
@@ -211,7 +211,7 @@ base_url="http://127.0.0.1:1/v1"
         disconnected.cancel();
         send.send(Invocation {
             request: Request::new(
-                format!("{}:{number}", owner.instance_id),
+                format!("{}:{number}", owner.operation_epoch.current()),
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
                     connection: None,
@@ -284,7 +284,7 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
     let control = Control::new(&owner, root.path().into());
     let response = control
         .request(Request::new(
-            format!("{}:create", control.store.instance_id),
+            format!("{}:create", control.store.operation_epoch.current()),
             Command::ThreadCreate(crate::protocol::ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -314,7 +314,11 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
         .unwrap()
     });
     ready.await.unwrap();
-    let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
+    let operation = format!(
+        "{}:{}",
+        control.store.operation_epoch.current(),
+        uuid::Uuid::new_v4()
+    );
     let op = operation.clone();
     let sender = control.clone();
     let observer = tokio::spawn(async move {

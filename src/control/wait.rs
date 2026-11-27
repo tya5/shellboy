@@ -684,7 +684,7 @@ mod tests {
             let dispatch = tokio::spawn(control.clone().serve(incoming));
             let mut clients = Vec::new();
             let mut collectors = Vec::new();
-            let operations = [0, 1].map(|n| format!("{}:{n}", owner.instance_id));
+            let operations = [0, 1].map(|n| format!("{}:{n}", owner.operation_epoch.current()));
             let keys = ["sa", "sb"].map(|id| wakes::Key::ShellTerminal(id.into()));
             control.waits.keyed.track_publications(keys.clone());
             control.waits.tracked_observations.lock().unwrap().extend(

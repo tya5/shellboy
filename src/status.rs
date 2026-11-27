@@ -107,6 +107,8 @@ pub struct IpcAdmissionClass {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatusSnapshot {
     pub instance_id: String,
+    /// Prefix that new operation IDs must carry (`<instance_id>.<n>`).
+    pub operation_epoch: String,
     pub observed_at: String,
     pub scope: String,
     pub consistency: String,
@@ -532,7 +534,12 @@ fn encode_cursor(cursor: &Cursor) -> String {
 
 /// The caller supplies an already-open read transaction. No DB/filesystem/API
 /// mutations, process liveness inspection, or other store observations occur.
-pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<StatusSnapshot> {
+pub fn snapshot(
+    db: &Connection,
+    args: &StatusArgs,
+    instance: &str,
+    operation_epoch: &str,
+) -> Result<StatusSnapshot> {
     let scope = check_scope(db, args)?;
     let cursor = decode_cursor(args, instance, &scope.filter)?;
     let flags = rusqlite::functions::FunctionFlags::SQLITE_UTF8
@@ -808,6 +815,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
             .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid receipt summary"))?,
         page: RecordPage::new(args.limit, filters, selected, next_cursor),
         instance_id: instance.into(),
+        operation_epoch: operation_epoch.into(),
         observed_at: observed.to_rfc3339(),
         scope: "durable_only".into(),
         consistency: "single_sqlite_read_transaction".into(),
@@ -832,12 +840,12 @@ mod response_node_tests {
             limit: 1,
             ..Default::default()
         };
-        let active = snapshot(&db, &args, "fixture").unwrap();
+        let active = snapshot(&db, &args, "fixture", "fixture.0").unwrap();
         assert_eq!(active.page.items.len(), 1);
         assert_eq!(active.page.items[0].id, "live");
         assert!(active.page.next_cursor.is_none());
         let all = StatusArgs { all: true, ..args };
-        let first = snapshot(&db, &all, "fixture").unwrap();
+        let first = snapshot(&db, &all, "fixture", "fixture.0").unwrap();
         db.execute(
             "UPDATE run SET stop_reason='changed off page' WHERE id='older'",
             [],
@@ -848,7 +856,7 @@ mod response_node_tests {
             [],
         )
         .unwrap();
-        let unchanged = snapshot(&db, &all, "fixture").unwrap();
+        let unchanged = snapshot(&db, &all, "fixture", "fixture.0").unwrap();
         assert_eq!(
             unchanged.page.items[0].reason.as_deref(),
             Some("on page but not hashed")
@@ -861,6 +869,7 @@ mod response_node_tests {
                 ..all
             },
             "fixture",
+            "fixture.0",
         )
         .unwrap();
         assert_eq!(next.page.items.len(), 1);
@@ -878,7 +887,7 @@ mod response_node_tests {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('current','/','','p','m','2026-11-24T00:00:00Z');
             INSERT INTO run(id,thread_id,state,created_at) VALUES('pending','current','live','2026-11-24T00:00:00Z');").unwrap();
         let page = |args: &StatusArgs| {
-            let result = snapshot(&db, args, "fixture").unwrap();
+            let result = snapshot(&db, args, "fixture", "fixture.0").unwrap();
             assert_eq!(
                 result
                     .page

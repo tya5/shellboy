@@ -77,7 +77,7 @@ impl Fixture {
                 #[cfg(unix)]
                 _listener: listener,
             },
-            instance.into(),
+            crate::control::OperationEpoch::new(instance),
             requests,
             EndpointFiles {
                 metadata,
@@ -116,7 +116,7 @@ impl Fixture {
         self.input.send(Ok(server)).await.unwrap();
         let endpoint = self.endpoint.clone();
         tokio::spawn(async move {
-            let operation = format!("{}:{number}", endpoint.instance_id);
+            let operation = format!("{}.0:{number}", endpoint.instance_id);
             super::super::call_stream(client, endpoint, command, Some(operation), None).await
         })
     }
@@ -159,10 +159,11 @@ async fn cli_wait_retries_only_definite_admission_refusals_until_deadline() {
         after: Some("fixture-cursor".into()),
     };
     let mut attempts = Vec::new();
-    let response = super::super::retry_cli_wait(args.clone(), "fixture:wait", |args| {
+    let response = super::super::retry_cli_wait(args.clone(), None, |args, operation| {
+        assert!(attempts.is_empty() || operation.as_deref() == Some("fixture.0:wait"));
         attempts.push(args.timeout_ms);
         std::future::ready(Ok(Response::failure(
-            "fixture:wait",
+            "fixture.0:wait",
             ApiError::new(ErrorCode::InvalidState, "busy")
                 .details(json!({"phase": "admission", "request_may_have_been_applied": false})),
         )))
@@ -170,7 +171,7 @@ async fn cli_wait_retries_only_definite_admission_refusals_until_deadline() {
     .await
     .unwrap();
     assert_eq!(attempts, [2350, 2300, 2200, 2000, 1600, 800]);
-    assert_eq!(response.operation_id, "fixture:wait");
+    assert_eq!(response.operation_id, "fixture.0:wait");
     let result = response.result.unwrap();
     assert_eq!(result["status"], "timeout");
     assert_eq!(result["cursor"], "fixture-cursor");
@@ -180,10 +181,10 @@ async fn cli_wait_retries_only_definite_admission_refusals_until_deadline() {
 
     for code in [ErrorCode::InvalidState, ErrorCode::IoFailed] {
         let mut attempts = 0;
-        let response = super::super::retry_cli_wait(args.clone(), "fixture:wait", |_| {
+        let response = super::super::retry_cli_wait(args.clone(), None, |_, _| {
             attempts += 1;
             std::future::ready(Ok(Response::failure(
-                "fixture:wait",
+                "fixture.0:wait",
                 ApiError::new(code, "not a definite admission refusal")
                     .details(json!({"phase": "admission", "request_may_have_been_applied": true})),
             )))
@@ -229,7 +230,7 @@ async fn parked_waits_leave_ordinary_and_stop_admission_available() {
     }
 
     let mut rejected = fixture.pending_connection().await;
-    write_frame(&mut rejected, &Request::new("fixture:32", wait()))
+    write_frame(&mut rejected, &Request::new("fixture.0:32", wait()))
         .await
         .unwrap();
     let response = crate::test_watchdog::watchdog(
@@ -313,7 +314,7 @@ async fn refused_wait_frame_survives_native_pipe_close() {
     let (requests, mut incoming) = mpsc::channel(1);
     let served = tokio::spawn(serve_connection(
         server,
-        "fixture".into(),
+        crate::control::OperationEpoch::new("fixture"),
         requests,
         CancellationToken::new(),
         work,
@@ -327,7 +328,13 @@ async fn refused_wait_frame_survives_native_pipe_close() {
     };
     let response = crate::test_watchdog::watchdog(
         "native pipe wait refusal",
-        super::super::call_stream(client, endpoint, command, Some("fixture:pipe".into()), None),
+        super::super::call_stream(
+            client,
+            endpoint,
+            command,
+            Some("fixture.0:pipe".into()),
+            None,
+        ),
     )
     .await
     .unwrap()
@@ -578,7 +585,7 @@ async fn full_connection_set_defers_accept_until_a_connection_releases() {
     let next = fixture.accepted().await;
     assert_eq!(
         next.request.operation_id,
-        format!("fixture:{MAX_CONNECTIONS}")
+        format!("fixture.0:{MAX_CONNECTIONS}")
     );
     next.reply
         .send(Response::success(
@@ -720,7 +727,7 @@ async fn request_frame_timeout_releases_a_full_connection_slot_without_dispatch(
             .unwrap();
     assert_eq!(
         invocation.request.operation_id,
-        format!("fixture:{MAX_CONNECTIONS}")
+        format!("fixture.0:{MAX_CONNECTIONS}")
     );
     invocation
         .reply
@@ -772,7 +779,7 @@ async fn disconnected_accepted_work_keeps_all_slots_until_consumer_completion() 
     let invocation = fixture.accepted().await;
     assert_eq!(
         invocation.request.operation_id,
-        format!("fixture:{MAX_IPC_WORK}")
+        format!("fixture.0:{MAX_IPC_WORK}")
     );
     invocation
         .reply

@@ -301,7 +301,10 @@ async fn recurring_management_mutations_use_selected_listener_without_fallback()
         .unwrap();
         assert!(applied[result_key].is_string(), "{applied}");
         let receipt = applied["request_operation_id"].as_str().unwrap();
-        assert_eq!(receipt.split_once(':').unwrap().0, selected.instance_id);
+        assert_eq!(
+            receipt.split_once(':').unwrap().0,
+            selected.operation_epoch.current()
+        );
     }
     for (owner, expected) in [(&owner, 0), (&selected, 2)] {
         let count = owner
@@ -2454,7 +2457,10 @@ mod db_stall;
 async fn refused_native_send_restores_the_exact_frozen_draft() {
     use crate::protocol::{Command, Deliver, DraftSubmitArgs, ErrorCode, ThreadCreateArgs};
     let (_root, owner, control, server) = fixture().await;
-    let operation = format!("{}:refused-compose", control.store.instance_id);
+    let operation = format!(
+        "{}:refused-compose",
+        control.store.operation_epoch.current()
+    );
     let draft = DraftSnapshot {
         text: "retain this draft".into(),
         revision: 7,

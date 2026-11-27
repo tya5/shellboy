@@ -283,7 +283,7 @@ struct TransportStop {
 
 async fn accept_connections<A: Acceptor>(
     mut listener: A,
-    instance: String,
+    epoch: Arc<crate::control::OperationEpoch>,
     requests: mpsc::Sender<Invocation>,
     stop: TransportStop,
     files: EndpointFiles,
@@ -302,7 +302,7 @@ async fn accept_connections<A: Acceptor>(
                 match accepted {
                     Ok(stream) => {
                         backoff = ACCEPT_BACKOFF;
-                        clients.spawn(serve_connection(stream, instance.clone(), requests.clone(), stop.delivery.clone(), work.clone()));
+                        clients.spawn(serve_connection(stream, epoch.clone(), requests.clone(), stop.delivery.clone(), work.clone()));
                     }
                     Err(error) if retryable(&error) => {
                         if !wait_backoff(&stop.accepting, backoff).await {
@@ -379,7 +379,7 @@ impl LocalServer {
         }
         Ok(Self::start(
             listener,
-            instance,
+            owner.operation_epoch.clone(),
             requests,
             files,
             owner.ipc_refusals.clone(),
@@ -388,7 +388,7 @@ impl LocalServer {
 
     fn start<A: Acceptor>(
         listener: A,
-        instance: String,
+        epoch: Arc<crate::control::OperationEpoch>,
         requests: mpsc::Sender<Invocation>,
         files: EndpointFiles,
         refused: Arc<AdmissionRefusals>,
@@ -398,7 +398,7 @@ impl LocalServer {
         let (failure_send, failure) = watch::channel(None);
         let task = tokio::spawn(accept_connections(
             listener,
-            instance,
+            epoch,
             requests,
             token,
             files,

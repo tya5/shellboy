@@ -373,7 +373,7 @@ mod tests {
             ErrorCode::OperationConflict
         );
         assert!(call("draft", append(0), None).await.unwrap().ok);
-        let op = format!("{instance}:upload");
+        let op = format!("{}:upload", control.store.operation_epoch.current());
         let commit = || DraftImageAction::Commit {
             upload_id: upload_id.clone(),
         };

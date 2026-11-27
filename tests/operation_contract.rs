@@ -23,7 +23,7 @@ async fn inspect(store: &Store, id: &str) -> Value {
     store
         .execute(
             request(
-                &store.instance_id,
+                &store.operation_epoch.current(),
                 Command::OperationGet(OperationTarget {
                     operation_id: id.into(),
                 }),
@@ -38,7 +38,7 @@ async fn thread(store: &Store) -> String {
     store
         .execute(
             request(
-                &store.instance_id,
+                &store.operation_epoch.current(),
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
                     parent_thread_id: None,
@@ -72,10 +72,10 @@ async fn explicit_context_edit_keeps_each_intent_in_the_protected_original_recei
         })
     };
     let first = request(
-        "first",
+        "first.0",
         edit(ContextEditAction::Spill, Some("a"), Some("b")),
     );
-    let second = request("first", edit(ContextEditAction::Trim, None, Some("c")));
+    let second = request("first.0", edit(ContextEditAction::Trim, None, Some("c")));
     let accepted = store.execute(first.clone(), None).await.unwrap();
     let other = store.execute(second.clone(), None).await.unwrap();
     assert_eq!(accepted.result["context_edit"]["action"], "spill");
@@ -147,7 +147,7 @@ async fn stopping_thread_remains_observable_when_context_metrics_are_temporarily
     let control = shellboy::control::Control::new(&owner, root.path().into());
     let created = control
         .request(request(
-            &owner.instance_id,
+            &owner.operation_epoch.current(),
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 cwd: None,
@@ -170,7 +170,7 @@ async fn stopping_thread_remains_observable_when_context_metrics_are_temporarily
     }).await.unwrap();
     let details = control
         .request(request(
-            &owner.instance_id,
+            &owner.operation_epoch.current(),
             Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                 thread_id: Some(thread.clone()),
                 display: false,
@@ -201,7 +201,7 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
     let (_dir, store) = fixture().await;
     let thread = thread(&store).await;
     let req = request(
-        "first",
+        "first.0",
         Command::MessageSend(MessageSendArgs {
             max_model_requests: None,
             resume_recovery: false,
@@ -278,7 +278,7 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
 async fn pending_external_intent_is_uncertain_and_never_reexecuted_by_a_new_instance() {
     let (_dir, store) = fixture().await;
     let req = request(
-        "first",
+        "first.0",
         Command::ShellWrite(ShellWriteArgs {
             execution_id: "synthetic".into(),
             text: "write once".into(),
@@ -329,7 +329,7 @@ async fn queued_compaction_restart_keeps_acceptance_and_records_interrupted_down
     let store=Store::new(owner.db.clone(),Arc::new(Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap()),dir.path().into(),owner.instance_id.clone());
     let thread = thread(&store).await;
     let req = request(
-        &store.instance_id,
+        &store.operation_epoch.current(),
         Command::Compact(ThreadTarget {
             thread_id: Some(thread),
         }),
@@ -378,7 +378,7 @@ async fn attachment_replay_precedes_deleted_target_preflight_and_checks_content_
     let file = dir.path().join("synthetic.txt");
     std::fs::write(&file, "synthetic attachment").unwrap();
     let req = request(
-        &owner.instance_id,
+        &owner.operation_epoch.current(),
         Command::AttachmentAdd(AttachmentAddArgs {
             thread_id: Some(thread.clone()),
             path: file.to_string_lossy().into(),
@@ -389,7 +389,7 @@ async fn attachment_replay_precedes_deleted_target_preflight_and_checks_content_
     assert!(first.ok, "{:?}", first.error);
     let deleted = control
         .request(request(
-            &owner.instance_id,
+            &owner.operation_epoch.current(),
             Command::ThreadDelete(ThreadDeleteArgs {
                 preview_marker: None,
                 thread_id: thread,
@@ -434,16 +434,25 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
         db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES(?1,?2,'null','fixture','pending','2026-10-25T00:00:00Z',268435456)",rusqlite::params![pending,instance])?;
         Ok(())
     }}).await.unwrap();
+    let epoch = control.store.operation_epoch.current();
     let rejected = control
         .request(request(
-            &control.store.instance_id,
+            &epoch,
             Command::StorageCollect(StorageArgs { category: None }),
         ))
         .await;
-    assert_eq!(rejected.error.unwrap().code, ErrorCode::StorageLimit);
+    let rejected = rejected.error.unwrap();
+    assert_eq!(rejected.code, ErrorCode::StorageLimit);
+    // Only protected intent holds the space: the epoch does not move.
+    assert!(
+        rejected
+            .details
+            .is_none_or(|d| d["reason"] != "operation_epoch_rolled")
+    );
+    assert_eq!(control.store.operation_epoch.current(), epoch);
     let lookup = control
         .request(request(
-            &control.store.instance_id,
+            &control.store.operation_epoch.current(),
             Command::OperationGet(OperationTarget {
                 operation_id: pending.clone(),
             }),
@@ -474,7 +483,7 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
         .unwrap();
     let list = control
         .request(request(
-            &control.store.instance_id,
+            &control.store.operation_epoch.current(),
             Command::ThreadList(ThreadListArgs {
                 thread_ids: None,
                 state: None,
@@ -499,7 +508,7 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
 }
 
 #[tokio::test]
-async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_available() {
+async fn full_receipt_budget_keeps_replay_status_gc_epoch_roll_and_owner_restart_available() {
     use shellboy::control::Control;
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
@@ -510,7 +519,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         .unwrap();
     let control = Control::new(&owner, root.path().into());
     let saved_request = request(
-        &control.store.instance_id,
+        &control.store.operation_epoch.current(),
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             parent_thread_id: None,
@@ -528,7 +537,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
                 .store
                 .reserve_runtime(
                     request(
-                        &control.store.instance_id,
+                        &control.store.operation_epoch.current(),
                         Command::ShellWrite(ShellWriteArgs {
                             execution_id: "not-started".into(),
                             text: "never executed".into(),
@@ -547,7 +556,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         Command::StorageStatus(StorageArgs { category: None }),
     ] {
         let response = control
-            .request(request(&control.store.instance_id, command))
+            .request(request(&control.store.operation_epoch.current(), command))
             .await;
         assert!(
             response.ok,
@@ -555,21 +564,22 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
             response.error
         );
     }
-    assert_eq!(
-        control
-            .request(request(
-                &control.store.instance_id,
-                Command::StorageCollect(StorageArgs { category: None })
-            ))
-            .await
-            .error
-            .unwrap()
-            .code,
-        ErrorCode::StorageLimit
-    );
+    let first_epoch = control.store.operation_epoch.current();
+    let refused = control
+        .request(request(
+            &first_epoch,
+            Command::StorageCollect(StorageArgs { category: None }),
+        ))
+        .await
+        .error
+        .unwrap();
+    assert_eq!(refused.code, ErrorCode::StorageLimit);
+    // The finished current-epoch identity moves the owner to the next epoch.
+    assert_eq!(refused.details.unwrap()["reason"], "operation_epoch_rolled");
+    assert_ne!(control.store.operation_epoch.current(), first_epoch);
     let lookup = control
         .request(request(
-            &control.store.instance_id,
+            &control.store.operation_epoch.current(),
             Command::OperationGet(OperationTarget {
                 operation_id: saved_request.operation_id.clone(),
             }),
@@ -579,7 +589,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
     assert_eq!(
         control
             .request(request(
-                &control.store.instance_id,
+                &control.store.operation_epoch.current(),
                 Command::Status(StatusArgs::default())
             ))
             .await
@@ -602,20 +612,16 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         .collect(StorageCategory::All, chrono::Utc::now())
         .await
         .unwrap();
-    assert_eq!(control.store.collect_receipts().await.unwrap().collected, 0);
+    control.store.collect_receipts().await.unwrap();
     owner
         .db
         .call(|db| {
+            // Pressure deletes the earlier-epoch identity; protected intent stays.
             assert_eq!(
                 db.query_row("SELECT COUNT(*) FROM operation_receipt", [], |r| r
                     .get::<_, i64>(0))?,
-                32
+                31
             );
-            // Make the terminal fixture old enough for ordinary post-restart GC.
-            db.execute(
-                "UPDATE operation_receipt SET created_at='2000-01-01' WHERE state='completed'",
-                [],
-            )?;
             Ok(())
         })
         .await
@@ -629,10 +635,10 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         .unwrap();
     let control = Control::new(&owner, root.path().into());
     assert_ne!(control.store.instance_id, old_instance);
-    assert_eq!(control.store.collect_receipts().await.unwrap().collected, 1);
+    assert_eq!(control.store.collect_receipts().await.unwrap().collected, 0);
     let status = control
         .request(request(
-            &control.store.instance_id,
+            &control.store.operation_epoch.current(),
             Command::Status(StatusArgs::default()),
         ))
         .await;
@@ -654,7 +660,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
     assert!(
         control
             .request(request(
-                &control.store.instance_id,
+                &control.store.operation_epoch.current(),
                 Command::ThreadList(ThreadListArgs {
                     thread_ids: None,
                     state: None,
@@ -694,7 +700,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
 async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime_nonexecution() {
     let (_dir, store) = fixture().await;
     let create = request(
-        "first",
+        "first.0",
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             parent_thread_id: None,
@@ -706,7 +712,7 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
     );
     let created = store.execute(create.clone(), None).await.unwrap().result;
     let runtime = request(
-        "first",
+        "first.0",
         Command::ShellWrite(ShellWriteArgs {
             execution_id: "synthetic".into(),
             text: "once".into(),
@@ -763,7 +769,7 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
     let status = store
         .execute(
             request(
-                "first",
+                "first.0",
                 Command::OperationGet(OperationTarget {
                     operation_id: runtime.operation_id.clone(),
                 }),
@@ -778,7 +784,7 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
     assert_eq!(
         store
             .execute(
-                request("first", Command::Status(StatusArgs::default())),
+                request("first.0", Command::Status(StatusArgs::default())),
                 None
             )
             .await
@@ -817,10 +823,83 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
 }
 
 #[tokio::test]
+async fn finished_identities_filling_the_budget_roll_the_epoch_without_applying_the_trigger() {
+    let (_dir, store) = fixture().await;
+    assert_eq!(store.operation_epoch.current(), "first.0");
+    // Finished current-epoch identities whose metadata fills the budget.
+    store.database.call(|db| {
+        for n in 1..=31 {
+            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,result_ref_json)VALUES(?1,'first','\"'||hex(zeroblob(4194304))||'\"','hash','completed',?2,0,'0')",rusqlite::params![format!("first.0:filler-{n}"),chrono::Utc::now().to_rfc3339()])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    let create = || {
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            parent_thread_id: None,
+            cwd: None,
+            connection: None,
+            model: None,
+            effort: None,
+        })
+    };
+    let trigger = request("first.0", create());
+    let refused = store.execute(trigger.clone(), None).await.unwrap_err();
+    assert_eq!(refused.code, ErrorCode::StorageLimit);
+    let details = refused.details.unwrap();
+    assert_eq!(details["reason"], "operation_epoch_rolled");
+    assert_eq!(details["request_may_have_been_applied"], false);
+    let status = store
+        .execute(
+            request(
+                &store.operation_epoch.current(),
+                Command::Status(StatusArgs::default()),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(status["operation_epoch"], "first.1");
+    assert_eq!(
+        store.execute(trigger.clone(), None).await.unwrap_err().code,
+        ErrorCode::OperationExpired,
+        "the triggering ID is outside the new epoch and never runs"
+    );
+    let retried = store
+        .execute(request(&store.operation_epoch.current(), create()), None)
+        .await
+        .unwrap();
+    assert!(retried.result["thread_id"].as_str().is_some());
+    store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM thread", [], |row| row
+                    .get::<_, i64>(0))?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id LIKE 'first.0:%'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )?,
+                0,
+                "earlier-epoch identities are reclaimed under pressure"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_current_identity() {
     let (_dir, store) = fixture().await;
     let original = request(
-        "first",
+        "first.0",
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             parent_thread_id: None,
@@ -836,7 +915,7 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
         Ok(())
     }).await.unwrap();
     let rejected = request(
-        "first",
+        "first.0",
         Command::ThreadCreate(ThreadCreateArgs {
             agents: None,
             parent_thread_id: None,
@@ -865,7 +944,7 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
     let status = store
         .execute(
             request(
-                "first",
+                &store.operation_epoch.current(),
                 Command::OperationGet(OperationTarget {
                     operation_id: original.operation_id.clone(),
                 }),
@@ -878,8 +957,10 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
     assert_eq!(status["result_expired"], true);
     // Stops retain the existing finite headroom even when ordinary admission
     // remains blocked by protected pending reservations.
+    // The refusal rolled the epoch; new work uses the current one.
+    assert_eq!(store.operation_epoch.current(), "first.1");
     let stop = request(
-        "first",
+        &store.operation_epoch.current(),
         Command::ShellStop(ExecutionTarget {
             execution_id: "synthetic".into(),
         }),
@@ -950,7 +1031,7 @@ async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_resul
     let control = shellboy::control::Control::new(&owner, root.path().into());
     let created = control
         .request(request(
-            &owner.instance_id,
+            &owner.operation_epoch.current(),
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 cwd: None,
@@ -990,7 +1071,7 @@ async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_resul
     for action in [ContextEditAction::Omit, ContextEditAction::Restore] {
         let omit = action == ContextEditAction::Omit;
         let req = request(
-            &owner.instance_id,
+            &owner.operation_epoch.current(),
             Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
                 thread_id: Some(thread.clone()),
@@ -1006,7 +1087,7 @@ async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_resul
             loop {
                 let status = control
                     .request(request(
-                        &owner.instance_id,
+                        &owner.operation_epoch.current(),
                         Command::OperationGet(OperationTarget {
                             operation_id: req.operation_id.clone(),
                         }),

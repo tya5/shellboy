@@ -355,7 +355,11 @@ impl Fixture {
         let thread = self
             .control
             .request(Request::new(
-                format!("{}:{}", self.owner.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    self.owner.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
                     connection: None,
@@ -374,7 +378,11 @@ impl Fixture {
         let accepted = self
             .control
             .request(Request::new(
-                format!("{}:{}", self.owner.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    self.owner.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -1014,7 +1022,11 @@ async fn run_end_selects_last_turn_after_processing_turn() {
     let response = fixture
         .control
         .request(Request::new(
-            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                fixture.owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageSend(MessageSendArgs {
                 max_model_requests: None,
                 resume_recovery: false,
@@ -1096,7 +1108,11 @@ async fn reply_mode_returns_explicit_reply_not_end_message() {
     let reply = fixture
         .control
         .request(Request::new(
-            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                fixture.owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageReply(MessageReplyArgs {
                 message_id: id,
                 text: "{\"value\":\"reply\"}".into(),
@@ -1245,7 +1261,11 @@ async fn exec_waiting_on_an_ask_back(
     let ended = crate::test_watchdog::watchdog(
         "recipient Run ended",
         fixture.control.request(Request::new(
-            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                fixture.owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::Wait(WaitArgs {
                 after: None,
                 conditions: vec![WaitCondition::RunEnded {
@@ -1301,7 +1321,11 @@ async fn reply_mode_waits_while_the_recipient_awaits_its_own_ask() {
     let answered = fixture
         .control
         .request(Request::new(
-            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                fixture.owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageReply(MessageReplyArgs {
                 message_id: question,
                 text: "Option A".into(),
@@ -1353,7 +1377,11 @@ async fn reply_mode_reports_a_cancelled_duty_from_the_wait_snapshot() {
     let cancelled = fixture
         .control
         .request(Request::new(
-            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                fixture.owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageCancel(MessageCancelArgs {
                 message_ids: vec![duty],
             }),
@@ -1427,7 +1455,11 @@ async fn reply_mode_interruption_after_a_reopen_leaves_the_duty_open() {
     let created = fixture
         .control
         .request(Request::new(
-            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                fixture.owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -1515,7 +1547,11 @@ async fn reply_mode_interruption_after_a_reopen_leaves_the_duty_open() {
     let answered = fixture
         .control
         .request(Request::new(
-            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                fixture.owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageReply(MessageReplyArgs {
                 message_id: question,
                 text: "Option A".into(),
@@ -1530,7 +1566,11 @@ async fn reply_mode_interruption_after_a_reopen_leaves_the_duty_open() {
     let input = fixture
         .control
         .request(Request::new(
-            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                fixture.owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageSend(MessageSendArgs {
                 max_model_requests: None,
                 resume_recovery: false,
@@ -1587,7 +1627,11 @@ async fn end_mode_interruption_sends_one_wait_and_leaves_the_target_running() {
         let created = fixture
             .control
             .request(Request::new(
-                format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    fixture.owner.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
                     connection: None,
@@ -1623,7 +1667,11 @@ async fn end_mode_interruption_sends_one_wait_and_leaves_the_target_running() {
         let input = fixture
             .control
             .request(Request::new(
-                format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    fixture.owner.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -2478,7 +2526,7 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
     let created = fixture
         .control
         .request(Request::new(
-            format!("{}:prefix-seed", fixture.owner.instance_id),
+            format!("{}:prefix-seed", fixture.owner.operation_epoch.current()),
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -2544,7 +2592,10 @@ async fn chat_and_exec_resolve_thread_and_parent_prefixes_before_targeting() {
             let detail = fixture
                 .control
                 .request(Request::new(
-                    format!("{}:prefix-child-check", fixture.owner.instance_id),
+                    format!(
+                        "{}:prefix-child-check",
+                        fixture.owner.operation_epoch.current()
+                    ),
                     Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
                         thread_id: Some(selected.as_str().unwrap().into()),
                         display: false,

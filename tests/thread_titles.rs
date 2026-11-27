@@ -17,7 +17,7 @@ async fn fixture() -> (tempfile::TempDir, Store) {
     (root, store)
 }
 fn request(command: Command) -> Request {
-    Request::new(format!("title-test:{}", uuid::Uuid::new_v4()), command)
+    Request::new(format!("title-test.0:{}", uuid::Uuid::new_v4()), command)
 }
 async fn execute(store: &Store, command: Command) -> Value {
     store.execute(request(command), None).await.unwrap().result

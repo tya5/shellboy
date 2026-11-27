@@ -177,7 +177,11 @@ fn wait_command(after: Option<&str>, threads: &[&str], timeout_ms: u64, text: bo
 }
 fn wait_request(control: &Control, command: Command) -> Request {
     Request::new(
-        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+        format!(
+            "{}:{}",
+            control.store.operation_epoch.current(),
+            uuid::Uuid::new_v4()
+        ),
         command,
     )
 }

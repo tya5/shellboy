@@ -1314,7 +1314,7 @@ fn exported_schema_local_references_resolve() {
 
 #[test]
 fn welcome_owner_version_is_optional_and_additive() {
-    let prior = json!({"protocol_version": 7, "instance_id": "old"});
+    let prior = json!({"protocol_version": 7, "instance_id": "old", "operation_epoch": "old.0"});
     let welcome: shellboy::ipc::Welcome = serde_json::from_value(prior.clone()).unwrap();
     assert_eq!(welcome.instance_id, "old");
     assert_eq!(welcome.owner_version, None);
@@ -1326,7 +1326,7 @@ fn welcome_owner_version_is_optional_and_additive() {
     );
 
     let exact = format!("{} {}", env!("CARGO_PKG_VERSION"), "a".repeat(40));
-    let current = json!({"protocol_version": 7, "instance_id": "current", "owner_version": exact});
+    let current = json!({"protocol_version": 7, "instance_id": "current", "operation_epoch": "current.0", "owner_version": exact});
     #[derive(serde::Deserialize)]
     struct PriorWelcome {
         protocol_version: u32,
@@ -1358,7 +1358,7 @@ fn welcome_owner_version_is_optional_and_additive() {
 fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
     let welcome = serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
-        "instance_id": "i",
+        "instance_id": "i", "operation_epoch": "i.0",
         "capabilities": ["events.reasoning_activity", "id.resolve"],
         "future_metadata": true,
     });
@@ -1435,7 +1435,7 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
 #[test]
 fn typed_status_preserves_both_existing_modes_and_rejects_ambiguous_union_matches() {
     let activity: Value = serde_json::from_str(r###"{
-        "instance_id":"i", "observed_at":"now", "scope":"durable_only",
+        "instance_id":"i", "operation_epoch":"i.0", "observed_at":"now", "scope":"durable_only",
         "consistency":"single_sqlite_read_transaction", "fingerprint":"f",
         "limit":50,"filters":{"thread_id":null,"run_id":null,"since":null,"state":[],"all":false,"future_filter":{"x":1}},
         "items":[{"kind":"shell","id":"s","state":"running","thread_id":"t","thread_title":"title",

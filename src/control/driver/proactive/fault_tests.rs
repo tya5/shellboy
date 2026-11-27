@@ -658,7 +658,10 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
             })
             .await
             .unwrap();
-        let operation = format!("{}:delete-held-proactive", control.store.instance_id);
+        let operation = format!(
+            "{}:delete-held-proactive",
+            control.store.operation_epoch.current()
+        );
         let make_request = || {
             Request::new(
                 operation.clone(),
@@ -3219,7 +3222,11 @@ async fn thread_get_summarizing(control: &Arc<Control>, thread: &str) -> Value {
 async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;

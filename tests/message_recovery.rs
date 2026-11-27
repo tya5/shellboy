@@ -132,7 +132,11 @@ async fn open(root: &Path) -> DataOwner {
 }
 fn request(control: &Control, command: Command) -> Request {
     Request::new(
-        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+        format!(
+            "{}:{}",
+            control.store.operation_epoch.current(),
+            uuid::Uuid::new_v4()
+        ),
         command,
     )
 }

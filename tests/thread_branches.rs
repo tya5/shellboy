@@ -108,7 +108,7 @@ impl Fixture {
 
 impl Fixture {
     async fn run(&self, command: Command) -> Result<Value, ApiError> {
-        let request = Request::new(format!("instance:{}", uuid::Uuid::new_v4()), command);
+        let request = Request::new(format!("instance.0:{}", uuid::Uuid::new_v4()), command);
         self.store
             .execute(request, None::<Origin>)
             .await

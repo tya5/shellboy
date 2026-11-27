@@ -101,7 +101,11 @@ async fn owner(root: &std::path::Path, url: &str) -> DataOwner {
 async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;
@@ -221,7 +225,11 @@ fn defaults() -> ThreadCreateArgs {
     }
 }
 fn operation(control: &Control) -> String {
-    format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4())
+    format!(
+        "{}:{}",
+        control.store.operation_epoch.current(),
+        uuid::Uuid::new_v4()
+    )
 }
 async fn manifest(control: &Control, thread: &str) -> Value {
     let thread = thread.to_owned();

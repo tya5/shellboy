@@ -126,7 +126,10 @@ mod tests {
         .await
         .unwrap();
         let control = crate::control::Control::new(&owner, root.path().into());
-        let operation = format!("{}:ordered-acceptance", control.store.instance_id);
+        let operation = format!(
+            "{}:ordered-acceptance",
+            control.store.operation_epoch.current()
+        );
         let args = crate::protocol::ThreadCreateArgs {
             agents: None,
             connection: None,
@@ -189,7 +192,7 @@ mod tests {
         let invalid = control
             .store
             .send_draft_content(
-                format!("{}:invalid-order", control.store.instance_id),
+                format!("{}:invalid-order", control.store.operation_epoch.current()),
                 args,
                 None,
                 DraftContent {

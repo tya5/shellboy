@@ -34,7 +34,11 @@ mod tests {
     }
     fn request(control: &Control, instance: String) -> Request {
         Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::OwnerShutdown(OwnerShutdownArgs {
                 instance_id: instance,
             }),

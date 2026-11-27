@@ -494,7 +494,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let operation = format!("{}:accepted-before-save", control.store.instance_id);
+        let operation = format!(
+            "{}:accepted-before-save",
+            control.store.operation_epoch.current()
+        );
         compose_call::<serde_json::Value>(
             &control,
             Command::DraftSubmit(Box::new(DraftSubmitArgs {

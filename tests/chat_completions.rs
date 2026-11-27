@@ -394,7 +394,7 @@ async fn core_retries_tools_context_reduction_and_saved_cache_usage_are_shared()
         std::fs::write(&config,format!("default_connection='chat'\ndefault_model='fixture'\n[connections.chat]\napi='chat_completions'\nbase_url='http://{address}/v1'\nresponse_retry_max_delay_ms=1\n")).unwrap();
         let owner=DataOwner::start(Some(config),Some(root.path().join("data")),root.path().into()).await.unwrap();
         let control=Control::new(&owner,root.path().into());control.start().await.unwrap();
-        let req=|command|Request::new(format!("{}:{}",owner.instance_id,uuid::Uuid::new_v4()),command);
+        let req=|command|Request::new(format!("{}:{}",owner.operation_epoch.current(),uuid::Uuid::new_v4()),command);
         let created=control.request(req(Command::ThreadCreate(ThreadCreateArgs{agents:None,connection:None,cwd:None,model:None,effort:None,parent_thread_id:None}))).await;
         assert!(created.ok,"{created:?}");let thread=created.result.unwrap()["thread_id"].as_str().unwrap().to_owned();
         let expected_thread=thread.clone();

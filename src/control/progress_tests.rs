@@ -158,7 +158,11 @@ async fn in_process_edit_refuses_running_run_without_waiting() {
         Ok(db.query_row("SELECT r.id,n.id FROM run r JOIN receipt x ON x.run_id=r.id JOIN node n ON n.id=x.message_node_id WHERE r.thread_id=?1 AND r.state='live' ORDER BY x.rowid LIMIT 1",[target],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?)
     }).await.unwrap();
     let edited = control.clone();
-    let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
+    let operation = format!(
+        "{}:{}",
+        control.store.operation_epoch.current(),
+        uuid::Uuid::new_v4()
+    );
     let mut pending = tokio::spawn(async move {
         edited
             .edit_ordered_request(
