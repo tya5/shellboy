@@ -123,7 +123,10 @@ mod tests {
                     .is_none(),
                 "{damage}"
             );
-            let projection = crate::frontend::activity::project(&db, "t").unwrap();
+            let projection = crate::frontend::activity::from_thread_activity(
+                crate::control::db::thread_activity::read(&db, "t").unwrap(),
+                crate::config::UiLanguage::Ja,
+            );
             assert!(projection.snapshot.waiting_reason.is_none(), "{damage}");
         }
     }

@@ -408,7 +408,12 @@ mod tests {
                 )?;
                 assert!(project(db, None, start, seen)?.seen.is_empty());
                 for id in ["auth", "other", "failed", "stopped", "idle", "working-0"] {
-                    let same = crate::frontend::activity::project(db, id)?.snapshot.phase;
+                    let same = crate::frontend::activity::from_thread_activity(
+                        crate::control::db::thread_activity::read(db, id)?,
+                        crate::config::UiLanguage::Ja,
+                    )
+                    .snapshot
+                    .phase;
                     let counts = project(db, None, start, BTreeMap::new())?.snapshot.counts;
                     assert!(matches!(
                         same,
