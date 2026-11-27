@@ -1600,14 +1600,14 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
     let target = thread.clone();
-    let instance = control.store.instance_id.clone();
-    // A live reader pin protects the expired fixture until explicit collection.
+    // A running execution is not collectable. Unlike a pin row without a live
+    // lease (which the maintenance Pins pass deletes at any time), it stays
+    // protected until this test ends it.
     control.store.database.call(move|db|{
         db.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('quota-old-run',?1,'completed','2020-01-01T00:00:00Z','2020-01-01T00:00:01Z')",[&target])?;
         db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('quota-old-turn',?1,'quota-old-run','completed','2020-01-01T00:00:00Z','2020-01-01T00:00:01Z')",[target])?;
-        db.execute_batch("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,exit_code,output_complete,started_at,ended_at)VALUES('quota-raw','quota-old-run','quota-old-turn','quota-old-operation','exited','/','{}','UTF-8','UTF-8','closed',32,0,1,'2020-01-01T00:00:00Z','2020-01-01T00:00:01Z');")?;
+        db.execute_batch("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,saved_sequence,exit_code,output_complete,started_at,ended_at)VALUES('quota-raw','quota-old-run','quota-old-turn','quota-old-operation','running','/','{}','UTF-8','UTF-8','closed',32,NULL,0,'2020-01-01T00:00:00Z',NULL);")?;
         for sequence in 0..32_i64 { db.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('quota-raw',?1,'stdout',?2,zeroblob(65536),'2020-01-01T00:00:01Z')",rusqlite::params![sequence,sequence*65536])?; }
-        db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES('quota-pin',?1,'shell_output','quota-raw',0,?2)",rusqlite::params![instance,chrono::Utc::now().to_rfc3339()])?;
         Ok(())
     }).await.unwrap();
     let protected = request(
@@ -1619,14 +1619,14 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
     .await;
     assert_eq!(protected["raw_bytes_collected"], 0);
     // The report can be incomplete or another GC pass can consume its rescan.
-    // Check the durable pin and bytes, not a per-pass accounting snapshot.
+    // Check the durable bytes, not a per-pass accounting snapshot.
     control.store.database.call(|db| {
-        let (pins, chunks, bytes): (i64, i64, i64) = db.query_row(
-            "SELECT (SELECT count(*) FROM runtime_pin WHERE id=?1 AND resource_kind=?2 AND resource_id=?3), count(*), COALESCE(sum(length(bytes)), 0) FROM output_chunk WHERE execution_id=?3",
-            rusqlite::params!["quota-pin", "shell_output", "quota-raw"],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        let (chunks, bytes): (i64, i64) = db.query_row(
+            "SELECT count(*), COALESCE(sum(length(bytes)), 0) FROM output_chunk WHERE execution_id=?1",
+            ["quota-raw"],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        assert_eq!((pins, chunks, bytes), (1, 32, 2097152));
+        assert_eq!((chunks, bytes), (32, 2097152));
         Ok(())
     }).await.unwrap();
     let original = "Quota-held instruction 日本語\nretry the original once";
@@ -1675,7 +1675,7 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
                 )?,
                 0
             );
-            db.execute("DELETE FROM runtime_pin WHERE id='quota-pin'", [])?;
+            db.execute("UPDATE shell_execution SET state='exited',exit_code=0,output_complete=1,ended_at='2020-01-01T00:00:01Z' WHERE id='quota-raw'", [])?;
             Ok(())
         })
         .await
