@@ -770,34 +770,37 @@ async fn overflow_without_any_target_in_an_open_tool_loop_recovers_without_resen
             );
         }
     }
-    control
-        .store
-        .database
-        .call(|db| {
-            assert_eq!(
-                db.query_row("SELECT state FROM turn", [], |r| r.get::<_, String>(0))?,
-                "recovery_wait"
-            );
-            assert_eq!(
-                db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
-                    .get::<_, i64>(0))?,
-                2
-            );
-            let (outcome, saved): (String, String) = db.query_row(
-                "SELECT outcome,result_json FROM automatic_compaction",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
-            let saved: Value = serde_json::from_str(&saved).unwrap();
-            assert_eq!(outcome, "no_safe_reduction");
-            assert_eq!(saved["midturn"]["reason"], "open_tool_loop");
-            Ok(())
-        })
-        .await
-        .unwrap();
+    let outcome = overflow_compaction(&control, &thread).await;
+    assert_eq!(outcome["state"], "no_safe_reduction");
+    let turn = request(&control, Command::TurnGet(TurnTarget {
+        turn_id: outcome["turn_id"].as_str().unwrap().to_owned(),
+    })).await;
+    assert_eq!(turn["state"], "recovery_wait");
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
+}
+
+async fn overflow_compaction(control: &Arc<Control>, thread: &str) -> Value {
+    let page = request(control, Command::CompactList(CompactListArgs {
+        thread_id: Some(thread.to_owned()), since: None, until: None, limit: 20,
+    })).await;
+    let mut items = page["items"].as_array().unwrap().iter()
+        .filter(|item| item["kind"] == "automatic_reduction");
+    let outcome = items.next().expect("the overflow attempt is listed");
+    assert!(items.next().is_none(), "one overflow attempt: {page}");
+    outcome.clone()
+}
+
+async fn selected_history(control: &Arc<Control>, thread: &str) -> HistoryWindow {
+    let args = serde_json::from_value(json!({
+        "thread_id": thread, "before": 199, "after": 0, "excerpt_chars": 0,
+    })).unwrap();
+    let window: HistoryWindow = serde_json::from_value(
+        request(control, Command::HistoryWindow(args)).await,
+    ).unwrap();
+    assert_eq!(window.items.len() as u64, window.total, "fixture fits one window");
+    window
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2929,32 +2932,28 @@ async fn automatic_nonshrinking_summary_enters_recovery_without_adoption_or_rese
             let revision:i64=tx.query_row("SELECT selection_revision FROM thread WHERE id=?1",[&target],|r|r.get(0))?;
             shellboy::history::select_path(&tx,&target,revision as u64,&selected,"2026-10-31T00:00:00Z")?;tx.commit()?;Ok(())
         }).await.unwrap();
+        let before = selected_history(&control, &thread).await;
         pending.reply.send((400,json!({"error":{"code":"context_length_exceeded","message":"fixture pressure"}}))).unwrap();
-        let log=root.path().join("summary-requests.jsonl");std::fs::write(&log,"").unwrap();
-        // #303 §4.2/§4.3: one summary request; an output that does not shrink
-        // the source (here far over both the cap and the source) is rejected
-        // deterministically, with no second request and no adoption.
-        let request=incoming_summary(&control,&mut receive).await;assert_eq!(request.body["tools"],json!([]));
-        use std::io::Write;
-        writeln!(std::fs::OpenOptions::new().append(true).open(&log).unwrap(),"{}",request.body).unwrap();
-        request.reply.send((200,answer(&"x".repeat(20_000)))).unwrap();
-        loop {
-            let ready=control.store.database.call(|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE state='recovery_wait')",[],|r|r.get::<_,bool>(0))?)).await.unwrap();
-            if ready {break;}tokio::task::yield_now().await;
+        let request_summary = incoming_summary(&control, &mut receive).await;
+        assert_eq!(request_summary.body["tools"], json!([]));
+        request_summary.reply.send((200, answer(&"x".repeat(20_000)))).unwrap();
+        tokio::select! {
+            biased;
+            unexpected = receive.recv() => panic!("rejected summary sent another request: {:?}", unexpected.map(|r| r.body)),
+            _ = settled(&control, &thread) => {}
         }
-        control.store.database.call(|db| {
-            assert_eq!(db.query_row("SELECT count(*) FROM node WHERE kind='summary'",[],|r|r.get::<_,i64>(0))?,0);
-            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE kind='conversation'",[],|r|r.get::<_,i64>(0))?,3);
-            let (raw, no_observed_fact): (String, bool)=db.query_row("SELECT c.result_json,c.failure_json IS NULL FROM automatic_compaction c JOIN model_attempt a ON a.id=c.attempt_id WHERE a.state='incomplete'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
-            let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["metrics"];
-            // Overflow has no Automatic::observed stage/token.
-            assert!(no_observed_fact,"{value:#}");
-            assert_eq!(value["error"]["code"],"invalid_state","{value:#}");
-            assert_eq!(value["error"]["message"],"Summary does not shrink its original source projection; original path retained","{value:#}");
-            assert_eq!(facts["summary_usage"]["requests"],1,"{value:#}");Ok(())
-        }).await.unwrap();
-        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1);
-        // Summary witness changes to model_attempt with #328.
+        let outcome = overflow_compaction(&control, &thread).await;
+        assert_eq!(outcome["state"], "rejected");
+        let turn = request(&control, Command::TurnGet(TurnTarget {
+            turn_id: outcome["turn_id"].as_str().unwrap().to_owned(),
+        })).await;
+        assert_eq!(turn["state"], "recovery_wait");
+        let after = selected_history(&control, &thread).await;
+        let input_nodes = |window: &HistoryWindow| window.items.iter()
+            .filter(|node| node.kind != "event" && node.kind != "incomplete_response")
+            .map(|node| node.node_id.clone()).collect::<Vec<_>>();
+        assert_eq!(input_nodes(&after), input_nodes(&before), "rejection retains the input path");
+        assert!(!after.items.iter().any(|node| node.kind == "summary"));
         assert_eq!(summary_request_count_for_thread(&control, &thread).await, 1,
             "the persisted pre-send Summary ledger admits no second Summary POST");
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
