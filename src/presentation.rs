@@ -48,6 +48,38 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::mem::size_of;
 
+/// Owner text carries the Unicode truncation mark and deep-structure placeholder; draw them
+/// with this terminal's glyph policy.
+pub(crate) fn client_glyphs(text: String) -> String {
+    use crate::display_outline::{DEEP_STRUCTURE, TRUNCATED};
+    if text == DEEP_STRUCTURE {
+        return crate::ui::text_width::glyphs::select(
+            DEEP_STRUCTURE,
+            "[深い構造 | 詳細は原文参照]",
+        )
+        .into();
+    }
+    match text.strip_suffix(TRUNCATED) {
+        Some(head) => format!(
+            "{head}{}",
+            crate::ui::text_width::glyphs::select(TRUNCATED, "...")
+        ),
+        None => text,
+    }
+}
+fn short(text: &str, limit: usize) -> String {
+    client_glyphs(crate::display_outline::short(text, limit))
+}
+/// Saved-field walk with this terminal's glyphs.
+pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
+    let mut fields = crate::display_outline::fields_of_value(value);
+    for field in &mut fields {
+        field.label = client_glyphs(std::mem::take(&mut field.label));
+        field.value = client_glyphs(std::mem::take(&mut field.value));
+    }
+    fields
+}
+
 /// Human-readable recorded Revisit facts shared by existing displays.
 pub fn revisit_label(summary: &crate::protocol::RevisitSummary) -> Option<String> {
     if summary.consumed_count == 0 && !summary.pending {
@@ -61,10 +93,8 @@ pub fn revisit_label(summary: &crate::protocol::RevisitSummary) -> Option<String
 }
 
 pub(crate) use crate::display_outline::MAX_FIELDS;
-use crate::display_outline::{
-    MAX_BLOCKS, parse_container_detail, parse_envelope, secret, short, summary,
-};
-pub use crate::display_outline::{PresentationField, fields_of_value};
+pub use crate::display_outline::PresentationField;
+use crate::display_outline::{MAX_BLOCKS, parse_container_detail, parse_envelope, secret, summary};
 use crate::plain_text::{MAX_LINKS, add_link};
 pub use crate::plain_text::{MAX_METADATA_BYTES, PresentationLink, sanitize_plain};
 pub(crate) const CONTEXT_TRIM_TITLE: &str = "Input scope reduced (original retained)";
