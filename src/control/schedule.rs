@@ -2174,12 +2174,7 @@ mod tests {
         let (_root, owner, control, accepted) =
             super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
         let thread = accepted.thread_id;
-        let request = |command| {
-            Request::new(
-                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
-                command,
-            )
-        };
+        let request = |command| Request::new(owner.operation_epoch.mint(), command);
         let add = control
             .request(request(Command::ScheduleAdd(ScheduleAddArgs {
                 thread_id: Some(thread.clone()),
