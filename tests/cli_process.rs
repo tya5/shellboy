@@ -1680,6 +1680,41 @@ async fn artifact_read_serves_a_published_app_folder_and_refuses_escapes() {
         parent["version"]["uri"],
         actual_cwd.join("a").join("..").join("b").to_str().unwrap()
     );
+    #[cfg(unix)]
+    {
+        for (path, readable) in [
+            ("notes.txt", true),
+            ("notes.txt/", false),
+            ("./notes.txt/", false),
+        ] {
+            let added = ok(&[
+                "artifact",
+                "add",
+                "--thread",
+                thread,
+                "--uri",
+                path,
+                "--title",
+                "Trailing separator fixture",
+            ])
+            .await;
+            let stored = actual_cwd.join(path.trim_start_matches("./"));
+            assert_eq!(added["version"]["uri"], stored.to_str().unwrap());
+            let artifact = added["artifact_id"].as_str().unwrap();
+            let (success, _) = cli(&[
+                "artifact",
+                "read",
+                "--thread",
+                thread,
+                "--artifact",
+                artifact,
+                "--version",
+                "1",
+            ])
+            .await;
+            assert_eq!(success, readable, "{path}");
+        }
+    }
     let read = async |version: &str, path: Option<&str>| -> (bool, Value) {
         let mut args = vec![
             "artifact",
