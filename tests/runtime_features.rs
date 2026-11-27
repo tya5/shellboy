@@ -3363,17 +3363,42 @@ async fn headless_background_parent_stop_reaps_nested_owner_and_tool_without_ree
 async fn headless_repeated_term_does_not_escalate_drain() {
     crate::test_watchdog::watchdog("headless repeated TERM during drain", async {
         let root = tempfile::tempdir().unwrap();
+        let (url, mut requests, proxy_task) = proxy().await;
         let config = root.path().join("config.toml");
-        std::fs::write(&config, "").unwrap();
+        // The grace is only the owner's own TERM-to-KILL bound for the held
+        // shell; the test releases the hold long before it could matter.
+        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n[io]\nterm_grace_ms=3600000\n")).unwrap();
         let data = root.path().join("data");
         let owner = HeadlessOwner::start(&data, &config).await;
         let identity = owner.ready["instance_id"].clone();
         let endpoint: shellboy::app::Endpoint =
             serde_json::from_slice(&std::fs::read(data.join("endpoint.json")).unwrap()).unwrap();
-        let hold = rusqlite::Connection::open(data.join("shellboy.db")).unwrap();
-        hold.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let thread = headless_cli(&data, &["thread", "create"]).await["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        headless_cli(&data, &["message", "send", "--thread", &thread, "--text", "hold a shell through drain"]).await;
+        // The hold: a running shell that ignores TERM until the test creates
+        // the release file. Shutdown waits for it, so the drain stays in
+        // progress exactly as long as the test decides.
+        let started = root.path().join("started");
+        let release = root.path().join("release");
+        let command = format!(
+            "trap '' TERM; printf x > {}; while [ ! -e {} ]; do sleep 0.05; done",
+            serve_quote(&started),
+            serve_quote(&release)
+        );
+        let incoming = requests.recv().await.unwrap();
+        incoming.reply.send((200, json!({"id":"hold","status":"completed","output":[{
+            "type":"function_call","call_id":"hold-shell","name":"shell",
+            "arguments":json!({"command":command}).to_string()
+        }]}))).unwrap();
+        while !started.exists() {
+            tokio::task::yield_now().await;
+        }
         let pid = owner.child.id().unwrap() as i32;
         assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+        // The endpoint closes once the owner has begun draining.
         loop {
             if tokio::net::UnixStream::connect(&endpoint.address)
                 .await
@@ -3385,8 +3410,7 @@ async fn headless_repeated_term_does_not_escalate_drain() {
         }
         assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
         assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
-        hold.execute_batch("ROLLBACK").unwrap();
-        drop(hold);
+        std::fs::write(&release, "").unwrap();
         owner
             .finish(true, &root.path().join("signal-drain.jsonl"))
             .await;
@@ -3397,6 +3421,7 @@ async fn headless_repeated_term_does_not_escalate_drain() {
         reopened
             .finish(true, &root.path().join("restart.jsonl"))
             .await;
+        proxy_task.abort();
     })
     .await
     .unwrap();
