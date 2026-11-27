@@ -472,11 +472,13 @@ pub(super) fn follow_target_in(
             }));
         }
         let thread=row.get("thread_id").and_then(Value::as_str).filter(|s|!s.is_empty()).ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"The selected attachment record has no explicit Thread; inspect its Thread attachment list"))?;
-        return Ok(Command::AttachmentList(crate::protocol::AttachmentListArgs {
-            thread_id: Some(thread.into()),
-            limit: crate::protocol::DEFAULT_LIST_LIMIT,
-            cursor: None,
-        }));
+        return Ok(Command::AttachmentList(
+            crate::protocol::AttachmentListArgs {
+                thread_id: Some(thread.into()),
+                limit: crate::protocol::DEFAULT_LIST_LIMIT,
+                cursor: None,
+            },
+        ));
     }
     follow_in(value, pointer, mode, language)
 }
@@ -1170,9 +1172,12 @@ mod attachment_reference_tests {
         let value = serde_json::json!({"spaces":[],"coverage_window":{
             "selection":{"scope":null,"space_id":"s","thread_ids":["t"],"source_ids":[]},
             "next_cursor":"CURSOR"}});
-        let Command::IndexStatus(args) =
-            follow(&value, "/coverage_window/next_cursor", ManagementFollow::Next).unwrap()
-        else {
+        let Command::IndexStatus(args) = follow(
+            &value,
+            "/coverage_window/next_cursor",
+            ManagementFollow::Next,
+        )
+        .unwrap() else {
             panic!("the next window is an index status read");
         };
         assert!(args.coverage);
@@ -1181,7 +1186,14 @@ mod attachment_reference_tests {
         assert_eq!(args.thread_ids, ["t"]);
         let last = serde_json::json!({"coverage_window":{
             "selection":{"scope":null,"space_id":null,"thread_ids":[],"source_ids":[]}}});
-        assert!(follow(&last, "/coverage_window/next_cursor", ManagementFollow::Next).is_err());
+        assert!(
+            follow(
+                &last,
+                "/coverage_window/next_cursor",
+                ManagementFollow::Next
+            )
+            .is_err()
+        );
     }
     #[test]
     fn selected_record_owns_attachment_thread_and_source_without_viewer_fallback() {

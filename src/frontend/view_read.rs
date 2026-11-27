@@ -348,7 +348,7 @@ mod cancellation_tests {
             browser.observe(1,"".into(),Some("t".into()),true).unwrap();
             let mut descendants=lineage_observer::Observer::default();
             descendants.observe(1,vec!["t".into()]).unwrap();
-            let tickets=Tickets { browser:Some(browser.take(tokio::time::Instant::now()).unwrap()), descendants:Some(descendants.take(tokio::time::Instant::now()).unwrap()),..Default::default() };
+            let tickets=Tickets { browser:Some(browser.take(tokio::time::Instant::now()).unwrap()), descendants:Some(descendants.take(tokio::time::Instant::now()).unwrap()) };
             let (single_stays_pending,all_closed_ready)={
                 let mut pending=std::pin::pin!(read(&control,&tickets,slots.clone(),stop));
                 assert!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
@@ -388,7 +388,6 @@ mod cancellation_tests {
         let tickets = Tickets {
             browser: Some(browser.take(tokio::time::Instant::now()).unwrap()),
             descendants: Some(descendants.take(tokio::time::Instant::now()).unwrap()),
-            ..Default::default()
         };
         tickets.browser.as_ref().unwrap().stop.cancel();
         let raw = read_tx(&db, &tickets).unwrap();

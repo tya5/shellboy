@@ -333,10 +333,7 @@ async fn seed_paused_history(data: &std::path::Path, source: &str) -> (String, S
         .await
         .unwrap()
     {}
-    assert_eq!(
-        service.status(Default::default()).await.unwrap().failed,
-        0
-    );
+    assert_eq!(service.status(Default::default()).await.unwrap().failed, 0);
     let thread = uuid::Uuid::new_v4().to_string();
     let target = thread.clone();
     let saved_at = paused_at.clone();

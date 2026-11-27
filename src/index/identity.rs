@@ -197,7 +197,8 @@ impl IndexService {
         let family = self.endpoint_family_key.clone();
         let auto_history = self.config.indexing.auto_history;
         let mut status = crate::control::db::read_only(&self.database, "IndexStatus", move |db| {
-            let mut status = read_status(db, selection, keys.clone(), family.clone(), auto_history)?;
+            let mut status =
+                read_status(db, selection, keys.clone(), family.clone(), auto_history)?;
             observations::enrich(db, &mut status, &keys, family.as_deref())?;
             Ok(status)
         })

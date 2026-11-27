@@ -42,13 +42,13 @@ pub(crate) mod i18n;
 #[cfg(test)]
 pub(crate) use history_items::ItemState as PreviewItemState;
 pub use history_items::{ItemKey, Preview as ToolPreview};
+mod awaiting_human;
+mod branches;
+mod held_input;
 mod input;
 mod key_hints;
 mod lifecycle;
 mod management;
-mod awaiting_human;
-mod branches;
-mod held_input;
 mod message_queue;
 mod models;
 #[allow(dead_code)]

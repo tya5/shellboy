@@ -702,12 +702,7 @@ async fn history_search_ipc_disconnect_closes_embedding_http_and_next_observatio
         }
     }
     assert_eq!(
-        control
-            .index
-            .status(Default::default())
-            .await
-            .unwrap()
-            .done,
+        control.index.status(Default::default()).await.unwrap().done,
         1
     );
     let (send, receive) = mpsc::channel(8);

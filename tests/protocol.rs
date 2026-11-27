@@ -806,11 +806,7 @@ fn optional_operation_defaults_keep_empty_wire_and_explicit_index_target_semanti
         serde_json::to_value(IndexArgs::default()).unwrap(),
         json!({"scope":null,"space_id":null,"thread_ids":[],"source_ids":[]})
     );
-    assert!(
-        Command::IndexStatus(Default::default())
-            .validate()
-            .is_ok()
-    );
+    assert!(Command::IndexStatus(Default::default()).validate().is_ok());
     assert!(
         Command::IndexRebuild(IndexArgs::default())
             .validate()

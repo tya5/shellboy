@@ -1528,14 +1528,8 @@ mod usage_slow_tests {
             std::time::Duration::ZERO,
             std::time::Duration::from_micros(99_999),
         ] {
-            assert!(
-                slow_usage_trace(UsageTrigger::Open, UsageScope::Thread, duration).is_none()
-            );
-            diagnostics.record_usage_aggregation(
-                UsageTrigger::Open,
-                UsageScope::Thread,
-                duration,
-            );
+            assert!(slow_usage_trace(UsageTrigger::Open, UsageScope::Thread, duration).is_none());
+            diagnostics.record_usage_aggregation(UsageTrigger::Open, UsageScope::Thread, duration);
         }
         diagnostics.record_usage_aggregation(
             UsageTrigger::Open,
