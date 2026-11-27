@@ -37,8 +37,9 @@ larger than one frame or a folder entry without naming it.
   type check before opening: the opened handle is still the one checked.
 - One local-path rule (`artifacts::content::local_path`, decided on #445):
   every form is resolved to a path first (schemeless, `file:` after
-  conversion, `shellboy-app:` root, root joined with the relative path), then
-  leading double separators, control characters and Windows device names
+  conversion, `shellboy-app:` root, root joined with the relative path). A
+  Windows verbatim drive path is normalized before the same check (#458).
+  Remaining leading double separators, control characters and Windows device names
   (with the `COM¹-³`/`LPT¹-³` aliases) are refused as `path_not_local` before
   any filesystem access. `file:` authority checks (raw text, where tab/newline/
   CR refuse the URI, and after parsing) validate the authority only.
