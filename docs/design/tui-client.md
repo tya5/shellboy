@@ -152,19 +152,12 @@ already shown before it arrived.
 
 This one wait is the client's only owner wake (4d slice 3):
 
-- `index_changed` rereads the index pause, the selected Thread and an index,
-  storage or retained-source inspection.
-- `retention_changed` rereads a visible inspection and the selected detail
-  sources.
-- `output` re-reads the shown execution: the shell inspection, a Watch row's
-  detail, or the open live preview. The live work output age is computed from
-  the entry's saved `output_at` (the same time `shell.get` reports as
-  `last_output_at`).
+- `index_changed` rereads the index pause and the selected Thread.
+- `retention_changed` rereads the selected detail sources.
+- `output` entries carry the saved `output_at` (the same time `shell.get`
+  reports as `last_output_at`); the live work output age is computed from it.
 - An owner notification for one Thread arrives as an ordinary change for it.
-  An operation inspection rereads on its receipt's Thread; one whose saved
-  facts name no Thread rereads on any change and on any owner mark, since an
-  owner-level receipt settles through its mark and a shell receipt through the
-  shell's Thread.
+  The F8 management views have no wake of their own until slice 5.
 - A baseline or gap rereads everything the marks and output entries cover.
 
 No worker or queued event buffer is added; dropping the pending wait drops its
