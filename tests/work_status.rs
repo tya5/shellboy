@@ -53,6 +53,27 @@ impl Fixture {
             .await
             .map(|v| serde_json::from_value(v.result).unwrap())
     }
+    async fn thread_get_projection(
+        &self,
+        thread: &str,
+    ) -> shellboy::frontend::activity::Projection {
+        let request = Request {
+            protocol_version: shellboy::protocol::PROTOCOL_VERSION,
+            operation_id: format!("fixture:thread-get:{thread}"),
+            command: Command::ThreadGet(ThreadGetArgs {
+                thread_id: Some(thread.to_owned()),
+                display: true,
+            }),
+            origin: None,
+        };
+        let details: ThreadDetails =
+            serde_json::from_value(self.store.execute(request, None).await.unwrap().result)
+                .unwrap();
+        shellboy::frontend::activity::from_thread_activity(
+            details.activity,
+            shellboy::config::UiLanguage::Ja,
+        )
+    }
     async fn close(self) {
         self.db.shutdown().await.unwrap();
     }
@@ -710,10 +731,16 @@ async fn revisit_facts_are_run_scoped_and_projected_to_active_footer() {
             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<5)
             INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,created_at,result_json) SELECT 'revisit-'||i,'fixture:revisit-'||i,'null','a','revisit-'||i,'root','applied','2026-10-25T08:00:00Z','{"deliver":"complete","delivery_context":{"reason":"run_completion"}}' FROM n;
             INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,hold_reason,created_at,result_json) VALUES('revisit-0','fixture:revisit-0','null','a','revisit-0','held','run_completion','2026-10-25T08:00:00Z','{"deliver":"complete"}');"#)?;
-        let activity = shellboy::frontend::activity::project(db,"a")?;
-        assert_eq!(activity.snapshot.revisit.as_deref(),Some("↻5+"));
         Ok(())
     }).await.unwrap();
+    assert_eq!(
+        f.thread_get_projection("a")
+            .await
+            .snapshot
+            .revisit
+            .as_deref(),
+        Some("↻5+")
+    );
     let after = f.status(StatusArgs::default()).await.unwrap();
     let run = after
         .page
@@ -739,16 +766,17 @@ async fn revisit_facts_are_run_scoped_and_projected_to_active_footer() {
     );
     f.db.call(|db| {
         db.execute("UPDATE run SET state='completed' WHERE id='root'", [])?;
-        assert!(
-            shellboy::frontend::activity::project(db, "a")?
-                .snapshot
-                .revisit
-                .is_none()
-        );
         Ok(())
     })
     .await
     .unwrap();
+    assert!(
+        f.thread_get_projection("a")
+            .await
+            .snapshot
+            .revisit
+            .is_none()
+    );
     f.close().await;
 }
 

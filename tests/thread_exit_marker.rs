@@ -77,12 +77,26 @@ async fn thread_list_exposes_latest_stop_reason_and_new_run_clears_it() {
         db.execute("INSERT INTO run(id,thread_id,state,created_at,stop_reason)VALUES('backdated','crash','stopped','earlier','app_shutdown')",[])?;
         Ok(())
     }).await.unwrap();
-    let activity = store
-        .database
-        .call(|db| shellboy::frontend::activity::project(db, "crash"))
-        .await
-        .unwrap();
-    assert_eq!(activity.snapshot.run_id.as_deref(), Some("z-new"));
+    let details: ThreadDetails = serde_json::from_value(
+        store
+            .execute(
+                Request {
+                    protocol_version: PROTOCOL_VERSION,
+                    operation_id: "fixture:thread-get".into(),
+                    command: Command::ThreadGet(ThreadGetArgs {
+                        thread_id: Some("crash".into()),
+                        display: true,
+                    }),
+                    origin: None,
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .result,
+    )
+    .unwrap();
+    assert_eq!(details.activity.unwrap().run.run_id.as_str(), "z-new");
     let same: Page<ThreadSummary> = serde_json::from_value(
         store
             .execute(list("same-order"), None)

@@ -1007,7 +1007,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
         db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','target-run','completed','now')",[])?;
         db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('g','c',0,'shell','{}','completed')",[])?;
         db.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','c','result','completed')",[])?;
-        super::activity::project(db,"thread")
+        Ok(super::activity::prepare(crate::control::db::thread_activity::read(db, "thread")?))
     }).await.unwrap();
     assert_eq!(
         projection.snapshot.phase,
@@ -1021,7 +1021,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
     assert_eq!(recovery.saved_tool_results, 1);
     let context_projection=control.store.database.call(|db| {
         db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.error.provider_code','context_length_exceeded') WHERE id='a'",[])?;
-        super::activity::project(db,"thread")
+        Ok(super::activity::prepare(crate::control::db::thread_activity::read(db, "thread")?))
     }).await.unwrap();
     assert_eq!(
         context_projection.snapshot.recovery.unwrap().stage,
@@ -1034,7 +1034,9 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
         .database
         .call(|db| {
             db.execute("UPDATE model_attempt SET state='failed' WHERE id='a'", [])?;
-            super::activity::project(db, "thread")
+            Ok(super::activity::prepare(
+                crate::control::db::thread_activity::read(db, "thread")?,
+            ))
         })
         .await
         .unwrap();
@@ -1057,7 +1059,9 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
                 [],
             )?;
             db.execute("UPDATE turn SET generation=1 WHERE id='target-run'", [])?;
-            super::activity::project(db, "thread")
+            Ok(super::activity::prepare(
+                crate::control::db::thread_activity::read(db, "thread")?,
+            ))
         })
         .await
         .unwrap();
@@ -1074,7 +1078,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
     let projection = control.store.database.call(|db| {
         db.execute("UPDATE run SET state='stopped',stop_reason='explicit_stop' WHERE id='target-run'",[])?;
         db.execute("UPDATE turn SET state='stopped',ended_at='2026-10-25T00:00:03Z' WHERE id='target-run'",[])?;
-        super::activity::project(db,"thread")
+        Ok(super::activity::prepare(crate::control::db::thread_activity::read(db, "thread")?))
     }).await.unwrap();
     assert_eq!(
         projection.snapshot.phase,
@@ -1105,7 +1109,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
     // it is not proof of a previous recovery_wait state.
     let interrupted = control.store.database.call(|db| {
         db.execute("UPDATE turn SET recovery_reason_json=?1 WHERE id='target-run'",[serde_json::json!({"reason":"previous_instance_interrupted","result_uncertain":true}).to_string()])?;
-        super::activity::project(db,"thread")
+        Ok(super::activity::prepare(crate::control::db::thread_activity::read(db, "thread")?))
     }).await.unwrap();
     assert_eq!(
         interrupted.snapshot.phase,
@@ -1126,7 +1130,9 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
                 "UPDATE turn SET state='recovery_wait' WHERE id='target-run'",
                 [],
             )?;
-            super::activity::project(db, "thread")
+            Ok(super::activity::prepare(
+                crate::control::db::thread_activity::read(db, "thread")?,
+            ))
         })
         .await
         .unwrap();
