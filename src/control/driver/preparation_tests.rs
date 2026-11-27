@@ -3126,36 +3126,36 @@ async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
     let thread = accepted.thread_id.clone();
     let old_run = accepted.run_id.clone().unwrap();
     let reply_node_after = reply_id.clone();
-    let (new_run, path, receipt, event) = control.store.database.call(move |db| {
+    let (new_run, path, receipt, receipt_reply, event) = control.store.database.call(move |db| {
         let new_run: String = db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state='live'", [&thread], |r|r.get(0))?;
         let path: Vec<String> = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?.query_map([&thread], |r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let old_state: String = db.query_row("SELECT state FROM run WHERE id=?1", [&old_run], |r|r.get(0))?;
         assert_eq!(old_state, "stopped");
-        let mut receipt: (String,Option<String>,Option<String>,String,Option<String>) = db.query_row("SELECT state,run_id,turn_id,sender_json,NULL FROM receipt WHERE message_node_id=?1", [&reply_node_after], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
-        receipt.4 = crate::control::db::named_reply_state(db, &reply_node_after);
+        let receipt = crate::control::db::message_details(db, &reply_node_after).unwrap();
+        let receipt_reply = crate::control::db::named_reply_state(db, &reply_node_after);
         // The notice is untargeted until admitted; its delivery wakes the new Run.
         let event: (String,Option<String>,String) = db.query_row("SELECT e.kind,d.recipient_id,e.payload_ref_json FROM event e JOIN delivery d ON d.event_id=e.id WHERE e.id=?1 AND e.target_run_id IS NULL AND d.state='pending'", [format!("reply-outcome-{reply_node_after}")], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-        Ok((new_run,path,receipt,event))
+        Ok((new_run,path,receipt,receipt_reply,event))
     }).await.unwrap();
     assert_eq!(
         path.as_slice(),
         std::slice::from_ref(&accepted.message_id),
         "new Run is created only after canonical rewind"
     );
-    assert_eq!(receipt.0, "applied");
     assert_eq!(
-        receipt.1.as_deref(),
+        receipt.delivery_status,
+        crate::protocol::DeliveryStatus::Applied
+    );
+    assert_eq!(
+        receipt.run_id.as_deref(),
         Some(accepted.run_id.as_deref().unwrap())
     );
     assert_eq!(
-        receipt.2.as_deref(),
+        receipt.turn_id.as_deref(),
         Some(accepted.turn_id.as_deref().unwrap())
     );
-    assert_eq!(
-        serde_json::from_str::<crate::protocol::MessageSender>(&receipt.3).unwrap(),
-        sender
-    );
-    assert_eq!(receipt.4.as_deref(), Some("ignored"));
+    assert_eq!(receipt.sender, sender);
+    assert_eq!(receipt_reply.as_deref(), Some("ignored"));
     assert_eq!(event.0, "reply_outcome");
     assert_eq!(event.1.as_deref(), Some(new_run.as_str()));
     assert_eq!(
