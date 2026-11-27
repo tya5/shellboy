@@ -184,6 +184,22 @@ struct Selected {
     previous_state: Option<String>,
     detached: bool,
 }
+impl Selected {
+    fn omission_for(&self, observation: Option<&Observation>) -> Option<OmissionReason> {
+        self.omission.or_else(|| match observation {
+            None => Some(OmissionReason::AttachmentUnavailable),
+            Some(value)
+                if self
+                    .sent_fingerprint
+                    .as_ref()
+                    .is_some_and(|hash| hash != &value.hash) =>
+            {
+                Some(OmissionReason::AttachmentChanged)
+            }
+            Some(_) => None,
+        })
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AttachmentManifest {
     pub attachment_id: String,
@@ -241,16 +257,20 @@ struct Signature {
     bytes: u64,
     modified: Option<SystemTime>,
 }
-#[derive(Debug)]
-struct Encoded {
-    base64: String,
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Observation {
     hash: String,
     raw_size: u64,
     mime: String,
 }
+#[derive(Debug)]
+struct Encoded {
+    base64: String,
+    observation: Observation,
+}
 impl Encoded {
     fn bytes(&self) -> usize {
-        self.base64.len() + self.hash.len() + self.mime.len()
+        self.base64.len() + self.observation.hash.len() + self.observation.mime.len()
     }
 }
 struct CacheEntry {
@@ -495,87 +515,91 @@ impl AttachmentService {
         } = snapshot;
         let pins = Arc::new((pinned != 0).then_some(pins));
         let deadline = self.deadline();
-        let mut sizes = BTreeMap::new();
         let file_limit = self.config.limits.attachment_file_bytes;
-        for selection in selected.iter().filter(|s| s.active) {
-            if sizes.contains_key(&selection.path) {
+        // Classify paths before reserving send capacity. Only small observations
+        // survive this pass; at most one bounded raw read is held per worker.
+        let mut observed = BTreeMap::new();
+        for s in selected.iter().filter(|s| s.active) {
+            if observed.contains_key(&s.path) {
                 continue;
             }
-            let path = selection.path.clone();
+            let path = s.path.clone();
+            let cache = self.cache.clone();
             let pin = pins.clone();
-            let result = self
+            let observation = self
                 .workers
                 .execute(deadline, cancel.clone(), move || {
                     let _pin = pin;
-                    open_attachment(&path, file_limit).map(|(_, signature)| signature.bytes)
+                    observe_attachment(&path, file_limit, force_reload, &cache)
                 })
-                .await;
+                .await
+                .map_err(|e| e.message);
             if cancel.is_cancelled() {
                 return Err(cancelled());
             }
-            sizes.insert(selection.path.clone(), result.map_err(|e| e.message));
+            observed.insert(s.path.clone(), observation);
         }
+        let binary =
+            |s: &Selected| s.active && s.omission_for(observed[&s.path].as_ref().ok()).is_none();
         let mut protected = 0u64;
         let mut total = 0u64;
-        for s in selected.iter().filter(|s| s.active && s.omission.is_none()) {
-            if let Some(Ok(bytes)) = sizes.get(&s.path) {
-                total = total
-                    .checked_add(*bytes)
+        for s in selected.iter().filter(|s| binary(s)) {
+            let bytes = observed[&s.path]
+                .as_ref()
+                .expect("binary observation")
+                .raw_size;
+            total = total
+                .checked_add(bytes)
+                .ok_or_else(|| io_error("Attachment size overflow"))?;
+            if s.protected {
+                protected = protected
+                    .checked_add(bytes)
                     .ok_or_else(|| io_error("Attachment size overflow"))?;
-                if s.protected {
-                    protected = protected
-                        .checked_add(*bytes)
-                        .ok_or_else(|| io_error("Attachment size overflow"))?;
-                }
             }
         }
         if protected > self.config.limits.attachment_request_bytes {
             return Err(ApiError::new(ErrorCode::InputLimit,"Current protected attachment files exceed the request limit; request is held for explicit retry").hint("Reduce the selection with shellboy attachment remove --thread THREAD_ID --attachment ATTACHMENT_ID.").details(json!({"protected_bytes":protected,"limit_bytes":self.config.limits.attachment_request_bytes})));
         }
         let mut excluded = Vec::new();
-        for s in selected
-            .iter()
-            .filter(|s| s.active && !s.protected && s.omission.is_none())
-        {
+        for s in selected.iter().filter(|s| !s.protected && binary(s)) {
             if total <= self.config.limits.attachment_request_bytes {
                 break;
             }
-            if let Some(Ok(bytes)) = sizes.get(&s.path) {
-                total -= *bytes;
-                excluded.push(s.id.clone());
-            }
+            total -= observed[&s.path]
+                .as_ref()
+                .expect("binary observation")
+                .raw_size;
+            excluded.push(s.id.clone());
         }
-        // Only admitted references can pin encoded content. Count repeated paths
-        // per reference even though they share a single read.
+        // Only the admitted paths get encoded. Verify the bytes still match the
+        // observation that qualified them; a concurrent rewrite requires retry.
         let excluded_set: HashSet<_> = excluded.iter().map(String::as_str).collect();
-        let mut read = BTreeMap::new();
-        for selection in selected
+        let mut encoded = BTreeMap::new();
+        for s in selected
             .iter()
-            .filter(|s| s.active && !excluded_set.contains(s.id.as_str()))
+            .filter(|s| binary(s) && !excluded_set.contains(s.id.as_str()))
         {
-            if read.contains_key(&selection.path) {
+            if encoded.contains_key(&s.path) {
                 continue;
             }
-            let result = match &sizes[&selection.path] {
-                Ok(bytes) => {
-                    let reserved = *bytes;
-                    let path = selection.path.clone();
-                    let cache = self.cache.clone();
-                    let pin = pins.clone();
-                    self.workers
-                        .execute(deadline, cancel.clone(), move || {
-                            let _pin = pin;
-                            read_encoded(&path, file_limit, reserved, force_reload, &cache)
-                        })
-                        .await
-                        .map_err(|e| e.message)
-                }
-                Err(error) => Err(error.clone()),
-            };
+            let expected = observed[&s.path]
+                .as_ref()
+                .expect("binary observation")
+                .clone();
+            let path = s.path.clone();
+            let cache = self.cache.clone();
+            let pin = pins.clone();
+            let content = self
+                .workers
+                .execute(deadline, cancel.clone(), move || {
+                    let _pin = pin;
+                    read_encoded(&path, file_limit, force_reload, &cache, &expected)
+                })
+                .await?;
             if cancel.is_cancelled() {
                 return Err(cancelled());
             }
-            read.insert(selection.path.clone(), result);
+            encoded.insert(s.path.clone(), content);
         }
         let mut result = PreparedAttachments {
             thread_id: thread_id.into(),
@@ -649,18 +673,12 @@ impl AttachmentService {
                     ));
                 }
             } else {
-                match &read[&s.path] {
+                match &observed[&s.path] {
                     Ok(content) => {
                         manifest.raw_size = Some(content.raw_size);
                         manifest.content_hash = Some(content.hash.clone());
                         manifest.mime_type = Some(content.mime.clone());
-                        let differs_from_sent = s
-                            .sent_fingerprint
-                            .as_ref()
-                            .is_some_and(|hash| hash != &content.hash);
-                        manifest.omission_reason = s
-                            .omission
-                            .or(differs_from_sent.then_some(OmissionReason::AttachmentChanged));
+                        manifest.omission_reason = s.omission_for(Some(content));
                         if manifest.omission_reason.is_some() {
                             manifest.state = "observed".into();
                             // Report a new observation, not a newly sent version of this slot.
@@ -678,15 +696,16 @@ impl AttachmentService {
                                 }])));
                             }
                         } else {
-                            let data = format!("data:{};base64,{}", content.mime, content.base64);
+                            let content_bytes = &encoded[&s.path];
+                            let data =
+                                format!("data:{};base64,{}", content.mime, content_bytes.base64);
                             expansion.push(if s.kind==AttachmentKind::Image{json!({"type":"input_image","image_url":data,"detail":"auto"})}else{json!({"type":"input_file","filename":s.path.file_name().unwrap_or_default().to_string_lossy(),"file_data":data})});
-                            result._resources.push(content.clone());
+                            result._resources.push(content_bytes.clone());
                         }
                     }
                     Err(error) => {
                         manifest.state = "unavailable".into();
-                        manifest.omission_reason =
-                            s.omission.or(Some(OmissionReason::AttachmentUnavailable));
+                        manifest.omission_reason = s.omission_for(None);
                         manifest.error = Some(error.clone());
                         let notice = format!(
                             "Attachment unavailable: {} ({error}); inspect the saved selection with shellboy attachment list --thread {thread_id}",
@@ -1094,32 +1113,50 @@ fn open_attachment(path: &Path, limit: u64) -> Result<(File, Signature), ApiErro
     ))
 }
 
-fn read_encoded(
+fn cached_encoding(
+    cache: &Mutex<Cache>,
+    path: &Path,
+    signature: &Signature,
+    force: bool,
+) -> Option<Arc<Encoded>> {
+    if force {
+        return None;
+    }
+    let mut cache = cache.lock().expect("attachment cache poisoned");
+    cache.clock += 1;
+    let clock = cache.clock;
+    let entry = cache
+        .entries
+        .get_mut(path)
+        .filter(|entry| &entry.signature == signature)?;
+    entry.touched = clock;
+    Some(entry.content.clone())
+}
+
+fn observe_attachment(
     path: &Path,
     limit: u64,
-    reserved: u64,
     force: bool,
     cache: &Mutex<Cache>,
-) -> Result<Arc<Encoded>, ApiError> {
-    let (mut file, signature) = open_attachment(path, limit)?;
+) -> Result<Observation, ApiError> {
+    let (file, signature) = open_attachment(path, limit)?;
+    if let Some(encoded) = cached_encoding(cache, path, &signature, force) {
+        return Ok(encoded.observation.clone());
+    }
+    read_attachment(file, &signature, signature.bytes).map(|(_, observation)| observation)
+}
+
+fn read_attachment(
+    mut file: File,
+    signature: &Signature,
+    reserved: u64,
+) -> Result<(Vec<u8>, Observation), ApiError> {
     let grew = || io_error("Attachment grew beyond its reserved bytes during preparation");
     if signature.bytes > reserved {
         return Err(grew());
     }
     let capacity = usize::try_from(reserved)
         .map_err(|_| io_error("Attachment reservation exceeds addressable memory"))?;
-    {
-        let mut cache = cache.lock().expect("attachment cache poisoned");
-        cache.clock += 1;
-        let clock = cache.clock;
-        if !force
-            && let Some(entry) = cache.entries.get_mut(path)
-            && entry.signature == signature
-        {
-            entry.touched = clock;
-            return Ok(entry.content.clone());
-        }
-    }
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(capacity)
@@ -1147,11 +1184,42 @@ fn read_encoded(
             ApiError::new(ErrorCode::InvalidArgument, UNSUPPORTED_FORMAT_ERROR).hint(ATTACH_HELP),
         );
     }
-    let encoded = Arc::new(Encoded {
-        base64: STANDARD.encode(&bytes),
+    let observation = Observation {
         hash,
         raw_size: bytes.len() as u64,
         mime: mime.into(),
+    };
+    Ok((bytes, observation))
+}
+
+fn read_encoded(
+    path: &Path,
+    limit: u64,
+    force: bool,
+    cache: &Mutex<Cache>,
+    expected: &Observation,
+) -> Result<Arc<Encoded>, ApiError> {
+    let (file, signature) = open_attachment(path, limit)?;
+    let verify = |observation: &Observation| {
+        if expected != observation {
+            Err(io_error(
+                "Attachment changed during preparation; retry the request",
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    if let Some(encoded) = cached_encoding(cache, path, &signature, force) {
+        verify(&encoded.observation)?;
+        if signature.bytes <= expected.raw_size {
+            return Ok(encoded);
+        }
+    }
+    let (bytes, observation) = read_attachment(file, &signature, expected.raw_size)?;
+    verify(&observation)?;
+    let encoded = Arc::new(Encoded {
+        base64: STANDARD.encode(&bytes),
+        observation,
     });
     let mut cache = cache.lock().expect("attachment cache poisoned");
     cache.clock += 1;
@@ -1733,7 +1801,7 @@ mod mime_tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("file.txt");
         std::fs::write(&path, b"binary\0data").unwrap();
-        let error = read_encoded(&path, 64, 64, false, &Mutex::new(Cache::default()))
+        let error = observe_attachment(&path, 64, false, &Mutex::new(Cache::default()))
             .expect_err("the attachment must be rejected");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
         assert_eq!(error.message, UNSUPPORTED_FORMAT_ERROR);

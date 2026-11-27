@@ -2,7 +2,7 @@
 
 [User Guide](user-guide.md) · [TUI controls](tui.md) · [Guide index](README.md)
 
-Ordinary attachments are references to resolved absolute paths, not file copies. Send preparation reads the path's current contents. Saving a conversation does not save or restore earlier versions of external files.
+Ordinary attachments are references to resolved absolute paths, not file copies. Send preparation checks the path's current contents; it sends bytes only for a live or newly attached slot. Saving a conversation does not save or restore earlier versions of external files.
 
 ## Adding a file to a draft
 
@@ -39,7 +39,7 @@ Earlier images are not reattached to a subsequent message that has no attachment
 
 ## Changes, missing files, and explicit reload
 
-After a file changes, later requests use its current contents. Normally attributes such as size and modification time determine whether RAM conversion cache entries can be reused. There is no complete snapshot guarantee against rewrites preserving attributes or changes during reading.
+Later requests can observe changes, but do not send the changed contents in the old slot. Attach the path again to send the new version. Normally attributes such as size and modification time determine whether RAM conversion cache entries can be reused. There is no complete snapshot guarantee against rewrites preserving attributes or changes during reading.
 
 If you suspect a rewrite that preserved attributes, use this command on a saved Thread:
 

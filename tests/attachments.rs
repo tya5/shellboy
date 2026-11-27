@@ -391,18 +391,14 @@ async fn oldest_past_attachments_excluded_only_at_admission_never_resurrect() {
     config.limits.attachment_file_bytes = 10;
     config.limits.attachment_request_bytes = 10;
     let f = Fixture::new(config).await;
-    let old = f.add("old", b"x").await;
+    let old = f.add("old", b"123456").await;
     drop(f.adopt(f.prepare().await, true).await);
-    let cached_old_bytes = f.service.cache_stats().retained_bytes;
-    std::fs::write(f.path.join("old"), b"123456").unwrap();
     f.add("new", b"123456").await;
     let prepared = f.prepare().await;
     assert_eq!(prepared.excluded_ids, vec![old.clone()]);
-    // The old encoding stays cached at its original size. Only the admitted
-    // new six-byte text file can add a new encoding (8 Base64 + hash + MIME).
-    assert_eq!(
-        f.service.cache_stats().retained_bytes,
-        cached_old_bytes + 8 + 64 + "text/plain".len()
+    assert!(
+        f.service.cache_stats().pinned_bytes < f.service.cache_stats().retained_bytes,
+        "the excluded file is not pinned by preparation"
     );
     let before =
         f.db.call(|db| {
@@ -428,6 +424,129 @@ async fn oldest_past_attachments_excluded_only_at_admission_never_resurrect() {
     drop(next);
     f.db.shutdown().await.unwrap();
 }
+#[tokio::test]
+async fn changed_slot_keeps_its_notice_without_charging_or_pinning_unsent_bytes() {
+    let mut config = Config::default();
+    config.limits.attachment_file_bytes = 10;
+    config.limits.attachment_request_bytes = 10;
+    config.cache.attachment_base64_bytes = 0;
+    let f = Fixture::new(config).await;
+    f.add("unchanged", b"12345").await;
+    let changed_id = f.add("changed", b"x").await;
+    drop(f.adopt(f.prepare().await, true).await);
+    std::fs::write(f.path.join("changed"), b"1234567890").unwrap();
+    f.add("new", b"12345").await;
+    let prepared = f.prepare().await;
+    assert!(prepared.excluded_ids.is_empty());
+    assert!(
+        prepared
+            .notices
+            .iter()
+            .any(|notice| notice.contains("attachment changed update"))
+    );
+    for (placement, sends_file) in prepared.placements.iter().zip([true, false, true]) {
+        assert_eq!(
+            placement
+                .content
+                .iter()
+                .any(|part| part["type"] == "input_file"),
+            sends_file
+        );
+    }
+    drop(f.adopt(prepared, true).await);
+    std::fs::write(f.path.join("changed"), b"another").unwrap();
+    let second = f.prepare().await;
+    assert!(
+        second
+            .notices
+            .iter()
+            .any(|notice| notice.contains("attachment changed update"))
+    );
+    let pinned_with_observation = f.service.cache_stats().pinned_bytes;
+    drop(second);
+    f.remove(changed_id).await;
+    let without_observation = f.prepare().await;
+    assert_eq!(
+        f.service.cache_stats().pinned_bytes,
+        pinned_with_observation,
+        "an observed omission must not pin an encoding while the request is alive"
+    );
+    drop(without_observation);
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn attachment_upgrade_keeps_adopted_unavailability_without_making_failed_attempts_sticky() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("shellboy.db");
+    {
+        let mut db = rusqlite::Connection::open(&path).unwrap();
+        crate::schema42_fixture::build_historical_schema(&mut db, 69);
+        let dir = root.path().to_str().unwrap();
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('thread',?1,?1,'profile','model','now')", [dir]).unwrap();
+        db.execute_batch(r#"
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('run','thread','live','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('turn','thread','run','preparing','now');
+            INSERT INTO node(id,kind,created_at,payload_json) VALUES('source','user','now',
+             '{"role":"user","content":[{"type":"attachment_ref","attachment_id":"retired"},{"type":"attachment_ref","attachment_id":"retry"}]}');
+            INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('thread',0,'source');
+            INSERT INTO model_attempt(id,turn_id,kind,thread_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES
+            ('first','turn','conversation','thread',0,0,'profile','model',0,'completed','{"adoption":{"outcome":"adopted"}}','2026-01-01T00:00:00Z'),
+            ('resumed','turn','conversation','thread',0,0,'profile','model',0,'completed','{"adoption":{"outcome":"adopted"}}','2026-01-02T00:00:00Z'),
+            ('failed','turn','conversation','thread',0,0,'profile','model',0,'failed','{}','2026-01-03T00:00:00Z');
+        "#).unwrap();
+        for (ordinal, id) in ["retired", "retry"].into_iter().enumerate() {
+            let file = root.path().join(id);
+            std::fs::write(&file, b"file is readable now").unwrap();
+            db.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES(?1,'source',?2,'file','external','now')", rusqlite::params![id, file.to_str().unwrap()]).unwrap();
+            db.execute("INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order,protected) VALUES('thread',?1,'active','now',?2,?3)", rusqlite::params![id, ordinal, id == "retry"]).unwrap();
+        }
+        db.execute_batch(
+            r#"
+            INSERT INTO attachment_send(attempt_id,ordinal,attachment_id,state,content_hash) VALUES
+            ('first',0,'retired','unavailable',NULL),
+            ('resumed',0,'retired','sent','legacy-recorded-hash'),
+            ('failed',0,'retry','unavailable',NULL);
+        "#,
+        )
+        .unwrap();
+    }
+    let db = DbWorker::open(&path).await.unwrap();
+    let service = AttachmentService::new(
+        db.clone(),
+        &Config::default(),
+        root.path().into(),
+        "instance-test".into(),
+    );
+    let prepared = service
+        .prepare("thread", CancellationToken::new(), false)
+        .await
+        .unwrap();
+    let retired = &prepared.placements[0].content;
+    assert!(retired.iter().all(|part| part["type"] == "input_text"));
+    let fact: serde_json::Value = serde_json::from_str(
+        retired[0]["text"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("[Shellboy omitted content] ")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(fact["reason"], "attachment_unavailable");
+    assert!(
+        fact.get("fingerprint").is_none(),
+        "legacy resume cannot set the first slot's fingerprint"
+    );
+    assert!(
+        prepared.placements[1]
+            .content
+            .iter()
+            .any(|part| part["type"] == "input_file")
+    );
+    drop(prepared);
+    db.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn stale_selection_cas_rejects_manifest_and_transaction_rolls_back() {
     let f = Fixture::new(Config::default()).await;
