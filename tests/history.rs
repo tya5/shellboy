@@ -1172,7 +1172,7 @@ async fn fork_override_snapshot_is_independent_and_rolls_back_atomically() {
 }
 
 #[tokio::test]
-async fn positioned_display_pages_preserve_fences_and_reject_displaced_selection() {
+async fn positioned_display_pages_preserve_fences_and_reject_nodes_off_the_selected_path() {
     use shellboy::protocol::{HistoryDisplayPosition, HistoryDisplayRead, HistoryDisplaySelection};
     let (_root, db, history) = repository().await;
     let prefix = "ordinary text\n".repeat(900);
@@ -1183,23 +1183,13 @@ async fn positioned_display_pages_preserve_fences_and_reject_displaced_selection
         "after code\n".repeat(9000)
     );
     let anchor = (prefix.len() + "```rust\n".len() + 200 * code_line.len()) as u64;
+    append(&db, "base", "user", json!({"text":"earlier"})).await;
     append(&db, "fence", "assistant_response", json!({"text":text})).await;
-    let revision = db
-        .call(|db| {
-            Ok(db.query_row(
-                "SELECT selection_revision FROM thread WHERE id='thread'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )?)
-        })
-        .await
-        .unwrap();
     let mut read = body("fence", 64 * 1024, None);
     read.display = Some(HistoryDisplayRead {
         position: HistoryDisplayPosition::Absolute { offset: anchor },
         selection: Some(HistoryDisplaySelection {
             thread_id: "thread".into(),
-            revision: u64::try_from(revision).unwrap(),
         }),
     });
     let first = history.read(read.clone()).await.unwrap();
@@ -1232,7 +1222,20 @@ async fn positioned_display_pages_preserve_fences_and_reject_displaced_selection
             .code,
         ErrorCode::CursorExpired
     );
+    // An append leaves the earlier node on the selected path.
     append(&db, "later", "user", json!({"text":"next"})).await;
+    history.read(read.clone()).await.unwrap();
+    db.call(|db| {
+        let tx = db.transaction()?;
+        shellboy::history::rewind::rewind_thread(
+            &tx, "thread", "fence", true, false, "branch", "now",
+        )
+        .map_err(StorageError::from)?;
+        tx.commit()?;
+        Ok(())
+    })
+    .await
+    .unwrap();
     assert_eq!(
         history.read(read).await.unwrap_err().code,
         ErrorCode::CursorExpired
