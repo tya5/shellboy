@@ -471,7 +471,23 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }).await.expect("foreground shell becomes available");
-    let thread = ui.view().thread_id.clone().unwrap();
+    // The owner can start the shell before the frontend delivers the saved input.
+    let thread = match ui.view().thread_id.clone() {
+        Some(thread) => thread,
+        None => {
+            crate::test_watchdog::receive_until(
+                "UI adopts the saved Thread for the foreground shell",
+                &incoming,
+                crate::test_watchdog::WATCHDOG,
+                |update| {
+                    ui.apply(update);
+                    deliver(&sender, ui.take_deferred_actions());
+                    ui.view().thread_id.clone()
+                },
+            )
+            .await
+        }
+    };
     deliver(
         &sender,
         vec![UiAction::Background {
