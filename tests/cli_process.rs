@@ -1809,8 +1809,8 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     use shellboy::{
         ipc,
         protocol::{
-            Command, ErrorCode, ServiceAddArgs, ServiceEndpointArgs, ServiceSetArgs, ServiceTarget,
-            ThreadTarget,
+            Command, ErrorCode, ExecutionTarget, ServiceAddArgs, ServiceEndpointArgs,
+            ServiceSetArgs, ServiceTarget, ThreadTarget,
         },
     };
     use std::{
@@ -2039,19 +2039,37 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     // A directory at the publication path forces unlink to fail without using real secrets.
     std::fs::remove_file(&other_file).unwrap();
     std::fs::create_dir(&other_file).unwrap();
-    let refused = crate::test_watchdog::watchdog(
-        "service stop surfaces retirement failure",
-        rpc(Command::ServiceStop(target(&other))),
+    let service = ok(Command::ServiceGet(target(&other))).await;
+    let ended = service["latest"]["execution_id"].as_str().unwrap();
+    crate::test_watchdog::watchdog(
+        "service stop settles despite retirement failure",
+        ok(Command::ServiceStop(target(&other))),
     )
     .await
-    .unwrap()
-    .error
     .unwrap();
-    assert_eq!(refused.code, ErrorCode::IoFailed);
+    let wait = serde_json::from_value(serde_json::json!({"command":"wait", "args":{"conditions":[{"type":"shell_ended","execution_id":ended}],"timeout_ms":30000}})).unwrap();
+    assert_eq!(ok(wait).await["status"], "satisfied");
+    let saved = ok(Command::ShellGet(ExecutionTarget {
+        execution_id: ended.into(),
+    }))
+    .await;
+    assert_eq!(saved["state"], "stopped");
     assert_eq!(
-        refused.details.unwrap()["reason"],
+        saved["settlement_detail"],
         "service_endpoint_retirement_failed"
     );
+    assert_eq!(
+        rpc(exact(&other)).await.error.unwrap().details.unwrap()["reason"],
+        "service_not_running"
+    );
+    // The old obstruction remains; its failure must not fence the new execution.
+    ok(Command::ServiceStart(target(&other))).await;
+    let replacement = publication(&pipe).await;
+    assert_ne!(replacement, other_file);
+    assert_eq!(ok(exact(&other)).await["port"], 32103);
+    ok(Command::ServiceRemove(target(&other))).await;
+    assert!(!replacement.exists());
+    assert!(other_file.is_dir());
     std::fs::remove_dir(&other_file).unwrap();
     local.shutdown().await.unwrap();
     serving.abort();

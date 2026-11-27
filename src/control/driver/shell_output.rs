@@ -190,32 +190,9 @@ pub(in crate::control) async fn install_shell(
     } else {
         (None, None)
     };
-    let registered = if let ShellOwner::Schedule {
-        endpoint: Some(publication),
-        ..
-    } = &current
-    {
-        let registry = control.publications.clone();
-        let publication = publication.clone();
-        let id = execution.to_owned();
-        control
-            .store
-            .database
-            .call(move |db| {
-                let live = db.query_row(
-                    "SELECT state IN ('starting','running') FROM shell_execution WHERE id=?1",
-                    [&id],
-                    |r| r.get::<_, bool>(0),
-                )?;
-                if live {
-                    registry.register(id, &publication);
-                }
-                Ok(())
-            })
-            .await
-            .map_err(super::super::storage_error)
-    } else {
-        Ok(())
+    let publication = match &current {
+        ShellOwner::Schedule { endpoint, .. } => endpoint.clone(),
+        _ => None,
     };
     tokio::spawn(async move {
         let result = collect_shell(&collector, &mut current, &execution_copy, spawned).await;
@@ -254,17 +231,10 @@ pub(in crate::control) async fn install_shell(
         .filter(|(_, _, background)| !background)
         .map(|(slot, _, _)| &slot.foreground);
     let release = foreground.map(|slot| slot.register(execution));
-    if let Err(error) = registered {
-        if let Some(slot) = foreground {
-            slot.clear();
-        }
-        handle.stop();
-        if error.is_storage_failure() {
-            control.fail_storage().await;
-        }
-        return Err(error);
-    }
-    if let Err(error) = control.reapply_shell_intent(execution, &handle).await {
+    if let Err(error) = control
+        .reapply_shell_intent(execution, &handle, publication)
+        .await
+    {
         if let Some(slot) = foreground {
             slot.clear();
         }
@@ -394,31 +364,6 @@ pub(in crate::control) async fn collect_shell(
             .await
             .map_err(|_| invalid("Shell completion unavailable"))?;
     };
-    if let ShellOwner::Schedule { endpoint, .. } = owner
-        && let Some(publication) = endpoint.take()
-    {
-        let registry = control.publications.clone();
-        let id = execution.to_owned();
-        control
-            .store
-            .database
-            .call(move |_| {
-                registry.revoke(&id);
-                Ok(())
-            })
-            .await
-            .map_err(super::super::storage_error)?;
-        if let Err(error) = publication.retire() {
-            let registry = control.publications.clone();
-            let id = execution.to_owned();
-            control.store.database.call(move |db| {
-                    db.execute("UPDATE shell_execution SET state='stopping' WHERE id=?1 AND state IN ('starting','running')", [&id])?;
-                    registry.retirement_failed(id);
-                    Ok(())
-                }).await.map_err(super::super::storage_error)?;
-            return Err(error);
-        }
-    }
     // Even after a save failure, retain the shell until its supervisor has
     // terminated and reaped the process and drained its output pumps.
     if let Some(error) = save_failure {
@@ -452,10 +397,15 @@ async fn save_completion(
     let index = control.index.clone();
     let wakes = control.waits.keyed.clone();
     let store = control.store.clone();
+    let registry = control.publications.clone();
     let effects = control.store.database.call(move|db|{let tx=db.transaction()?;
+        let settlement_detail = match &current {
+            ShellOwner::Schedule { endpoint: Some(publication), .. } => publication.retire(),
+            _ => None,
+        };
         let service = super::super::schedule::service_settlement(&tx,&execution)?;
         let state=serde_json::to_value(completed.state).unwrap_or(Value::Null);
-        if tx.execute("UPDATE shell_execution SET state=CASE WHEN end_reason='schedule_timeout' THEN 'stopped' ELSE ?2 END,exit_code=CASE WHEN end_reason='schedule_timeout' THEN NULL ELSE ?3 END,end_reason=CASE WHEN end_reason IN ('schedule_timeout','owner_shutdown') THEN end_reason ELSE ?4 END,output_complete=?5,ended_at=?6,shell_json=json_set(shell_json,'$.completion',json(?7)) WHERE id=?1 AND state IN ('starting','running','stopping')",params![execution,state.as_str().unwrap_or("failed"),completed.exit_code,completed.reason,completed.output_complete,now(),json!({"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms}).to_string()])? == 0 {
+        if tx.execute("UPDATE shell_execution SET state=CASE WHEN end_reason='schedule_timeout' THEN 'stopped' ELSE ?2 END,exit_code=CASE WHEN end_reason='schedule_timeout' THEN NULL ELSE ?3 END,end_reason=CASE WHEN end_reason IN ('schedule_timeout','owner_shutdown') THEN end_reason ELSE ?4 END,output_complete=?5,ended_at=?6,shell_json=json_set(shell_json,'$.completion',json(?7)) WHERE id=?1 AND state IN ('starting','running','stopping')",params![execution,state.as_str().unwrap_or("failed"),completed.exit_code,completed.reason,completed.output_complete,now(),json!({"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms,"settlement_detail":settlement_detail}).to_string()])? == 0 {
             let saved:Option<String> = tx.query_row("SELECT state FROM shell_execution WHERE id=?1",[&execution],|r|r.get(0)).optional()?;
             let saved=saved.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Shell execution no longer exists"))?;
             let saved:ShellState=serde_json::from_value(Value::String(saved)).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Unknown saved shell state"))?;
@@ -478,6 +428,7 @@ async fn save_completion(
         }
         let mut effects = service.map(|service| service.finish(&store,&tx,&execution,None)).transpose()?.flatten();
         tx.commit()?;
+        registry.revoke(&execution);
         wakes.publish(Key::shell_terminal(execution).into_iter().chain(effects.iter_mut().flat_map(|effects| std::mem::take(&mut effects.wait_keys))));
         Ok(effects)}).await.map_err(storage_error)?;
     control.apply_effects(effects).await;

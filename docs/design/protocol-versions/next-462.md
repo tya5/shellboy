@@ -8,3 +8,5 @@
 ## Storage
 
 `next_service_name` adds optional `schedule.name` for services and a partial unique index on `(thread_id, name)`. Endpoint files are per execution and are not database state.
+
+`ShellDetails` may include `settlement_detail: "service_endpoint_retirement_failed"`; the shell state and exit facts still describe the execution itself.

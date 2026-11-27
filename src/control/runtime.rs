@@ -909,8 +909,10 @@ impl Control {
         &self,
         execution: &str,
         spawned: bool,
+        publication: Option<Arc<super::service_endpoint::Publication>>,
     ) -> Result<(bool, bool), ApiError> {
         let execution = execution.to_owned();
+        let registry = self.publications.clone();
         let wait_wakes = self.waits.keyed.clone();
         let (stop,eof,thread) = self.store.database.call(move |db| {
             let tx = db.transaction()?;
@@ -918,12 +920,15 @@ impl Control {
             let stop = !matches!(state.as_str(),"starting"|"running") || run.as_deref().is_some_and(|state| state!="live");
             let mut terminal = false;
             if spawned {
-                tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.spawned',json('true')),state=CASE WHEN state='starting' THEN 'running' ELSE state END WHERE id=?1",[&execution])?;
+                tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.spawned',json('true')),state=CASE WHEN state='starting' AND NOT ?2 THEN 'running' ELSE state END WHERE id=?1",rusqlite::params![&execution, stop])?;
             } else if stop && tx.execute("UPDATE shell_execution SET state='stopped',end_reason=COALESCE(end_reason,'stopped_before_spawn'),output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",rusqlite::params![&execution,chrono::Utc::now().to_rfc3339()])? != 0 {
                 super::schedule::retire_oneshot(&tx,&execution)?;
                 terminal = true;
             }
             tx.commit()?;
+            if spawned && !stop && let Some(publication) = publication {
+                registry.register(execution.clone(), &publication);
+            }
             if terminal { wait_wakes.publish(super::wait::wakes::Key::shell_terminal(execution)); }
             Ok((stop,stdin=="closed",thread))
         }).await.map_err(storage_error)?;
@@ -937,8 +942,11 @@ impl Control {
         &self,
         execution: &str,
         handle: &ShellHandle,
+        publication: Option<Arc<super::service_endpoint::Publication>>,
     ) -> Result<(), ApiError> {
-        let (stop, eof) = self.shell_start_intent(execution, true).await?;
+        let (stop, eof) = self
+            .shell_start_intent(execution, true, publication)
+            .await?;
         if stop || self.stop.is_cancelled() {
             if self.stop.is_cancelled() {
                 handle.stop();

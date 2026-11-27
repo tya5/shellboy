@@ -231,7 +231,7 @@ pub(super) async fn dispatch(control: &Arc<Control>) -> Result<Option<DateTime<U
 }
 
 async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), ApiError> {
-    if control.shell_start_intent(&shell.id, false).await?.0 {
+    if control.shell_start_intent(&shell.id, false, None).await?.0 {
         control.changed(&shell.thread);
         return Ok(());
     }
@@ -277,23 +277,6 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
             .await?;
         }
         Err(error) => {
-            if let Some(publication) = endpoint
-                && let Err(error) = publication.retire()
-            {
-                let registry = control.publications.clone();
-                let id = shell.id.clone();
-                control
-                    .store
-                    .database
-                    .call(move |_| {
-                        registry.retirement_failed(id);
-                        Ok(())
-                    })
-                    .await
-                    .map_err(super::storage_error)?;
-                control.changed(&shell.thread);
-                return Err(error);
-            }
             let shutdown = error
                 .details
                 .as_ref()
@@ -315,7 +298,11 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
                     } else {
                         super::state::fail_shell_spawn(&tx, &shell.id, &at, &saved_error)? != 0
                     };
+                    let settlement_detail = endpoint.as_ref().and_then(|publication| publication.retire());
                     if changed {
+                        if let Some(detail) = settlement_detail {
+                            tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.completion.settlement_detail',json(?2)) WHERE id=?1", params![shell.id, serde_json::json!(detail).to_string()])?;
+                        }
                         if service.is_none() {
                             effects = refused_oneshot_notice(&store, &tx, &shell.id, &saved_error)?;
                         }
@@ -1056,16 +1043,12 @@ async fn drain(control: &Control, executions: &[String]) -> Result<(), ApiError>
         }
     }
     let targets = Arc::new(serde_json::json!(executions).to_string());
-    let executions = Arc::new(executions.to_vec());
     loop {
         let changed = control.changed.notified();
         tokio::pin!(changed);
         changed.as_mut().enable();
         let targets = targets.clone();
-        let registry = control.publications.clone();
-        let executions = executions.clone();
         let active = control.store.database.call(move |db| {
-            registry.check_retired(executions.iter().map(String::as_str))?;
             Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM json_each(?1) j CROSS JOIN shell_execution s ON s.id=j.value WHERE s.state IN ('starting','running','stopping'))",[targets.as_str()],|r|r.get::<_,bool>(0))?)
         }).await.map_err(super::storage_error)?;
         if !active {
@@ -1316,7 +1299,7 @@ mod tests {
             }
             let mut expected = None;
             if point == 3 {
-                control.shell_start_intent("x", false).await.unwrap();
+                control.shell_start_intent("x", false, None).await.unwrap();
                 let effects = control
                     .store
                     .finalize_deletion(request.operation_id.clone(), move |tx| {
@@ -1735,7 +1718,13 @@ mod tests {
             {
                 tokio::task::yield_now().await;
             }
-            assert!(control.shell_start_intent("x", false).await.unwrap().0);
+            assert!(
+                control
+                    .shell_start_intent("x", false, None)
+                    .await
+                    .unwrap()
+                    .0
+            );
             let result = deleting.await.unwrap();
             assert!(result.ok, "{:?}", result.error);
             assert_eq!(result.result, control.request(first).await.result);
