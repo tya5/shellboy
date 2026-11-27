@@ -726,7 +726,11 @@ impl Store {
                         .expected_selection_revision
                         .is_some_and(|value| value != revision)
                     {
-                        return Err(ApiError::precondition_changed("thread_revision", Some(json!(revision)), "Draft attachment selection changed; retry from the retained draft"));
+                        return Err(ApiError::precondition_changed(
+                            "thread_revision",
+                            Some(json!(revision)),
+                            "Draft attachment selection changed; retry from the retained draft",
+                        ));
                     }
                     let result = store.send_content(
                         tx,
@@ -3094,7 +3098,11 @@ fn stop_thread_run(
         .map_err(sql_error)?;
     let run = run.ok_or_else(|| {
         if expected_turn.is_some() {
-            ApiError::precondition_changed("turn", Some(Value::Null), "The selected Run no longer has a live Turn")
+            ApiError::precondition_changed(
+                "turn",
+                Some(Value::Null),
+                "The selected Run no longer has a live Turn",
+            )
         } else {
             error(ErrorCode::InvalidState, "No live Run to stop")
         }
@@ -3116,11 +3124,17 @@ fn check_expected_turn(
         [run], |row| Ok((row.get(0)?, row.get(1)?)),
     ).optional().map_err(sql_error)?;
     let current = current.and_then(|(turn_id, generation)| {
-        Some(ExpectedTurn { turn_id, generation: u64::try_from(generation).ok()? })
+        Some(ExpectedTurn {
+            turn_id,
+            generation: u64::try_from(generation).ok()?,
+        })
     });
     if current.as_ref() != Some(expected) {
-        return Err(ApiError::precondition_changed("turn", Some(json!(current)),
-            "The selected Run's Turn changed; read it again before acting"));
+        return Err(ApiError::precondition_changed(
+            "turn",
+            Some(json!(current)),
+            "The selected Run's Turn changed; read it again before acting",
+        ));
     }
     Ok(())
 }

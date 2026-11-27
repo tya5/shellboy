@@ -3588,12 +3588,17 @@ mod message_acknowledgement_tests {
         let schema = operation_result_schemas(&mut generator);
         let results = schema.as_object().unwrap();
         let commands = serde_json::to_value(schemars::schema_for!(Command)).unwrap();
-        let expected = commands["oneOf"].as_array().unwrap().iter()
+        let expected = commands["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
             .map(|variant| variant["properties"]["command"]["const"].as_str().unwrap())
             .collect::<std::collections::BTreeSet<_>>();
-        let actual = results.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>();
+        let actual = results
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(actual, expected);
-
     }
 
     #[test]

@@ -3316,7 +3316,7 @@ async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reco
     let hash = crate::digest::sha256_hex(&edited);
     let applied = crate::config_edit::apply_live(
         &path,
-        &hash,
+        Some(&hash),
         &changes,
         &control.store.config,
         &control.store.clients,
@@ -3328,7 +3328,7 @@ async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reco
     assert_eq!(applied.result["restart_required"], false);
     let again = crate::config_edit::apply_live(
         &path,
-        &hash,
+        Some(&hash),
         &changes,
         &control.store.config,
         &control.store.clients,

@@ -983,8 +983,11 @@ fn require_shell_owner(
         [execution], |row| Ok(crate::protocol::ShellReadOwner { run_id: row.get(0)?, thread_id: row.get(1)? }),
     ).optional().map_err(sql_error)?;
     if current.as_ref() != Some(expected) {
-        return Err(ApiError::precondition_changed("owner", current.map(|owner| serde_json::json!(owner)),
-            "Shell output does not belong to the expected Run and Thread"));
+        return Err(ApiError::precondition_changed(
+            "owner",
+            current.map(|owner| serde_json::json!(owner)),
+            "Shell output does not belong to the expected Run and Thread",
+        ));
     }
     Ok(())
 }
