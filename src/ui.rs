@@ -579,7 +579,8 @@ pub enum UiAction {
         cursor: Option<String>,
     },
     CancelWait,
-
+    /// The F8 management view closed: its shown result is not read again.
+    ManagementClosed,
     CancelMessages {
         message_ids: Vec<String>,
         target: DraftRecoveryTarget,
@@ -962,6 +963,13 @@ pub enum UiUpdate {
         work_status: bool,
         request_id: u64,
         title: String,
+        fields: Vec<PresentationField>,
+        omitted: bool,
+    },
+    /// The shown result read again; it replaces the fields where they stand.
+    ManagementRefreshed {
+        work_status: bool,
+        request_id: u64,
         fields: Vec<PresentationField>,
         omitted: bool,
     },
@@ -2966,6 +2974,15 @@ impl UiState {
             } => {
                 self.management
                     .open_structured(title, request_id, fields, omitted, work_status);
+            }
+            UiUpdate::ManagementRefreshed {
+                work_status,
+                request_id,
+                fields,
+                omitted,
+            } => {
+                self.management
+                    .refresh_structured(request_id, fields, omitted, work_status);
             }
             UiUpdate::ManagementDetailFailure {
                 request_id,
@@ -5603,6 +5620,9 @@ cursor: None,
         context
     }
     fn invalidate_management(&mut self) {
+        if self.management.is_some() {
+            self.deferred_actions.push(UiAction::ManagementClosed);
+        }
         self.management.close();
         if matches!(
             self.confirmation,

@@ -761,7 +761,7 @@ Hidden output must not invalidate visible history or trigger redraw/DB work.
 
 F descendant counting is exactly one bounded recursive SQL statement using the
 parent index, depth8/256 discovered rows and lightweight latest-Run/Turn facts.
-Do not call activity::project separately per descendant. Count only the visible
+Do not read the `thread.get` activity separately per descendant. Count only the visible
 parent footer/watch scope, at most one in flight, sharing the500ms deadline.
 Ignore Changed IDs outside the cached descendant set unless new-Thread evidence
 can affect that scope. Watch details use one visible-ID batch, sanitized/formatted

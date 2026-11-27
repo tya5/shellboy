@@ -163,7 +163,10 @@ async fn shown_config_result_is_read_again_when_a_saved_credential_change_wakes_
         let mut changed = false;
         loop {
             while let Ok(update) = incoming.try_recv() {
-                if matches!(update, UiUpdate::StructuredManagement { .. }) {
+                if matches!(
+                    update,
+                    UiUpdate::StructuredManagement { .. } | UiUpdate::ManagementRefreshed { .. }
+                ) {
                     shown += 1;
                 }
             }
@@ -215,7 +218,10 @@ async fn shown_config_result_is_read_again_when_a_saved_credential_change_wakes_
         .unwrap();
         loop {
             while let Ok(update) = incoming.try_recv() {
-                if matches!(update, UiUpdate::StructuredManagement { .. }) {
+                if matches!(
+                    update,
+                    UiUpdate::StructuredManagement { .. } | UiUpdate::ManagementRefreshed { .. }
+                ) {
                     shown += 1;
                 }
             }

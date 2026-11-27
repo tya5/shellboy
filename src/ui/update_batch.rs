@@ -55,6 +55,7 @@ impl UiUpdate {
             | Self::OriginalPage { .. }
             | Self::ReceivedList { .. }
             | Self::StructuredManagement { .. }
+            | Self::ManagementRefreshed { .. }
             | Self::ManagementDetail { .. }
             | Self::Initialize { .. }
             | Self::ThreadListFailed { .. }

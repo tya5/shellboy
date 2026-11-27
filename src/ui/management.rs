@@ -238,6 +238,40 @@ impl ManagementPopup {
             }),
         });
     }
+    /// The shown result read again: the fields are replaced where they stand,
+    /// the selection stays (clamped) and an open detail is marked stale.
+    pub(super) fn refresh_structured(
+        &mut self,
+        request_id: u64,
+        fields: Vec<PresentationField>,
+        omitted: bool,
+        work_status: bool,
+    ) {
+        let language = self.language;
+        let Some(state) = self.structured_mut() else {
+            return;
+        };
+        if state.request_id != request_id {
+            return;
+        }
+        state.selected = state.selected.min(fields.len().saturating_sub(1));
+        state.fields = fields;
+        state.omitted = omitted;
+        if let Some(page) = &mut state.detail {
+            page.stale = Some(
+                local!(
+                    language,
+                    "管理結果が更新されました。同じ対象を再取得してください",
+                    "The management result was updated. Retrieve the same target again"
+                )
+                .into(),
+            );
+        }
+        if work_status {
+            self.mode = ManagementMode::Status;
+        }
+        self.reset_reader();
+    }
     pub(super) fn accept_detail(
         &mut self,
         request_id: u64,

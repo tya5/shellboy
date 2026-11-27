@@ -840,3 +840,80 @@ fn next_key_follows_the_shown_coverage_cursor_only_in_the_index_view() {
         "{actions:?}"
     );
 }
+
+fn field(key: &str, value: &str) -> PresentationField {
+    PresentationField {
+        value_omitted: false,
+        key: key.into(),
+        label: key.into(),
+        value: value.into(),
+        display: None,
+    }
+}
+
+#[test]
+fn refreshed_result_keeps_selection_and_marks_the_open_detail_stale() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.apply(UiUpdate::StructuredManagement {
+        work_status: false,
+        request_id: 3,
+        title: "index".into(),
+        fields: vec![field("/a", "1"), field("/b", "2"), field("/c", "3")],
+        omitted: false,
+    });
+    ui.management.structured_mut().unwrap().selected = 2;
+    ui.management.structured_mut().unwrap().detail = Some(crate::ui::management::ManagementPage {
+        source_request_id: 3,
+        stale: None,
+        pointer: "/c".into(),
+        text: "old".into(),
+        next_cursor: None,
+    });
+    ui.apply(UiUpdate::ManagementRefreshed {
+        work_status: false,
+        request_id: 3,
+        fields: vec![field("/a", "1"), field("/b", "20")],
+        omitted: false,
+    });
+    let state = ui.management.structured().unwrap();
+    assert_eq!(state.fields[1].value, "20");
+    assert_eq!(
+        state.selected, 1,
+        "the selection is clamped to the new fields"
+    );
+    assert!(
+        state
+            .detail
+            .as_ref()
+            .is_some_and(|page| page.stale.is_some())
+    );
+    ui.apply(UiUpdate::ManagementRefreshed {
+        work_status: false,
+        request_id: 99,
+        fields: vec![field("/z", "9")],
+        omitted: false,
+    });
+    assert_eq!(
+        ui.management.structured().unwrap().fields.len(),
+        2,
+        "a refresh for another view is dropped"
+    );
+}
+
+#[test]
+fn closing_the_management_view_tells_the_client_to_stop_refreshing() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.apply(UiUpdate::StructuredManagement {
+        work_status: false,
+        request_id: 3,
+        title: "index".into(),
+        fields: vec![field("/a", "1")],
+        omitted: false,
+    });
+    ui.invalidate_management();
+    assert!(
+        ui.take_deferred_actions()
+            .iter()
+            .any(|action| matches!(action, UiAction::ManagementClosed))
+    );
+}

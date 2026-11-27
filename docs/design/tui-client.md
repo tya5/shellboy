@@ -160,7 +160,12 @@ This one wait is the client's only owner wake (4d slice 3):
 - `config_changed`, `index_changed` and `retention_changed` read the shown F8
   `config.get`, `index.status` or `storage.status` result again with the
   command that made it (a gap rereads whichever is shown). It takes one command
-  slot and no timer; a full slot leaves the result as shown.
+  slot and no timer. One pending refresh is kept while the slot is full or a
+  command or read is in flight, and it starts when that finishes; it is cleared
+  only when a read starts. A refresh updates the shown fields in place (selection,
+  scroll and an open field detail stay; the detail is marked stale) and never
+  replaces a command result the user asked for. Closing F8 ends the shown result
+  and its pending refresh: no refresh is read while F8 is closed.
 - A baseline or gap rereads everything the marks and output entries cover.
 
 No worker or queued event buffer is added; dropping the pending wait drops its
