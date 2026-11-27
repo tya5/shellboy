@@ -163,12 +163,21 @@ impl Fixture {
                         let (tap, actual) = oneshot::channel();
                         let args = args.clone();
                         let reply = std::mem::replace(&mut invocation.reply, tap);
+                        let follow_log = log.clone();
+                        let operation = invocation.request.operation_id.clone();
+                        log.lock().unwrap().push(format!("FollowHeld:{operation}"));
                         held.send((args, release)).unwrap();
                         tokio::spawn(async move {
                             if let Ok(actual) = actual.await
                                 && released.await.is_ok()
                             {
-                                let _ = reply.send(actual);
+                                assert!(actual.ok);
+                                assert_eq!(actual.operation_id, operation);
+                                assert!(reply.send(actual).is_ok());
+                                follow_log
+                                    .lock()
+                                    .unwrap()
+                                    .push(format!("FollowReply:{operation}"));
                             }
                         });
                     }
@@ -2441,15 +2450,9 @@ async fn chat_follow_reads_the_turn_after_the_wait_returns() {
     assert_eq!(args.thread_ids.len(), 1);
     assert!(args.after.is_some());
     assert!(args.timeout_ms > 0);
-    let before = fixture.count("TurnGet");
-    pending.reply.send(answer("done")).unwrap();
     tokio::time::pause();
     let at = tokio::time::Instant::now();
-    assert_eq!(
-        fixture.count("TurnGet"),
-        before,
-        "the follow response is still held"
-    );
+    pending.reply.send(answer("done")).unwrap();
     release.send(()).unwrap();
     // Keep Tokio's clock frozen while the wall-clock watchdog bounds a hang.
     let watchdog = crate::test_watchdog::Deadline::new("chat finishes after the follow response");
@@ -2463,7 +2466,23 @@ async fn chat_follow_reads_the_turn_after_the_wait_returns() {
     let out = String::from_utf8(out).unwrap();
     assert_eq!(result.unwrap(), 0, "{out}");
     assert!(out.contains("done"), "{out}");
-    assert!(fixture.count("TurnGet") > before);
+    let trace = fixture.seen.lock().unwrap();
+    let (held, operation) = trace
+        .iter()
+        .enumerate()
+        .find_map(|(index, event)| event.strip_prefix("FollowHeld:").map(|id| (index, id)))
+        .expect("a cursor-bearing follow invocation was held");
+    let order: Vec<_> = trace[held + 1..]
+        .iter()
+        .filter(|event| event.starts_with("FollowReply:") || event.as_str() == "TurnGet")
+        .take(2)
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        order,
+        [format!("FollowReply:{operation}").as_str(), "TurnGet"]
+    );
+    drop(trace);
     fixture.close().await;
 }
 
