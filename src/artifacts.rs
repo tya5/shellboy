@@ -181,6 +181,18 @@ fn seek(token: Option<&str>, scope: &str, target: &str) -> Result<Option<String>
         .map(|s| PageCursor::decode(s, scope, target, 0, None).map(|c| c.last_sort_key))
         .transpose()
 }
+fn list_cursor(scope: &str, target: &str, key: String) -> Result<String> {
+    PageCursor {
+        version: 1,
+        scope: scope.into(),
+        filter: target.into(),
+        last_sort_key: key,
+        watermark: 0,
+        revision: 0,
+        encoding: None,
+    }
+    .encode()
+}
 fn page<T, F>(
     mut items: Vec<T>,
     limit: usize,
@@ -191,18 +203,7 @@ fn page<T, F>(
 ) -> Result<RecordPage<T, F>> {
     let next_cursor = if items.len() > limit {
         items.truncate(limit);
-        Some(
-            PageCursor {
-                version: 1,
-                scope: scope.into(),
-                filter: target.into(),
-                last_sort_key: key(&items[limit - 1]),
-                watermark: 0,
-                revision: 0,
-                encoding: None,
-            }
-            .encode()?,
-        )
+        Some(list_cursor(scope, target, key(&items[limit - 1]))?)
     } else {
         None
     };
@@ -225,23 +226,10 @@ pub(crate) fn list(
     let limit = page_limit(a.limit)?;
     let scheme = validate_list_scope(a)?;
     let thread = a.thread_id.as_deref();
-    let (scope, target, index, filter, primary) = if let Some(s) = scheme.as_deref() {
-        let target = serde_json::json!([s, thread]).to_string();
-        let filter = if thread.is_some() {
-            "a.current_scheme=?1 AND a.thread_id=?5"
-        } else {
-            "a.current_scheme=?1"
-        };
-        (SCHEME_LIST, target, "artifact_scheme_page", filter, s)
-    } else {
-        let t = thread.expect("validated artifact list scope");
-        (
-            LIST,
-            t.to_owned(),
-            "artifact_thread_page",
-            "a.thread_id=?1",
-            t,
-        )
+    let (scope, target) = match (&scheme, thread) {
+        (Some(scheme), _) => (SCHEME_LIST, serde_json::json!([scheme, thread]).to_string()),
+        (None, Some(thread)) => (LIST, thread.to_owned()),
+        (None, None) => unreachable!("validated artifact list scope"),
     };
     let after = seek(a.cursor.as_deref(), scope, &target)?
         .map(|key| {
@@ -253,11 +241,10 @@ pub(crate) fn list(
     if let Some(t) = thread {
         check_thread(tx, t)?;
     }
-    let live = if scheme.is_some() {
-        "AND EXISTS (SELECT 1 FROM thread t WHERE t.id=a.thread_id AND t.deleted_at IS NULL AND t.archived_at IS NULL)"
-    } else {
-        ""
-    };
+    if let Some(scheme) = scheme {
+        return list_scheme(tx, thread, scheme, &target, after, limit);
+    }
+    let thread = thread.expect("validated artifact list scope");
     let mut items = Vec::new();
     let mut read = |range: &str, updated: Option<&str>, id: Option<&str>| -> Result<()> {
         let remaining = (limit + 1 - items.len()) as i64;
@@ -265,11 +252,11 @@ pub(crate) fn list(
             return Ok(());
         }
         let query = format!(
-            "SELECT {FIELDS} FROM artifact a INDEXED BY {index} {LATEST_JOIN} WHERE {filter} {live} {range}
+            "SELECT {FIELDS} FROM artifact a INDEXED BY artifact_thread_page {LATEST_JOIN} WHERE a.thread_id=?1 {range}
              ORDER BY a.updated_at DESC, a.id LIMIT ?2"
         );
         let mut stmt = tx.prepare(&query).map_err(sql)?;
-        let values: [&dyn rusqlite::ToSql; 5] = [&primary, &remaining, &updated, &id, &thread];
+        let values: [&dyn rusqlite::ToSql; 4] = [&thread, &remaining, &updated, &id];
         let binds = &values[..stmt.parameter_count()];
         for row in stmt.query_map(binds, summary).map_err(sql)? {
             items.push(row.map_err(sql)?);
@@ -289,11 +276,95 @@ pub(crate) fn list(
         scope,
         &target,
         ArtifactListFilter {
-            thread_id: a.thread_id.clone(),
-            scheme,
+            thread_id: Some(thread.to_owned()),
+            scheme: None,
         },
         |a| serde_json::json!([a.updated_at, a.artifact_id]).to_string(),
     )
+}
+// Bound owner work independently of how many rows the eligibility check rejects.
+const SCHEME_CANDIDATE_LIMIT: usize = 128;
+
+fn list_scheme(
+    tx: &Transaction<'_>,
+    thread: Option<&str>,
+    scheme: String,
+    target: &str,
+    after: Option<(String, String)>,
+    limit: usize,
+) -> Result<RecordPage<ArtifactSummary, ArtifactListFilter>> {
+    let (index, field, primary) = match thread {
+        Some(thread) => ("artifact_thread_page", "thread_id", thread),
+        None => ("artifact_scheme_page", "current_scheme", scheme.as_str()),
+    };
+    let mut candidates = Vec::new();
+    let mut read = |range: &str, updated: Option<&str>, id: Option<&str>| -> Result<()> {
+        let remaining = (SCHEME_CANDIDATE_LIMIT + 1 - candidates.len()) as i64;
+        if remaining == 0 {
+            return Ok(());
+        }
+        let query = format!(
+            "SELECT id,updated_at,thread_id,current_scheme FROM artifact INDEXED BY {index}
+             WHERE {field}=?1 {range} ORDER BY updated_at DESC,id LIMIT ?2"
+        );
+        let mut stmt = tx.prepare(&query).map_err(sql)?;
+        let values: [&dyn rusqlite::ToSql; 4] = [&primary, &remaining, &updated, &id];
+        for row in stmt
+            .query_map(&values[..stmt.parameter_count()], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(sql)?
+        {
+            candidates.push(row.map_err(sql)?);
+        }
+        Ok(())
+    };
+    if let Some((updated, id)) = after {
+        read("AND updated_at=?3 AND id>?4", Some(&updated), Some(&id))?;
+        read("AND updated_at<?3", Some(&updated), None)?;
+    } else {
+        read("", None, None)?;
+    }
+
+    let mut items = Vec::new();
+    let mut last = None;
+    let mut candidates = candidates.into_iter().peekable();
+    let mut live = tx.prepare_cached(
+        "SELECT EXISTS (SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL AND archived_at IS NULL)"
+    ).map_err(sql)?;
+    for (id, updated, owner, current) in candidates.by_ref().take(SCHEME_CANDIDATE_LIMIT) {
+        if current.as_deref() == Some(scheme.as_str())
+            && live
+                .query_row([owner], |r| r.get::<_, bool>(0))
+                .map_err(sql)?
+        {
+            items.push(find(tx, &id, None)?);
+        }
+        last = Some((updated, id));
+        if items.len() == limit {
+            break;
+        }
+    }
+    let next = if candidates.peek().is_some() {
+        last.map(|key| list_cursor(SCHEME_LIST, target, serde_json::json!(key).to_string()))
+            .transpose()?
+    } else {
+        None
+    };
+    Ok(RecordPage::new(
+        limit as u32,
+        ArtifactListFilter {
+            thread_id: thread.map(str::to_owned),
+            scheme: Some(scheme),
+        },
+        items,
+        next,
+    ))
 }
 pub(crate) fn get(tx: &Transaction<'_>, a: &ArtifactGetArgs) -> Result<ArtifactGetResult> {
     if let Some(n) = a.version {

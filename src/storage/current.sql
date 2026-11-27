@@ -953,13 +953,13 @@ INSERT INTO schema_migration(version,name) VALUES(69,'0069_instruction_snapshot_
 PRAGMA user_version=69;
 ALTER TABLE artifact ADD COLUMN current_scheme TEXT;
 
--- Match the URI scheme grammar used by artifact add/update.
+-- Match artifact add/update. Check the original URI before text substr can stop at NUL.
 UPDATE artifact AS a SET current_scheme = (
     SELECT CASE
         WHEN instr(uri, ':') > 1
             AND substr(uri, 1, 1) GLOB '[A-Za-z]'
             AND substr(uri, 1, instr(uri, ':') - 1) NOT GLOB '*[^A-Za-z0-9+.-]*'
-            AND instr(substr(uri, 1, instr(uri, ':') - 1), char(0)) = 0
+            AND (instr(uri, char(0)) = 0 OR instr(uri, char(0)) > instr(uri, ':'))
         THEN lower(substr(uri, 1, instr(uri, ':') - 1))
         END
     FROM artifact_version

@@ -59,3 +59,59 @@ fn artifact_list_seeks_across_equal_update_times() {
     args.cursor = old.next_cursor;
     assert_eq!(list(&tx, &args).unwrap_err().code, ErrorCode::CursorExpired);
 }
+
+#[test]
+fn artifact_scheme_pages_resume_after_bounded_filtered_candidates() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+    let tx = db.transaction().unwrap();
+    tx.execute_batch(
+        "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
+         VALUES ('live','/','','p','m','now',NULL), ('archive','/','','p','m','now','now');",
+    )
+    .unwrap();
+    let add = |thread: &str, uri: &str, updated: &str| {
+        super::add(
+            &tx,
+            &ArtifactAddArgs {
+                thread_id: thread.into(),
+                uri: uri.into(),
+                title: "Fixture".into(),
+                mime: None,
+            },
+            updated,
+        )
+        .unwrap()
+        .artifact_id
+    };
+    let expected = add("live", "shellboy-app:/live", "2026-11-01");
+    for _ in 0..SCHEME_CANDIDATE_LIMIT + 1 {
+        add("archive", "shellboy-app:/archived", "2026-11-03");
+    }
+    let mut args = ArtifactListArgs {
+        thread_id: None,
+        scheme: Some("shellboy-app".into()),
+        limit: 2,
+        cursor: None,
+    };
+    let empty = list(&tx, &args).unwrap();
+    assert!(empty.items.is_empty());
+    args.cursor = Some(empty.next_cursor.unwrap());
+    let continued = list(&tx, &args).unwrap();
+    assert_eq!(continued.items[0].artifact_id, expected);
+    assert!(continued.next_cursor.is_none());
+
+    // Outside the Thread range, archived app rows must not consume the scoped budget.
+    args.thread_id = Some("live".into());
+    args.cursor = None;
+    assert_eq!(list(&tx, &args).unwrap().items[0].artifact_id, expected);
+    for _ in 0..SCHEME_CANDIDATE_LIMIT {
+        add("live", "file:///other", "2026-11-02");
+    }
+    let empty = list(&tx, &args).unwrap();
+    assert!(empty.items.is_empty());
+    args.cursor = Some(empty.next_cursor.unwrap());
+    let continued = list(&tx, &args).unwrap();
+    assert_eq!(continued.items[0].artifact_id, expected);
+    assert!(continued.next_cursor.is_none());
+}
