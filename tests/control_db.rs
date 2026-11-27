@@ -1520,20 +1520,39 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
             .unwrap(),
         RuntimeReservation::Pending
     ));
-    let expected = serde_json::to_value(origin.identity()).unwrap();
-    store.database.call(move |db| {
-        for sql in ["SELECT origin_json FROM operation_receipt WHERE json_extract(origin_json,'$.execution_id') IS NOT NULL", "SELECT sender_json FROM receipt WHERE json_extract(sender_json,'$.execution_id') IS NOT NULL"] {
-            let bodies = db.prepare(sql)?.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(!bodies.is_empty());
-            for body in bodies {
-                assert!(!body.contains("fixture-token"));
-                let mut expected_record = expected.clone();
-                if sql.contains("SELECT sender_json") { expected_record["kind"] = serde_json::json!("model"); }
-                assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), expected_record);
+    let message_id = first.result["message_id"].as_str().unwrap().to_owned();
+    let expected = shellboy::protocol::MessageSender {
+        kind: shellboy::protocol::SenderKind::Model,
+        instance_id: Some(origin.instance_id.clone()),
+        thread_id: Some(origin.thread_id.clone()),
+        run_id: Some(origin.run_id.clone()),
+        turn_id: Some(origin.turn_id.clone()),
+        execution_id: Some(origin.execution_id.clone()),
+        label: None,
+    };
+    store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                shellboy::control::db::message_details(db, &message_id)?.sender,
+                expected
+            );
+            for sql in [
+                "SELECT origin_json FROM operation_receipt",
+                "SELECT sender_json FROM receipt",
+            ] {
+                let bodies = db
+                    .prepare(sql)?
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                for body in bodies {
+                    assert!(!body.contains("fixture-token"));
+                }
             }
-        }
-        Ok(())
-    }).await.unwrap();
+            Ok(())
+        })
+        .await
+        .unwrap();
     store.database.shutdown().await.unwrap();
 }
 
