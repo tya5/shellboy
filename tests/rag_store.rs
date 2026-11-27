@@ -912,7 +912,7 @@ async fn history_keyword_hides_deleted_thread_exclusive_nodes_before_physical_gc
     store
         .execute(
             shellboy::protocol::Request::new(
-                "keyword-delete:live",
+                "keyword-delete.0:live",
                 shellboy::protocol::Command::ThreadDelete(shellboy::protocol::ThreadDeleteArgs {
                     preview_marker: None,
                     thread_id: "live".into(),

@@ -740,8 +740,7 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
         })));
     }
     let mut request = Request::new(
-        operation_id
-            .unwrap_or_else(|| format!("{}:{}", welcome.operation_epoch, uuid::Uuid::new_v4())),
+        operation_id.unwrap_or_else(|| crate::control::mint_operation_id(&welcome.operation_epoch)),
         command,
     );
     request.origin = origin;

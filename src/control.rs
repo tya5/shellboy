@@ -47,7 +47,7 @@ pub(crate) mod request_parts {
 pub(crate) mod compaction_test_fixture;
 pub mod output;
 pub(crate) mod receipt;
-pub use receipt::OperationEpoch;
+pub use receipt::{OperationEpoch, mint_operation_id};
 pub mod replay;
 pub(crate) mod reply;
 pub(crate) mod revisit;
