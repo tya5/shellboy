@@ -703,7 +703,7 @@ pub(super) async fn rebase(
             },
         ),
     };
-    let anchor = crate::ui::ViewAnchor {
+    let anchor = crate::draft::ViewAnchor {
         node_id: Some(node_id),
         char_offset: offset,
     };

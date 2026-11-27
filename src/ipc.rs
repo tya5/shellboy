@@ -1066,7 +1066,7 @@ mod frame_delivery_tests {
                 effort: None,
                 parent_thread_id: None,
             },
-            draft: Box::new(crate::ui::DraftSnapshot {
+            draft: Box::new(crate::draft::DraftSnapshot {
                 revision: 1,
                 text: "draft kept by the client".into(),
                 ..Default::default()

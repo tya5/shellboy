@@ -52,7 +52,7 @@ fn operation_result_schemas(
     result!("draft.save", Accepted);
     result!("draft.get", DraftState);
     result!("draft.list", DraftListPage);
-    result!("draft.restore", crate::ui::DraftSnapshot);
+    result!("draft.restore", crate::draft::DraftSnapshot);
     result!("draft.submit", MessageAccepted);
     result!("status", StatusResult);
     result!("model.list", ModelListResult);
@@ -1891,7 +1891,7 @@ args!(DraftSubmitArgs {
     thread_id: Option<String>,
     selection_revision: Option<u64>,
     create: ThreadCreateArgs,
-    draft: Box<crate::ui::DraftSnapshot>,
+    draft: Box<crate::draft::DraftSnapshot>,
     #[serde(default)] #[schemars(with = "NewDelivery")] deliver: Deliver,
 });
 pub const DRAFT_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
@@ -1979,18 +1979,18 @@ pub type DraftListPage = RecordPage<DraftRecord, DraftListFilters>;
 args!(DraftRestoreArgs { archive_id: String });
 record!(DraftState {
     selection_revision: u64,
-    draft: Option<crate::ui::DraftSnapshot>,
+    draft: Option<crate::draft::DraftSnapshot>,
     view: Option<DraftView>,
     #[serde(default, skip_serializing_if = "Option::is_none")] record: Option<DraftRecord>,
 });
 record!(DraftView {
-    anchor: crate::ui::ViewAnchor,
+    anchor: crate::draft::ViewAnchor,
     follow_tail: bool
 });
 args!(DraftSaveArgs {
     thread_id: String,
-    draft: Box<crate::ui::DraftSnapshot>,
-    anchor: crate::ui::ViewAnchor,
+    draft: Box<crate::draft::DraftSnapshot>,
+    anchor: crate::draft::ViewAnchor,
     follow_tail: bool,
 });
 
