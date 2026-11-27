@@ -146,6 +146,13 @@ pub fn stored_names(path: &Path) -> Result<BTreeSet<String>, StoreError> {
     inspect(path).names
 }
 
+/// Whether `config.get` would report a stored key for the connection.
+pub fn has_key(path: &Path, name: &str) -> Result<bool, ApiError> {
+    stored_names(path)
+        .map(|names| names.contains(name))
+        .map_err(|error| invalid_file(error, path))
+}
+
 /// The stored key of one connection, read when a request starts so a new key
 /// applies to the next request. A missing file or entry is `None`.
 pub async fn read_key(path: &Path, name: &str) -> Result<Option<String>, StoreError> {
