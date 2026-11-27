@@ -1035,8 +1035,10 @@ For command examples and execution IDs, see the Agent Guide's
 Names use 1–64 lowercase ASCII letters, digits or hyphens, and duplicates in
 one Thread return `service_name_conflict`. `service get --service ID` and
 `service list --thread THREAD` show the name but not credentials.
-`service endpoint --service ID` reads the live port and secret token for that
-exact service. Its JSON output is sensitive; do not log or save it.
+`service endpoint --service ID` or `service endpoint --thread THREAD --name NAME`
+reads the live port and secret token for one service. An authenticated local
+caller can explicitly address another Thread in the same owner. Its JSON
+output is sensitive; do not log or save it.
 
 `schedule add` and `schedule set` take `--notify VALUE`, repeatable. `skipped`
 sends one ordinary message from `schedule:<id>` to the owning Thread for every

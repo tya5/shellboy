@@ -1008,8 +1008,19 @@ impl Command {
             Self::ServiceStart(a)
             | Self::ServiceStop(a)
             | Self::ServiceRemove(a)
-            | Self::ServiceGet(a)
-            | Self::ServiceEndpoint(a) => nonempty(&a.service_id, "service_id"),
+            | Self::ServiceGet(a) => nonempty(&a.service_id, "service_id"),
+            Self::ServiceEndpoint(a) => match (
+                a.service_id.as_deref(),
+                a.thread_id.as_deref(),
+                a.name.as_deref(),
+            ) {
+                (Some(id), None, None) => nonempty(id, "service_id"),
+                (None, Some(thread), Some(name)) => {
+                    nonempty(thread, "thread_id")?;
+                    service_name(name)
+                }
+                _ => Err(invalid("Specify service_id or both thread_id and name")),
+            },
             Self::ScheduleAdd(a) => {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
                 ScheduleNotify::saved(&a.notify).map(drop)

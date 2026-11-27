@@ -647,8 +647,12 @@ pub enum ServiceCommand {
     },
     /// Read one live endpoint. Output contains a secret; do not log it.
     Endpoint {
-        #[arg(long = "service")]
-        service_id: String,
+        #[arg(long = "service", required_unless_present = "thread_id", conflicts_with_all = ["thread_id", "name"])]
+        service_id: Option<String>,
+        #[arg(long = "thread", requires = "name")]
+        thread_id: Option<String>,
+        #[arg(long, requires = "thread_id")]
+        name: Option<String>,
     },
     Start {
         #[arg(long = "service")]
@@ -750,9 +754,15 @@ impl From<ServiceCommand> for wire::Command {
             ServiceCommand::Set { service_id, name } => {
                 Self::ServiceSet(wire::ServiceSetArgs { service_id, name })
             }
-            ServiceCommand::Endpoint { service_id } => {
-                Self::ServiceEndpoint(wire::ServiceTarget { service_id })
-            }
+            ServiceCommand::Endpoint {
+                service_id,
+                thread_id,
+                name,
+            } => Self::ServiceEndpoint(wire::ServiceEndpointArgs {
+                service_id,
+                thread_id,
+                name,
+            }),
             ServiceCommand::Start { service_id } => {
                 Self::ServiceStart(wire::ServiceTarget { service_id })
             }
