@@ -1,55 +1,37 @@
-//! Bounded observations of work owned by the selected saved Run.
+//! Bounded observations of work owned by the selected saved Run, from the
+//! owner's `shell.list` running rows and their waits.
 use crate::{
-    protocol::{ApiError, ErrorCode, ShellWait, WaitCondition},
-    storage::StorageError,
+    protocol::{ApiError, Command, ErrorCode, ShellWait, WaitCondition},
     ui::live_work::{LiveWorkRow, LiveWorkSnapshot, LiveWorkTarget, WaitInfo, WaitTarget},
 };
-use rusqlite::{Connection, OptionalExtension};
 use std::time::{Duration, Instant};
 
-pub(super) const MAX_WAITS: usize = 128;
-// Candidate sets are capped before sorting and counting. Counts at the cap are
-// lower bounds; they cannot establish the globally oldest work. Waits are the
-// owner's `shell.list` wait facts; this snapshot keeps those of the selected Run.
-const LIVE_SQL: &str = r"
-WITH wait_keys AS MATERIALIZED (
- SELECT DISTINCT json_extract(value,'$[0]') AS operation_id,
-                 json_extract(value,'$[1]') AS execution_id,
-                 json_extract(value,'$[2]') AS started_at FROM json_each(?2)
-), waits AS MATERIALIZED (
- SELECT k.operation_id,k.execution_id,k.started_at
- FROM wait_keys k JOIN shell_execution s ON s.id=k.execution_id AND s.owner_run_id=?1
-), shell_candidates AS MATERIALIZED (
- SELECT id,started_at FROM shell_execution INDEXED BY shell_active_owner
- WHERE owner_run_id=?1 AND state IN ('starting','running','stopping') LIMIT 128
-), shell_members AS MATERIALIZED (
- SELECT id,started_at FROM shell_candidates
- WHERE NOT EXISTS (SELECT 1 FROM waits WHERE waits.execution_id=shell_candidates.id)
- ORDER BY julianday(started_at) IS NULL,julianday(started_at),id LIMIT ?3
-), shells AS MATERIALIZED (
- SELECT 'shell' AS kind,s.id AS id,s.turn_id AS related,s.id AS execution,
-        CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.command')='text' THEN substr(json_extract(s.shell_json,'$.command'),1,512) END END AS label,
-        s.state,s.started_at,
-        (SELECT received_at FROM output_chunk o WHERE o.execution_id=s.id ORDER BY o.sequence DESC LIMIT 1) AS output_at,
-        CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END AS description
- FROM shell_members member CROSS JOIN shell_execution s ON s.id=member.id
-), wait_rows AS MATERIALIZED (
- SELECT 'wait' AS kind,operation_id AS id,NULL AS related,execution_id AS execution,
-        NULL AS label,'waiting' AS state,started_at,NULL AS output_at,NULL AS description FROM waits
- ORDER BY julianday(started_at) IS NULL,julianday(started_at),operation_id LIMIT ?3
-), picked AS MATERIALIZED (
- SELECT * FROM (SELECT * FROM shells UNION ALL SELECT * FROM wait_rows)
- ORDER BY julianday(started_at) IS NULL,julianday(started_at),id,kind LIMIT ?3
-), counts AS MATERIALIZED (
- SELECT (SELECT count(*) FROM shell_candidates) AS shells,
-        (SELECT count(*) FROM waits) AS waits,
-        (SELECT count(DISTINCT s.id) FROM waits w JOIN shell_execution s ON s.id=w.execution_id
-         WHERE s.owner_run_id=?1 AND s.state IN ('starting','running','stopping')) AS duplicate_shells
-)
-SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked.state,picked.started_at,picked.output_at,
-       counts.shells,counts.waits,picked.description,counts.duplicate_shells
-FROM counts LEFT JOIN picked ON 1
-ORDER BY julianday(picked.started_at) IS NULL,julianday(picked.started_at),picked.id,picked.kind";
+const MAX_SHELLS: u32 = 128;
+
+/// One running shell row of the owner's `shell.list`; only these fields are read.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub(super) struct RunningShell {
+    pub execution_id: String,
+    pub run_id: String,
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    #[serde(default)]
+    pub command_excerpt: Option<String>,
+    pub state: String,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub wait: Option<ShellWait>,
+}
+
+/// One `shell.list` page of the selected Thread's running shells; `complete`
+/// is false when more running shells exist than the page returned.
+pub(super) struct RunningPage {
+    pub shells: Vec<RunningShell>,
+    pub complete: bool,
+}
 
 pub(super) struct RawLiveWork {
     run_id: String,
@@ -63,168 +45,195 @@ pub(super) struct RawLiveWork {
     wall_at: chrono::DateTime<chrono::Utc>,
 }
 struct RawRow {
-    kind: String,
+    kind: &'static str,
     id: String,
     related: Option<String>,
-    execution: Option<String>,
+    execution: String,
     label: Option<String>,
     description: Option<String>,
     state: String,
     started_at: Option<String>,
     output_at: Option<String>,
-    title: Option<super::header::TitleWitness>,
     wait: Option<ShellWait>,
     wait_target: Option<WaitTarget>,
 }
 
-/// Owner-proved waits of the selected Thread's running shells, by execution;
-/// `None` when the owner's listing did not cover every running shell.
-pub(super) type ShellWaits = Option<Vec<(String, ShellWait)>>;
-
-#[cfg(test)]
-pub(super) fn read_tx(
-    db: &Connection,
-    run_id: &str,
-    waits: Option<&[(String, ShellWait)]>,
-) -> Result<RawLiveWork, StorageError> {
-    read_tx_limited(db, run_id, waits, 3)
+fn started(at: Option<&str>) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    chrono::DateTime::parse_from_rfc3339(at?).ok()
 }
 
-pub(super) fn read_tx_limited(
-    db: &Connection,
+/// Order the Run's running shells and waits oldest first (unknown starts last)
+/// and keep `limit` rows. A waiting shell is shown as its wait. Counts are the
+/// owner's: `owned_shells` includes starting and stopping shells.
+pub(super) fn assemble(
     run_id: &str,
-    waits: Option<&[(String, ShellWait)]>,
+    owned_shells: u64,
+    page: &RunningPage,
     limit: usize,
-) -> Result<RawLiveWork, StorageError> {
+) -> Result<RawLiveWork, ApiError> {
     if !(1..=10).contains(&limit) {
         return Err(ApiError::new(
             ErrorCode::InputLimit,
             "Live work row limit must be in 1..=10",
-        )
-        .into());
+        ));
     }
-    if waits.is_some_and(|scope| scope.len() > MAX_WAITS) {
-        return Err(ApiError::new(
-            ErrorCode::InputLimit,
-            "Live wait source scope exceeds128 entries",
-        )
-        .into());
-    }
-    let known = waits.is_some();
-    let scope = waits.unwrap_or_default();
-    let encoded = serde_json::to_string(
-        &scope
-            .iter()
-            .map(|(execution, wait)| [&wait.operation_id, execution, &wait.accepted_at])
-            .collect::<Vec<_>>(),
-    )
-    .expect("wait identities serialize");
-    let mut result = RawLiveWork {
-        run_id: run_id.into(),
-        rows: Vec::new(),
-        shells: 0,
-
-        waits: known.then_some(0),
-        known_waits: 0,
-        duplicate_shells: 0,
-        observed_at: Instant::now(),
-        wall_at: chrono::Utc::now(),
-    };
-    let mut statement = db.prepare(LIVE_SQL)?;
-    let mut rows = statement.query(rusqlite::params![run_id, encoded, limit as i64])?;
-    while let Some(row) = rows.next()? {
-        result.shells = row.get::<_, i64>(8)? as u64;
-        result.known_waits = row.get::<_, i64>(9)? as u64;
-        result.duplicate_shells = row.get::<_, i64>(11)? as u64;
-        result.waits = known.then_some(result.known_waits);
-        if let Some(kind) = row.get::<_, Option<String>>(0)? {
-            let id: String = row.get(1)?;
-            let wait = (kind == "wait")
-                .then(|| {
-                    scope
-                        .iter()
-                        .find(|(_, wait)| wait.operation_id == id)
-                        .map(|(_, wait)| wait.clone())
-                })
-                .flatten();
-            result.rows.push(RawRow {
-                kind,
-                id,
-                related: row.get(2)?,
-                execution: row.get(3)?,
-                label: row.get(4)?,
-                description: row.get(10)?,
-                state: row.get(5)?,
-                started_at: row.get(6)?,
-                output_at: row.get(7)?,
-                title: None,
-                wait,
+    let shells: Vec<_> = page.shells.iter().filter(|s| s.run_id == run_id).collect();
+    let known = page.complete;
+    let mut rows: Vec<RawRow> = Vec::new();
+    let mut waiting = std::collections::BTreeSet::new();
+    for shell in &shells {
+        match (&shell.wait, known) {
+            (Some(wait), true) => {
+                waiting.insert(shell.execution_id.clone());
+                rows.push(RawRow {
+                    kind: "wait",
+                    id: wait.operation_id.clone(),
+                    related: None,
+                    execution: shell.execution_id.clone(),
+                    label: None,
+                    description: None,
+                    state: "waiting".into(),
+                    started_at: Some(wait.accepted_at.clone()),
+                    output_at: None,
+                    wait: Some(wait.clone()),
+                    wait_target: None,
+                });
+            }
+            _ => rows.push(RawRow {
+                kind: "shell",
+                id: shell.execution_id.clone(),
+                related: shell.turn_id.clone(),
+                execution: shell.execution_id.clone(),
+                label: shell.command_excerpt.clone(),
+                description: shell.description.clone(),
+                state: shell.state.clone(),
+                started_at: shell.started_at.clone(),
+                output_at: None,
+                wait: None,
                 wait_target: None,
-            });
+            }),
         }
     }
-    drop(rows);
-    drop(statement);
-    // Resolve only the selected wait targets by primary key in this snapshot.
-    for row in &mut result.rows {
-        let Some(condition) = row.wait.as_ref().map(|wait| &wait.first_condition) else {
+    rows.sort_by(|a, b| {
+        let (left, right) = (
+            started(a.started_at.as_deref()),
+            started(b.started_at.as_deref()),
+        );
+        (left.is_none(), left, &a.id, a.kind).cmp(&(right.is_none(), right, &b.id, b.kind))
+    });
+    rows.truncate(limit);
+    let known_waits = waiting.len() as u64;
+    Ok(RawLiveWork {
+        run_id: run_id.into(),
+        rows,
+        shells: owned_shells,
+        waits: known.then_some(known_waits),
+        known_waits,
+        duplicate_shells: known_waits,
+        observed_at: Instant::now(),
+        wall_at: chrono::Utc::now(),
+    })
+}
+
+/// A missing target is an unknown label, not a failed observation.
+fn absent<T>(result: Result<T, ApiError>) -> Result<Option<T>, ApiError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(error)
+            if matches!(
+                error.code,
+                ErrorCode::TargetUnavailable | ErrorCode::ThreadNotFound | ErrorCode::NotFound
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// The selected Run's live work: one `shell.list` page of the Thread's running
+/// shells, then `shell.get` for each kept shell row's last output and each
+/// kept wait's target label (at most `limit` rows, so at most 10 reads).
+pub(super) async fn read(
+    owner: &super::native_history::Owner<'_>,
+    thread: &str,
+    run_id: &str,
+    owned_shells: u64,
+    limit: usize,
+    language: crate::config::UiLanguage,
+) -> Result<RawLiveWork, ApiError> {
+    #[derive(serde::Deserialize)]
+    struct Page {
+        items: Vec<RunningShell>,
+        next_cursor: Option<String>,
+    }
+    let page: Page = owner
+        .call(Command::ShellList(crate::protocol::ShellListArgs {
+            thread_id: Some(thread.to_owned()),
+            since: None,
+            until: None,
+            command_contains: None,
+            state: Some("running".into()),
+            exit_code: None,
+            limit: MAX_SHELLS,
+            cursor: None,
+        }))
+        .await?;
+    let page = RunningPage {
+        complete: page.next_cursor.is_none(),
+        shells: page.items,
+    };
+    let mut raw = assemble(run_id, owned_shells, &page, limit)?;
+    let shell =
+        |id: String| Command::ShellGet(crate::protocol::ExecutionTarget { execution_id: id });
+    for row in &mut raw.rows {
+        if row.kind == "shell" {
+            let details: crate::protocol::ShellDetails = owner.call(shell(row.id.clone())).await?;
+            row.output_at = details.last_output_at;
             continue;
-        };
-        match condition {
+        }
+        let Some(wait) = &row.wait else { continue };
+        match &wait.first_condition {
             WaitCondition::ShellEnded { execution_id }
             | WaitCondition::ShellOutput { execution_id, .. } => {
                 row.wait_target = Some(WaitTarget::Shell(execution_id.clone()));
-                row.label = db.query_row(
-                    "SELECT CASE WHEN json_type(shell_json,'$.command')='text' THEN substr(json_extract(shell_json,'$.command'),1,512) END FROM shell_execution WHERE id=?1",
-                    [execution_id], |r| r.get(0),
-                ).optional()?.flatten();
+                let target: Option<crate::protocol::ShellDetails> =
+                    absent(owner.call(shell(execution_id.clone())).await)?;
+                row.label = target.and_then(|target| target.command);
             }
-            WaitCondition::RunEnded { run_id: id }
-            | WaitCondition::TurnCompleted { turn_id: id } => {
-                let sql = if matches!(condition, WaitCondition::RunEnded { .. }) {
-                    "SELECT t.id,substr(t.title,1,512) FROM run r JOIN thread t ON t.id=r.thread_id WHERE r.id=?1"
-                } else {
-                    "SELECT t.id,substr(t.title,1,512) FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1"
-                };
-                let found: Option<(String, String)> = db
-                    .query_row(sql, [id], |r| Ok((r.get(0)?, r.get(1)?)))
-                    .optional()?;
-                if let Some((thread, title)) = found {
-                    row.wait_target =
-                        Some(if matches!(condition, WaitCondition::RunEnded { .. }) {
-                            WaitTarget::Run(id.clone())
-                        } else {
-                            WaitTarget::Thread(thread.clone())
-                        });
-                    row.title = super::header::read_title_tx(db, &thread, &title)?;
-                    row.label = Some(title);
+            WaitCondition::RunEnded { run_id } => {
+                if let Some(target) = &wait.target_thread_id {
+                    row.label = thread_title(owner, target, language).await?;
+                    row.wait_target = row.label.is_some().then(|| WaitTarget::Run(run_id.clone()));
                 }
             }
-            WaitCondition::ThreadSettled { thread_ids, .. } => {
-                let Some(id) = thread_ids.first() else {
-                    continue;
-                };
-                let found: Option<(String, String)> = db
-                    .query_row(
-                        "SELECT id,substr(title,1,512) FROM thread WHERE id=?1",
-                        [id],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
-                    )
-                    .optional()?;
-                if let Some((thread, title)) = found {
-                    row.wait_target = Some(WaitTarget::Thread(thread.clone()));
-                    row.title = super::header::read_title_tx(db, &thread, &title)?;
-                    row.label = Some(title);
+            WaitCondition::TurnCompleted { .. } | WaitCondition::ThreadSettled { .. } => {
+                if let Some(target) = &wait.target_thread_id {
+                    row.label = thread_title(owner, target, language).await?;
+                    row.wait_target = row
+                        .label
+                        .is_some()
+                        .then(|| WaitTarget::Thread(target.clone()));
                 }
             }
             WaitCondition::MessageDelivered { .. } | WaitCondition::ReplyReceived { .. } => {}
         }
     }
-    // Capture after the last same-snapshot child/title observation and before
-    // yielding the DB worker: later output commits must remain newer markers.
-    result.observed_at = Instant::now();
-    result.wall_at = chrono::Utc::now();
-    Ok(result)
+    raw.observed_at = Instant::now();
+    raw.wall_at = chrono::Utc::now();
+    Ok(raw)
+}
+
+/// The target Thread's display title from its `thread.get` header.
+async fn thread_title(
+    owner: &super::native_history::Owner<'_>,
+    thread: &str,
+    language: crate::config::UiLanguage,
+) -> Result<Option<String>, ApiError> {
+    Ok(
+        absent(super::native_header(owner.data_dir, owner.instance, thread).await)?
+            .map(|header| header.prepare_for_ui(language).title),
+    )
 }
 
 pub(super) fn age(saved: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> {
@@ -261,9 +270,6 @@ pub(super) fn prepare_in(
         .rows
         .into_iter()
         .map(|mut row| {
-            if let Some(title) = row.title.take() {
-                row.label = Some(title.prepare());
-            }
             let wait_info = (row.kind == "wait").then(|| WaitInfo {
                 target: row.wait_target.take(),
                 timeout: row
@@ -271,7 +277,7 @@ pub(super) fn prepare_in(
                     .as_ref()
                     .map(|wait| Duration::from_millis(wait.timeout_ms)),
             });
-            let (target, display) = match row.kind.as_str() {
+            let (target, display) = match row.kind {
                 "shell" => (
                     LiveWorkTarget::Shell {
                         execution_id: row.id,
@@ -289,7 +295,7 @@ pub(super) fn prepare_in(
                 _ => (
                     LiveWorkTarget::Wait {
                         operation_id: row.id,
-                        execution_id: row.execution.expect("validated wait source"),
+                        execution_id: row.execution,
                     },
                     {
                         let condition = row.wait.as_ref().map(|wait| &wait.first_condition);
@@ -403,121 +409,100 @@ pub(super) fn prepare_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::sql_trace::Statements;
     use serde_json::json;
 
-    fn fixture() -> Connection {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now'),('child','/','','p','m','now'),('lineage','/','','p','m','now');
-            UPDATE thread SET parent_thread_id='t' WHERE id='lineage';
-            INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','2020-01-01T00:00:00Z'),('lineage-run','lineage','live','2010-01-01T00:00:00Z');
-            INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','2020-01-01T00:00:01Z');
-            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','2020-01-01T00:00:00Z');").unwrap();
-        for (id, owner, start) in [
-            ("s-old", "r", "2020-01-01T00:00:00Z"),
-            ("s-new", "r", "2020-01-01T00:00:03Z"),
-            ("s-third", "r", "2020-01-01T00:00:04Z"),
-            ("s-fourth", "r", "2020-01-01T00:00:05Z"),
-            ("foreign", "lineage-run", "2010-01-01T00:00:00Z"),
-        ] {
-            db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,?2,'u',?1,'running','/',?3,'UTF-8','UTF-8','open',?4)",rusqlite::params![id,owner,json!({"command":"printf saved\u{1b}[31m command"}).to_string(),start]).unwrap();
+    fn shell(id: &str, run: &str, started_at: &str) -> RunningShell {
+        RunningShell {
+            execution_id: id.into(),
+            run_id: run.into(),
+            turn_id: Some("u".into()),
+            command_excerpt: Some("printf saved\u{1b}[31m command".into()),
+            state: "running".into(),
+            started_at: Some(started_at.into()),
+            description: None,
+            wait: None,
         }
-        db.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('s-old',0,'stdout',0,x'61','2020-01-01T00:00:02Z'),('s-old',1,'stderr',0,x'62','2020-01-01T00:00:09Z')",[]).unwrap();
-        db
     }
-    /// One owner `shell.list` wait fact for `execution`.
-    fn wait(
-        operation: &str,
-        execution: &str,
-        conditions: &[serde_json::Value],
-        timeout_ms: u64,
-    ) -> (String, ShellWait) {
-        (
-            execution.into(),
-            ShellWait {
-                operation_id: operation.into(),
-                accepted_at: "2020-01-01T00:00:02Z".into(),
-                timeout_ms,
-                condition_count: conditions.len() as u32,
-                first_condition: serde_json::from_value(conditions[0].clone()).unwrap(),
-            },
-        )
+    /// The Run `r` with four running shells and one shell of another Run.
+    fn page() -> RunningPage {
+        RunningPage {
+            shells: vec![
+                shell("s-old", "r", "2020-01-01T00:00:00Z"),
+                shell("s-new", "r", "2020-01-01T00:00:03Z"),
+                shell("s-third", "r", "2020-01-01T00:00:04Z"),
+                shell("s-fourth", "r", "2020-01-01T00:00:05Z"),
+                shell("foreign", "lineage-run", "2010-01-01T00:00:00Z"),
+            ],
+            complete: true,
+        }
     }
-    fn message_wait(operation: &str, execution: &str) -> (String, ShellWait) {
-        wait(
-            operation,
-            execution,
-            &[json!({"type":"message_delivered","message_id":"m"})],
-            30000,
-        )
+    fn wait(operation: &str, conditions: &[serde_json::Value], timeout_ms: u64) -> ShellWait {
+        ShellWait {
+            operation_id: operation.into(),
+            accepted_at: "2020-01-01T00:00:02Z".into(),
+            timeout_ms,
+            condition_count: conditions.len() as u32,
+            first_condition: serde_json::from_value(conditions[0].clone()).unwrap(),
+            target_thread_id: None,
+        }
+    }
+    fn waiting(page: &mut RunningPage, execution: &str, wait: ShellWait) {
+        page.shells
+            .iter_mut()
+            .find(|shell| shell.execution_id == execution)
+            .unwrap()
+            .wait = Some(wait);
+    }
+    /// The kept wait row with the label and target the owner reads resolve.
+    fn resolved(raw: &mut RawLiveWork, label: &str, target: WaitTarget) {
+        let row = raw.rows.iter_mut().find(|row| row.kind == "wait").unwrap();
+        row.label = Some(label.into());
+        row.wait_target = Some(target);
     }
 
     #[test]
-    fn row_limit_bounds_the_candidate_merge_without_changing_counts() {
-        let db = fixture();
+    fn row_limit_bounds_the_merge_without_changing_counts() {
         for (limit, rows, overflow) in [(1, 1, 3), (3, 3, 1), (10, 4, 0)] {
-            let snapshot = prepare(read_tx_limited(&db, "r", Some(&[]), limit).unwrap());
+            let snapshot = prepare(assemble("r", 4, &page(), limit).unwrap());
             assert_eq!(snapshot.rows.len(), rows);
             assert_eq!(snapshot.overflow, overflow);
             assert_eq!(snapshot.shells, 4);
         }
         for invalid in [0, 11] {
-            assert!(read_tx_limited(&db, "r", Some(&[]), invalid).is_err());
+            assert!(assemble("r", 4, &page(), invalid).is_err());
         }
-    }
-    #[test]
-    fn live_work_plan_seeks_owned_candidates_and_exact_child_state() {
-        let db = fixture();
-        let mut statement = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {LIVE_SQL}"))
-            .unwrap();
-        let details: Vec<String> = statement
-            .query_map(rusqlite::params!["r", "[]", 3], |row| row.get(3))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        {
-            let index = "shell_active_owner";
-            assert!(
-                details.iter().any(|detail| detail.contains(index)),
-                "missing {index}: {details:?}"
-            );
-        }
-        assert!(
-            !details
-                .iter()
-                .any(|detail| detail == "SCAN shell_execution" || detail == "SCAN run"),
-            "{details:?}"
-        );
     }
 
     #[test]
-    fn large_owned_scope_reports_a_lower_bound_without_claiming_global_order() {
-        let db = fixture();
-        for i in 0..130 {
-            db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,'r','u',?1,'running','/','{}','UTF-8','UTF-8','open','2010-01-01T00:00:00Z')", [format!("many-{i:03}")]).unwrap();
-        }
-        let snapshot = prepare(read_tx_limited(&db, "r", Some(&[]), 3).unwrap());
+    fn owned_count_at_the_bound_is_a_lower_bound() {
+        let snapshot = prepare(assemble("r", 128, &page(), 3).unwrap());
         assert_eq!(snapshot.shells, 128);
         assert!(snapshot.counts_capped);
         assert_eq!(snapshot.rows.len(), 3);
-        assert!(snapshot.overflow <= 131);
+        assert_eq!(snapshot.overflow, 125);
     }
 
     #[test]
-    fn selected_wait_describes_first_saved_target_and_avoids_duplicate_caller() {
-        let db = fixture();
-        let scope = [wait(
-            "w",
+    fn selected_wait_describes_first_target_and_replaces_its_shell() {
+        let mut page = page();
+        waiting(
+            &mut page,
             "s-old",
-            &[
-                json!({"type":"shell_ended","execution_id":"s-new"}),
-                json!({"type":"run_ended","run_id":"child-run"}),
-            ],
-            300000,
-        )];
-        let snapshot = prepare(read_tx_limited(&db, "r", Some(&scope), 10).unwrap());
+            wait(
+                "w",
+                &[
+                    json!({"type":"shell_ended","execution_id":"s-new"}),
+                    json!({"type":"run_ended","run_id":"child-run"}),
+                ],
+                300000,
+            ),
+        );
+        let raw = || {
+            let mut raw = assemble("r", 4, &page, 10).unwrap();
+            resolved(&mut raw, "printf saved", WaitTarget::Shell("s-new".into()));
+            raw
+        };
+        let snapshot = prepare(raw());
         assert_eq!(
             (snapshot.shells, snapshot.waits, snapshot.overflow),
             (4, Some(1), 0)
@@ -542,84 +527,43 @@ mod tests {
                 timeout: Some(Duration::from_secs(300))
             })
         );
-        let english = prepare_in(
-            read_tx_limited(&db, "r", Some(&scope), 10).unwrap(),
-            crate::config::UiLanguage::En,
-        );
+        let english = prepare_in(raw(), crate::config::UiLanguage::En);
         let english_wait = english
             .rows
             .iter()
             .find(|row| matches!(row.target, LiveWorkTarget::Wait { .. }))
             .unwrap();
-        assert!(
-            english_wait.label.contains("Shell ended"),
-            "{}",
-            english_wait.label
-        );
-        assert!(
-            english_wait.label.contains("1 more"),
-            "{}",
-            english_wait.label
-        );
-        assert!(
-            english_wait.label.contains("printf saved"),
-            "{}",
-            english_wait.label
-        );
-        assert!(
-            !english_wait.label.contains("shell の終了"),
-            "{}",
-            english_wait.label
-        );
+        for expected in ["Shell ended", "1 more", "printf saved"] {
+            assert!(
+                english_wait.label.contains(expected),
+                "{}",
+                english_wait.label
+            );
+        }
+        assert!(!english_wait.label.contains("shell の終了"));
     }
-    #[test]
-    fn waited_child_uses_saved_title_and_the_correct_condition_field() {
-        let db = fixture();
-        db.execute(
-            "UPDATE thread SET title='Child investigation' WHERE id='child'",
-            [],
-        )
-        .unwrap();
-        db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('child-turn','child','child-run','running','2020-01-01T00:00:01Z')", []).unwrap();
-        let scope = [wait(
-            "w",
-            "s-old",
-            &[json!({"type":"turn_completed","turn_id":"child-turn"})],
-            30000,
-        )];
-        let snapshot = prepare(read_tx_limited(&db, "r", Some(&scope), 10).unwrap());
-        let wait = snapshot
-            .rows
-            .iter()
-            .find(|r| matches!(r.target, LiveWorkTarget::Wait { .. }))
-            .unwrap();
-        assert!(
-            wait.label.contains("子の回答") && wait.label.contains("Child investigation"),
-            "{}",
-            wait.label
-        );
-        assert_eq!(
-            wait.wait_info.as_ref().unwrap().target,
-            Some(WaitTarget::Thread("child".into()))
-        );
-    }
+
     #[test]
     fn multiple_thread_targets_are_summarized_and_missing_target_stays_unknown() {
-        let db = fixture();
-        db.execute("UPDATE thread SET title='First child' WHERE id='child'", [])
-            .unwrap();
-        for (condition, expected) in [
+        for (condition, label, expected) in [
             (
                 json!({"type":"thread_settled", "thread_ids":["child","lineage"], "states":["completed"]}),
+                Some("First child"),
                 "First child | 他1会話",
             ),
             (
                 json!({"type":"run_ended", "run_id":"missing-run"}),
+                None,
                 "対象不明",
             ),
         ] {
-            let scope = [wait("w", "s-old", &[condition], 30000)];
-            let snapshot = prepare(read_tx_limited(&db, "r", Some(&scope), 10).unwrap());
+            let mut page = page();
+            waiting(&mut page, "s-old", wait("w", &[condition], 30000));
+            let mut raw = assemble("r", 4, &page, 10).unwrap();
+            if let Some(label) = label {
+                resolved(&mut raw, label, WaitTarget::Thread("child".into()));
+            }
+            let snapshot = prepare(raw);
             let wait = snapshot
                 .rows
                 .iter()
@@ -628,11 +572,12 @@ mod tests {
             assert!(wait.label.contains(expected), "{}", wait.label);
         }
     }
+
     #[test]
-    fn common_description_metadata_preserves_real_command_label_for_details_and_optout() {
-        let db = fixture();
-        db.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.description',?1) WHERE id='s-old'", ["  Inspect\nfiles\u{7}  "]).unwrap();
-        let snapshot = prepare(read_tx(&db, "r", Some(&[])).unwrap());
+    fn common_description_preserves_real_command_label() {
+        let mut page = page();
+        page.shells[0].description = Some("Inspect files".into());
+        let snapshot = prepare(assemble("r", 4, &page, 3).unwrap());
         let first = &snapshot.rows[0];
         assert_eq!(first.description.as_deref(), Some("Inspect files"));
         assert!(first.label.contains("printf saved"));
@@ -640,64 +585,47 @@ mod tests {
             matches!(&first.target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-old")
         );
     }
+
     #[test]
-    fn saved_ownership_oldest_rows_counts_and_timing_survive_later_changes() {
-        let db = fixture();
-        let scope = [message_wait("wait-old", "s-old")];
-        let trace = Statements::new(&db);
-        let raw = read_tx(&db, "r", Some(&scope)).unwrap();
-        assert_eq!(
-            trace.count(),
-            1,
-            "one shell/wait batch; no owned-child metadata lookups"
+    fn waits_count_only_for_the_selected_run_and_an_incomplete_page_is_unknown() {
+        let mut page = page();
+        let message = || {
+            wait(
+                "w",
+                &[json!({"type":"message_delivered","message_id":"m"})],
+                30000,
+            )
+        };
+        waiting(&mut page, "s-old", message());
+        waiting(
+            &mut page,
+            "foreign",
+            wait(
+                "other",
+                &[json!({"type":"message_delivered","message_id":"m"})],
+                30000,
+            ),
         );
-        drop(trace);
-        db.execute("UPDATE shell_execution SET state='exited'", [])
-            .unwrap();
-        drop(db);
-        let snapshot = prepare(raw);
+        let snapshot = prepare(assemble("r", 4, &page, 3).unwrap());
         assert_eq!(
             (snapshot.shells, snapshot.waits, snapshot.overflow),
             (4, Some(1), 1)
         );
-        assert_eq!(snapshot.rows.len(), 3);
-        assert!(snapshot.rows.iter().all(|row| !row.label.contains("child")));
         assert!(
-            matches!(&snapshot.rows[0].target, LiveWorkTarget::Wait { operation_id, .. } if operation_id == "wait-old")
+            matches!(&snapshot.rows[0].target, LiveWorkTarget::Wait { operation_id, .. } if operation_id == "w")
         );
         assert!(
             matches!(&snapshot.rows[1].target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-new")
         );
-    }
-
-    #[test]
-    fn owner_waits_count_only_for_the_selected_run() {
-        let db = fixture();
-        let scope = vec![
-            message_wait("valid", "s-old"),
-            message_wait("foreign", "foreign"),
-            message_wait("unknown-shell", "missing"),
-        ];
-        let observed = prepare(read_tx(&db, "r", Some(&scope)).unwrap());
-        assert_eq!(observed.waits, Some(1));
-        assert_eq!(prepare(read_tx(&db, "r", None).unwrap()).waits, None);
-        assert_eq!(
-            prepare(read_tx(&db, "r", Some(&[])).unwrap()).waits,
-            Some(0)
+        page.complete = false;
+        let unknown = prepare(assemble("r", 4, &page, 10).unwrap());
+        assert_eq!(unknown.waits, None);
+        assert!(
+            unknown
+                .rows
+                .iter()
+                .all(|row| !matches!(row.target, LiveWorkTarget::Wait { .. }))
         );
-        // The owner's wait fact, not this snapshot's shell state, decides it.
-        db.execute(
-            "UPDATE shell_execution SET state='exited' WHERE id='s-old'",
-            [],
-        )
-        .unwrap();
-        assert_eq!(
-            prepare(read_tx(&db, "r", Some(&scope)).unwrap()).waits,
-            Some(1)
-        );
-        let trace = Statements::new(&db);
-        assert!(read_tx(&db, "r", Some(&vec![message_wait("a", "b"); 129])).is_err());
-        assert_eq!(trace.count(), 0);
     }
 
     #[test]
@@ -712,54 +640,39 @@ mod tests {
     }
 
     #[test]
-    fn child_title_and_recovery_reuse_saved_bounded_header_and_activity_facts() {
-        let db = fixture();
-        db.execute_batch("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('child-turn','child','child-run','recovery_wait','2020-01-01T00:00:01Z');
-            INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('child-question','child-turn','user','now','{\"role\":\"user\",\"content\":\"Known child question\"}');
-            INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('child',0,'child-question');").unwrap();
-        let raw = read_tx(&db, "r", Some(&[])).unwrap();
-        db.execute(
-            "UPDATE node SET payload_json=NULL WHERE id='child-question'",
-            [],
-        )
-        .unwrap();
-        assert!(prepare(raw).rows.iter().all(|row| matches!(
-            row.target,
-            LiveWorkTarget::Shell { .. } | LiveWorkTarget::Wait { .. }
-        )));
-    }
-
-    #[test]
     fn chronological_display_handles_fractional_and_offset_times_with_unknown_last() {
-        let db = fixture();
-        db.execute_batch(
-            "UPDATE shell_execution SET started_at='invalid' WHERE owner_run_id='r';
-            UPDATE shell_execution SET started_at='2020-01-01T00:00:00Z' WHERE id='s-old';
-            UPDATE shell_execution SET started_at='2020-01-01T00:00:00.1Z' WHERE id='s-new';
-            UPDATE run SET created_at='2020-01-01T01:00:00.2+01:00' WHERE id='child-run';",
-        )
-        .unwrap();
-        let snapshot = prepare(read_tx(&db, "r", Some(&[])).unwrap());
-        assert!(
-            matches!(&snapshot.rows[0].target,LiveWorkTarget::Shell{execution_id,..}if execution_id=="s-old")
-        );
-        assert!(
-            matches!(&snapshot.rows[1].target,LiveWorkTarget::Shell{execution_id,..}if execution_id=="s-new")
-        );
-        assert!(matches!(
-            &snapshot.rows[2].target,
-            LiveWorkTarget::Shell { .. }
-        ));
+        let mut page = page();
+        for (id, at) in [
+            ("s-old", "2020-01-01T00:00:00Z"),
+            ("s-new", "2020-01-01T00:00:00.1Z"),
+            ("s-third", "invalid"),
+            ("s-fourth", "2020-01-01T01:00:00.2+01:00"),
+        ] {
+            page.shells
+                .iter_mut()
+                .find(|shell| shell.execution_id == id)
+                .unwrap()
+                .started_at = Some(at.into());
+        }
+        let snapshot = prepare(assemble("r", 4, &page, 10).unwrap());
+        let order: Vec<_> = snapshot
+            .rows
+            .iter()
+            .map(|row| match &row.target {
+                LiveWorkTarget::Shell { execution_id, .. } => execution_id.as_str(),
+                LiveWorkTarget::Wait { operation_id, .. } => operation_id.as_str(),
+            })
+            .collect();
+        assert_eq!(order, ["s-old", "s-new", "s-fourth", "s-third"]);
     }
 
     #[test]
     fn delayed_preparation_keeps_snapshot_clock_before_new_output_markers() {
-        let db = fixture();
-        let raw = read_tx(&db, "r", Some(&[])).unwrap();
+        let raw = assemble("r", 4, &page(), 3).unwrap();
         let observed_at = raw.observed_at;
         let expected_elapsed = age(Some("2020-01-01T00:00:00Z"), raw.wall_at);
         // A real commit marker can arrive while the finite presentation worker
-        // is occupied. Its time must stay newer than this older DB snapshot.
+        // is occupied. Its time must stay newer than this older observation.
         std::thread::sleep(Duration::from_millis(5));
         let newer_marker = Instant::now();
         std::thread::sleep(Duration::from_millis(5));
@@ -767,12 +680,8 @@ mod tests {
         assert_eq!(prepared.observed_at, observed_at);
         assert!(
             prepared.observed_at < newer_marker,
-            "UI supersession must preserve a marker newer than the DB snapshot, even if preparation happens later"
+            "UI supersession must preserve a marker newer than the observation, even if preparation happens later"
         );
         assert_eq!(prepared.rows[0].elapsed_base, expected_elapsed);
-        assert!(
-            Instant::now().saturating_duration_since(prepared.observed_at)
-                >= Duration::from_millis(10)
-        );
     }
 }

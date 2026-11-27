@@ -7,6 +7,7 @@ mod id_resolution;
 mod reparent;
 mod run_action;
 mod tags;
+pub(crate) mod thread_activity;
 mod thread_list;
 pub(crate) mod thread_summary;
 mod usage_status;
@@ -1360,6 +1361,8 @@ impl Store {
                     details
                 };
                 details.context_usage = Some(context_usage_tx(tx, &details.thread_id)?);
+                details.activity = thread_activity::read(tx, &details.thread_id)
+                    .map_err(StorageError::into_api_error)?;
                 MutationResult::value(details)
             }
             Command::CompactList(args) => {
@@ -2601,7 +2604,7 @@ fn read_thread_details(
     id: &str,
     include_summarizing: bool,
 ) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,archived_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { display_coverage:None, instruction_warnings: Vec::new(), instruction_sources: None, archived_at: row.get(8)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(10)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:row.get::<_,Option<i64>>(11)?.map(|v|v as u64),spill:crate::storage::decode_spill_override(row.get_ref(12)?,12)?,effective_spill:false,effective_max_tokens:None,pending_replies: Default::default(), last_end_message: None, last_input: None,  last_compaction:None,summarizing:false,agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_thread_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,archived_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { display_coverage:None, instruction_warnings: Vec::new(), instruction_sources: None, archived_at: row.get(8)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(10)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:row.get::<_,Option<i64>>(11)?.map(|v|v as u64),spill:crate::storage::decode_spill_override(row.get_ref(12)?,12)?,effective_spill:false,effective_max_tokens:None,pending_replies: Default::default(), last_end_message: None, last_input: None,  last_compaction:None,summarizing:false,activity:None,agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_thread_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.instruction_sources = connection.query_row(
         "SELECT CASE WHEN s.content_hash GLOB 'instruction-bundle-v1:sha256:*' AND json_valid(substr(s.body,38)) THEN json_extract(substr(s.body,38),'$.extra') ELSE NULL END FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.thread_id=?1 ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",[id],|r|r.get::<_,Option<String>>(0)).optional().map_err(sql_error)?.flatten().and_then(|body|serde_json::from_str::<Vec<Value>>(&body).ok()).map(|mut files| {for file in &mut files {if let Some(file)=file.as_object_mut() { file.remove("body"); }} json!({"extra":files,"snapshot":"latest_prepared_turn"})});
     let warnings: Option<String> = connection.query_row(

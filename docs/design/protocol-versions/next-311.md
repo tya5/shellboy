@@ -136,3 +136,35 @@ read-only inspection lane (`control::db::read_only`, the existing bounded
 inspection workers), so a reader never queues behind the writer; `index.status`
 reads its saved state in one transaction. No operation, event fact or CLI
 option is added.
+
+## Thread activity (4d slice 2b)
+
+`thread.get` (with or without `display`) adds `activity`, absent when the
+Thread has no Run. The owner reads it in the same read-only transaction as the
+rest of the result, with no usage aggregation:
+
+- `run`: the latest Run's `run_id`, `state`, `stop_reason`, `ended_at`,
+  `owned_shells` (starting, running or stopping, at most 128), `revisit` and
+  `waiting_reason`.
+- `turn`: that Run's latest Turn with `turn_id`, `generation`, `state`, the
+  saved `recovery_reason`, `tools` (`running_since`, `spawned`, `results`,
+  `cancelled`, `capped`), `recovery_counts` (`receipts`, `results`,
+  `active_shells`, `uncollected_shells`, `capped`) whenever the Turn has a
+  saved recovery reason, and `context_reduction` (the automatic reduction's
+  character and item counts at the current generation).
+- `current_attempt`: that Turn's latest attempt with `attempt_id`, `state` and
+  `started_at`. Only when it belongs to the Turn's current generation does it
+  carry `automatic_retry`, `retry_exhausted`, the attachment flags, and
+  `error_kind` (`model_request` or `model_context_limit`) with `error_message`.
+  The owner sets those two only when the Turn's saved recovery reason is
+  exactly this attempt's model error; `error_message` is the model's own
+  message.
+- `automatic_compaction`: `input_tokens`, `threshold` and `started_at` while an
+  automatic compaction runs for that live Run and Turn.
+
+Counts stop at 128 and `capped` means "128 or more". The `history.window`
+observation `activity` IDs come from the same owner function.
+
+`ShellWait` adds `target_thread_id`: the saved Thread of the first
+condition's Run, Turn or first Thread target, so a client can label the wait
+without a usage-aggregating `run.get` or `turn.get`.

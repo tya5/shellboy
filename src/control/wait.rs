@@ -110,10 +110,30 @@ impl PendingRecord {
                     timeout_ms: self.timeout_ms,
                     condition_count: u32::try_from(self.conditions.len()).unwrap_or(u32::MAX),
                     first_condition: first,
+                    target_thread_id: None,
                 },
             )
         })
     }
+}
+
+/// The saved Thread a wait's first Run, Turn or Thread target belongs to.
+fn target_thread(
+    db: &Connection,
+    condition: &WaitCondition,
+) -> std::result::Result<Option<String>, crate::storage::StorageError> {
+    let (sql, id) = match condition {
+        WaitCondition::RunEnded { run_id } => ("SELECT thread_id FROM run WHERE id=?1", run_id),
+        WaitCondition::TurnCompleted { turn_id } => {
+            ("SELECT thread_id FROM turn WHERE id=?1", turn_id)
+        }
+        WaitCondition::ThreadSettled { thread_ids, .. } => match thread_ids.first() {
+            Some(id) => ("SELECT id FROM thread WHERE id=?1", id),
+            None => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+    Ok(db.query_row(sql, [id], |row| row.get(0)).optional()?)
 }
 
 impl Control {
@@ -154,7 +174,8 @@ impl Control {
                 let proved = body
                     .and_then(|body| serde_json::from_str::<PendingRecord>(&body).ok())
                     .and_then(|record| record.shell_wait(&operation, &execution));
-                if let Some((run, accepted, wait)) = proved {
+                if let Some((run, accepted, mut wait)) = proved {
+                    wait.target_thread_id = target_thread(db, &wait.first_condition)?;
                     saved.push((execution, run, accepted, wait));
                 }
             }

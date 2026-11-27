@@ -166,6 +166,7 @@ pub(crate) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         last_input: None,
         last_compaction: None,
         summarizing: false,
+        activity: None,
         thread_id: thread.into(),
         title: row.get(0)?,
         cwd: row.get(1)?,
@@ -303,6 +304,10 @@ impl RawHeader {
     pub(crate) fn thread_id(&self) -> &str {
         &self.details.thread_id
     }
+    /// The `thread.get` activity the owner attached to this header.
+    pub(crate) fn activity(&self) -> Option<&crate::protocol::ThreadActivity> {
+        self.details.activity.as_ref()
+    }
     /// The `thread.get` context usage the owner attached to this header.
     pub(crate) fn context_usage(&self) -> Option<&serde_json::Value> {
         self.details.context_usage.as_ref()
@@ -386,9 +391,6 @@ fn title_fallback(fallback: TitleFallback, language: crate::config::UiLanguage) 
 }
 
 impl TitleWitness {
-    pub(crate) fn prepare(&self) -> String {
-        self.prepare_outcome().0
-    }
     fn prepare_for_ui(&self, language: crate::config::UiLanguage) -> String {
         let (value, _, fallback) = self.prepare_outcome();
         match (language, fallback) {
@@ -462,7 +464,7 @@ mod tests {
     fn synthetic_title_fallbacks_localize_only_in_the_ui_projection() {
         use crate::config::UiLanguage::{En, Ja};
         let unsent = TitleWitness::default();
-        assert_eq!(unsent.prepare(), "未送信");
+        assert_eq!(unsent.prepare_outcome().0, "未送信");
         assert_eq!(unsent.prepare_for_ui(Ja), "未送信");
         assert_eq!(unsent.prepare_for_ui(En), "Not sent");
 
@@ -687,7 +689,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let title = witness.prepare();
+        let title = witness.prepare_outcome().0;
         assert!(
             title.ends_with('…')
                 && title.graphemes(true).count() <= 80
@@ -704,7 +706,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(witness.prepare(), "名称未設定");
+        assert_eq!(witness.prepare_outcome().0, "名称未設定");
         let body = json!({"role":"user","content":[{"type":"image","text":"ignored"}]}).to_string();
         let witness = TitleWitness {
             path: Candidates {
@@ -717,7 +719,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(witness.prepare(), "名称未設定");
+        assert_eq!(witness.prepare_outcome().0, "名称未設定");
     }
 }
 

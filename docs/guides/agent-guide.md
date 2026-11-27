@@ -323,7 +323,8 @@ delegate to children, use `message ask --thread` and end the Turn; use `events w
 for tools and clients outside a model Turn.
 
 `status:"changed"` lists the Threads that changed (`changes[].thread_id`); then read
-their saved state (`thread get`, `turn get`, `history list`). Keep `result.cursor`, even
+their saved state (`thread get`, `turn get`, `history list`); `thread get.activity` shows the
+latest Run, Turn and attempt state, recovery reason and owned shell count in one read. Keep `result.cursor`, even
 after `timeout`. `more:true` means call again immediately. `resync_required` means
 re-read every Thread you track. Hints coalesce and are not data; for a conclusion that
 must not miss a transition, use `wait` with `thread_settled` (see below). Details:

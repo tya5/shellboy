@@ -275,9 +275,18 @@ selected view reads it on each activity refresh, an O(embedding jobs) owner
 read, until an `events.wait` index change wake lets it read only on change.
 Context usage comes from the header's `thread.get` `context_usage`. All
 three are owner reads on the read-only inspection lane, so the current view
-still does not queue behind the writer. The remaining activity projection
-(Run, Turn, attempt and shell rows, and wait-target labels) is still a
-private snapshot read.
+still does not queue behind the writer.
+
+The rest of the activity (Run, Turn, attempt, recovery counts, reduction and
+automatic compaction) is the header's `thread.get` `activity`, so the
+current view reads it with the header and no usage aggregation; a selection
+or progress refresh reads the display `thread.get` itself. Live work keeps
+the owner's counts and lists the Run's running shells from one `shell.list`
+page, with `shell.get` for each kept shell row's last output and for a
+shell wait target's command. A Run, Turn or Thread wait target is labelled
+from the display `thread.get` of the wait's `target_thread_id`. At most ten
+rows are kept, so at most ten of these reads. Starting and stopping shells
+are counted but not listed. No activity read uses a private snapshot.
 
 ### Draft save and selected view
 
