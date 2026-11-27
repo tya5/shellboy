@@ -797,8 +797,9 @@ from its bounded per-Thread entries. Every caller compares that entry with its o
 cursor; no waiter consumes it. It ignores the Thread filter, has no Thread ID, and
 can yield `status: changed` with an empty `changes` array. Baseline and resync return
 false; a cursor after the mark does not see it. `config.set` records it after any
-successful file write, including a restart-required write; refused and no-op writes
-do not. Readers use `config.get` to reread both on-disk and loaded values. The marker
+successful file write, including a restart-required write, and `credentials.set` and a
+`credentials.clear` that removed a stored key record it at the stored change (they change
+what `config.get` reports); refused and no-op writes do not. Readers use `config.get` to reread both on-disk and loaded values. The marker
 contains no config values or diff and adds no event path, persistence, cache, or poller.
 
 `index_changed` and `retention_changed` (#311) are required marks of the same kind,
@@ -811,10 +812,9 @@ Thread filter; readers reread `index.status` or the affected saved reads. Change
 entries also cover owner work state: every owner notification that concerns one
 Thread (a pending receipt, a finished compaction queue, a running foreground shell)
 goes through `Control::changed`. A runtime receipt announces its reservation and its
-settlement the same way: `storage.collect` through `retention_changed`, `config.set` and
-the credential operations through `config_changed`, index operations through
-`index_changed`, and the rest through the Thread their saved target belongs to (a
-shell's or Turn's Thread, the deleted Threads, a schedule's Thread, a wait's caller).
+settlement through the Thread their saved target belongs to (a shell's or Turn's
+Thread, the deleted Threads, a schedule's Thread, a wait's caller); the three marks are
+recorded only by the writer that makes the change, never by a receipt.
 Owner stop reaches clients as the typed disconnect.
 
 `include_output` (CLI `--output`) adds `output`: up to 64 `{thread_id, execution_id,

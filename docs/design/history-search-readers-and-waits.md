@@ -18,9 +18,9 @@ callerの切断、futureのdrop、owner停止は検索専用tokenを取消し、
 
 ## wait通知
 
-Controlの既存changed NotifyはRun/Turn/shellの状態・受付等の再観測に残す。raw chunkとsaved_sequenceだけを保存したcommitは、別のshell_output_changed Notifyだけへ通知する。
+Controlの既存changed NotifyはRun/Turn/shellの状態・受付等の再観測に残す。
 
-ShellOutput条件があるwaitだけが出力Notifyを購読する。すべてのwaitは従来のchangedも購読するので、ShellEnded、TurnCompleted、RunEnded、recovery_wait、取消し、timeoutの意味は変わらない。両Notifyを必要に応じてenableしてからDBを確認し、確認とawaitの間の通知を取りこぼさない。保存失敗では出力成功通知を発行しない。
+出力の保存はChangeClockの出力entryとして記録され、ShellOutput条件があるwaitはそのentryを確認する。ShellEnded、TurnCompleted、RunEnded、recovery_wait、取消し、timeoutの意味は変わらない。保存失敗では出力成功通知を発行しない。
 
 出力Notifyはownerごとに1個で、execution ID別のmapやworkerは作らない。複数のShellOutput待ち相互のfanoutは残るが、通常の終了/Turn待ちを出力batchごとに起こす負荷を除く。将来対象ID別の分配が必要かは、この最小変更後の実測で判断する。
 
