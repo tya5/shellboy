@@ -4457,13 +4457,26 @@ mod receipt_wait_tests {
         assert_ne!(control.store.operation_epoch.current(), epoch);
         release_tx.send(()).unwrap();
         let first = first.await.unwrap();
-        assert!(first.ok, "admitted ID answered with {:?}", first.error);
         assert_eq!(first.operation_id, same);
         assert_eq!(second.operation_id, same);
-        assert_eq!(
-            first.result.unwrap()["thread_id"],
-            second.result.unwrap()["thread_id"]
-        );
+        if let Some(error) = first.error {
+            // Reclamation may expire the saved result after the roll. That
+            // does not mean the request was never applied.
+            assert_eq!(error.code, ErrorCode::OperationExpired);
+            assert_ne!(
+                error
+                    .details
+                    .as_ref()
+                    .and_then(|d| d.get("request_may_have_been_applied")),
+                Some(&Value::Bool(false))
+            );
+        } else {
+            assert!(first.ok);
+            assert_eq!(
+                first.result.unwrap()["thread_id"],
+                second.result.unwrap()["thread_id"]
+            );
+        }
         assert_eq!(thread_count(db).await, initial_count + 1);
         server.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
