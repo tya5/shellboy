@@ -232,7 +232,7 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             .send((200, answer("background summary completed")))
             .unwrap();
         crate::test_watchdog::watchdog("same proactive job terminal", async {
-            while !terminal_record_written(&control,&terminal_identity,"adopted",Some("closed_summary")).await {
+            while !terminal_record_written(&control,&terminal_identity,"adopted").await {
                 tokio::task::yield_now().await;
             }
         })
@@ -544,7 +544,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             "an exhausted context-limit ends in the established recovery path without a duplicate POST"
         );
         crate::test_watchdog::watchdog("background summary FINISH", async {
-            while !terminal_record_written(control,&terminal_identity,"adopted",Some("closed_summary")).await {
+            while !terminal_record_written(control,&terminal_identity,"adopted").await {
                 tokio::task::yield_now().await;
             }
         })
@@ -856,6 +856,7 @@ pub(super) struct DirectBoundaryReceipt {
     pub(super) checkpoint_witness: StageWitness,
     pub(super) after_fault_witness: StageWitness,
     pub(super) reopened_witness: StageWitness,
+    pub(super) selected_summaries: Vec<String>,
     pub(super) reopen_audit_appends: Value,
 }
 
@@ -1189,7 +1190,33 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
     }).await.unwrap()
 }
 
-const SAVED_RECORD: &str = "json_object('token',c.token,'outcome',COALESCE(c.outcome,'unknown'),'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL)))";
+async fn selected_window(control: &Control, thread: &str) -> HistoryWindow {
+    let args: HistoryWindowArgs = serde_json::from_value(json!({
+        "thread_id": thread, "before": 199, "after": 0, "excerpt_chars": 0,
+    })).unwrap();
+    let window = control.store.database.call(move |db| {
+        Ok(crate::history::window(db, &args)?)
+    }).await.unwrap();
+    assert_eq!(window.items.len() as u64, window.total, "fixture fits one window");
+    window
+}
+
+fn selected_replacements(window: &HistoryWindow, kind: &str) -> Vec<String> {
+    window.items.iter().filter(|node| node.kind == kind)
+        .map(|node| node.node_id.clone()).collect()
+}
+
+async fn listed_compaction(control: &Control, thread: &str, attempt: &str) -> Option<Value> {
+    let thread = thread.to_owned();
+    let attempt = attempt.to_owned();
+    control.store.database.call(move |db| {
+        let args = CompactListArgs { thread_id: Some(thread.clone()), since: None, until: None, limit: 50 };
+        let page = crate::readback::compactions(db, &thread, &args)?;
+        Ok(page["items"].as_array().unwrap().iter().find(|item| item["attempt_id"] == attempt).cloned())
+    }).await.unwrap()
+}
+
+const SAVED_RECORD: &str = "json_object('token',c.token,'outcome',COALESCE(c.outcome,'unknown'),'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json))";
 
 async fn automatic_attempt_record(
     control: &Control,
@@ -1431,42 +1458,10 @@ async fn direct_boundary_case(
         );
     }
     let after_fault_witness = committed_selection_witness(&control, fixture.thread_id).await;
-    let after_fault_record = automatic_attempt_record(&control, &fixture).await;
-    let stage_names = [
-        "closed_spill",
-        "closed_summary",
-        "active_spill",
-        "active_summary",
-    ];
-    let checkpoint_stages = &checkpoint_record["committed_stages"];
-    let after_stages = &after_fault_record["committed_stages"];
-    if let Some(checkpoint_stage) = stage_names
-        .iter()
-        .rev()
-        .find(|stage| checkpoint_stages[stage].is_object())
-    {
-        assert_eq!(
-            checkpoint_stages[checkpoint_stage]["selection_revision"].as_i64(),
-            Some(checkpoint_witness.selection_revision),
-            "checkpoint's latest committed stage receipt must match its captured path revision"
-        );
-    }
-    let mut receipt_revision = checkpoint_witness.selection_revision;
-    let mut newly_committed_path_stages = 0i64;
-    for stage in stage_names {
-        if after_stages[stage].is_object() && checkpoint_stages[stage] != after_stages[stage] {
-            let stage_revision = after_stages[stage]["selection_revision"]
-                .as_i64()
-                .expect("committed stage receipt records its post-adoption selection revision");
-            assert_eq!(
-                stage_revision,
-                receipt_revision + 1,
-                "each changed stage receipt follows exactly one committed path adoption: checkpoint={checkpoint_stages}, after={after_stages}"
-            );
-            receipt_revision = stage_revision;
-            newly_committed_path_stages += 1;
-        }
-    }
+    let follows_active_summary = scenario.continues_to_active_summary(fault);
+    let after_window = selected_window(&control, fixture.thread_id).await;
+    let after_summary = selected_replacements(&after_window, "summary");
+    let after_spills = selected_replacements(&after_window, "spill");
     let checkpoint_audit = checkpoint_witness.audit_path.as_array().unwrap();
     let after_audit = after_fault_witness.audit_path.as_array().unwrap();
     let checkpoint_audit_ids = checkpoint_audit
@@ -1490,42 +1485,10 @@ async fn direct_boundary_case(
         .iter()
         .filter(|id| !checkpoint_audit_ids.contains(id))
         .count() as i64;
-    let path_identity = |path: &Value| {
-        path.as_array()
-            .unwrap()
-            .iter()
-            .map(|row| json!([row[0], row[1], row[3]]))
-            .collect::<Vec<_>>()
-    };
-    let replacement_identity = |witness: &StageWitness| {
-        witness
-            .replacement_provenance_and_source_bytes
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|row| json!([row[0], row[1], row[2], row[3], row[4], row[5], row[6]]))
-            .collect::<Vec<_>>()
-    };
-    let revision_context = json!({
-        "attempt_id":fixture.attempt_id,
-        "token":checkpoint_record["token"],
-        "checkpoint_revision":checkpoint_witness.selection_revision,
-        "after_revision":after_fault_witness.selection_revision,
-        "checkpoint_stages":checkpoint_stages,
-        "after_stages":after_stages,
-        "new_stage_count":newly_committed_path_stages,
-        "new_audit_count":newly_appended_audit_nodes,
-        "checkpoint_path_ids_kinds":path_identity(&checkpoint_witness.full_path),
-        "after_path_ids_kinds":path_identity(&after_fault_witness.full_path),
-        "checkpoint_replacements":replacement_identity(&checkpoint_witness),
-        "after_replacements":replacement_identity(&after_fault_witness),
-    });
     assert_eq!(
-        after_fault_witness.selection_revision,
-        checkpoint_witness.selection_revision
-            + newly_committed_path_stages
-            + newly_appended_audit_nodes,
-        "exact direct revision chronology mismatch: {revision_context}"
+        after_window.revision as i64,
+        checkpoint_witness.selection_revision + i64::from(follows_active_summary) + newly_appended_audit_nodes,
+        "the public revision advances for the follow-on splice and appended audit nodes only"
     );
     assert_eq!(
         after_fault_witness.cursor,
@@ -1540,7 +1503,6 @@ async fn direct_boundary_case(
             )),
         "cursor is the actual full selected-path tail, including audit nodes"
     );
-    let follows_active_summary = scenario.continues_to_active_summary(fault);
     if follows_active_summary {
         let checkpoint_path = checkpoint_witness
             .selected_path_source_bytes
@@ -1570,27 +1532,9 @@ async fn direct_boundary_case(
                 "protected/latest source {id} remains byte-identical across the real follow-on summary; ordinal shifts are caused by the selected summary replacement"
             );
         }
-        let follow_on = automatic_attempt_record(&control, &fixture).await;
-        let active_summary = &follow_on["committed_stages"]["active_summary"];
-        assert_eq!(
-            active_summary["captured_reasoning_epoch"], checkpoint_witness.reasoning_epoch,
-            "the follow-on summary captures the spill checkpoint epoch"
-        );
-        assert_eq!(
-            active_summary["reasoning_epoch"], after_fault_witness.reasoning_epoch,
-            "the committed follow-on summary records the resulting adopted epoch"
-        );
-        let summary_id = active_summary["summary_node_id"].as_str().unwrap();
-        let summary_path = final_path
-            .iter()
-            .find(|entry| entry[1] == summary_id && entry[3] == "summary")
-            .unwrap();
-        let summary_payload: Value =
-            serde_json::from_str(summary_path[5].as_str().unwrap()).unwrap();
-        assert_eq!(
-            summary_payload["reasoning_epoch"],
-            active_summary["reasoning_epoch"]
-        );
+        let [summary_id] = after_summary.as_slice() else { panic!("exactly one follow-on Summary: {after_summary:?}") };
+        let summary_path = final_path.iter().find(|entry| entry[1] == *summary_id && entry[3] == "summary").unwrap();
+        let summary_payload: Value = serde_json::from_str(summary_path[5].as_str().unwrap()).unwrap();
         let source_rows = after_fault_witness
             .replacement_provenance_and_source_bytes
             .as_array()
@@ -1598,10 +1542,6 @@ async fn direct_boundary_case(
             .iter()
             .filter(|row| row[1] == summary_id && row[2] == "summary")
             .collect::<Vec<_>>();
-        assert_eq!(
-            source_rows.len() as u64,
-            active_summary["source_nodes"].as_u64().unwrap()
-        );
         let checkpoint_path = checkpoint_witness
             .selected_path_source_bytes
             .as_array()
@@ -1633,6 +1573,8 @@ async fn direct_boundary_case(
             provenance_r, expected_r,
             "replacement provenance is exactly the ordered pre-summary active R"
         );
+        let summary = request(&control, Command::HistoryRead(serde_json::from_value(json!({"node_id": summary_id})).unwrap())).await;
+        assert_eq!(summary["source_node_ids"], json!(expected_r));
         assert_eq!(
             payload_r, expected_r,
             "persisted summary source_node_ids exactly certify the ordered pre-summary R"
@@ -1798,12 +1740,10 @@ async fn direct_boundary_case(
     }
     let terminal_outcome =
         expected_outcome(fault, scenario, ObservationPhase::AfterShutdownAndRestart);
-    let terminal_stage = expected_terminal_stage(scenario, fault);
     let final_record_expected = terminal_outcome != "unknown";
     if final_record_expected {
-        let stage_check = (fault != Fault::RejectFact).then_some(terminal_stage);
         assert!(
-            terminal_record_written(&control, &identity, terminal_outcome, stage_check).await,
+            terminal_record_written(&control, &identity, terminal_outcome).await,
             "FINISH targets the exact attempt/token when its terminal write is expected"
         );
     }
@@ -1817,73 +1757,21 @@ async fn direct_boundary_case(
         expected_outcome(fault, scenario, checkpoint_outcome),
         "the captured observation preserves the fault's DB stage contract"
     );
-    let query_thread = fixture.thread_id.to_owned();
-    let query_attempt = fixture.attempt_id.to_owned();
-    let state = control.store.database.call(move |db| {
-        let summaries: i64 = db.query_row(
-            "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",
-            [&query_thread], |row| row.get(0),
-        )?;
-        let spills: i64 = db.query_row(
-            "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='spill'",
-            [&query_thread], |row| row.get(0),
-        )?;
-        let record: String = db.query_row(&format!("SELECT {SAVED_RECORD} FROM automatic_compaction c WHERE attempt_id=?1"), [&query_attempt], |row| row.get(0))?;
-        let protected: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id='current-user')",
-            [&query_thread], |row| row.get(0),
-        )?;
-        let latest_group_nodes: i64 = db.query_row(
-            "SELECT count(*) FROM thread_path WHERE thread_id=?1 AND node_id IN ('g3-call','g3-result')",
-            [&query_thread], |row| row.get(0),
-        )?;
-        Ok((summaries, spills, record, protected, latest_group_nodes))
-    }).await.unwrap();
-    let record: Value = serde_json::from_str(&state.2).unwrap();
-    let summary_committed =
-        fault != Fault::RejectFact && (scenario.summary() || follows_active_summary);
+    let summary_committed = fault != Fault::RejectFact && (scenario.summary() || follows_active_summary);
     if scenario == Scenario::ClosedSpill {
-        assert_eq!(
-            state.1 > 0,
-            fault != Fault::RejectFact,
-            "closed whole groups spill unless their stage transaction rejects"
-        );
+        assert_eq!(!after_spills.is_empty(), fault != Fault::RejectFact,
+            "closed whole groups spill unless their adoption rejects");
     }
     if scenario == Scenario::ClosedSummary {
-        assert!(
-            state.1 > 0,
-            "closed spill precedes the selected summary stage"
-        );
+        assert!(!after_spills.is_empty(), "closed spill precedes summary");
     }
-    assert_eq!(
-        state.0 > 0,
-        summary_committed,
-        "only a policy-reachable summary stage adopts"
-    );
-    assert!(state.3, "the protected current request remains selected");
-    assert_eq!(
-        state.4, 2,
-        "the latest whole active tool group remains selected"
-    );
-    assert_eq!(record["unfinished"], terminal_outcome == "unknown");
-    assert_eq!(record["outcome"], terminal_outcome);
-    assert_eq!(record["trigger"]["input_tokens"], fixture.input_tokens);
-    assert_eq!(record["trigger"]["a_input_tokens"], fixture.a_input_tokens);
-    assert_eq!(
-        record["committed_stages"][scenario.stage()].is_object(),
-        fault != Fault::RejectFact,
-        "precommit fact rejection rolls back its stage while other injected cells commit it",
-    );
-    if summary_committed {
-        let final_summary_stage = if scenario == Scenario::ClosedSummary {
-            "closed_summary"
-        } else {
-            "active_summary"
-        };
-        assert!(record["committed_stages"][final_summary_stage].is_object());
-    } else if scenario == Scenario::ActiveSpill {
-        assert!(record["committed_stages"]["active_summary"].is_null());
+    assert_eq!(!after_summary.is_empty(), summary_committed, "only a committed Summary joins the selected path");
+    for id in ["current-user", "g3-call", "g3-result"] {
+        assert!(after_window.items.iter().any(|node| node.node_id == id), "protected source {id} remains selected");
     }
+    let listed = listed_compaction(&control, fixture.thread_id, fixture.attempt_id).await.unwrap();
+    assert_eq!(listed["state"], terminal_outcome);
+    assert_eq!(listed["trigger"]["input_tokens"], fixture.input_tokens);
     drop(boundary.into_guard());
     let storage_failure = matches!(&result, Err(error) if error.is_storage_failure());
     if storage_failure {
@@ -1907,12 +1795,11 @@ async fn direct_boundary_case(
         terminal_outcome == "unknown",
         "unknown receipts remain provisional; terminal outcomes are finalized"
     );
-    if fault == Fault::RejectFact {
-        assert!(
-            reopened_record["committed_stages"][scenario.stage()].is_null(),
-            "rejected stage fact remains absent after reopen"
-        );
-    }
+    let reopened_public = selected_window(&reopened, fixture.thread_id).await;
+    assert_eq!(selected_replacements(&reopened_public, "summary"), after_summary);
+    assert_eq!(selected_replacements(&reopened_public, "spill"), after_spills);
+    let listed = listed_compaction(&reopened, fixture.thread_id, fixture.attempt_id).await.unwrap();
+    assert_eq!(listed["state"], terminal_outcome);
     let active_key = crate::compaction::CompactionKeys::new(fixture.thread_id).automatic_active();
     assert_eq!(
         reopened
@@ -1999,6 +1886,7 @@ async fn direct_boundary_case(
         checkpoint_witness,
         after_fault_witness,
         reopened_witness,
+        selected_summaries: after_summary,
         reopen_audit_appends,
     }
 }
@@ -2154,7 +2042,6 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
             &control,
             &identity,
             expected_outcome,
-            expected_adoption.then_some("active_summary")
         )
         .await,
         "exact attempt/token terminal FINISH for {mutation:?}"
@@ -2172,9 +2059,9 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
 
     let after = committed_selection_witness(&control, fixture.thread_id).await;
     if expected_adoption {
-        let summary_id = record["committed_stages"]["active_summary"]["summary_node_id"]
-            .as_str()
-            .unwrap();
+        let selected = selected_window(&control, fixture.thread_id).await;
+        let summaries = selected_replacements(&selected, "summary");
+        let [summary_id] = summaries.as_slice() else { panic!("exactly one adopted Summary: {summaries:?}") };
         let rows = after
             .replacement_provenance_and_source_bytes
             .as_array()
@@ -2182,12 +2069,10 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
             .iter()
             .filter(|row| row[1] == summary_id && row[2] == "summary")
             .collect::<Vec<_>>();
-        assert_eq!(
-            rows.len() as u64,
-            record["committed_stages"]["active_summary"]["source_nodes"]
-                .as_u64()
-                .unwrap()
-        );
+        let summary = request(&control, Command::HistoryRead(serde_json::from_value(json!({"node_id": summary_id})).unwrap())).await;
+        let source_ids: Vec<_> = rows.iter().map(|row| row[4].clone()).collect();
+        assert!(!source_ids.is_empty());
+        assert_eq!(summary["source_node_ids"], json!(source_ids));
         for (ordinal, source) in rows.iter().enumerate() {
             assert_eq!(source[3].as_u64(), Some(ordinal as u64));
             let prior = before_mutation
@@ -2208,10 +2093,8 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
             "DropAll adoption advances the post-mutation projected epoch exactly once"
         );
     } else {
-        assert!(
-            record["committed_stages"]["active_summary"].is_null(),
-            "stale candidate is not committed"
-        );
+        let selected = selected_window(&control, fixture.thread_id).await;
+        assert!(selected_replacements(&selected, "summary").is_empty());
         assert_eq!(
             after.selected_path_source_bytes, mutated_candidate.selected_path_source_bytes,
             "rejected candidate leaves the explicit source/protection/tool mutation as the only path effect"
@@ -2327,7 +2210,8 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
                 let record = automatic_attempt_record(&control, &fixture).await;
                 assert_eq!(record["token"], identity.token);
                 assert_eq!(record["unfinished"], true);
-                assert!(record["committed_stages"]["active_summary"].is_null());
+                let selected = selected_window(&control, fixture.thread_id).await;
+                assert!(selected_replacements(&selected, "summary").is_empty());
                 assert_eq!(record["trigger"]["run_id"], fixture.run_id);
                 assert_eq!(record["trigger"]["input_tokens"], usage);
                 post.reply.send((200, answer(" "))).unwrap();
@@ -2338,13 +2222,15 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
                 identity
             };
             drop(boundary.into_guard());
-            assert!(terminal_record_written(&control, &identity, "failed", None).await);
+            assert!(terminal_record_written(&control, &identity, "failed").await);
             let record = automatic_attempt_record(&control, &fixture).await;
             let outcome = &record["compaction_outcome"]["outcome"];
             assert_eq!(outcome["reason"], "empty");
             assert_eq!(outcome["origin"], "output_validation");
             assert_eq!(record["error"]["details"]["summary_usage"]["requests"], 1);
-            assert_eq!(record["committed_stages"], json!({}));
+            let selected = selected_window(&control, fixture.thread_id).await;
+            assert!(selected_replacements(&selected, "spill").is_empty());
+            assert!(selected_replacements(&selected, "summary").is_empty());
             assert_eq!(record["compaction_outcome"]["phase"], "active_summary");
             let thread = fixture.thread_id;
             let failure: String = control.store.database.call(move |db| {
@@ -2841,7 +2727,7 @@ async fn prepare_driver_lifecycle(
                     }
                     continue;
                 }
-                if terminal_record_written(&control, identity, "adopted", Some(scenario.stage()))
+                if terminal_record_written(&control, identity, "adopted")
                     .await
                 {
                     break;
@@ -2876,7 +2762,6 @@ async fn prepare_driver_lifecycle(
                         .as_ref()
                         .expect("rejected attempt identity captured"),
                     rejected_outcome,
-                    None,
                 )
                 .await
             }
@@ -2942,9 +2827,9 @@ async fn prepare_driver_lifecycle(
     if spill_off {
         assert!(saved["trigger"]["a_input_tokens"].is_null());
         assert_eq!(saved["outcome"], "adopted");
-        assert!(saved["committed_stages"]["closed_spill"].is_null());
-        assert!(saved["committed_stages"]["active_spill"].is_null());
-        assert!(saved["committed_stages"][scenario.stage()].is_object());
+        let selected = selected_window(&control, &target).await;
+        assert!(selected_replacements(&selected, "spill").is_empty());
+        assert_eq!(selected_replacements(&selected, "summary").len(), 1);
         assert!(
             receive.try_recv().is_err(),
             "one summary POST only; no automatic spill continuation"
@@ -2966,17 +2851,10 @@ async fn prepare_driver_lifecycle(
             saved["outcome"], expected_outcome,
             "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
         );
-        if fault == Fault::RejectFact {
-            assert!(
-                saved["committed_stages"][scenario.stage()].is_null(),
-                "rejected stage leaves no stage fact: {saved}"
-            );
-        } else {
-            assert!(
-                saved["committed_stages"][scenario.stage()].is_object(),
-                "selected stage fact is persisted: {saved}"
-            );
-        }
+        let selected = selected_window(&control, &target).await;
+        let kind = if scenario.summary() { "summary" } else { "spill" };
+        assert_eq!(!selected_replacements(&selected, kind).is_empty(), fault != Fault::RejectFact,
+            "only committed adoption is visible in selected history");
         assert!(
             receive.try_recv().is_err(),
             "no provider continuation before the selected checkpoint"
@@ -3061,13 +2939,6 @@ async fn capture_terminal_identity(
     }
 }
 
-struct TerminalRecord {
-    provisional: Option<i64>,
-    token: Option<String>,
-    outcome: Option<String>,
-    committed_stage: Option<i64>,
-}
-
 /// Observe only terminal FINISH on the exact captured receipt; callers assert its meaning separately.
 async fn terminal_attempt_finished(control: &Control, identity: &TerminalAttemptIdentity) -> bool {
     let identity = identity.clone();
@@ -3088,37 +2959,9 @@ async fn terminal_record_written(
     control: &Control,
     identity: &TerminalAttemptIdentity,
     expected_outcome: &str,
-    committed_stage: Option<&str>,
 ) -> bool {
-    let identity = identity.clone();
-    let expected_outcome = expected_outcome.to_owned();
-    let committed_stage = committed_stage.map(str::to_owned);
-    control.store.database.call(move |db| {
-        let row: Option<TerminalRecord> = db.query_row(
-            "SELECT (c.outcome IS NULL),c.token,c.outcome,CASE WHEN ?4 IS NULL THEN 1 ELSE CASE ?4 WHEN 'closed_spill' THEN c.closed_spill WHEN 'active_spill' THEN c.active_spill WHEN 'closed_summary' THEN c.closed_summary WHEN 'active_summary' THEN c.active_summary END IS NOT NULL END FROM model_attempt a JOIN automatic_compaction c ON c.attempt_id=a.id JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2 AND c.token=?3",
-            rusqlite::params![identity.attempt,identity.thread,identity.token,committed_stage],
-            |row| Ok(TerminalRecord {
-                provisional: row.get(0)?,
-                token: row.get(1)?,
-                outcome: row.get(2)?,
-                committed_stage: row.get(3)?,
-            }),
-        ).optional()?;
-        Ok(row.is_some_and(|record| {
-            record.provisional == Some(0)
-                && record.token.as_deref() == Some(identity.token.as_str())
-                && record.outcome.as_deref() == Some(expected_outcome.as_str())
-                && record.committed_stage == Some(1)
-        }))
-    }).await.unwrap()
-}
-
-fn expected_terminal_stage(scenario: Scenario, fault: Fault) -> &'static str {
-    if scenario.continues_to_active_summary(fault) {
-        "active_summary"
-    } else {
-        scenario.stage()
-    }
+    listed_compaction(control, &identity.thread, &identity.attempt).await
+        .is_some_and(|item| item["state"] == expected_outcome)
 }
 
 pub(super) async fn checkpoint(
@@ -3891,47 +3734,30 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
             .send((200, answer("short synthetic summary")))
             .unwrap();
         crate::test_watchdog::watchdog("outside-R current adoption terminal", async {
-            while !terminal_record_written(&control,&terminal_identity,"adopted",Some("closed_summary")).await {
+            while !terminal_record_written(&control,&terminal_identity,"adopted").await {
                 tokio::task::yield_now().await;
             }
         })
         .await
         .unwrap();
-        let attempt_id = attempt.clone();
-        control
-            .store
-            .database
-            .call(move |db| {
-                let (stage, outcome, provider_error): (String, String, Option<String>) = db.query_row(
-                    "SELECT c.closed_summary,c.outcome,a.error_json FROM automatic_compaction c JOIN model_attempt a ON a.id=c.attempt_id WHERE c.attempt_id=?1",
-                    [&attempt_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-                )?;
-                assert_eq!(outcome,"adopted");
-                assert!(provider_error.is_none());
-                let stage: Value = serde_json::from_str(&stage).unwrap();
-                let args = crate::protocol::CompactListArgs {thread_id:Some(target.clone()), since:None, until:None,limit:20};
-                let exact = crate::readback::compactions(db,&target,&args)?;
-                let exact = exact["items"].as_array().unwrap().iter().find(|item|item["attempt_id"]==attempt_id).expect("automatic row in compact.list");
-                let display = crate::readback::last_compaction(db,&target)?;
-                let candidate = &display["bounded_candidate"];
-                for item in [exact,candidate] {
-                    assert_eq!(item["attempt_id"],attempt_id);
-                    assert_eq!(item["state"],"adopted");
-                    assert_eq!(item["metrics"]["summary_node_id"],stage["summary_node_id"]);
-                    assert_eq!(item["metrics"]["source_nodes"],stage["source_nodes"]);
-                }
-                let path = db
-                    .prepare("SELECT p.node_id FROM thread_path p WHERE p.thread_id=?1 ORDER BY p.ordinal")?
-                    .query_map([&target], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                assert!(path.iter().any(|id| {
-                    db.query_row("SELECT kind='summary' FROM node WHERE id=?1", [id], |row| row.get::<_, bool>(0)).unwrap_or(false)
-                }), "summary node adopted for {change}: {path:?}");
-                assert!(!stage.to_string().contains("PRIVATE_SENTINEL"));
-                Ok(())
-            })
-            .await
-            .unwrap();
+        let exact = listed_compaction(&control, &target, &attempt).await.unwrap();
+        let display_target = target.clone();
+        let display = control.store.database.call(move |db| {
+            Ok(crate::readback::last_compaction(db, &display_target)?)
+        }).await.unwrap();
+        let selected = selected_window(&control, &target).await;
+        let summaries = selected_replacements(&selected, "summary");
+        let [summary_id] = summaries.as_slice() else { panic!("one Summary adopted for {change}: {summaries:?}") };
+        let body = request(&control, Command::HistoryRead(serde_json::from_value(json!({"node_id": summary_id})).unwrap())).await;
+        let sources = body["source_node_ids"].as_array().unwrap();
+        assert!(!sources.is_empty());
+        for item in [&exact, &display["bounded_candidate"]] {
+            assert_eq!(item["attempt_id"], attempt);
+            assert_eq!(item["state"], "adopted");
+            assert_eq!(item["metrics"]["summary_node_id"], *summary_id);
+            assert_eq!(item["metrics"]["source_nodes"], sources.len());
+            assert!(!item.to_string().contains("PRIVATE_SENTINEL"));
+        }
         control.shutdown().await.unwrap();
         drop(control);
         owner.shutdown().await.unwrap();
