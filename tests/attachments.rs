@@ -499,7 +499,7 @@ async fn attachment_upgrade_keeps_adopted_unavailability_without_making_failed_a
             let file = root.path().join(id);
             std::fs::write(&file, b"file is readable now").unwrap();
             db.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES(?1,'source',?2,'file','external','now')", rusqlite::params![id, file.to_str().unwrap()]).unwrap();
-            db.execute("INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order,protected) VALUES('thread',?1,'active','now',?2,?3)", rusqlite::params![id, ordinal, id == "retry"]).unwrap();
+            db.execute("INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order,protected) VALUES('thread',?1,'active','now',?2,?3)", rusqlite::params![id, i64::try_from(ordinal).unwrap(), id == "retry"]).unwrap();
         }
         db.execute_batch(
             r#"
