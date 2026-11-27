@@ -219,7 +219,7 @@ job's `instructions` stage, between `receipts` and `roots`, walks
 `instruction_snapshot` by rowid up to the horizon saved when the job started, at
 most one batch per transaction, and deletes a row only if the DELETE itself
 still finds no referencing Turn. Its bytes count toward
-`history_bytes_collected`. Migration `next_instruction_snapshot_turns` adds the
+`history_bytes_collected`. Migration `0069_instruction_snapshot_turns` adds the
 `turn(instruction_snapshot_id)` index so that check and the foreign-key check
 are seeks. The batch size and over-budget retention follow the stage rules
 below. Existing per-Turn copies stay referenced by their Turns; nothing

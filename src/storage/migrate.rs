@@ -364,7 +364,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 69,
-        sql: include_str!("../../migrations/next_instruction_snapshot_turns.sql"),
+        sql: include_str!("../../migrations/0069_instruction_snapshot_turns.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
 ];

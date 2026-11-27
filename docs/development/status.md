@@ -5,7 +5,7 @@
 Branch `task/core450-growth-1-4-7`. (1) A Turn with an unchanged instruction
 observation references the previous Turn's snapshot row; history GC's
 `instructions` stage deletes snapshots no Turn references (migration
-`next_instruction_snapshot_turns` adds the Turn index). (4) Raw GC deletes
+`0069_instruction_snapshot_turns` adds the Turn index). (4) Raw GC deletes
 `raw_tombstone` markers whose execution is gone and collected, superseded
 schedule/service executions with their markers; the latest execution of each
 definition stays. One marker owner (`Work::RawMarkers`) settles them from
