@@ -13,7 +13,7 @@ triggers and cooperating Threads do mail intake and distribution, minutes and ch
 intake, task and Thread generation, periodic Thread cleanup, and knowledge
 accumulation.
 
-Boundary: the secretary is **not** bundled into Shellboy or the Web UI. App-specific
+Boundary: the secretary is **not** bundled into Shellboy or an IPC client. App-specific
 top layers are set up on site by Shellboy itself. This memo fixes only the generic
 lower stack; section 6 is the outline for the on-site part.
 
@@ -36,7 +36,7 @@ lower stack; section 6 is the outline for the on-site part.
 | Tags, re-parent | Core + CLI | #222 stages 2-3 | Archive, re-parent, tags, `thread cwds`, and list cwd filter landed on main |
 | Knowledge | CLI + files | `rag`, `history search`, plain files | Exists |
 | Cheaper index | Core | #253, #254 | API-free int8 conversion and explicit remove/revert behavior (#253); configurable automatic node kinds (#254) are on main |
-| Web UI | External bridge (separate project) | Local IPC to the owner; HTTP/WebSocket to the browser on localhost | Outside Core; not verified by Core |
+| Browser client | External bridge (separate project) | Local IPC to the owner; HTTP/WebSocket to the browser on localhost | Outside Core; not verified by Core |
 | TUI on a running owner | Core | #247 | Study only; not a prerequisite |
 | Spend limit | External | Provider or LiteLLM budget | No spend limit in Shellboy |
 | Liveness, failure alerts | External | Scheduler history, on-site monitor | Not Shellboy's |
@@ -256,7 +256,7 @@ documents where the observation is still applicable.
 
 | Where | Says | Actual |
 |---|---|---|
-| `docs/design/effective-spec.md` (list of what is not adopted) | "web UI, archive" not adopted | Archive is on main; the Web UI is a separate adopted project |
+| `docs/design/effective-spec.md` (list of what is not adopted) | "web UI, archive" not adopted | Archive is on main; a browser client is a separate adopted project |
 | `docs/guides/cli-reference.md` (`message send`) | Ordinary machine messages are held at `recovery_wait`; `--resume-recovery` is explicit | Updated for #263 |
 | #262 issue body | `message list --awaiting-human` | Superseded by its later comment and D4 |
 | `docs/design/README.md` | Reply-expected "adopted, not implemented" | Updated: implemented on main |

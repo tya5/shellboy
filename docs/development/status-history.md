@@ -140,7 +140,7 @@ attempt and 16 attempts (not a memory bound; see acceptance.md), freed by a guar
 dependency. Deltas use a separate `text_changed` Notify and `events.wait` completions skip the `changed` notify until
 admission closes, so `wait` loops and plain polls are not woken. Past 16 attempts newcomers wait; incumbents keep their previews. Design:
 events-and-external-protocol.md 2.5; decisions D-243-2; facts in acceptance.md. Not done: plan B, `status --memory`
-reporting, and the Web client itself. The two flawed landed tests found while validating this (`stopping_run_is_announced`,
+reporting, and the IPC client itself. The two flawed landed tests found while validating this (`stopping_run_is_announced`,
 `chat_resync_required_rereads_and_follows_to_the_end`) were fixed and shipped separately in v0.10.0; see D-243-3. Other load failures listed in
 acceptance.md are out of scope and left to be filed. Resume point: CI on the branch tip, then owner review.
 
@@ -5420,7 +5420,7 @@ attempt and 16 attempts (not a memory bound; see acceptance.md), freed by a guar
 dependency. Deltas use a separate `text_changed` Notify and `events.wait` completions skip the `changed` notify until
 admission closes, so `wait` loops and plain polls are not woken. Past 16 attempts newcomers wait; incumbents keep their previews. Design:
 events-and-external-protocol.md 2.5; decisions D-243-2; facts in acceptance.md. Not done: plan B, `status --memory`
-reporting, and the Web client itself. The two flawed landed tests found while validating this (`stopping_run_is_announced`,
+reporting, and the IPC client itself. The two flawed landed tests found while validating this (`stopping_run_is_announced`,
 `chat_resync_required_rereads_and_follows_to_the_end`) were fixed and shipped separately in v0.10.0; see D-243-3. Other load failures listed in
 acceptance.md are out of scope and left to be filed. Resume point: CI on the branch tip, then owner review.
 

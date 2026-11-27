@@ -212,4 +212,4 @@ reason).
 
 ## タグと作業場所の絞込み（Issue #222 段階3）
 
-一覧（List）にタグ・作業場所の絞込みは持たない（専用キーも表示も追加しない）。`thread.list`の`tags`（AND）と`cwd`（完全一致）、`thread.tag`、`thread.tags`は操作パレット（F8）の「会話 · 一覧」「会話 · タグ」「会話 · タグ一覧」から使える。フォームの複数タグはコンマ区切り（コンマを含むタグはフォームでは指定できず、CLIとwireでは指定できる）。一覧の行と`ThreadSummary`は`tags`を持つが、ブラウザのpatchと行の取り直し（`thread_summary::read_ids_tx`）は`tags`を読まないため、ブラウザの行に`tags`は載らない。新しいglyphは使わない。ブラウザへのタグ絞込みは、利用者がTUIで必要としたときに追加する（Web UIは`thread.list`の`tags`/`cwd`を直接使う）。
+一覧（List）にタグ・作業場所の絞込みは持たない（専用キーも表示も追加しない）。`thread.list`の`tags`（AND）と`cwd`（完全一致）、`thread.tag`、`thread.tags`は操作パレット（F8）の「会話 · 一覧」「会話 · タグ」「会話 · タグ一覧」から使える。フォームの複数タグはコンマ区切り（コンマを含むタグはフォームでは指定できず、CLIとwireでは指定できる）。一覧の行と`ThreadSummary`は`tags`を持つが、ブラウザのpatchと行の取り直し（`thread_summary::read_ids_tx`）は`tags`を読まないため、ブラウザの行に`tags`は載らない。新しいglyphは使わない。ブラウザへのタグ絞込みは、利用者がTUIで必要としたときに追加する（IPC clientは`thread.list`の`tags`/`cwd`を直接使う）。
