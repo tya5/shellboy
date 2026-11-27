@@ -792,6 +792,20 @@ async fn overflow_compaction(control: &Arc<Control>, thread: &str) -> Value {
     outcome.clone()
 }
 
+async fn selected_compaction_nodes(control: &Arc<Control>, thread: &str, kind: &str) -> Vec<String> {
+    selected_history(control, thread).await.items.into_iter()
+        .filter(|node| node.kind == kind).map(|node| node.node_id).collect()
+}
+
+async fn read_summary(control: &Arc<Control>, event: &Value) {
+    let id = event["metrics"]["summary_node_id"].as_str().expect("reported Summary ID");
+    let args = serde_json::from_value(json!({"node_id": id})).unwrap();
+    let body = request(control, Command::HistoryRead(args)).await;
+    assert_eq!(body["node_id"], id);
+    assert_eq!(body["kind"], "summary");
+    assert!(!body["source_node_ids"].as_array().unwrap().is_empty());
+}
+
 async fn selected_history(control: &Arc<Control>, thread: &str) -> HistoryWindow {
     let args = serde_json::from_value(json!({
         "thread_id": thread, "before": 199, "after": 0, "excerpt_chars": 0,
@@ -3780,7 +3794,7 @@ async fn automatic_attempt_record(control: &Control, attempt: String) -> Value {
         .database
         .call(move |db| {
             Ok(db.query_row(
-        "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
+        "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json)) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
         [attempt], |row| row.get(0)
     )?)
         })
@@ -4026,7 +4040,7 @@ async fn admitted_summary_boundary(
         let attempt_id = report.attempt_id.clone();
         let saved: Option<String> = control.store.database.call(move |db| {
             db.query_row(
-                "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)",
+                "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json)) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)",
                 [attempt_id], |row| row.get(0),
             ).optional().map_err(Into::into)
         }).await.unwrap();
@@ -4455,9 +4469,8 @@ if !oversized && cancel_active.is_none() {
     assert_eq!(record["trigger"]["input_tokens"],200);
     assert_eq!(record["trigger"]["a_input_tokens"],40);
     assert_eq!(record["trigger"]["target_tokens"],40);
-    assert_eq!(record["committed_stages"]["closed_spill"]["spilled_groups"],2);
-    assert_eq!(record["committed_stages"].as_object().unwrap().len(),1);
-    assert!(record["committed_stages"]["closed_summary"].is_null());
+    assert_eq!(selected_compaction_nodes(&control, &target, "spill").await.len(), 2);
+    assert!(selected_compaction_nodes(&control, &target, "summary").await.is_empty());
     assert!(events[0]["metrics"]["summary_node_id"].is_null());
     send(&control,&target,"verify spill-only replay after FINISH").await;
     let resumed=incoming_ordinary(&control,&mut receive).await;
@@ -4544,12 +4557,8 @@ if let Some(active) = cancel_active {
     if active { assert_eq!(boundary.trigger.turn_id,boundary.report.row_turn_id); }
     else { assert_ne!(boundary.trigger.turn_id,boundary.report.row_turn_id); }
             // §3 summary branch: spill inside the selected region, then summarize it.
-            let stage = if active { "active_spill" } else { "closed_spill" };
             let summary_stage = if active { "active_summary" } else { "closed_summary" };
-            let path_target = target.clone();
-            let adopted_ids = control.store.database.call(move |db| {
-                Ok(db.prepare("SELECT n.id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='spill' ORDER BY p.ordinal")?.query_map([path_target], |row| row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
-            }).await.unwrap();
+            let adopted_ids = selected_compaction_nodes(&control, &target, "spill").await;
             assert_eq!(adopted_ids.len(), 2, "both older large groups are selected spills before cancelling summary");
             if active {
                 let run = boundary.trigger.run_id.clone();
@@ -4606,9 +4615,8 @@ if let Some(active) = cancel_active {
             assert_eq!(record["trigger"]["a_input_tokens"], first_known_a);
             assert_eq!(record["trigger"]["target_tokens"], 40);
             assert_eq!(record["compaction_outcome"]["phase"], summary_stage, "{record:#?}");
-            assert_eq!(record["committed_stages"][stage]["spilled_groups"], adopted_ids.len(), "{record:#?}");
-            assert!(record["committed_stages"][summary_stage].is_null(), "{record:#?}");
-            assert_eq!(record["committed_stages"].as_object().unwrap().len(), 1, "{record:#?}");
+            assert_eq!(selected_compaction_nodes(&control, &target, "spill").await, adopted_ids);
+            assert!(selected_compaction_nodes(&control, &target, "summary").await.is_empty());
             assert_eq!(record["summary"]["summary_rejected"], true, "{record:#?}");
             assert_eq!(record["summary"]["spilled_groups"], adopted_ids.len());
             assert_eq!(record["summary"]["source_nodes"], record["summary"]["original_node_ids"].as_array().unwrap().len());
@@ -4688,17 +4696,8 @@ if let Some(active) = cancel_active {
             let events = proactive_events(&control, &target).await;
             assert_eq!(events.len(), 2, "{events:#?}");
             let retry = events.iter().find(|event| event["state"] == "adopted").expect("adopted retry");
-            let inspect_id=retry["attempt_id"].as_str().unwrap().to_owned();
-            let db=control.store.database.clone();
-            let facts = db.call(move |db| Ok(db.query_row("SELECT a.error_json IS NULL,json_extract(c.result_json,'$.metrics.summary_node_id'),json_extract(c.closed_summary,'$.summary_node_id') FROM model_attempt a JOIN automatic_compaction c ON c.attempt_id=a.id WHERE a.id=?1",[inspect_id],|r|Ok((r.get::<_,bool>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?)).await.unwrap();
-            assert!(facts.0, "executor saved no provider error for the successful attempt");
-            assert_eq!(facts.1, facts.2);
-            assert_eq!(Some(facts.1.as_str()),retry["metrics"]["summary_node_id"].as_str());
-            assert!(retry["metrics"]["summary_node_id"].is_string(), "{retry:#?}");
             assert_eq!(retry["attempt_id"],retry_finished.boundary.report.attempt_id);
-            let retry_record = automatic_attempt_record(&control, retry_finished.boundary.report.attempt_id.clone()).await;
-            assert_eq!(retry_record["trigger"]["a_input_tokens"], 200, "{retry_record:#?}");
-            assert!(retry_record["committed_stages"]["closed_summary"].is_object(), "{retry_record:#?}");
+            read_summary(&control, retry).await;
             let path_target = target.clone();
             let spills = control.store.database.call(move |db| Ok(db.query_row("SELECT count(*) FROM node WHERE kind='spill' AND id IN (SELECT r.output_node_id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1)", [path_target], |r| r.get::<_, i64>(0))?)).await.unwrap();
             assert_eq!(spills, 2, "the spill adopted before cancellation is kept, not redone");
@@ -4758,11 +4757,9 @@ control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort
         assert_eq!(item["metrics"]["spilled_groups"], 2, "{item:#?}");
         assert_eq!(item["metrics"]["summary_usage"]["input_tokens"]["known_sum"], 321);
         assert_eq!(item["metrics"]["summary_usage"]["output_tokens"]["known_sum"], 123);
-        let saved = automatic_attempt_record(&control, item["attempt_id"].as_str().unwrap().to_owned()).await;
-        assert_eq!(saved["outcome"], "failed", "{saved:#?}");
-        assert!(saved["error"]["code"].is_string(), "{saved:#?}");
-        assert_eq!(saved["committed_stages"]["closed_spill"]["spilled_groups"], 2, "{saved:#?}");
-        assert!(saved["committed_stages"]["closed_summary"].is_null(), "{saved:#?}");
+        assert_eq!(item["state"], "failed", "{item:#?}");
+        assert_eq!(selected_compaction_nodes(&control, &target, "spill").await.len(), 2);
+        assert!(selected_compaction_nodes(&control, &target, "summary").await.is_empty());
         eprintln!("partial-spill replay bytes {before_size} -> {after_size}; summary input=321 output=123; events={events:#?}");
         *entered_phase.borrow_mut()="shutting down partial-spill control/owner".to_owned();
 control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
@@ -4845,12 +4842,7 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
         assert!(outcome.get("http_status").is_none());
         assert!(record["error"].get("details").is_none());
     }
-    assert!(
-        records.iter().all(|record| record["committed_stages"]
-            .as_object()
-            .is_none_or(|stages| stages.keys().all(|stage| !stage.ends_with("_summary")))),
-        "no summary adopted: {records:#?}"
-    );
+    assert!(result.selected_summaries.is_empty(), "no Summary joins the selected path");
 }
 
 /// S2b retires the former per-report HTTP401 oracle: the veto remains a
@@ -4902,6 +4894,7 @@ async fn proactive_provider_500_is_suppressed_within_same_run_turn() {
 /// threshold. Automatic outcomes are limited to duties actually admitted by
 /// attempt_begin; an explicit compact remains independent of that memory.
 struct AxFixtureResult {
+    selected_summaries: Vec<String>,
     summaries: usize,
     records: Vec<Value>,
     owner_instance_id: String,
@@ -5016,7 +5009,7 @@ async fn ax_growing_turn_summary_requests(
             let attempt_id = first_report.attempt_id.clone();
             let saved: Option<String> = control.store.database.call(move |db| {
                 db.query_row(
-                    "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)",
+                    "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json)) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id)",
                     [attempt_id],
                     |row| row.get(0),
                 )
@@ -5102,7 +5095,7 @@ async fn ax_growing_turn_summary_requests(
             let attempt_id = owner.attempt_id.clone();
             let facts: RawReportReadback = control.store.database.call(move |db| {
                 Ok(db.query_row(
-                    "SELECT json_extract(a.usage_json,'$.input_tokens'),json_extract(a.input_manifest_json,'$.compaction_report_token'),CASE WHEN EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id) THEN (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=a.id) END,r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.id=?1",
+                    "SELECT json_extract(a.usage_json,'$.input_tokens'),json_extract(a.input_manifest_json,'$.compaction_report_token'),CASE WHEN EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id) THEN (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json)) FROM automatic_compaction c WHERE c.attempt_id=a.id) END,r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.id=?1",
                     [attempt_id],
                     |row| Ok(RawReportReadback {
                         input_tokens: row.get(0)?,
@@ -5169,9 +5162,11 @@ async fn ax_growing_turn_summary_requests(
         durable_attempt_ids.sort_unstable();
         assert_eq!(durable_attempt_ids, accepted_ids, "no automatic attempt exists outside the drained raw-owner partition");
         eprintln!("raw_reports=17 admitted={} unadmitted={} summary_requests={summaries} records={records:#?}", report_attempt_ids.len(), unadmitted_report_attempt_ids.len());
+        let selected_summaries = selected_compaction_nodes(&control, &target, "summary").await;
         set_phase("shutting down Owner after durable automatic record readback");
         owner.shutdown().await.unwrap(); server.abort();
         AxFixtureResult {
+            selected_summaries,
             summaries,
             records,
             owner_instance_id,
@@ -5778,10 +5773,8 @@ async fn bx_token_growth(
             "source report began before the previous FINISH advanced A boundary; completion cannot supply stale #A");
         assert_eq!(attempts[0]["trigger"]["target_tokens"],20);
         assert_eq!(attempts[0]["outcome"],"failed");
-        assert!(attempts[0]["committed_stages"]["closed_summary"].is_null());
         assert_eq!(attempts[1]["trigger"]["target_tokens"],20);
         assert_eq!(attempts[1]["outcome"],"no_target");
-        assert_eq!(attempts[1]["committed_stages"],json!({}));
         let events = proactive_events(&control, &thread).await;
         assert_eq!(events.len(), 2, "{events:?}");
         let first_event = events
@@ -5851,7 +5844,7 @@ async fn bx_attempts(control: &Arc<Control>, thread: &str) -> Vec<Value> {
         .store
         .database
         .call(move |db| {
-            let mut statement = db.prepare("SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=a.id) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id) ORDER BY a.rowid")?;
+            let mut statement = db.prepare("SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json)) FROM automatic_compaction c WHERE c.attempt_id=a.id) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND EXISTS(SELECT 1 FROM automatic_compaction c WHERE c.attempt_id=a.id) ORDER BY a.rowid")?;
             let rows = statement
                 .query_map([thread], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -6157,7 +6150,6 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
         [json!("failed"), json!("adopted")],
         "{attempts:#?}"
     );
-    assert!(attempts[1]["committed_stages"]["closed_summary"]["summary_node_id"].is_string());
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 2, "{events:?}");
     for state in ["failed", "adopted"] {
@@ -6170,6 +6162,8 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
             "{events:?}"
         );
     }
+    let adopted = events.iter().find(|event| event["state"] == "adopted").unwrap();
+    read_summary(&control, adopted).await;
     // Both Summary ledger `begin` calls commit before POST.
     // Summary witness changes to model_attempt with #328.
     assert_eq!(summary_request_count_for_thread(&control, &thread).await, 2);
@@ -6411,46 +6405,17 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     };
     let active_record =
         automatic_attempt_record(&control, active_boundary.report.attempt_id.clone()).await;
-    let stages = &active_record["committed_stages"];
-    let spill_stage = stages["active_spill"].as_object();
-    let expected_outcome = if summary_includes_call1.is_some() {
-        let spill = spill_stage.expect("active Summary follows its committed spill stage");
-        let groups = spill["spilled_groups"]
-            .as_u64()
-            .expect("bounded active spill count");
-        assert!(
-            (1..=3).contains(&groups),
-            "the complete four-call ledger allows one to three older whole groups: {stages:#?}"
-        );
-        assert_eq!(
-            spill["source_nodes"],
-            groups * 2,
-            "whole tool groups contribute call+result sources"
-        );
-        assert!(
-            stages["active_summary"]["summary_node_id"].is_string(),
-            "{stages:#?}"
-        );
-        "adopted"
-    } else if let Some(spill) = spill_stage {
-        let groups = spill["spilled_groups"]
-            .as_u64()
-            .expect("bounded spill-only count");
-        assert!(
-            (1..=3).contains(&groups),
-            "the complete four-call ledger allows one to three older whole groups: {stages:#?}"
-        );
-        assert_eq!(
-            spill["source_nodes"],
-            groups * 2,
-            "whole tool groups contribute call+result sources"
-        );
-        assert!(stages["active_summary"].is_null());
-        "adopted"
-    } else {
-        assert!(stages["active_summary"].is_null());
-        "no_target"
-    };
+    let spills = selected_compaction_nodes(&control, &thread, "spill").await;
+    let summaries = selected_compaction_nodes(&control, &thread, "summary").await;
+    assert_eq!(summaries.len(), usize::from(summary_includes_call1.is_some()));
+    let expected_outcome = if !summaries.is_empty() || !spills.is_empty() { "adopted" } else { "no_target" };
+    assert!(spills.len() <= 3, "only older groups may spill");
+    for id in &spills {
+        let args = serde_json::from_value(json!({"node_id": id})).unwrap();
+        let spill = request(&control, Command::HistoryRead(args)).await;
+        assert_eq!(spill["source_node_ids"].as_array().unwrap().len(), 2,
+            "a selected spill retains an entire call/result pair");
+    }
     let active_finished = active_boundary.finish(&active_terminal[0], &active_record);
     assert_eq!(active_finished.outcome, expected_outcome);
     let attempts = bx_attempts(&control, &thread).await;
@@ -6579,7 +6544,8 @@ async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
     assert_eq!(attempts[0]["outcome"], "no_target");
     assert_eq!(attempts[0]["trigger"]["input_tokens"], 150);
     assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 150);
-    assert_eq!(attempts[0]["committed_stages"], json!({}));
+    assert!(selected_compaction_nodes(&control, &thread, "spill").await.is_empty());
+    assert!(selected_compaction_nodes(&control, &thread, "summary").await.is_empty());
     // The Summary ledger `begin` commits before POST; no-target admits no Summary.
     // Summary witness changes to model_attempt with #328.
     assert_eq!(summary_request_count_for_thread(&control, &thread).await, 0);
@@ -6657,7 +6623,8 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
     assert_eq!(attempts[0]["trigger"]["input_tokens"], 9999);
     assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 10);
     assert_eq!(attempts[0]["trigger"]["target_tokens"], 20);
-    assert_eq!(attempts[0]["committed_stages"], json!({}));
+    assert!(selected_compaction_nodes(&control, &thread, "spill").await.is_empty());
+    assert!(selected_compaction_nodes(&control, &thread, "summary").await.is_empty());
     assert_eq!(bx_failure_slots(&control, &thread).await, (None, None));
     // The Summary ledger `begin` commits before POST; this spill-only branch admits none.
     // Summary witness changes to model_attempt with #328.
@@ -7306,10 +7273,8 @@ async fn issue_271_spill_shortfall_waits_until_threshold_recrossing() {
         assert_eq!(attempts[0]["outcome"], "adopted");
         assert_eq!(attempts[0]["trigger"]["input_tokens"], 200_001);
         assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 100);
-        assert_eq!(
-            attempts[0]["committed_stages"]["closed_spill"]["spilled_groups"],
-            6
-        );
+        assert_eq!(selected_compaction_nodes(&control, &target, "spill").await.len(), 6);
+        assert!(selected_compaction_nodes(&control, &target, "summary").await.is_empty());
         // This spill branch admits no Summary POST; `begin` commits before send.
         // Summary witness changes to model_attempt with #328.
         assert_eq!(summary_request_count_for_thread(&control, &target).await, 0);
@@ -7405,7 +7370,9 @@ async fn proactive_shallow_summary_does_not_continue_below_threshold() {
         assert_eq!(attempt["trigger"]["input_tokens"], 201_061);
         assert_eq!(attempt["trigger"]["a_input_tokens"], 50_000);
         assert_eq!(attempt["trigger"]["target_tokens"], 40_000);
-        assert!(attempt["committed_stages"]["closed_summary"]["summary_node_id"].is_string());
+        let events = proactive_events(&control, &target).await;
+        assert_eq!(events.len(), 1);
+        read_summary(&control, &events[0]).await;
         assert!(attempt.get("target_verification").is_none(), "{attempt:#?}");
         // The Summary ledger `begin` commits before POST; the closed-summary stage has one request.
         // Summary witness changes to model_attempt with #328.
@@ -7509,7 +7476,13 @@ async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older
         assert_eq!(attempts.len(), 2, "{attempts:#?}");
         for attempt in &attempts {
             assert_eq!(attempt["outcome"], "adopted", "{attempt:#?}");
-            assert!(attempt["committed_stages"]["closed_summary"]["summary_node_id"].is_string());
+
+        }
+        let events = proactive_events(&control, &target).await;
+        assert_eq!(events.len(), 2);
+        for event in &events {
+            assert_eq!(event["state"], "adopted");
+            read_summary(&control, event).await;
         }
         assert_eq!(attempts[1]["trigger"]["input_tokens"],200_500);
         assert_eq!(attempts[1]["trigger"]["a_input_tokens"],200_500,
@@ -7653,10 +7626,11 @@ async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
         let attempts = bx_attempts(&control, &target).await;
         assert_eq!(attempts.len(), 1, "{attempts:#?}");
         assert_eq!(attempts[0]["outcome"], "adopted");
-        let stages = &attempts[0]["committed_stages"];
-        assert!(stages["active_summary"].is_null(), "{stages:#?}");
-        let usage = &stages["closed_summary"]["summary_usage"];
-        assert_eq!(usage["requests"], 1, "{stages:#?}");
+        let events = proactive_events(&control, &target).await;
+        assert_eq!(events.len(), 1);
+        read_summary(&control, &events[0]).await;
+        let usage = &events[0]["metrics"]["summary_usage"];
+        assert_eq!(usage["requests"], 1, "{events:#?}");
         assert_eq!(usage["input_tokens"]["known_sum"], 11);
         // The Summary ledger `begin` commits before POST; one completed Summary is recorded.
         // Summary witness changes to model_attempt with #328.
@@ -7721,8 +7695,8 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         assert_eq!(record["outcome"], "cancelled", "{record:#?}");
         assert_eq!(record["compaction_outcome"]["outcome"]["reason"],"cancelled","{record:#?}");
         assert_eq!(record["trigger"]["a_input_tokens"], 100);
-        assert_eq!(record["committed_stages"]["active_spill"]["spilled_groups"], 2, "{record:#?}");
-        assert!(record["committed_stages"]["active_summary"].is_null(), "{record:#?}");
+        assert_eq!(selected_compaction_nodes(&control, &target, "spill").await, adopted.0);
+        assert!(selected_compaction_nodes(&control, &target, "summary").await.is_empty());
         let slots=bx_failure_slots(&control,&target).await;
         assert!(slots.0.is_none()&&slots.1.is_none(),"source rejection is never failure memory: {slots:?}");
         // RunStop cancels this admission before Summary ledger `begin`, so no POST was dispatched.
@@ -8110,7 +8084,7 @@ final_request.reply.send((200, answer("finished"))).unwrap();
             let mut ledger = Vec::new();
             for ((id, input_tokens), request_token) in ledger_ids.into_iter().zip(expected_tokens).zip(request_tokens) {
                 let (usage, automatic): (Option<i64>, Option<String>) = db.query_row(
-                    "SELECT json_extract(usage_json,'$.input_tokens'),(SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
+                    "SELECT json_extract(usage_json,'$.input_tokens'),(SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json)) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
                     [&id], |row| Ok((row.get(0)?,row.get(1)?)))?;
                 assert_eq!(usage, Some(input_tokens as i64), "source report usage remains independently declared for {id}");
                 let manifest: Value = serde_json::from_str(&request_token).expect("saved source report token");
@@ -8154,7 +8128,7 @@ final_request.reply.send((200, answer("finished"))).unwrap();
             let mut values = Vec::new();
             for id in refresh_ids {
                 let automatic: Option<String> = db.query_row(
-                    "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
+                    "SELECT (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json)) FROM automatic_compaction c WHERE c.attempt_id=model_attempt.id) FROM model_attempt WHERE id=?1",
                     [&id], |row| row.get(0))?;
                 values.push(automatic);
             }
@@ -8176,7 +8150,7 @@ final_request.reply.send((200, answer("finished"))).unwrap();
         assert_eq!(linked_attempts, attempts,
             "automatic records link to the exact captured model-attempt IDs in request order");
         let scope_thread=target.clone();
-        let scopes=control.store.database.call(move|db|Ok(db.prepare("SELECT r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json),'committed_stages',json((SELECT json_group_object(key,json(value)) FROM json_each(json_object('closed_spill',c.closed_spill,'active_spill',c.active_spill,'closed_summary',c.closed_summary,'active_summary',c.active_summary)) WHERE value IS NOT NULL))) FROM automatic_compaction c WHERE c.attempt_id=a.id) IS NOT NULL ORDER BY a.rowid")?.query_map([scope_thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)).await.unwrap();
+        let scopes=control.store.database.call(move|db|Ok(db.prepare("SELECT r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND (SELECT json_object('token',c.token,'outcome',c.outcome,'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json)) FROM automatic_compaction c WHERE c.attempt_id=a.id) IS NOT NULL ORDER BY a.rowid")?.query_map([scope_thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)).await.unwrap();
         let id = target.clone();
         let spills = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap().0.len();
         if !spilling {
