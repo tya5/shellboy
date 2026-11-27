@@ -23,8 +23,10 @@ the full named extent, which may be larger than the first page:
 - `links`: recognized URL, label, and source `range` within the extent.
 - `limited`: more structural metadata existed than the projection retained.
 
-Continuations omit the outline. They cannot be used across payload or requested
-selection revisions. The outline carries no raw payload, Markdown layout, or
+Continuations omit the outline. A payload change invalidates a continuation. When
+a selected Thread is given, a read stays valid while the node is on that live
+Thread's selected path (an append does not expire it); rewind, compaction, or
+deletion that removes the node expires it. The outline carries no raw payload, Markdown layout, or
 live tool, hold, and attempt state; those live facts belong to the selected
 window observation. The source byte ceilings remain 8 KiB per page and 64 KiB
 per extent. Outline metadata has the existing independent projection bounds.
