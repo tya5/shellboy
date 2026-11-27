@@ -1548,3 +1548,45 @@ async fn live_connections_concurrent_definition_and_key_reach_the_next_http_requ
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap();
     }).await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stored_key_change_wakes_a_config_wait_and_a_refused_one_does_not() {
+    crate::test_watchdog::watchdog("credentials config mark", async {
+        let root = tempfile::tempdir().unwrap();
+        let mock = mock().await;
+        write_config(root.path(), &proxy_config(&mock.url, ""));
+        let (_owner, control) = start(root.path()).await;
+        let wait = |after: Option<String>| {
+            Command::EventsWait(shellboy::protocol::EventsWaitArgs {
+                after,
+                thread_ids: vec![],
+                timeout_ms: 0,
+                include_text: false,
+                include_reasoning_activity: false,
+                include_output: false,
+            })
+        };
+        let baseline = call(&control, wait(None)).await.unwrap();
+
+        let error = call(&control, set("nobody", KEY)).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        let refused = call(
+            &control,
+            wait(baseline["cursor"].as_str().map(str::to_owned)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(refused["config_changed"], false);
+
+        call(&control, set("proxy", KEY)).await.unwrap();
+        let woken = call(
+            &control,
+            wait(refused["cursor"].as_str().map(str::to_owned)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(woken["config_changed"], true);
+    })
+    .await
+    .unwrap();
+}
