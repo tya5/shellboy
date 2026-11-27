@@ -267,7 +267,6 @@ async fn terminal_public_case(case: &str) {
                             &control,
                             identity,
                             if s2_success { "adopted" } else { "failed" },
-                            if s2_success { Some("closed_summary") } else { None },
                         )
                         .await,
                         "exact original FINISH must preserve the case outcome and stage"
