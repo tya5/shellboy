@@ -7005,6 +7005,6 @@
   "src/operations.rs:6bdf82c7272c75a5:1": {
     "category": "a",
     "reason": "Japanese AttachmentReload catalogue label paired with English \"Attachment · Reload\" in src/ui/operations/metadata.rs::operation_label_for (same OperationId arm; rustfmt wraps that arm in a block, so the automatic same-ID pairing does not match it).",
-    "source_tokens_sha256": "32332ed36cbfea7fc6ffcdc7afe56ac6d2690a96280b9b2518f02b51cf1c9def"
+    "source_tokens_sha256": "92cce6cc68a8bc17f6f62dd48ee6f87cd02bbb0ee0f46e83835720b01db4c7a5"
   }
 }
