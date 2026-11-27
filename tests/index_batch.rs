@@ -363,10 +363,7 @@ async fn rejected_batch_records_every_member_then_retries_singly_even_without_re
             .collect::<Vec<_>>(),
         vec![1, 3, 1, 1, 1]
     );
-    assert_eq!(
-        f.service.status(Default::default()).await.unwrap().done,
-        4
-    );
+    assert_eq!(f.service.status(Default::default()).await.unwrap().done, 4);
     f.close().await;
 }
 

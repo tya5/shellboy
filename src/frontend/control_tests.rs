@@ -1867,7 +1867,9 @@ async fn f8_usage_shows_the_wire_result_once_and_a_resubmission_reads_again() {
         .unwrap();
     let known = "/model_attempts/completed/input_tokens/known_sum";
     assert_eq!(expected.pointer(known), Some(&serde_json::json!(10)));
-    async fn shown(incoming: &std::sync::mpsc::Receiver<UiUpdate>) -> Vec<crate::presentation::PresentationField> {
+    async fn shown(
+        incoming: &std::sync::mpsc::Receiver<UiUpdate>,
+    ) -> Vec<crate::presentation::PresentationField> {
         crate::test_watchdog::watchdog("usage result", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {

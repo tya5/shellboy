@@ -301,9 +301,6 @@ impl RawHeader {
         }
     }
 
-    pub(crate) fn thread_id(&self) -> &str {
-        &self.details.thread_id
-    }
     /// The `thread.get` activity the owner attached to this header.
     pub(crate) fn activity(&self) -> Option<&crate::protocol::ThreadActivity> {
         self.details.activity.as_ref()

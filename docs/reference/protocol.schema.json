@@ -2109,7 +2109,7 @@
         {
           "properties": {
             "args": {
-              "$ref": "#/definitions/IndexArgs"
+              "$ref": "#/definitions/IndexStatusArgs"
             },
             "command": {
               "const": "index.status",
@@ -6382,6 +6382,138 @@
       },
       "type": "object"
     },
+    "IndexCoverageCounts": {
+      "properties": {
+        "coverage_unverified_sources": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "done_segments": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "eligible_sources": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed_segments": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fully_indexed_sources": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "not_indexable_sources": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "not_indexed_sources": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "partially_indexed_sources": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pending_segments": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stale_segments": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unavailable_sources": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "eligible_sources",
+        "unavailable_sources",
+        "not_indexable_sources",
+        "not_indexed_sources",
+        "partially_indexed_sources",
+        "fully_indexed_sources",
+        "coverage_unverified_sources",
+        "done_segments",
+        "pending_segments",
+        "failed_segments",
+        "stale_segments"
+      ],
+      "type": "object"
+    },
+    "IndexCoverageWindow": {
+      "description": "Current per-source coverage for one bounded window of the selected scope.\nWindows are separate reads, not one snapshot: never sum them into a\nglobal total. Counts are lower bounds unless `window_complete`.",
+      "properties": {
+        "coverage": {
+          "$ref": "#/definitions/IndexCoverageCounts"
+        },
+        "evaluated_sources": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inspected_memberships": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "read_at": {
+          "type": "string"
+        },
+        "scope_exhausted": {
+          "type": "boolean"
+        },
+        "selected_space": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selection": {
+          "$ref": "#/definitions/IndexArgs",
+          "description": "The normalized selection this window covers; repeat it with `next_cursor`."
+        },
+        "unverified_sources": {
+          "items": {
+            "$ref": "#/definitions/IndexUnverifiedSource"
+          },
+          "type": "array"
+        },
+        "window_complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "read_at",
+        "selection",
+        "coverage",
+        "evaluated_sources",
+        "inspected_memberships",
+        "window_complete",
+        "scope_exhausted"
+      ],
+      "type": "object"
+    },
     "IndexProbeArgs": {
       "additionalProperties": false,
       "properties": {
@@ -6604,6 +6736,16 @@
           },
           "type": "array"
         },
+        "coverage_window": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IndexCoverageWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "done": {
           "format": "uint64",
           "minimum": 0,
@@ -6720,6 +6862,78 @@
         "probes"
       ],
       "title": "IndexStatus",
+      "type": "object"
+    },
+    "IndexStatusArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "description": "Also report `coverage_window`: one bounded window of per-source coverage for the selected scope.",
+          "type": "boolean"
+        },
+        "coverage_cursor": {
+          "description": "`coverage_window.next_cursor` of the previous window; requires `coverage` and the same selection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IndexScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "space_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "IndexUnverifiedReason": {
+      "enum": [
+        "body_over_budget",
+        "malformed_source",
+        "unprovable"
+      ],
+      "type": "string"
+    },
+    "IndexUnverifiedSource": {
+      "properties": {
+        "reason": {
+          "$ref": "#/definitions/IndexUnverifiedReason"
+        },
+        "source_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "reason"
+      ],
       "type": "object"
     },
     "InstructionObservation": {
@@ -11207,7 +11421,7 @@
           "additionalProperties": false,
           "properties": {
             "args": {
-              "$ref": "#/definitions/IndexArgs"
+              "$ref": "#/definitions/IndexStatusArgs"
             },
             "command": {
               "const": "index.status",
@@ -17608,6 +17822,16 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "coverage_window": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IndexCoverageWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "done": {
           "format": "uint64",

@@ -3005,8 +3005,26 @@ record!(
     /// Windows are separate reads, not one snapshot: never sum them into a
     /// global total. Counts are lower bounds unless `window_complete`.
     IndexCoverageWindow { read_at: String, #[schemars(description = "The normalized selection this window covers; repeat it with `next_cursor`.")] selection: IndexArgs, #[serde(default, skip_serializing_if = "Option::is_none")] selected_space: Option<String>, coverage: IndexCoverageCounts, evaluated_sources: u64, inspected_memberships: u64, #[serde(default, skip_serializing_if = "Vec::is_empty")] unverified_sources: Vec<IndexUnverifiedSource>, window_complete: bool, scope_exhausted: bool, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String> });
-record!(#[derive(Default)] IndexCoverageCounts { eligible_sources: u64, unavailable_sources: u64, not_indexable_sources: u64, not_indexed_sources: u64, partially_indexed_sources: u64, fully_indexed_sources: u64, coverage_unverified_sources: u64, done_segments: u64, pending_segments: u64, failed_segments: u64, stale_segments: u64 });
-record!(IndexUnverifiedSource { source_id: String, reason: IndexUnverifiedReason });
+record!(
+    #[derive(Default)]
+    IndexCoverageCounts {
+        eligible_sources: u64,
+        unavailable_sources: u64,
+        not_indexable_sources: u64,
+        not_indexed_sources: u64,
+        partially_indexed_sources: u64,
+        fully_indexed_sources: u64,
+        coverage_unverified_sources: u64,
+        done_segments: u64,
+        pending_segments: u64,
+        failed_segments: u64,
+        stale_segments: u64
+    }
+);
+record!(IndexUnverifiedSource {
+    source_id: String,
+    reason: IndexUnverifiedReason
+});
 states!(IndexUnverifiedReason {
     BodyOverBudget,
     MalformedSource,

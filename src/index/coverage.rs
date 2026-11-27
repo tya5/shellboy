@@ -264,7 +264,10 @@ pub(super) fn classify_bodies(
 impl IndexService {
     /// Read-only management supplement; never authorizes historical sources or
     /// performs an embedding request. Empty selection means all only in this view.
-    pub async fn management_status(self: &Arc<Self>, mut args: IndexArgs) -> Result<Value, ApiError> {
+    pub async fn management_status(
+        self: &Arc<Self>,
+        mut args: IndexArgs,
+    ) -> Result<Value, ApiError> {
         if args.scope.is_none() && args.thread_ids.is_empty() && args.source_ids.is_empty() {
             args.scope = Some(IndexScope::All);
         }
