@@ -546,25 +546,33 @@ pub(super) fn fail_shell_spawn(
     db: &Connection,
     execution: &str,
     at: &str,
+    error: &ApiError,
 ) -> Result<usize, StorageError> {
-    finish_shell_spawn(db, execution, at, false)
+    finish_shell_spawn(
+        db,
+        execution,
+        at,
+        "failed",
+        crate::shell::spawn_failure_reason(error),
+    )
 }
 pub(super) fn cancel_shell_spawn(
     db: &Connection,
     execution: &str,
     at: &str,
 ) -> Result<usize, StorageError> {
-    finish_shell_spawn(db, execution, at, true)
+    finish_shell_spawn(db, execution, at, "stopped", "stopped_before_spawn")
 }
 fn finish_shell_spawn(
     db: &Connection,
     execution: &str,
     at: &str,
-    cancelled: bool,
+    state: &str,
+    reason: &str,
 ) -> Result<usize, StorageError> {
     // A saved stop intent can still be stopping when OS spawn fails. Settle
     // that admitted execution, but never overwrite an already terminal result.
-    let changed=db.execute("UPDATE shell_execution SET state=?3,end_reason=CASE WHEN end_reason='owner_shutdown' THEN end_reason ELSE ?4 END,output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",params![execution,at,if cancelled {"stopped"} else {"failed"},if cancelled {"stopped_before_spawn"} else {"spawn_failed"}])?;
+    let changed=db.execute("UPDATE shell_execution SET state=?3,end_reason=CASE WHEN end_reason='owner_shutdown' THEN end_reason ELSE ?4 END,output_complete=0,ended_at=?2 WHERE id=?1 AND state IN ('starting','stopping')",params![execution,at,state,reason])?;
     if changed == 0 {
         let state: Option<String> = db
             .query_row(
@@ -808,7 +816,11 @@ mod tests {
                 [state],
             )
             .unwrap();
-            assert_eq!(fail_shell_spawn(&db, "shell", "late").unwrap(), changed);
+            let error = ApiError::new(ErrorCode::IoFailed, "fixture");
+            assert_eq!(
+                fail_shell_spawn(&db, "shell", "late", &error).unwrap(),
+                changed
+            );
             let row = db
                 .query_row(
                     "SELECT state,end_reason,output_complete,ended_at FROM shell_execution",

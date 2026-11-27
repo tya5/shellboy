@@ -266,6 +266,7 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
                 .is_some_and(|details| details["reason"] == "shutdown_before_spawn");
             let store = control.store.clone();
             let wakes = control.waits.keyed.clone();
+            let saved_error = error.clone();
             let effects =
                 control
                     .store
@@ -279,7 +280,7 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
                             record_shell_stop(&tx, &shell.id, ShellStopIntent::OwnerShutdown)?;
                             super::state::cancel_shell_spawn(&tx, &shell.id, &at)? != 0
                         } else {
-                            super::state::fail_shell_spawn(&tx, &shell.id, &at)? != 0
+                            super::state::fail_shell_spawn(&tx, &shell.id, &at, &saved_error)? != 0
                         };
                         if changed {
                             retire_oneshot(&tx, &shell.id)?;
@@ -1582,15 +1583,30 @@ mod tests {
 
     #[tokio::test]
     async fn service_exit_records_one_message_and_disables_the_service() {
-        check_service_failure(false).await;
+        check_service_failure(ServiceFailure::Exit).await;
     }
 
     #[tokio::test]
     async fn service_spawn_failure_records_one_message_and_disables_the_service() {
-        check_service_failure(true).await;
+        check_service_failure(ServiceFailure::SpawnFailed).await;
     }
 
-    async fn check_service_failure(spawn_failure: bool) {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn service_refused_for_descriptor_headroom_is_saved_failed_with_the_typed_reason() {
+        check_service_failure(ServiceFailure::DescriptorBudget).await;
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum ServiceFailure {
+        Exit,
+        SpawnFailed,
+        #[cfg(unix)]
+        DescriptorBudget,
+    }
+
+    async fn check_service_failure(failure: ServiceFailure) {
+        let spawn_failure = failure != ServiceFailure::Exit;
         use crate::{
             app::DataOwner,
             protocol::{ExecutionTarget, MessageSendArgs, ServiceAddArgs, ThreadTarget},
@@ -1649,12 +1665,28 @@ mod tests {
         let added = control
             .request(request(Command::ServiceAdd(ServiceAddArgs {
                 thread_id: Some(thread.clone()),
-                cwd: spawn_failure.then(|| "missing-directory".into()),
+                cwd: (failure == ServiceFailure::SpawnFailed).then(|| "missing-directory".into()),
                 description: None,
                 command: "exit 3".into(),
             })))
             .await;
         assert!(added.ok, "{:?}", added.error);
+        // The exit case starts exactly at the headroom boundary; one more open
+        // descriptor is refused. The fixture replaces only the live observation.
+        #[cfg(unix)]
+        {
+            use crate::shell::descriptor_budget::{DescriptorUse, IPC_RESERVE, SPAWN_ADD};
+            let limit = 1024;
+            let boundary = limit - SPAWN_ADD - IPC_RESERVE;
+            let open = match failure {
+                ServiceFailure::DescriptorBudget => Some(boundary + 1),
+                ServiceFailure::Exit => Some(boundary),
+                ServiceFailure::SpawnFailed => None,
+            };
+            control
+                .shell
+                .set_descriptor_fixture(open.map(|open| DescriptorUse { open, limit }));
+        }
         dispatch(&control).await.unwrap();
         let service = added.result.unwrap()["service_id"]
             .as_str()
@@ -1694,7 +1726,12 @@ mod tests {
             .unwrap();
         if spawn_failure {
             assert_eq!(saved["state"], "failed");
-            assert_eq!(saved["reason"], "spawn_failed");
+            let reason = match failure {
+                #[cfg(unix)]
+                ServiceFailure::DescriptorBudget => "descriptor_budget",
+                _ => "spawn_failed",
+            };
+            assert_eq!(saved["reason"], reason);
         } else {
             assert_eq!(saved["state"], "exited");
             assert_eq!(saved["exit_code"], 3);

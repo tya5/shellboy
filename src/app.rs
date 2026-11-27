@@ -347,13 +347,16 @@ pub struct DataOwner {
 #[cfg(unix)]
 const OWNER_FD_FLOOR: libc::rlim_t = 1024;
 
+// The owner's soft limit is set to this value (within the hard limit), lower or
+// higher than inherited: shells inherit it, and the shell descriptor headroom
+// check (#450) bounds concurrent shells by it rather than by a huge inherited value.
 #[cfg(unix)]
-fn owner_fd_soft_target(soft: libc::rlim_t, hard: libc::rlim_t) -> libc::rlim_t {
-    soft.max(hard.min(OWNER_FD_FLOOR))
+fn owner_fd_soft_target(hard: libc::rlim_t) -> libc::rlim_t {
+    hard.min(OWNER_FD_FLOOR)
 }
 
 #[cfg(unix)]
-fn ensure_owner_fd_floor() -> Option<libc::rlimit> {
+fn set_owner_fd_limit() -> Option<libc::rlimit> {
     let mut limits = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
@@ -363,7 +366,7 @@ fn ensure_owner_fd_floor() -> Option<libc::rlimit> {
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) != 0 {
             return None;
         }
-        let target = owner_fd_soft_target(limits.rlim_cur, limits.rlim_max);
+        let target = owner_fd_soft_target(limits.rlim_max);
         if target != limits.rlim_cur {
             limits.rlim_cur = target;
             let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &limits);
@@ -455,8 +458,8 @@ impl DataOwner {
             loaded.config.logging.clone(),
         );
         #[cfg(unix)]
-        match ensure_owner_fd_floor() {
-            Some(limits) if limits.rlim_cur >= OWNER_FD_FLOOR => {}
+        match set_owner_fd_limit() {
+            Some(limits) if limits.rlim_cur == OWNER_FD_FLOOR => {}
             limits => diagnostics.record_owner_fd_limit(limits),
         }
         diagnostics.record_startup_stage(StartupStage::Configuration, configuration_elapsed, None);
@@ -653,11 +656,12 @@ const STARTUP_WAIT_DELETE: &str =
 mod startup_range_tests {
     #[cfg(unix)]
     #[test]
-    fn owner_fd_floor_raises_only_within_the_hard_limit() {
-        assert_eq!(super::owner_fd_soft_target(256, libc::RLIM_INFINITY), 1024);
-        assert_eq!(super::owner_fd_soft_target(256, 512), 512);
-        assert_eq!(super::owner_fd_soft_target(256, 256), 256);
-        assert_eq!(super::owner_fd_soft_target(2048, libc::RLIM_INFINITY), 2048);
+    fn owner_fd_limit_is_the_floor_within_the_hard_limit() {
+        assert_eq!(
+            super::owner_fd_soft_target(libc::RLIM_INFINITY),
+            super::OWNER_FD_FLOOR
+        );
+        assert_eq!(super::owner_fd_soft_target(512), 512);
     }
 
     use super::*;

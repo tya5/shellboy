@@ -254,3 +254,37 @@ regression coverage also drains stderr to EOF while the guardian is still alive.
 Startup shell snapshot values are SQL parameters, not source-text replacement;
 Unix interrupted-owner JSON reports startup_state=failed and os_state=unverified,
 while other platforms retain stopped without claiming an observed OS outcome.
+
+## Descriptor headroom at shell start (#450)
+
+The Unix owner sets its soft `RLIMIT_NOFILE` to 1,024 at startup (within the hard
+limit, lowering a larger inherited value), so the number of concurrent shells is
+bounded by descriptors rather than by the per-user process limit shared with every
+other application. Shells inherit that soft value.
+
+Start admission (`admit_start`, under the native ownership lock, after the
+shutdown gate and with no await before native creation) refuses unless
+`open + spawn + reserve <= limit`:
+
+- `limit`: the live soft `RLIMIT_NOFILE`; on macOS the smaller of it and
+  `kern.maxfilesperproc`.
+- `open`: the live count of open owner descriptors (macOS `PROC_PIDLISTFDS`,
+  Linux `/proc/self/fd`). The execution's lifeline socket pairs already exist at
+  this point and are counted.
+- `spawn`: descriptors created inside native spawn after admission: three stdio
+  pipes (6), std's exec-error pipe (2) and Tokio's reaper (a Linux pidfd, or the
+  process-wide SIGCHLD pipe pair on first registration; 2 at most), 10 in total.
+- `reserve` for IPC: the owner's connection limit (`MAX_CONNECTIONS`), one socket
+  per admitted connection.
+
+The check is stateless: nothing is reserved, queued or counted between starts,
+and concurrent starts observe each other through the lock and the live count. A
+count that cannot be read refuses the start instead of assuming a value.
+The refusal is `invalid_state` with `details`
+`{reason:"descriptor_budget", open, limit, reserve}` (`reserve` = spawn + IPC
+reserve; `open`/`limit` are null when unreadable) and a hint to stop unneeded
+background shells. The execution is saved `failed` with reason
+`descriptor_budget`; a Run's model sees the tool error, a service is disabled with
+its one notice under the existing spawn-failure rule, and a schedule occurrence
+fails. The rule does not apply on Windows. There is no permit or queue, setting,
+status field, or process or memory cap.

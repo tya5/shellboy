@@ -254,11 +254,14 @@ frameの8MiB上限を先に検証し、payloadはTokioの長さ制限付きreade
 
 69接続の受信payload合計は最大552 MiB（69 × 8 MiB）。Vec容量・JSON展開・返信・結果・cache/queueを
 含むプロセス総メモリの上限ではない。prefixだけの接続にはこの全量を確保しない。
-Unix ownerは起動時、soft `RLIMIT_NOFILE` が1,024未満ならhard limitの範囲で引き上げる。
-現在値を下げず、hard limitは変更しない。再読込で1,024に届かない場合は診断を記録する。
+Unix ownerは起動時、soft `RLIMIT_NOFILE` をhard limitの範囲で1,024に設定する（#450）。
+継承値が大きい場合も1,024へ下げ、hard limitは変更しない。shellはこのsoft値を継承し、必要なら
+自分でhard limitまで上げられる。再読込で1,024にならない場合は診断を記録する。
 接続69とlistener 1、SQLite（writerと2 inspection）に最大9、owner lockとlogに各1を見込み、
 ほかにshellごとに定常時最大5 fdと起動時の付加分が必要なため、soft 256を前提にしない。
-無制限のshell等の負荷に対して受付を保証するものではない。
+Unix shellの起動受付は、生存中の開放fd数・起動1回の追加分・この69接続分の予約がsoft値に
+収まる場合だけ許可する（[shell設計](shell.md#descriptor-headroom-at-shell-start-450)）。
+shell以外の負荷に対して受付を保証するものではない。
 owner全体の通常 `status` は `ipc_admission` に接続上限 `max_connections` と各分類の `limit` /
 `refused` を返す。`refused` はowner起動以降のpermit拒否の累計で、handshake失敗や受付後の
 拒否は数えない。永続化・拒否ごとのlog・頻度制御は行わない。

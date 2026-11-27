@@ -21,6 +21,8 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 #[cfg(unix)]
 use tokio::process::Command;
 #[cfg(unix)]
+pub(crate) mod descriptor_budget;
+#[cfg(unix)]
 mod unix_group;
 #[cfg(unix)]
 mod unix_lifeline;
@@ -254,6 +256,21 @@ impl ShellHandle {
         }
     }
 }
+/// Saved end reason of a shell whose native start failed: a typed admission
+/// refusal keeps its reason, any other start failure is `spawn_failed`.
+pub(crate) fn spawn_failure_reason(error: &ApiError) -> &'static str {
+    if error
+        .details
+        .as_ref()
+        .is_some_and(|details| details["reason"] == DESCRIPTOR_BUDGET_REASON)
+    {
+        DESCRIPTOR_BUDGET_REASON
+    } else {
+        "spawn_failed"
+    }
+}
+/// Typed reason of a Unix shell start refused for descriptor headroom (#450).
+pub(crate) const DESCRIPTOR_BUDGET_REASON: &str = "descriptor_budget";
 pub(crate) fn stdin_closed_error() -> ApiError {
     ApiError::new(
         ErrorCode::InvalidState,
@@ -290,6 +307,9 @@ pub struct ShellSupervisor {
     native_groups: Arc<StdMutex<std::collections::BTreeSet<i32>>>,
     #[cfg(unix)]
     force_requested: Arc<std::sync::atomic::AtomicBool>,
+    // Tests replace the live descriptor observation; the limit is never lowered.
+    #[cfg(all(unix, test))]
+    descriptor_fixture: Arc<StdMutex<Option<descriptor_budget::DescriptorUse>>>,
 }
 impl ShellSupervisor {
     pub fn new(config: &Config) -> Self {
@@ -300,7 +320,21 @@ impl ShellSupervisor {
             native_groups: Arc::new(StdMutex::new(std::collections::BTreeSet::new())),
             #[cfg(unix)]
             force_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(all(unix, test))]
+            descriptor_fixture: Arc::new(StdMutex::new(None)),
         }
+    }
+    #[cfg(all(unix, test))]
+    pub(crate) fn set_descriptor_fixture(&self, used: Option<descriptor_budget::DescriptorUse>) {
+        *self.descriptor_fixture.lock().unwrap() = used;
+    }
+    #[cfg(unix)]
+    fn observe_descriptors(&self) -> std::io::Result<descriptor_budget::DescriptorUse> {
+        #[cfg(test)]
+        if let Some(used) = *self.descriptor_fixture.lock().unwrap() {
+            return Ok(used);
+        }
+        descriptor_budget::observe()
     }
     pub(crate) fn start_gate(&self) -> Arc<std::sync::atomic::AtomicBool> {
         self.starts_closed.clone()
@@ -346,6 +380,10 @@ impl ShellSupervisor {
             )
             .details(serde_json::json!({"reason":"shutdown_before_spawn"})))
         } else {
+            // Unix only: the caller holds the native ownership lock, so starts
+            // are serialized against each other and this live count (#450).
+            #[cfg(unix)]
+            descriptor_budget::admit(self.observe_descriptors())?;
             Ok(())
         }
     }
