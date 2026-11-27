@@ -218,14 +218,6 @@
   {
     "file": "src/frontend/control_tests.rs",
     "rule": "raw-timeout",
-    "fingerprint": "099a31fa19e946b8c0dbb9438377922f87469d12b9b4e37840d3d0440fa7a100",
-    "function": "cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt occurrence only, migrate on #41 integration."
-  },
-  {
-    "file": "src/frontend/control_tests.rs",
-    "rule": "raw-timeout",
     "fingerprint": "180128c70ddef207bc3adf35e7cca47e962a349a1b7a05733da7dd86a69d9182",
     "function": "copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_from_terminal_request",
     "count": 1,
@@ -262,14 +254,6 @@
     "function": "changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body",
     "count": 1,
     "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body occurrence only, migrate on #41 integration."
-  },
-  {
-    "file": "src/frontend/control_tests.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "718df3829d440ee4d2e17761b993cebd58f9b469d39e762598094756873ccffa",
-    "function": "cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt occurrence only, migrate on #41 integration."
   },
   {
     "file": "src/frontend/control_tests.rs",

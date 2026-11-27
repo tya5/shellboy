@@ -720,7 +720,7 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
             })))
             .unwrap();
     }
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("ordinary wait admission fills", async {
         loop {
             drain(&incoming);
             let count: i64 = control
@@ -803,7 +803,7 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
             thread_id: "thread".into(),
         })
         .unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("priority Thread stop settles", async {
         loop {
             drain(&incoming);
             let state: String = control
