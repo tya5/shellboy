@@ -138,6 +138,27 @@ fn refused_as_not_local(uri: &str, path: Option<&str>) -> ApiError {
 }
 
 #[test]
+fn local_path_normalizes_verbatim_drives_but_refuses_other_namespaces() {
+    for (path, normalized) in [
+        (r"\\?\C:\work\index.html", r"C:\work\index.html"),
+        (r"\\?\z:\", r"z:\"),
+    ] {
+        assert_eq!(local_path(Path::new(path)).unwrap().as_os_str(), normalized);
+    }
+    for path in [
+        r"\\?\UNC\server\share\index.html",
+        r"\\.\NUL",
+        r"\\server\share\index.html",
+        r"\\?\C:relative",
+        "\\\\?\\C:\\work\\index\n.html",
+    ] {
+        let error = local_path(Path::new(path)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{path:?}");
+        assert_eq!(reason(&error), "path_not_local", "{path:?}");
+    }
+}
+
+#[test]
 fn network_shares_and_control_characters_are_refused_in_every_form() {
     let (_root, folder) = web_app();
     let uri = app(&folder);
@@ -300,7 +321,7 @@ fn windows_device_names_and_namespaces_are_refused_before_any_open() {
     for uri in [
         r"C:\work\CON",
         r"\\.\NUL",
-        r"\\?\C:\Windows\win.ini",
+        r"\\?\C:\work\NUL",
         // Percent-decoding a file: URI must not slip a device name past the rule.
         "file:///C:/work/%4EUL",
         "file:///C:/work/COM%C2%B9.txt",

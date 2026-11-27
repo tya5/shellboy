@@ -82,11 +82,21 @@ fn is_device(path: &Path) -> bool {
 fn is_device(_: &Path) -> bool {
     false
 }
-/// The one local-path rule, applied to every input after it is resolved to a
-/// filesystem path and before any filesystem access: no leading double
-/// separator (network shares, `\\.\` and `\\?\` namespaces), no control
-/// characters, and no Windows device names.
-fn local_path(path: &Path) -> Result<()> {
+/// The one local-path rule, applied before any filesystem access. A Windows
+/// verbatim drive path is checked and used in its ordinary drive form. Other
+/// leading double separators, control characters and Windows device names
+/// are refused.
+fn local_path(path: &Path) -> Result<&Path> {
+    let path = path
+        .to_str()
+        .and_then(|text| text.strip_prefix(r"\\?\"))
+        .filter(|rest| {
+            matches!(
+                rest.as_bytes(),
+                [b'A'..=b'Z' | b'a'..=b'z', b':', b'\\', ..]
+            )
+        })
+        .map_or(path, Path::new);
     let text = path.to_string_lossy();
     let separator = |c: char| c == '/' || c == '\\';
     let mut chars = text.chars();
@@ -97,7 +107,7 @@ fn local_path(path: &Path) -> Result<()> {
             "The owner reads only local paths: no network shares, device names or control characters",
         ));
     }
-    Ok(())
+    Ok(path)
 }
 fn outside() -> ApiError {
     refused(
@@ -180,10 +190,7 @@ enum Target {
 
 fn target(source: Source, path: Option<&str>) -> Result<Target> {
     match (source, path) {
-        (Source::File(file), None) => {
-            local_path(&file)?;
-            Ok(Target::File(file))
-        }
+        (Source::File(file), None) => Ok(Target::File(local_path(&file)?.into())),
         (Source::File(_), Some(_)) => Err(refused(
             "path_not_allowed",
             "This artifact version is one file; omit the path",
@@ -200,9 +207,9 @@ fn target(source: Source, path: Option<&str>) -> Result<Target> {
             {
                 return Err(outside());
             }
-            local_path(&folder)?;
+            let folder = local_path(&folder)?;
             local_path(&folder.join(relative))?;
-            Ok(Target::InFolder(folder, relative.into()))
+            Ok(Target::InFolder(folder.into(), relative.into()))
         }
     }
 }
