@@ -364,10 +364,10 @@ mod extra_tests {
     async fn extra_instructions_are_explicit_ordered_stable_and_refreshed_only_on_prepare() {
         let root = tempfile::tempdir().unwrap();
         let local = root.path().join("AGENTS.md");
-        let one = root.path().join("studio.md");
+        let one = root.path().join("client.md");
         let two = root.path().join("user.md");
         std::fs::write(&local, "thread role").unwrap();
-        std::fs::write(&one, "studio guide").unwrap();
+        std::fs::write(&one, "client guide").unwrap();
         std::fs::write(&two, "user guide").unwrap();
         let loader = InstructionLoader::new(&Config::default());
         let no_extra = loader
@@ -400,7 +400,7 @@ mod extra_tests {
         assert_eq!(first.body, same.body);
         assert_eq!(first.hash, same.hash);
         let captured = bundle(&first.body).unwrap();
-        assert_eq!(captured["extra"][0]["body"], "studio guide");
+        assert_eq!(captured["extra"][0]["body"], "client guide");
         assert_eq!(captured["extra"][1]["body"], "user guide");
         assert_eq!(captured["local"], "thread role");
         std::fs::write(&one, "changed").unwrap();
