@@ -889,9 +889,10 @@ mod retention_tests {
             let tx=db.transaction()?;
             let body=json!({"role":"user","content":[{"type":"input_text","text":"before"},{"type":"attachment_ref","attachment_id":"retention-file"},{"type":"input_text","text":"after"}]}).to_string();
             tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES('retention-message','user','0',?1,?2,?3)",params![body,body.len()as i64,crate::digest::sha256_hex(body.as_bytes())])?;
-            tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES('retention-message','retention-op','null','thread','retention-message','held','unadmitted','0','{}')",[])?;
+            let receipt=json!({"draft_submission":{"operation_id":"retention-op","source_draft_id":"retention-composer","source_revision":7,"message_id":"retention-message"}}).to_string();
+            tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES('retention-message','retention-op','null','thread','retention-message','held','unadmitted','0',?1)",[receipt])?;
             tx.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('retention-file','retention-message',?1,'file','external','0')",[file])?;
-            let body=json!({"draft_id":"retention-composer","revision":7,"text":"beforeafter","attachments":[],"_submission":{"operation_id":"retention-op","source_draft_id":"retention-composer","source_revision":7,"message_id":"retention-message","accepted_thread_id":"thread"}}).to_string();
+            let body=json!({"draft_id":"retention-composer","revision":7,"text":"beforeafter","attachments":[],"_submission":{"operation_id":"retention-op","source_draft_id":"retention-composer","source_revision":7}}).to_string();
             tx.execute("INSERT INTO draft VALUES(?1,'thread',7,?2,'submitted','0')",params![crate::control::db::DraftSubmission::id_for_operation("retention-op"),body])?;
             tx.commit()?;Ok(())
         }).await.unwrap();
