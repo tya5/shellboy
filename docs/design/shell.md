@@ -284,7 +284,24 @@ The refusal is `invalid_state` with `details`
 `{reason:"descriptor_budget", open, limit, reserve}` (`reserve` = spawn + IPC
 reserve; `open`/`limit` are null when unreadable) and a hint to stop unneeded
 background shells. The execution is saved `failed` with reason
-`descriptor_budget`; a Run's model sees the tool error, a service is disabled with
-its one notice under the existing spawn-failure rule, and a schedule occurrence
-fails. The rule does not apply on Windows. There is no permit or queue, setting,
-status field, or process or memory cap.
+`descriptor_budget`; a Run's model sees the tool error. No retry, timer or queue
+is added: the person or model decides when to start again, because only they know
+which shells can stop. The existing spawn-failure rule applies to schedules and is
+stated explicitly here:
+
+- a service is disabled, with its one notice, and stays disabled until
+  `shellboy service start --service ID`;
+- a one-shot schedule is retired (deleted) and must be recreated; it sends one
+  notice (`schedule-refused:EXECUTION`);
+- a recurring schedule loses only that occurrence; its next occurrence still runs.
+
+The service and one-shot notices name `descriptor_budget`, the live open count and
+limit, and the next action (stop unneeded shells, then restart the service or
+recreate the one-shot).
+
+The reserve covers only the IPC sockets. Descriptors that open lazily after
+admission (SQLite connections, model HTTP sockets, file workers) are not
+reserved, so the margin is not a guarantee for them. A count that cannot be read
+refuses every start: this includes a Unix other than Linux or macOS and a Linux
+without `/proc`. There is no permit or queue, setting, status field, or process or
+memory cap.

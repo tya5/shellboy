@@ -1688,6 +1688,51 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn a_run_shell_refused_for_descriptor_headroom_is_a_typed_tool_error_and_saved_failed() {
+    use crate::shell::descriptor_budget::{DescriptorUse, IPC_RESERVE, SPAWN_ADD};
+    crate::test_watchdog::watchdog("descriptor refusal", async {
+        let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let snapshot = ready(&control, &accepted).await;
+        let turn = snapshot.turn.clone();
+        control.store.database.call(move |db| {
+            db.execute("UPDATE turn SET state='running' WHERE id=?1", [&turn])?;
+            db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id=?1),'refusal-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
+            db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('refusal-group','refusal-attempt',?1,'running','now')", [turn])?;
+            db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('refusal-group','refusal-call',0,'shell','{}','pending')", [])?;
+            Ok(())
+        }).await.unwrap();
+        let slot = control.live.register_or_nudge_driver(
+            &snapshot.thread, snapshot.run.clone(), &control.stop,
+        ).await.unwrap();
+        let limit = 1024;
+        control.shell.set_descriptor_fixture(Some(DescriptorUse {
+            open: limit - SPAWN_ADD - IPC_RESERVE + 1,
+            limit,
+        }));
+        let marker = root.path().join("must-not-spawn");
+        let args = serde_json::from_value(json!({"command":format!("printf refused > '{}'",marker.display())})).unwrap();
+        let error = run_shell(control.clone(), &snapshot, &slot, "refusal-group", "refusal-call", args)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert_eq!(error.details.as_ref().unwrap()["reason"], "descriptor_budget");
+        assert!(!marker.exists());
+        let saved = control.store.database.call(|db| {
+            Ok(db.query_row("SELECT state,end_reason FROM shell_execution", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?)
+        }).await.unwrap();
+        assert_eq!(saved, ("failed".into(), "descriptor_budget".into()));
+        control
+            .live
+            .remove_driver_if_current(&snapshot.thread, &slot.id)
+            .await;
+        drop(slot);
+        drop(snapshot);
+        close(control, owner).await;
+    }).await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn a_reported_running_shell_can_be_backgrounded_immediately() {
     crate::test_watchdog::watchdog("running shell foreground publication", async {
         for wire in [false, true] {

@@ -411,7 +411,7 @@ async fn save_completion(
         } else {
             super::super::schedule::retire_oneshot(&tx,&execution)?;
         }
-        let mut effects = service.map(|service| service.finish(&store,&tx,&execution)).transpose()?.flatten();
+        let mut effects = service.map(|service| service.finish(&store,&tx,&execution,None)).transpose()?.flatten();
         tx.commit()?;
         wakes.publish(Key::shell_terminal(execution).into_iter().chain(effects.iter_mut().flat_map(|effects| std::mem::take(&mut effects.wait_keys))));
         Ok(effects)}).await.map_err(storage_error)?;
@@ -441,6 +441,8 @@ mod output_batch_tests {
             (5, 8, vec![5, 7], Duration::from_millis(u64::MAX)),
         ] {
             let directory = tempfile::tempdir().unwrap();
+            #[cfg(unix)]
+            crate::app::set_owner_fd_limit();
             let mut config = Config::default();
             config.io.output_batch_bytes = read_bound;
             config.io.output_buffer_bytes = 16;
@@ -493,6 +495,8 @@ mod output_batch_tests {
     #[tokio::test]
     async fn sparse_live_output_flushes_at_the_configured_time_bound() {
         let directory = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        crate::app::set_owner_fd_limit();
         let config = Config::default();
         let args = serde_json::from_value(
             json!({"command":"printf timer; read -r done","stdin_open":true}),

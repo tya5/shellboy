@@ -267,46 +267,109 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
             let store = control.store.clone();
             let wakes = control.waits.keyed.clone();
             let saved_error = error.clone();
-            let effects =
-                control
-                    .store
-                    .database
-                    .call(move |db| {
-                        let tx = db.transaction()?;
-                        let service = service_settlement(&tx, &shell.id)?;
-                        let mut effects = None;
-                        let at = super::state::now();
-                        let changed = if shutdown {
-                            record_shell_stop(&tx, &shell.id, ShellStopIntent::OwnerShutdown)?;
-                            super::state::cancel_shell_spawn(&tx, &shell.id, &at)? != 0
-                        } else {
-                            super::state::fail_shell_spawn(&tx, &shell.id, &at, &saved_error)? != 0
-                        };
-                        if changed {
-                            retire_oneshot(&tx, &shell.id)?;
-                            if let Some(service) = service.filter(|_| !shutdown) {
-                                effects = service.finish(&store, &tx, &shell.id)?;
-                            }
+            let effects = control
+                .store
+                .database
+                .call(move |db| {
+                    let tx = db.transaction()?;
+                    let service = service_settlement(&tx, &shell.id)?;
+                    let mut effects = None;
+                    let at = super::state::now();
+                    let changed = if shutdown {
+                        record_shell_stop(&tx, &shell.id, ShellStopIntent::OwnerShutdown)?;
+                        super::state::cancel_shell_spawn(&tx, &shell.id, &at)? != 0
+                    } else {
+                        super::state::fail_shell_spawn(&tx, &shell.id, &at, &saved_error)? != 0
+                    };
+                    if changed {
+                        if service.is_none() {
+                            effects = refused_oneshot_notice(&store, &tx, &shell.id, &saved_error)?;
                         }
-                        tx.commit()?;
-                        if changed {
-                            wakes.publish(
-                                super::wait::wakes::Key::shell_terminal(shell.id)
-                                    .into_iter()
-                                    .chain(effects.iter_mut().flat_map(|effects| {
-                                        std::mem::take(&mut effects.wait_keys)
-                                    })),
-                            );
+                        retire_oneshot(&tx, &shell.id)?;
+                        if let Some(service) = service.filter(|_| !shutdown) {
+                            effects = service.finish(&store, &tx, &shell.id, Some(&saved_error))?;
                         }
-                        Ok(effects)
-                    })
-                    .await
-                    .map_err(super::storage_error)?;
+                    }
+                    tx.commit()?;
+                    if changed {
+                        wakes.publish(
+                            super::wait::wakes::Key::shell_terminal(shell.id)
+                                .into_iter()
+                                .chain(
+                                    effects
+                                        .iter_mut()
+                                        .flat_map(|effects| std::mem::take(&mut effects.wait_keys)),
+                                ),
+                        );
+                    }
+                    Ok(effects)
+                })
+                .await
+                .map_err(super::storage_error)?;
             control.apply_effects(effects).await;
             control.changed(&shell.thread);
         }
     }
     Ok(())
+}
+
+/// What a descriptor_budget refusal tells the Thread: the live numbers and the
+/// next action. Other spawn failures add nothing.
+fn refusal_text(error: &ApiError) -> Option<String> {
+    let details = error.details.as_ref()?;
+    if details["reason"] != crate::shell::DESCRIPTOR_BUDGET_REASON {
+        return None;
+    }
+    let count = |key: &str| {
+        details[key]
+            .as_u64()
+            .map_or_else(|| "unknown".to_owned(), |value| value.to_string())
+    };
+    Some(format!(
+        "descriptor_budget: {} of {} file descriptors were open. Stop unneeded shells first (shellboy shell list --state running, then shellboy shell stop --execution EXECUTION_ID)",
+        count("open"),
+        count("limit")
+    ))
+}
+
+/// A one-shot schedule is retired when its start fails; a descriptor_budget
+/// refusal says so and names the recovery, in the same transaction.
+fn refused_oneshot_notice(
+    store: &super::Store,
+    tx: &Transaction<'_>,
+    execution: &str,
+    error: &ApiError,
+) -> Result<Option<super::MutationResult>, StorageError> {
+    let Some(reason) = refusal_text(error) else {
+        return Ok(None);
+    };
+    let owner: Option<(String, String)> = tx
+        .query_row(
+            "SELECT q.id,q.thread_id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1 AND q.kind='time' AND q.once_at IS NOT NULL AND q.next_at IS NULL",
+            [execution],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((schedule, thread)) = owner else {
+        return Ok(None);
+    };
+    let args = crate::protocol::MessageSendArgs {
+        max_model_requests: None,
+        human: false,
+        resume_recovery: false,
+        sender_label: Some(format!("schedule:{schedule}")),
+        thread_id: Some(thread),
+        deliver: crate::protocol::Deliver::Next,
+        text: format!(
+            "One-shot schedule {schedule} did not run and was removed: execution {execution} was refused. {reason}; then recreate the one-shot schedule."
+        ),
+    };
+    Ok(Some(store.send_owner_notice(
+        tx,
+        &args,
+        &format!("schedule-refused:{execution}"),
+        &super::state::now(),
+    )?))
 }
 
 // Called only for an execution just settled in this transaction. A preexisting
@@ -650,6 +713,7 @@ impl ServiceSettlement {
         store: &super::Store,
         tx: &Transaction<'_>,
         execution: &str,
+        refusal: Option<&ApiError>,
     ) -> Result<Option<super::MutationResult>, StorageError> {
         if self.prior_reason.as_deref() == Some("owner_shutdown") {
             return Ok(None);
@@ -660,6 +724,9 @@ impl ServiceSettlement {
         }
         let (state, code, reason, signal): (String,Option<i32>,Option<String>,Option<i32>) = tx.query_row("SELECT state,exit_code,end_reason,json_extract(shell_json,'$.completion.exit_signal') FROM shell_execution WHERE id=?1",[execution],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
         let id = self.id;
+        let next = refusal
+            .and_then(refusal_text)
+            .map(|text| format!(" {text}, then restart the service."));
         let details = [
             code.map(|value| format!("exit code {value}")),
             signal.map(|value| format!("signal {value}")),
@@ -678,7 +745,8 @@ impl ServiceSettlement {
             thread_id: Some(self.thread),
             deliver: crate::protocol::Deliver::Next,
             text: format!(
-                "Service {id} ended: execution {execution}, {state} ({details}). It will not restart automatically. Restart: shellboy service start --service {id}. Output: shellboy shell read --execution {execution}"
+                "Service {id} ended: execution {execution}, {state} ({details}). It will not restart automatically. Restart: shellboy service start --service {id}. Output: shellboy shell read --execution {execution}.{}",
+                next.unwrap_or_default()
             ),
         };
         Ok(Some(store.send_owner_notice(
@@ -2077,6 +2145,97 @@ mod tests {
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn one_shot_refused_for_descriptor_headroom_is_retired_with_one_notice() {
+        use crate::protocol::{ExecutionTarget, ScheduleAddArgs, ShellListArgs, ThreadTarget};
+        use crate::shell::descriptor_budget::{DescriptorUse, IPC_RESERVE, SPAWN_ADD};
+
+        let (_root, owner, control, accepted) =
+            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let thread = accepted.thread_id;
+        let request = |command| {
+            Request::new(
+                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                command,
+            )
+        };
+        let add = control
+            .request(request(Command::ScheduleAdd(ScheduleAddArgs {
+                thread_id: Some(thread.clone()),
+                cron: None,
+                at: None,
+                in_seconds: Some(1),
+                cwd: None,
+                description: None,
+                notify: Vec::new(),
+                command: "echo must-not-run".into(),
+            })))
+            .await;
+        assert!(add.ok, "{:?}", add.error);
+        let schedule = add.result.unwrap()["schedule_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let key = schedule.clone();
+        owner
+            .db
+            .call(move |db| {
+                db.execute("UPDATE schedule SET next_at=1,once_at=1 WHERE id=?1", [key])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let limit = 1024;
+        control.shell.set_descriptor_fixture(Some(DescriptorUse {
+            open: limit - SPAWN_ADD - IPC_RESERVE + 1,
+            limit,
+        }));
+        dispatch(&control).await.unwrap();
+        let listed = control
+            .request(request(Command::ShellList(
+                serde_json::from_value::<ShellListArgs>(json!({"thread_id":thread})).unwrap(),
+            )))
+            .await
+            .result
+            .unwrap();
+        let execution = listed["items"][0]["execution_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let saved = control
+            .request(request(Command::ShellGet(ExecutionTarget {
+                execution_id: execution.clone(),
+            })))
+            .await
+            .result
+            .unwrap();
+        assert_eq!(saved["state"], "failed");
+        assert_eq!(saved["reason"], "descriptor_budget");
+        let remaining = control
+            .request(request(Command::ScheduleList(ThreadTarget {
+                thread_id: Some(thread.clone()),
+            })))
+            .await
+            .result
+            .unwrap();
+        assert!(remaining["items"].as_array().unwrap().is_empty());
+        let operation = format!("schedule-refused:{execution}");
+        let notices: i64 = owner
+            .db
+            .call(move |db| {
+                Ok(db.query_row(
+                "SELECT count(*) FROM receipt WHERE client_operation_id=?1 AND target_thread_id=?2",
+                [operation, thread], |row| row.get(0),
+            )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(notices, 1);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test]

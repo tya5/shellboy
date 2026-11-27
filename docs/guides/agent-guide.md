@@ -335,7 +335,12 @@ On Unix a shell start can be refused with `invalid_state` and
 `details.reason: descriptor_budget` when the owner is short of file descriptors;
 the execution is saved `failed` with that reason and did not run. Stop background
 shells you no longer need (`shellboy shell list --state running`, then
-`shellboy shell stop --execution ID`) and start it again.
+`shellboy shell stop --execution ID`) and start it again. Nothing retries for you.
+A service refused this way is disabled and you get one message naming
+`descriptor_budget` and the open/limit numbers; restart it with
+`shellboy service start --service ID` after stopping shells. A one-shot schedule
+refused this way is deleted (one message says so); recreate it. A recurring
+schedule only loses that occurrence.
 
 Use `shellboy shell background --execution ID` to release a Turn’s foreground
 shell wait without stopping the process. The tool result remains `running` with

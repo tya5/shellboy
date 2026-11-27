@@ -355,8 +355,11 @@ fn owner_fd_soft_target(hard: libc::rlim_t) -> libc::rlim_t {
     hard.min(OWNER_FD_FLOOR)
 }
 
+/// The owner's startup limit step; tests that start a supervisor in-process
+/// call it too, so they run under the same limit as the owner.
 #[cfg(unix)]
-fn set_owner_fd_limit() -> Option<libc::rlimit> {
+#[doc(hidden)]
+pub fn set_owner_fd_limit() -> Option<libc::rlimit> {
     let mut limits = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
