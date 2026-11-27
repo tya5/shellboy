@@ -369,7 +369,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 70,
-        sql: include_str!("../../migrations/next_artifact_current_scheme.sql"),
+        sql: include_str!("../../migrations/0070_artifact_current_scheme.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
 ];

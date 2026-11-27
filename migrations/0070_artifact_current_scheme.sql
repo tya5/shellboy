@@ -15,5 +15,5 @@ UPDATE artifact AS a SET current_scheme = (
 );
 CREATE INDEX artifact_scheme_page ON artifact(current_scheme,updated_at DESC,id);
 
-INSERT INTO schema_migration(version,name) VALUES(70,'next_artifact_current_scheme');
+INSERT INTO schema_migration(version,name) VALUES(70,'0070_artifact_current_scheme');
 PRAGMA user_version=70;
