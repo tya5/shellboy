@@ -4101,10 +4101,12 @@ mod activity_list_tests {
             assert_eq!(item.state, native);
             assert_eq!(item.activity, expected);
             assert_eq!(
-                crate::frontend::activity::project(&db, "parent")
-                    .unwrap()
-                    .snapshot
-                    .phase,
+                crate::frontend::activity::from_thread_activity(
+                    crate::control::db::thread_activity::read(&db, "parent").unwrap(),
+                    crate::config::UiLanguage::Ja
+                )
+                .snapshot
+                .phase,
                 expected
             );
         };
@@ -4191,12 +4193,12 @@ mod receipt_wait_tests {
         let thread_id = thread.result["thread_id"].as_str().unwrap().to_owned();
         let mut args = crate::protocol::DraftSaveArgs {
             thread_id,
-            draft: Box::new(crate::ui::DraftSnapshot {
+            draft: Box::new(crate::draft::DraftSnapshot {
                 revision: 2,
                 text: "current".into(),
                 ..Default::default()
             }),
-            anchor: crate::ui::ViewAnchor::default(),
+            anchor: crate::draft::ViewAnchor::default(),
             follow_tail: false,
         };
         store

@@ -1,21 +1,9 @@
 //! Local attachment chips and canonical input order. No filesystem/DB work.
 use super::{DraftSnapshot, PasteFold, UiAttachment};
-use crate::{
-    attachments::DraftContent,
-    protocol::{ApiError, ErrorCode},
-};
 use crossterm::event::KeyCode;
-use serde_json::Value;
-use std::collections::{HashMap, HashSet};
 use unicode_segmentation::UnicodeSegmentation;
 
-pub(crate) const MARKER: &str = "\u{fffc}";
-fn invalid() -> ApiError {
-    ApiError::new(
-        ErrorCode::InvalidArgument,
-        "Draft attachment positions or source elements are inconsistent; retain the draft and inspect its source",
-    )
-}
+pub(crate) use crate::draft::MARKER;
 impl DraftSnapshot {
     pub(super) fn insert_text(&mut self, text: &str, pasted: bool, fold_id: Option<u64>) {
         self.snap_cursor(true);
@@ -157,93 +145,6 @@ impl DraftSnapshot {
     }
 }
 
-pub(crate) fn decode(
-    text: &str,
-    mut attachments: Vec<UiAttachment>,
-) -> Result<(DraftContent, Vec<UiAttachment>), ApiError> {
-    let mut ids = HashSet::new();
-    let mut positions = HashSet::new();
-    for a in &attachments {
-        if !ids.insert(&a.id) {
-            return Err(invalid());
-        }
-        let p = a.position.ok_or_else(invalid)?;
-        if !text.is_char_boundary(p) || !text[p..].starts_with(MARKER) || !positions.insert(p) {
-            return Err(invalid());
-        }
-    }
-    attachments.sort_by_key(|a| a.position.expect("validated marker position"));
-    let mut plain = String::new();
-    let mut source = 0;
-    let mut offsets = Vec::new();
-    for a in &attachments {
-        let position = a.position.expect("validated marker position");
-        plain.push_str(&text[source..position]);
-        offsets.push(plain.len());
-        source = position + MARKER.len();
-    }
-    plain.push_str(&text[source..]);
-    let content = DraftContent {
-        text: plain,
-        positions: offsets,
-    };
-    content.validate(attachments.len())?;
-    Ok((content, attachments))
-}
-
-/// Rebuild from the source's ordered references, never SQL ID order or text flattening.
-pub(crate) fn restore(
-    payload: &Value,
-    attachments: Vec<UiAttachment>,
-    selected_only: bool,
-) -> Result<(String, Vec<UiAttachment>), ApiError> {
-    let count = attachments.len();
-    let mut records: HashMap<_, _> = attachments.into_iter().map(|a| (a.id.clone(), a)).collect();
-    if records.len() != count {
-        return Err(invalid());
-    }
-    if let Some(text) = payload.get("content").and_then(Value::as_str) {
-        if !records.is_empty() {
-            return Err(invalid());
-        }
-        return Ok((text.into(), Vec::new()));
-    }
-    let elements = payload
-        .get("content")
-        .and_then(Value::as_array)
-        .ok_or_else(invalid)?;
-    let mut text = String::new();
-    let mut ordered = Vec::new();
-    for element in elements {
-        match element.get("type").and_then(Value::as_str) {
-            Some("input_text") => text.push_str(
-                element
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .ok_or_else(invalid)?,
-            ),
-            Some("attachment_ref") => {
-                let id = element
-                    .get("attachment_id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(invalid)?;
-                let mut attachment = records.remove(id).ok_or_else(invalid)?;
-                if selected_only && attachment.state != "active" {
-                    continue;
-                }
-                attachment.position = Some(text.len());
-                text.push_str(MARKER);
-                ordered.push(attachment);
-            }
-            _ => return Err(invalid()),
-        }
-    }
-    if !records.is_empty() {
-        return Err(invalid());
-    }
-    Ok((text, ordered))
-}
-
 pub(super) fn adjust_folds(folds: &mut Vec<PasteFold>, start: usize, end: usize, added: usize) {
     folds.retain_mut(|fold| {
         if end <= fold.start {
@@ -289,33 +190,10 @@ fn move_vertical(draft: &mut DraftSnapshot, down: bool) {
     }
 }
 
-pub(crate) fn validate_positions(snapshot: &DraftSnapshot, limit: u64) -> Result<(), ApiError> {
-    if snapshot.text.len() as u64 > limit {
-        return Err(ApiError::new(
-            ErrorCode::InputLimit,
-            "Draft exceeds the current input budget",
-        ));
-    }
-    if snapshot.cursor > snapshot.text.len()
-        || !snapshot.text.is_char_boundary(snapshot.cursor)
-        || snapshot.folds.iter().any(|fold| {
-            fold.start > fold.end
-                || fold.end > snapshot.text.len()
-                || !snapshot.text.is_char_boundary(fold.start)
-                || !snapshot.text.is_char_boundary(fold.end)
-        })
-    {
-        return Err(ApiError::new(
-            ErrorCode::InvalidState,
-            "Saved draft positions are malformed",
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::draft::{decode, restore};
     use crate::{
         config::Config,
         ui::{UiAction, UiState, UiUpdate},

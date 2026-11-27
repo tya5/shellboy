@@ -1,6 +1,6 @@
 //! Owner-side durable compose state. Call within the command's receipt transaction.
 use super::{error, sql_error};
-use crate::ui::{DraftSnapshot, UiAttachment};
+use crate::draft::{DraftSnapshot, UiAttachment};
 use crate::{
     control::submission_retention,
     history::{self, ThreadScope},
@@ -51,7 +51,7 @@ pub(super) fn save(
             "Saved view anchor is no longer selected",
         ));
     }
-    crate::ui::draft::validate_positions(draft, draft_bytes)?;
+    crate::draft::validate_positions(draft, draft_bytes)?;
     let revision = i64::try_from(draft.revision)
         .map_err(|_| error(ErrorCode::InvalidArgument, "Draft revision is out of range"))?;
     let offset = i64::try_from(anchor.char_offset)
@@ -160,7 +160,7 @@ pub(super) fn get(
             [thread],
             |row| {
                 Ok(crate::protocol::DraftView {
-                    anchor: crate::ui::ViewAnchor {
+                    anchor: crate::draft::ViewAnchor {
                         node_id: row.get(0)?,
                         char_offset: usize::try_from(row.get::<_, i64>(1)?)
                             .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(1, -1))?,
@@ -307,7 +307,7 @@ pub(super) fn restore_archive(
     tx: &Transaction<'_>,
     id: &str,
     draft_bytes: u64,
-) -> super::Result<crate::ui::DraftSnapshot> {
+) -> super::Result<crate::draft::DraftSnapshot> {
     let submission_fence = crate::control::submission_retention::fence(
         "json_extract(current.body_json,'$._submission.source_draft_id')",
         "json_extract(current.body_json,'$._submission.source_revision')",
@@ -340,8 +340,8 @@ pub(super) fn restore_archive(
         serde_json::from_value::<DraftSnapshot>(value)
             .map_err(|_| error(ErrorCode::InvalidState, "Frozen draft is malformed"))?
     };
-    crate::ui::draft::validate_positions(&snapshot, draft_bytes)?;
-    crate::ui::draft::decode(&snapshot.text, snapshot.attachments.clone())?;
+    crate::draft::validate_positions(&snapshot, draft_bytes)?;
+    crate::draft::decode(&snapshot.text, snapshot.attachments.clone())?;
     Ok(snapshot)
 }
 
@@ -367,7 +367,7 @@ fn restore_source(
     let payload: Value = serde_json::from_str(&body)
         .map_err(|_| error(ErrorCode::InvalidState, "Saved request is malformed"))?;
     let attachments=tx.prepare("SELECT id,absolute_path,input_kind FROM attachment_ref WHERE source_node_id=?1 ORDER BY id").map_err(sql_error)?.query_map([node_id],|r|Ok(UiAttachment{id:r.get(0)?,path:PathBuf::from(r.get::<_,String>(1)?),kind:r.get(2)?,state:"saved source; revalidated on send".into(),position:None})).map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
-    let (text, attachments) = crate::ui::draft::restore(&payload, attachments, false)?;
+    let (text, attachments) = crate::draft::restore(&payload, attachments, false)?;
     if text.len() as u64 > limit {
         return Err(error(
             ErrorCode::InputLimit,

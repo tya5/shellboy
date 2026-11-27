@@ -44,7 +44,7 @@ pub(super) fn submission_snapshot(
             "Submission snapshot does not match the sent draft; retain the original draft",
         ));
     }
-    crate::ui::draft::validate_positions(&snapshot, limit)?;
+    crate::draft::validate_positions(&snapshot, limit)?;
     Ok(snapshot)
 }
 const DRAFT_VIEW_LIMIT: u32 = 128;
@@ -168,8 +168,8 @@ pub(super) async fn restore_archive(
     .await
 }
 fn validate_restore(snapshot: &DraftSnapshot, limit: u64) -> Result<(), ApiError> {
-    crate::ui::draft::validate_positions(snapshot, limit)?;
-    crate::ui::draft::decode(&snapshot.text, snapshot.attachments.clone()).map_err(|_| {
+    crate::draft::validate_positions(snapshot, limit)?;
+    crate::draft::decode(&snapshot.text, snapshot.attachments.clone()).map_err(|_| {
         ApiError::new(
             ErrorCode::InvalidState,
             "Saved attachment order is malformed",
