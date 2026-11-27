@@ -94,11 +94,14 @@ impl Control {
                     .details(json!({"field":"connection","written":false})));
                 }
                 let path = credential_store::path_beside(config_path);
+                let had_key = credential_store::has_key(&path, &args.connection)?;
                 let outcome = credential_store::set(&path, &args.connection, &args.value)?;
-                config.stored_keys.set(&args.connection, true);
-                // config.get reports only whether a key is stored, so only a newly stored key
-                // marks. Publish under the write guard even if the caller has stopped waiting.
-                if !outcome.existed {
+                let has_key = credential_store::has_key(&path, &args.connection)?;
+                config.stored_keys.set(&args.connection, has_key);
+                // config.get reports only whether a key is stored, so the mark follows that
+                // predicate before and after. Publish under the write guard even if the
+                // caller has stopped waiting.
+                if had_key != has_key {
                     change_clock.record_config_changed();
                 }
                 let source = known.key_source(env_value, true);
