@@ -2544,6 +2544,7 @@ impl Cli {
                     kind: a.kind,
                 }),
                 AttachmentCommand::List(a) => C::AttachmentList(wire::AttachmentListArgs {
+                    attachment_id: None,
                     thread_id: a.thread_id,
                     limit: a.limit,
                     cursor: a.cursor,

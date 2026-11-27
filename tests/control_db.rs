@@ -2437,6 +2437,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
             cursor: None,
         }),
         Command::AttachmentList(AttachmentListArgs {
+            attachment_id: None,
             thread_id: Some(thread.thread_id),
             limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
             cursor: None,

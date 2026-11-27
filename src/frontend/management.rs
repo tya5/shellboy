@@ -474,6 +474,18 @@ pub(super) fn follow_target_in(
         let thread=row.get("thread_id").and_then(Value::as_str).filter(|s|!s.is_empty()).ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"The selected attachment record has no explicit Thread; inspect its Thread attachment list"))?;
         return Ok(Command::AttachmentList(
             crate::protocol::AttachmentListArgs {
+                attachment_id: Some(
+                    row["attachment_id"]
+                        .as_str()
+                        .filter(|id| !id.is_empty())
+                        .ok_or_else(|| {
+                            ApiError::new(
+                                ErrorCode::TargetUnavailable,
+                                "Saved attachment identity is unavailable",
+                            )
+                        })?
+                        .into(),
+                ),
                 thread_id: Some(thread.into()),
                 limit: crate::protocol::DEFAULT_LIST_LIMIT,
                 cursor: None,
@@ -1199,7 +1211,7 @@ mod attachment_reference_tests {
     fn selected_record_owns_attachment_thread_and_source_without_viewer_fallback() {
         let value = serde_json::json!({"thread_id":"viewer","attachments":[{"thread_id":"foreign","attachment_id":"a","source_node_id":"source"}]});
         assert!(
-            matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Inspect).unwrap(),Command::AttachmentList(a) if a.thread_id.as_deref()==Some("foreign"))
+            matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Inspect).unwrap(),Command::AttachmentList(a) if a.thread_id.as_deref()==Some("foreign") && a.attachment_id.as_deref()==Some("a"))
         );
         assert!(
             matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Read).unwrap(),Command::HistoryRead(a) if a.node_id=="source")
