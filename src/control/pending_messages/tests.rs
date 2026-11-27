@@ -603,13 +603,16 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
         questions.push(question);
         replies.push(answer.result["message_id"].as_str().unwrap().to_owned());
     }
-    let before_plan: (i64, i64) = store.database.call(|db| {
+    let before_plan: (i64, i64) = store.database.call({ let questions = questions.clone(); move |db| {
         let owed = |extra: &str| {
-            let counts = crate::control::db::named_reply_counts(db, &format!("target_thread_id='t' AND state='applied' AND path_admission='unadmitted'{extra} AND json_extract(result_json,'$.to_human')=1"));
-            counts.get("pending").copied().unwrap_or(0) + counts.get("replied").copied().unwrap_or(0)
+            let ids: Vec<String> = db.prepare(&format!("SELECT message_node_id FROM receipt WHERE target_thread_id='t' AND state='applied' AND path_admission='unadmitted'{extra}")).unwrap().query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+            ids.iter().filter(|id| questions.contains(id)).filter(|id| {
+                let details = crate::control::db::message_details(db, id).unwrap();
+                details.to_human && matches!(details.reply.as_ref().and_then(|r| r["state"].as_str()), Some("pending" | "replied"))
+            }).count() as i64
         };
         Ok((owed(""), owed(" AND run_id IS NULL AND turn_id IS NULL")))
-    }).await.unwrap();
+    }}).await.unwrap();
     assert_eq!(before_plan, (DUTIES as i64, DUTIES as i64));
     let (plan, selected) = store
         .database
@@ -669,11 +672,15 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
     let after_plan = store.database.call({
         let questions = questions.clone();
         move |db| {
-            questions.into_iter().map(|question| db.query_row(
-                "SELECT r.state,r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),json_extract(r.result_json,'$.reply.state') FROM receipt r WHERE r.message_node_id=?1",
-                [question],
-                |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,bool>(2)?, row.get::<_,String>(3)?)),
-            )).collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+            questions.into_iter().map(|question| {
+                let (state, admission, on_path) = db.query_row(
+                    "SELECT r.state,r.path_admission,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id) FROM receipt r WHERE r.message_node_id=?1",
+                    [&question],
+                    |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,bool>(2)?)),
+                )?;
+                let reply = crate::control::db::named_reply_state(db, &question).unwrap();
+                Ok((state, admission, on_path, reply))
+            }).collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
         }
     }).await.unwrap();
     assert_eq!(after_plan.len(), DUTIES);

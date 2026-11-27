@@ -4753,10 +4753,25 @@ mod agents_reference_tests {
             )
         );
         let retained_thread = thread.clone();
-        let retained = store.database.call(move |db| Ok(db.query_row(
-            "SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND COALESCE(json_extract(result_json,'$.to_human'),0)=0",
-            [&retained_thread], |row| row.get::<_, i64>(0),
-        )?)).await.unwrap();
+        let retained = store
+            .database
+            .call(move |db| {
+                let ids: Vec<String> = db
+                    .prepare("SELECT message_node_id FROM receipt WHERE target_thread_id=?1")?
+                    .query_map([&retained_thread], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                Ok(ids
+                    .iter()
+                    .filter(|id| {
+                        let details = message_details(db, id).unwrap();
+                        !details.to_human
+                            && details.reply.as_ref().and_then(|r| r["state"].as_str())
+                                == Some("pending")
+                    })
+                    .count() as i64)
+            })
+            .await
+            .unwrap();
         assert_eq!(
             retained, 16,
             "refusing the 17th must retain all pre-existing duties"
@@ -5779,14 +5794,20 @@ mod message_acknowledgement_state_tests {
         assert_eq!(accepted.assignment, Assignment::Pending);
         let before = message_id.clone();
         db.call(move |db| {
-            let (state, admission, reply):(String,String,String)=db.query_row(
-                "SELECT state,path_admission,json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",
+            let (state, admission): (String, String) = db.query_row(
+                "SELECT state,path_admission FROM receipt WHERE message_node_id=?1",
                 [&before],
-                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
-            assert_eq!((state.as_str(),admission.as_str(),reply.as_str()),("applied","unadmitted","pending"));
+            let reply = named_reply_state(db, &before).unwrap();
+            assert_eq!(
+                (state.as_str(), admission.as_str(), reply.as_str()),
+                ("applied", "unadmitted", "pending")
+            );
             Ok(())
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         let target = message_id.clone();
         db.call(move |db| {
             let tx = db.transaction()?;
@@ -5940,10 +5961,17 @@ mod thread_deletion_notification_tests {
                 .execute(delete(&owner.instance_id, false), None)
                 .await
                 .unwrap();
-            let states = owner.db.call(|db| Ok(db.query_row(
-                "SELECT count(*),sum(json_extract(result_json,'$.reply.state')='recipient_deleted') FROM receipt WHERE target_thread_id='parent'",
-                [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?.unwrap_or(0))),
-            )?)).await.unwrap();
+            let states = owner
+                .db
+                .call(|db| {
+                    let counts = named_reply_counts(db, "target_thread_id='parent'");
+                    Ok((
+                        counts.values().sum::<i64>(),
+                        counts.get("recipient_deleted").copied().unwrap_or(0),
+                    ))
+                })
+                .await
+                .unwrap();
             let synchronous =
                 count.min(crate::protocol::MAX_SYNC_DELETION_REPLY_DUTIES as usize) as i64;
             assert_eq!(states, (count as i64, synchronous));

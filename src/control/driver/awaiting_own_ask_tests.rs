@@ -161,12 +161,8 @@ impl Fixture {
             .store
             .database
             .call(move |db| {
-                let (reply, run): (String, Option<String>) = db.query_row(
-                    "SELECT json_extract(result_json,'$.reply'),run_id FROM receipt WHERE message_node_id=?1",
-                    [message],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )?;
-                Ok((serde_json::from_str(&reply).unwrap(), run))
+                let details = crate::control::db::message_details(db, &message)?;
+                Ok((details.reply.unwrap(), details.run_id))
             })
             .await
             .unwrap()

@@ -3284,7 +3284,24 @@ async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_r
         )
         .await;
         let child_query = child.clone();
-        let (message,run):(String,String)=control.store.database.call(move|db|Ok(db.query_row("SELECT message_node_id,run_id FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.expect_reply')=1",[child_query],|r|Ok((r.get(0)?,r.get(1)?)))?)).await.unwrap();
+        let (message, run): (String, String) = control
+            .store
+            .database
+            .call(move |db| {
+                let ids: Vec<String> = db
+                    .prepare("SELECT message_node_id FROM receipt WHERE target_thread_id=?1")?
+                    .query_map([child_query], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                for id in ids {
+                    let details = shellboy::control::db::message_details(db, &id)?;
+                    if details.expect_reply {
+                        return Ok((id, details.run_id.unwrap()));
+                    }
+                }
+                panic!("fixture has no reply-expected message")
+            })
+            .await
+            .unwrap();
         match outcome {
             "completed" => {
                 recipient
