@@ -1,11 +1,35 @@
 use shellboy::{
+    control::db::Store,
     frontend::activity::{self, Projection},
+    protocol::{Command, Request, ThreadDetails, ThreadGetArgs},
     storage::DbWorker,
     ui::activity::ActivityPhase,
 };
 
+/// The footer's projection of what `thread.get` reports as `activity`.
+async fn thread_get_projection(store: &Store, thread: &str) -> Projection {
+    let request = Request {
+        protocol_version: shellboy::protocol::PROTOCOL_VERSION,
+        operation_id: format!("fixture:thread-get:{thread}"),
+        command: Command::ThreadGet(ThreadGetArgs {
+            thread_id: Some(thread.to_owned()),
+            display: true,
+        }),
+        origin: None,
+    };
+    let details: ThreadDetails =
+        serde_json::from_value(store.execute(request, None).await.unwrap().result).unwrap();
+    activity::from_thread_activity(details.activity, shellboy::config::UiLanguage::Ja)
+}
+
 async fn projection(db: &DbWorker) -> Projection {
-    db.call(|db| activity::project(db, "t")).await.unwrap()
+    let store = Store::new(
+        db.clone(),
+        std::sync::Arc::new(shellboy::config::Config::default()),
+        std::env::temp_dir(),
+        "fixture".into(),
+    );
+    thread_get_projection(&store, "t").await
 }
 
 #[tokio::test]
@@ -238,14 +262,9 @@ async fn activity_uses_recorded_run_turn_attempt_priority_and_remains_read_only(
         ActivityPhase::Stopped,
         "old Turn/attempt must not animate the newer Run"
     );
-    db.call(|db| {
-        let before = db.total_changes();
-        let _ = activity::project(db, "t")?;
-        assert_eq!(db.total_changes(), before);
-        Ok(())
-    })
-    .await
-    .unwrap();
+    let before = db.call(|db| Ok(db.total_changes())).await.unwrap();
+    let _ = projection(&db).await;
+    assert_eq!(db.call(|db| Ok(db.total_changes())).await.unwrap(), before);
     db.shutdown().await.unwrap();
 }
 

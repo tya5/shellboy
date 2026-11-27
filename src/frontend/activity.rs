@@ -66,9 +66,18 @@ fn has_live_work(activity: &ThreadActivity) -> bool {
         && matches!(activity.run.state, RunState::Live | RunState::Stopping)
 }
 
+/// The footer projection of what `thread.get` reports as `activity`, without
+/// live work rows.
+pub fn from_thread_activity(
+    activity: Option<ThreadActivity>,
+    language: crate::config::UiLanguage,
+) -> Projection {
+    prepare_in(activity, None, language)
+}
+
 #[cfg(test)]
 pub(super) fn prepare(activity: Option<ThreadActivity>) -> Projection {
-    prepare_in(activity, None, crate::config::UiLanguage::Ja)
+    from_thread_activity(activity, crate::config::UiLanguage::Ja)
 }
 
 pub(super) fn prepare_in(
@@ -298,15 +307,6 @@ pub(super) fn prepare_in(
     }
 }
 
-/// The owner's projection over a direct connection, without live-work rows.
-pub fn project(
-    db: &rusqlite::Connection,
-    thread: &str,
-) -> Result<Projection, crate::storage::StorageError> {
-    crate::control::db::thread_activity::read(db, thread)
-        .map(|activity| prepare_in(activity, None, crate::config::UiLanguage::Ja))
-}
-
 /// One projection over the embedded owner's own listener.
 pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiError> {
     let owner = super::native_history::Owner {
@@ -516,6 +516,10 @@ mod tests {
 mod footer85_tests {
     use super::*;
     use rusqlite::Connection;
+    /// What `thread.get` reports as `activity`, projected for the footer.
+    fn saved(db: &Connection) -> Projection {
+        prepare(crate::control::db::thread_activity::read(db, "t").unwrap())
+    }
     #[test]
     fn saved_recovery_is_current_only_until_explicit_saved_resolution() {
         let db = Connection::open_in_memory().unwrap();
@@ -532,15 +536,14 @@ mod footer85_tests {
             [serde_json::to_string(&reason).unwrap()],
         )
         .unwrap();
-        let p = project(&db, "t").unwrap();
+        let p = saved(&db);
         let recovery = p.snapshot.recovery.unwrap();
         assert!(recovery.usage_limit.unwrap().locally_blocked);
         assert!(recovery.limit_summary().unwrap().contains("UTC"));
         for state in ["running", "completed", "stopped"] {
             db.execute("UPDATE turn SET state=?1", [state]).unwrap();
             assert!(
-                project(&db, "t")
-                    .unwrap()
+                saved(&db)
                     .snapshot
                     .recovery
                     .as_ref()
@@ -549,16 +552,9 @@ mod footer85_tests {
             );
         }
         db.execute("UPDATE turn SET state='failed'", []).unwrap();
-        assert!(project(&db, "t").unwrap().snapshot.recovery.is_some());
+        assert!(saved(&db).snapshot.recovery.is_some());
         db.execute("UPDATE run SET state='stopped'", []).unwrap();
-        assert!(
-            project(&db, "t")
-                .unwrap()
-                .snapshot
-                .recovery
-                .unwrap()
-                .resolved
-        );
+        assert!(saved(&db).snapshot.recovery.unwrap().resolved);
         let original: String = db
             .query_row("SELECT recovery_reason_json FROM turn", [], |r| r.get(0))
             .unwrap();

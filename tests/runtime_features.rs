@@ -228,6 +228,27 @@ pub(crate) async fn request(control: &Arc<Control>, command: Command) -> Value {
     assert!(response.ok, "{:?}", response.error);
     response.result.unwrap()
 }
+/// The footer projection of what `thread.get` reports as `activity`.
+async fn thread_get_projection(
+    control: &Arc<Control>,
+    thread: &str,
+) -> shellboy::frontend::activity::Projection {
+    let details: shellboy::protocol::ThreadDetails = serde_json::from_value(
+        request(
+            control,
+            Command::ThreadGet(shellboy::protocol::ThreadGetArgs {
+                thread_id: Some(thread.to_owned()),
+                display: true,
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    shellboy::frontend::activity::from_thread_activity(
+        details.activity,
+        shellboy::config::UiLanguage::Ja,
+    )
+}
 pub(crate) fn answer(text: &str) -> Value {
     json!({"id":uuid::Uuid::new_v4().to_string(),"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text}]}]})
 }
@@ -3673,8 +3694,7 @@ async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background
         assert_eq!(blocked["waiting_reason"]["kind"],"context_edit_boundary");
         assert_eq!(blocked["waiting_reason"]["operation_id"],accepted["operation_id"]);
         assert_eq!(blocked["waiting_reason"]["action"],"compact");
-        let projected_thread=thread.clone();
-        let projected=control.store.database.call(move|db|shellboy::frontend::activity::project(db,&projected_thread)).await.unwrap();
+        let projected=thread_get_projection(&control,&thread).await;
         assert_eq!(serde_json::to_value(projected.snapshot.waiting_reason).unwrap(),blocked["waiting_reason"]);
         // Finishing the background shell cannot release the held summary boundary.
         request(&control,Command::ShellEof(ExecutionTarget {execution_id:background.clone()})).await;
@@ -6552,13 +6572,7 @@ async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
     let terminal = automatic_attempts_finished_for_turns(&control, &[trigger_turn], 1).await;
     assert_eq!(terminal.len(), 1);
     assert_eq!(terminal[0].id, events[0]["attempt_id"]);
-    let id = thread.clone();
-    let projected = control
-        .store
-        .database
-        .call(move |db| shellboy::frontend::activity::project(db, &id))
-        .await
-        .unwrap();
+    let projected = thread_get_projection(&control, &thread).await;
     assert!(
         projected.snapshot.automatic_compaction.is_none(),
         "after the actual no-target FINISH, projection no longer shows compaction active"
@@ -6632,13 +6646,7 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
         &third.body,
         "the spill-only branch leaves the current Turn unchanged",
     );
-    let projected_thread = thread.clone();
-    let projected = control
-        .store
-        .database
-        .call(move |db| shellboy::frontend::activity::project(db, &projected_thread))
-        .await
-        .unwrap();
+    let projected = thread_get_projection(&control, &thread).await;
     assert!(
         projected.snapshot.automatic_compaction.is_none(),
         "finished work must not appear active"
