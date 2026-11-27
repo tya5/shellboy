@@ -61,13 +61,23 @@ async fn spill_store() -> (TempDir, Store) {
 /// A request in the store's current operation epoch (it moves when the owner
 /// reclaims receipt space).
 fn request_in(store: &Store, command: Command) -> Request {
-    Request::new(format!("{}:{}", store.operation_epoch.current(), uuid::Uuid::new_v4()), command)
+    Request::new(
+        format!(
+            "{}:{}",
+            store.operation_epoch.current(),
+            uuid::Uuid::new_v4()
+        ),
+        command,
+    )
 }
 fn request(command: Command) -> Request {
     Request::new(format!("instance.0:{}", uuid::Uuid::new_v4()), command)
 }
 async fn execute(store: &Store, command: Command) -> MutationResult {
-    store.execute(request_in(store, command), None).await.unwrap()
+    store
+        .execute(request_in(store, command), None)
+        .await
+        .unwrap()
 }
 #[tokio::test]
 async fn thread_list_state_pages_current_failures_in_update_order() {
@@ -1664,20 +1674,26 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
             RuntimeReservation::Pending
         ));
     }
-    let other = request(Command::ShellWrite(ShellWriteArgs {
-        execution_id: "fixture".into(),
-        text: "never written either".into(),
-        encoding: "UTF-8".into(),
-    }));
+    let other = request_in(
+        &store,
+        Command::ShellWrite(ShellWriteArgs {
+            execution_id: "fixture".into(),
+            text: "never written either".into(),
+            encoding: "UTF-8".into(),
+        }),
+    );
     assert_eq!(
         store.reserve_runtime(other, None).await.unwrap_err().code,
         ErrorCode::StorageLimit
     );
     let status = store
         .execute(
-            request_in(&store, Command::OperationGet(OperationTarget {
-                operation_id: intent.operation_id.clone(),
-            })),
+            request_in(
+                &store,
+                Command::OperationGet(OperationTarget {
+                    operation_id: intent.operation_id.clone(),
+                }),
+            ),
             None,
         )
         .await
@@ -1687,7 +1703,10 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
     assert_eq!(status["result_uncertain"], true);
     assert_eq!(
         store
-            .execute(request_in(&store, Command::Status(StatusArgs::default())), None)
+            .execute(
+                request_in(&store, Command::Status(StatusArgs::default())),
+                None
+            )
             .await
             .unwrap()
             .result["receipt_budget"]["at_limit"],
@@ -1704,7 +1723,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
             assert_eq!(
                 db.query_row("SELECT count(*) FROM operation_receipt", [], |r| r
                     .get::<_, i64>(0))?,
-                2
+                1
             );
             assert_eq!(
                 db.query_row("SELECT count(*) FROM shell_execution", [], |r| r
@@ -2031,11 +2050,14 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(
         store
             .reserve_runtime(
-                request_in(&store, Command::ShellWrite(ShellWriteArgs {
-                    execution_id: "not-started".into(),
-                    text: "not written".into(),
-                    encoding: "UTF-8".into(),
-                })),
+                request_in(
+                    &store,
+                    Command::ShellWrite(ShellWriteArgs {
+                        execution_id: "not-started".into(),
+                        text: "not written".into(),
+                        encoding: "UTF-8".into(),
+                    })
+                ),
                 None
             )
             .await
@@ -2046,9 +2068,12 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
 
     // ShellStop retains the runtime intent contract while consuming the stop
     // allowance. A concurrent same-ID observer cannot execute it twice.
-    let shell_stop = request_in(&store, Command::ShellStop(ExecutionTarget {
-        execution_id: "fixture-shell".into(),
-    }));
+    let shell_stop = request_in(
+        &store,
+        Command::ShellStop(ExecutionTarget {
+            execution_id: "fixture-shell".into(),
+        }),
+    );
     assert!(matches!(
         store
             .reserve_runtime(shell_stop.clone(), None)
@@ -2078,9 +2103,12 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
 
     // RunStop takes the DB path, changes state and generation once, and saves
     // its result in the same transaction while the shell reservation is live.
-    let run_stop = request_in(&store, Command::RunStop(RunTarget {
-        run_id: run_id.clone(),
-    }));
+    let run_stop = request_in(
+        &store,
+        Command::RunStop(RunTarget {
+            run_id: run_id.clone(),
+        }),
+    );
     let stopped = store.execute(run_stop.clone(), None).await.unwrap();
     assert_eq!(stopped.result["state"], "stopping");
     assert_eq!(stopped.stop_runs, vec![run_id.clone()]);
@@ -2115,9 +2143,12 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(
         store
             .execute(
-                request_in(&store, Command::RunStop(RunTarget {
-                    run_id: run_id.clone()
-                })),
+                request_in(
+                    &store,
+                    Command::RunStop(RunTarget {
+                        run_id: run_id.clone()
+                    })
+                ),
                 None
             )
             .await
@@ -2128,9 +2159,12 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(
         store
             .reserve_runtime(
-                request_in(&store, Command::ShellStop(ExecutionTarget {
-                    execution_id: "fresh-stop".into()
-                })),
+                request_in(
+                    &store,
+                    Command::ShellStop(ExecutionTarget {
+                        execution_id: "fresh-stop".into()
+                    })
+                ),
                 None
             )
             .await
@@ -2142,16 +2176,18 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         store.execute(run_stop, None).await.unwrap_err().code,
         ErrorCode::OperationExpired
     );
-    assert!(matches!(
-        store.reserve_runtime(shell_stop, None).await.unwrap(),
-        RuntimeReservation::Saved(Err(ApiError {
-            code: ErrorCode::OperationExpired,
-            ..
-        }))
-    ));
+    // The pre-roll identity is outside the current epoch and no longer saved.
+    assert_eq!(
+        store
+            .reserve_runtime(shell_stop, None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::OperationExpired
+    );
     assert_eq!(
         store.execute(run_conflict, None).await.unwrap_err().code,
-        ErrorCode::OperationConflict
+        ErrorCode::OperationExpired
     );
     assert_eq!(
         store
@@ -2159,7 +2195,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
             .await
             .unwrap_err()
             .code,
-        ErrorCode::OperationConflict
+        ErrorCode::OperationExpired
     );
     let status = execute(&store, Command::Status(StatusArgs::default()))
         .await
@@ -2174,7 +2210,10 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(status["receipt_budget"]["available_bytes"], 0);
     assert_eq!(
         store
-            .execute(request_in(&store, Command::Status(StatusArgs::default())), None)
+            .execute(
+                request_in(&store, Command::Status(StatusArgs::default())),
+                None
+            )
             .await
             .unwrap()
             .result["receipt_budget"]["at_limit"],

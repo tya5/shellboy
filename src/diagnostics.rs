@@ -1304,7 +1304,7 @@ fn rotate(directory: &Path, files: usize) -> std::io::Result<()> {
 
 fn sanitize_id(id: &str) -> String {
     id.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || "-_:".contains(*c))
+        .filter(|c| c.is_ascii_alphanumeric() || "-_:.".contains(*c))
         .take(128)
         .collect()
 }
@@ -1385,7 +1385,7 @@ mod ui_history_tests {
             assert_eq!(id.len(), 128);
             assert!(
                 id.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "-_:".contains(c))
+                    .all(|c| c.is_ascii_alphanumeric() || "-_:.".contains(c))
             );
             assert_eq!(entry.as_object().unwrap().len(), 5);
         }

@@ -169,14 +169,7 @@ async fn update(sender: &(impl UpdateTarget + ?Sized), mut value: UiUpdate) {
 }
 
 fn operation(control: &Control, command: Command) -> Request {
-    Request::new(
-        format!(
-            "{}:{}",
-            control.store.operation_epoch.current(),
-            uuid::Uuid::new_v4()
-        ),
-        command,
-    )
+    Request::new(control.store.operation_epoch.mint(), command)
 }
 async fn request(control: &Arc<Control>, command: Command) -> Result<Value, ApiError> {
     let response = control.request(operation(control, command)).await;
@@ -1723,11 +1716,7 @@ async fn run_client(
                             stage: MessageSendStage::Queued,
                             draft_id: draft_id.clone(),
                             revision,
-                            operation_id: format!(
-                                "{}:{}",
-                                control.store.operation_epoch.current(),
-                                uuid::Uuid::new_v4()
-                            ),
+                            operation_id: control.store.operation_epoch.mint(),
                             message_id: None,
                         };
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, thread_id.as_deref(), None);
@@ -2333,11 +2322,7 @@ async fn run_client(
                             stage: MessageSendStage::Queued,
                             draft_id: draft_id.clone(),
                             revision,
-                            operation_id: format!(
-                                "{}:{}",
-                                control.store.operation_epoch.current(),
-                                uuid::Uuid::new_v4()
-                            ),
+                            operation_id: control.store.operation_epoch.mint(),
                             message_id: None,
                         };
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, Some(source_thread_id.as_str()), None);
@@ -4307,11 +4292,7 @@ async fn save_draft(
     anchor: ViewAnchor,
     follow_tail: bool,
 ) -> Result<(), ApiError> {
-    let operation = format!(
-        "{}:{}",
-        control.store.operation_epoch.current(),
-        uuid::Uuid::new_v4()
-    );
+    let operation = control.store.operation_epoch.mint();
     compose_call::<crate::protocol::Accepted>(
         control,
         Command::DraftSave(crate::protocol::DraftSaveArgs {

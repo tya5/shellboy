@@ -126,7 +126,7 @@ impl OperationEpoch {
     }
     /// A fresh operation ID in the current epoch.
     pub fn mint(&self) -> String {
-        format!("{}:{}", self.current(), uuid::Uuid::new_v4())
+        mint_operation_id(&self.current())
     }
     /// True when an unknown operation with this ID may execute.
     pub fn admits(&self, operation_id: &str) -> bool {
@@ -150,6 +150,12 @@ impl OperationEpoch {
         }
         Ok(reclaimable)
     }
+}
+/// The one place an operation ID is built: `<epoch>:<nonce>`. In-process
+/// callers pass the store's epoch; socket clients pass the one the owner's
+/// handshake reported.
+pub fn mint_operation_id(epoch: &str) -> String {
+    format!("{epoch}:{}", uuid::Uuid::new_v4())
 }
 /// Refusal of the request that rolled the epoch. Its receipt was never
 /// reserved, so the request was not applied; its ID is now outside the epoch.

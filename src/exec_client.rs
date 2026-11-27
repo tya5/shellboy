@@ -249,7 +249,7 @@ impl Session {
                 "Client deadline expired; no target was stopped",
             ));
         }
-        let operation = format!("{}:exec-{}", self.epoch, uuid::Uuid::new_v4());
+        let operation = crate::control::mint_operation_id(&self.epoch);
         self.progress.operation_id = Some(operation.clone());
         if stage == "send" {
             self.progress.send_operation_id = Some(operation.clone());
