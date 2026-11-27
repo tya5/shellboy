@@ -272,7 +272,7 @@ No protocol read or wake fact exists for these:
 Management (slice 4, done): F8 shows the result of the command it ran, read
 once from the owner, as the CLI prints it. The in-process substitutions and
 the saved-inspection observation (its readers, refresh tickets, retained and
-list re-observations, and the Storage physical sample) are deleted; there is
+list re-observations, and the Storage physical sample) are deleted.
 F8 refreshes a shown `config.get`, `index.status` or `storage.status` result
 from the events.wait marks only, so it consumes no index saved-change or
 management owner-state wake. The index coverage window is

@@ -472,6 +472,18 @@ fn tool_reason(value: &str) -> String {
         ToolReasonKind::Unknown => sanitize_plain(&short(value, 256), 0).0,
     }
 }
+#[cfg(test)]
+#[test]
+fn saved_background_and_unexecuted_tool_reasons_remain_distinct_in_japanese() {
+    assert_eq!(
+        tool_reason("shell_backgrounded"),
+        "背景移行の要求で待機を解除"
+    );
+    assert_eq!(
+        tool_reason("prior_wait_shell_background"),
+        "先行する呼出しを背景へ移したため未実行"
+    );
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresentationBlock {
     pub kind: BlockKind,
