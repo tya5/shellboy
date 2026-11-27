@@ -1669,9 +1669,62 @@ async fn ordinary_history_gc_collects_bound_copies_in_batches() {
             .unwrap();
         assert_eq!(report.submitted_drafts_collected, expected);
     }
-    store.database.call(|db| {
-        assert_eq!(db.query_row("SELECT count(*) FROM draft WHERE state='submitted'",[],|r|r.get::<_,i64>(0))?,0);
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_type(result_json,'$.draft_submission')='object'",[],|r|r.get::<_,i64>(0))?,130);Ok(())
-    }).await.unwrap();
+    let mut cursor = None;
+    let mut records = Vec::new();
+    loop {
+        let page = store
+            .execute(
+                Request::new(
+                    "fixture:gc-draft-list",
+                    Command::DraftList(DraftListArgs {
+                        thread_id: Some("t".into()),
+                        kind: DraftListKind::Submitted,
+                        limit: 100,
+                        cursor,
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        let page: DraftListPage = serde_json::from_value(page).unwrap();
+        records.extend(page.items);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+        assert!(records.len() < 130, "draft list cursor must advance");
+    }
+    assert_eq!(records.len(), 130);
+    for (n, record) in records.into_iter().rev().enumerate() {
+        let op = format!("old-op-{n:03}");
+        assert_eq!(
+            record,
+            DraftRecord::Submitted {
+                draft_id: DraftSubmission::id_for_operation(&op),
+                thread_id: "t".into(),
+                operation_id: op.clone(),
+                source_draft_id: format!("old-source-{n:03}"),
+                source_revision: 7,
+                message_id: op.clone(),
+            }
+        );
+        let message = store
+            .execute(
+                Request::new(
+                    "fixture:gc-message-get",
+                    Command::MessageGet(MessageTarget {
+                        message_id: op.clone(),
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(message["message_id"], op);
+        assert_eq!(message["thread_id"], "t");
+    }
     store.database.shutdown().await.unwrap();
 }

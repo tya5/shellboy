@@ -220,8 +220,8 @@ even on cancellation. A completed/stopped Run alone does not prove disposal of
 unadmitted held input. Admission/cancellation and copy disposal share their write
 transaction. Already-admitted first sends are collected after the copy is bound.
 Existing history/all GC also processes at most128 eligible old copies per DB
-transaction, saving the same binding before deletion; malformed or mismatched
-correlations fail closed. Editing/archived rows are never collection candidates.
+transaction, requiring the binding written by acceptance and leaving it unchanged;
+malformed or mismatched correlations fail closed. Editing/archived rows are never collection candidates.
 
 Autosave, editable restoration and submitting restoration consult both retained
 old submitted rows and receipt bindings, so removal cannot revive a sent revision.
