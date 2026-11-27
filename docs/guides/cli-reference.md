@@ -1329,7 +1329,7 @@ Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --nod
 
 - `shellboy artifact add --thread THREAD_ID --uri URI --title TITLE [--mime MIME]` registers an artifact.
 - `shellboy artifact update --artifact ARTIFACT_ID --uri URI [--title TITLE] [--mime MIME]` appends a version.
-- `shellboy artifact list --thread THREAD_ID [--limit N] [--cursor CURSOR]` lists latest metadata, newest-updated first. Equal timestamps sort by artifact ID. Pass `next_cursor` to continue the same live list; start again without a cursor to see entries that moved ahead of it.
+- `shellboy artifact list [--thread THREAD_ID] [--scheme SCHEME] [--limit N] [--cursor CURSOR]` lists latest metadata, newest-updated first; equal timestamps sort by artifact ID. At least one of `--thread` and `--scheme` is required. For example, `shellboy artifact list --scheme shellboy-app` lists apps across live, non-archived Threads and returns `thread_id` on each item. Scheme names are case-insensitive and have no trailing colon. Pass `next_cursor` with the same filters to continue; start again without a cursor to see entries that moved ahead of it.
 
 - `shellboy artifact read --thread THREAD_ID --artifact ARTIFACT_ID --version N [--path RELATIVE_PATH]` reads one file of that exact version. The result carries the bytes as `base64` with their count in `raw_bytes`; decode it yourself, for example by extracting `.result.base64` from the reply with `jq -r` and passing it to `base64 -d`.
 

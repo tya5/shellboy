@@ -190,13 +190,38 @@
           "minimum": 0,
           "type": "integer"
         },
+        "scheme": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "thread_id": {
-          "type": "string"
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "required": [
-        "thread_id"
-      ],
+      "type": "object"
+    },
+    "ArtifactListFilter": {
+      "properties": {
+        "scheme": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ArtifactReadArgs": {
@@ -14328,7 +14353,7 @@
       "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
         "filters": {
-          "$ref": "#/definitions/ThreadScopeFilter"
+          "$ref": "#/definitions/ArtifactListFilter"
         },
         "items": {
           "items": {

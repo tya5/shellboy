@@ -17,7 +17,8 @@ fn artifact_list_seeks_across_equal_update_times() {
     )
     .unwrap();
     let mut args = ArtifactListArgs {
-        thread_id: "t".into(),
+        thread_id: Some("t".into()),
+        scheme: None,
         limit: 2,
         cursor: None,
     };
@@ -34,7 +35,7 @@ fn artifact_list_seeks_across_equal_update_times() {
         args.cursor = Some(result.next_cursor.unwrap());
     }
     let mut other = args.clone();
-    other.thread_id = "other".into();
+    other.thread_id = Some("other".into());
     assert_eq!(
         list(&tx, &other).unwrap_err().code,
         ErrorCode::CursorExpired
@@ -48,8 +49,9 @@ fn artifact_list_seeks_across_equal_update_times() {
         1,
         "artifact.list",
         "t",
-        ThreadScopeFilter {
-            thread_id: "t".into(),
+        ArtifactListFilter {
+            thread_id: Some("t".into()),
+            scheme: None,
         },
         |id| (*id).into(),
     )

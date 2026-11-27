@@ -106,3 +106,38 @@ fn interrupted_upgrade_and_later_integrity_error_both_keep_pending() {
     let db = Connection::open(&path).unwrap();
     assert_eq!(pending(&db).unwrap(), Some(Check::Skip));
 }
+
+#[test]
+fn artifact_scheme_migration_backfills_latest_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let mut db = Connection::open(&path).unwrap();
+    let version = MIGRATION_NAMES
+        .iter()
+        .find(|(_, name)| *name == "0069_instruction_snapshot_turns")
+        .unwrap()
+        .0;
+    build_historical_schema(&mut db, version as usize);
+    db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');
+        INSERT INTO artifact(id,thread_id,created_at,updated_at) VALUES ('a','t','now','now'),('b','t','now','now'),('c','t','now','now');
+        INSERT INTO artifact_version(artifact_id,version,uri,title,created_at) VALUES
+        ('a',1,'shellboy-app:/old','Old','now'),('a',2,'FiLe:///latest','Latest','now'),
+        ('b',1,'/path:with-colon','Path','now'),('c',1,'SHELLBOY-APP:/app','App','now');").unwrap();
+    drop(db);
+    let db = open_connection(&path, None, None, true).unwrap();
+    for (id, expected) in [
+        ("a", Some("file")),
+        ("b", None),
+        ("c", Some("shellboy-app")),
+    ] {
+        let scheme: Option<String> = db
+            .query_row(
+                "SELECT current_scheme FROM artifact WHERE id=?",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(scheme.as_deref(), expected);
+    }
+    assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
+}

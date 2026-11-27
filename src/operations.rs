@@ -208,6 +208,7 @@ pub(crate) enum Discovery {
 pub(crate) enum FieldId {
     Artifact,
     ArtifactUri,
+    ArtifactScheme,
     ArtifactTitle,
     ArtifactMime,
     ArtifactVersion,
@@ -446,6 +447,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         default_origin: DefaultOrigin::None,
         label: "URI",
         help: "参照先のURIを指定します。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::ArtifactScheme,
+        default_origin: DefaultOrigin::None,
+        label: "URI scheme",
+        help: "Filter by the URI scheme of the current version.",
         kind: FieldType::Text,
         discovery: Discovery::None,
     },
@@ -1679,7 +1688,12 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::Inspect,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Thread, FieldId::Cursor, FieldId::Limit],
+        fields: &[
+            FieldId::Thread,
+            FieldId::ArtifactScheme,
+            FieldId::Cursor,
+            FieldId::Limit,
+        ],
     },
     OperationSpec {
         id: OperationId::ArtifactGet,

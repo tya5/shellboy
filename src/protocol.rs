@@ -80,7 +80,7 @@ fn operation_result_schemas(
     result!("thread.tags", RecordPage<String, NoListFilters>);
     result!("artifact.add", ArtifactSelected);
     result!("artifact.update", ArtifactSelected);
-    result!("artifact.list", RecordPage<ArtifactSummary, ThreadScopeFilter>);
+    result!("artifact.list", RecordPage<ArtifactSummary, ArtifactListFilter>);
     result!("artifact.get", ArtifactGetResult);
     result!("artifact.remove", Accepted);
     result!("artifact.read", ArtifactContent);
@@ -872,7 +872,7 @@ args!(ArtifactUpdateArgs { artifact_id: String, uri: String, #[serde(default)] t
 args!(ArtifactRemoveArgs {
     artifact_id: String
 });
-args!(ArtifactListArgs { thread_id: String, #[serde(default)] cursor: Option<String>, #[serde(default="artifact_page_limit")] limit: u32 });
+args!(ArtifactListArgs { #[serde(default)] thread_id: Option<String>, #[serde(default)] scheme: Option<String>, #[serde(default)] cursor: Option<String>, #[serde(default="artifact_page_limit")] limit: u32 });
 args!(ArtifactGetArgs { artifact_id: String, #[serde(default)] version: Option<i64>, #[serde(default)] cursor: Option<String>, #[serde(default)] limit: Option<u32> });
 args!(ArtifactReadArgs { thread_id: String, artifact_id: String, version: i64, #[serde(default, skip_serializing_if = "Option::is_none")] path: Option<String> });
 // One regular file of an exact artifact version, base64-encoded in the reply.
@@ -2070,6 +2070,7 @@ record!(MessageListFilters {
 pub type MessageListPage = RecordPage<Value, MessageListFilters>;
 
 record!(NoListFilters {});
+record!(ArtifactListFilter { #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] scheme: Option<String> });
 record!(ThreadScopeFilter { thread_id: String });
 record!(ArtifactScopeFilter {
     artifact_id: String

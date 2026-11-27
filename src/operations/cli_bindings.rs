@@ -35,6 +35,7 @@ const MEANINGS: &[Meaning] = &[
         &["artifact", "list"],
         &[
             ("thread_id", FieldId::Thread),
+            ("scheme", FieldId::ArtifactScheme),
             ("cursor", FieldId::Cursor),
             ("limit", FieldId::Limit),
         ],

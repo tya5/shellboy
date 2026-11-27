@@ -959,7 +959,12 @@ impl Command {
             }
             Self::ArtifactAdd(a) => nonempty(&a.thread_id, "thread_id"),
             Self::ArtifactUpdate(a) => nonempty(&a.artifact_id, "artifact_id"),
-            Self::ArtifactList(a) => nonempty(&a.thread_id, "thread_id"),
+            Self::ArtifactList(a) => {
+                if let Some(id) = &a.thread_id {
+                    nonempty(id, "thread_id")?;
+                }
+                crate::artifacts::validate_list_scope(a).map(|_| ())
+            }
             Self::ArtifactGet(a) => nonempty(&a.artifact_id, "artifact_id"),
             Self::ArtifactRemove(a) => nonempty(&a.artifact_id, "artifact_id"),
             Self::ArtifactRead(a) => {
