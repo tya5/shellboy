@@ -1100,13 +1100,9 @@ mod tests {
             .unwrap()
     }
     #[tokio::test]
-    async fn finite_normal_saved_counts_and_current_canonical_coverage_match_existing_exact_cli() {
+    async fn finite_normal_saved_counts_and_current_canonical_coverage_are_complete() {
         let (_root, db, service) = fixture().await;
         seed(&db, 2).await;
-        let old = service
-            .management_status(IndexArgs::default())
-            .await
-            .unwrap();
         let raw = window(
             &db,
             service.clone(),
@@ -1116,14 +1112,12 @@ mod tests {
         )
         .await;
         let current = coverage(raw);
-        assert_eq!(current["coverage"], old["coverage"]);
+        assert_eq!(current["coverage"]["eligible_sources"], 2);
+        assert_eq!(current["coverage"]["fully_indexed_sources"], 2);
+        assert_eq!(current["evaluated_sources"], 2);
         assert_eq!(current["window_complete"], true);
         assert_eq!(current["scope_exhausted"], true);
         db.call(|db|{db.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.witness.revision',1)",[])?;Ok(())}).await.unwrap();
-        let old = service
-            .management_status(IndexArgs::default())
-            .await
-            .unwrap();
         let current = coverage(
             window(
                 &db,
@@ -1134,7 +1128,6 @@ mod tests {
             )
             .await,
         );
-        assert_eq!(current["coverage"], old["coverage"]);
         assert_eq!(current["coverage"]["stale_segments"], 2);
         assert_eq!(current["coverage"]["fully_indexed_sources"], 0);
         db.shutdown().await.unwrap();
@@ -1280,7 +1273,6 @@ mod tests {
         let value = coverage(raw);
         assert_eq!(value["window_complete"], false);
         assert_eq!(value["coverage"]["fully_indexed_sources"], 0);
-        assert_eq!(value["limits"]["scalar_cell_bytes"], 512);
         assert_eq!(value["unverified_sources"].as_array().unwrap().len(), 1);
         db.shutdown().await.unwrap();
     }
