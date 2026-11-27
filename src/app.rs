@@ -450,18 +450,21 @@ impl DataOwner {
         let recovery_started = std::time::Instant::now();
         let directory = loaded.data_dir.clone();
         let stage_lock = lock.clone();
-        let cleanup = tokio::task::spawn_blocking(move || {
-            let _owner = stage_lock;
-            startup_stage::publish(&directory, StartupStage::InterruptedWork);
-            crate::control::service_endpoint::recover(&directory)
-        })
-        .await;
-        if !matches!(cleanup, Ok(Ok(()))) {
+        let cleanup = crate::attachments::BlockingFiles::new(loaded.config.workers.attachment)
+            .execute_owned(move || {
+                let _owner = stage_lock;
+                startup_stage::publish(&directory, StartupStage::InterruptedWork);
+                crate::control::service_endpoint::recover(&directory).map_err(|_| {
+                    ApiError::new(
+                        ErrorCode::IoFailed,
+                        "Cannot remove retired service endpoint files",
+                    )
+                })
+            })
+            .await;
+        if let Err(error) = cleanup {
             let _ = db.shutdown().await;
-            return Err(StartupStage::InterruptedWork.failure(ApiError::new(
-                ErrorCode::IoFailed,
-                "Cannot remove retired service endpoint files",
-            )));
+            return Err(StartupStage::InterruptedWork.failure(error));
         }
         progress(StartupStage::InterruptedWork, language, motion);
         let preserve_usage_waits = loaded.config.recovery.auto_retry_usage_limit;

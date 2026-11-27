@@ -206,3 +206,82 @@ async fn marker_case(rollback: bool) {
     }
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn service_endpoint_retires_even_when_output_cannot_be_saved() {
+    for obstructed in [false, true] {
+        let (root, owner, control, accepted) =
+            crate::control::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let execution = uuid::Uuid::new_v4().to_string();
+        let saved = execution.clone();
+        let thread = accepted.thread_id;
+        let saved_thread = thread.clone();
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO schedule(id,thread_id,kind,enabled,cwd,command) VALUES('service',?1,'service',1,'.','echo fixture')", [&saved_thread])?;
+            db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,'service',?1,'starting','.','{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')", [&saved])?;
+            db.execute_batch("CREATE TRIGGER reject_service_output BEFORE INSERT ON output_chunk BEGIN SELECT RAISE(ABORT,'synthetic output rollback'); END;")?;
+            Ok(())
+        }).await.unwrap();
+        let publication = Arc::new(
+            crate::control::service_endpoint::Publication::create(&control, &execution)
+                .await
+                .unwrap(),
+        );
+        let file = std::path::PathBuf::from(publication.env_value());
+        assert!(file.is_file());
+        if obstructed {
+            std::fs::remove_file(&file).unwrap();
+            std::fs::create_dir(&file).unwrap();
+        }
+        let shell = ShellSupervisor::new(&owner.loaded.config)
+            .spawn(
+                execution.clone(),
+                root.path().into(),
+                serde_json::from_value(json!({"command":"printf fixture; exec sleep 600"}))
+                    .unwrap(),
+                BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        let (stop, _) = control
+            .shell_start_intent(&execution, true, Some(publication.clone()))
+            .await
+            .unwrap();
+        assert!(!stop);
+        let mut shell_owner = ShellOwner::Schedule {
+            thread,
+            endpoint: Some(publication),
+        };
+        let result = crate::test_watchdog::watchdog(
+            "post-reap endpoint retirement",
+            collect_shell(&control, &mut shell_owner, &execution, shell),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.unwrap_err().code, ErrorCode::SaveFailed);
+        let saved = crate::control::output::ShellOutputReader::new(
+            owner.db.clone(),
+            owner.instance_id.clone(),
+        )
+        .get(&execution)
+        .await
+        .unwrap();
+        assert_eq!(saved.state, ShellState::Stopped);
+        assert!(!saved.output_complete);
+        assert_eq!(
+            saved.settlement_detail,
+            obstructed.then_some(ShellSettlementDetail::ServiceEndpointRetirementFailed)
+        );
+        if obstructed {
+            assert!(file.is_dir());
+            std::fs::remove_dir(&file).unwrap();
+        } else {
+            assert!(!file.exists());
+        }
+        assert_eq!(
+            control.shutdown().await.unwrap_err().code,
+            ErrorCode::SaveFailed
+        );
+        owner.shutdown().await.unwrap();
+    }
+}

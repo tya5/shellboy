@@ -114,11 +114,39 @@ impl BlockingFiles {
         F: FnOnce() -> Result<T, ApiError> + Send + 'static,
     {
         let permit = tokio::select! { biased; _=cancel.cancelled()=>return Err(cancelled()), permit=tokio::time::timeout_at(deadline,self.slots.clone().acquire_owned())=>permit.map_err(|_|io_error("File preparation timed out waiting for a worker"))?.map_err(|_|io_error("File workers closed"))? };
-        let task = tokio::task::spawn_blocking(move || {
+        let task = Self::spawn(permit, operation);
+        tokio::select! { biased; _=cancel.cancelled()=>Err(cancelled()), result=tokio::time::timeout_at(deadline,task)=>result.map_err(|_|io_error("File preparation timed out; the OS read may still occupy a worker"))?.map_err(|_|io_error("File worker failed"))? }
+    }
+
+    /// An owner must observe the result of a lifecycle write even during shutdown.
+    pub(crate) async fn execute_owned<T, F>(&self, operation: F) -> Result<T, ApiError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+    {
+        let permit = self
+            .slots
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| io_error("File workers closed"))?;
+        Self::spawn(permit, operation)
+            .await
+            .map_err(|_| io_error("File worker failed"))?
+    }
+
+    fn spawn<T, F>(
+        permit: tokio::sync::OwnedSemaphorePermit,
+        operation: F,
+    ) -> tokio::task::JoinHandle<Result<T, ApiError>>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || {
             let _permit = permit;
             operation()
-        });
-        tokio::select! { biased; _=cancel.cancelled()=>Err(cancelled()), result=tokio::time::timeout_at(deadline,task)=>result.map_err(|_|io_error("File preparation timed out; the OS read may still occupy a worker"))?.map_err(|_|io_error("File worker failed"))? }
+        })
     }
 }
 #[derive(Clone, Debug)]

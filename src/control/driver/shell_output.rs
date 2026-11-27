@@ -7,7 +7,7 @@ use crate::shell::OutputChunk;
 use crate::{
     app::storage_error,
     control::Control,
-    protocol::{ApiError, ErrorCode, ShellState},
+    protocol::{ApiError, ErrorCode, ShellSettlementDetail, ShellState},
     shell::{OutputStream, ShellCompletion, ShellEvent},
 };
 use rusqlite::{OptionalExtension, params};
@@ -354,7 +354,7 @@ pub(in crate::control) async fn collect_shell(
             }
         }
     }
-    let completion = loop {
+    let mut completion = loop {
         if let Some(value) = shell.completion.borrow().clone() {
             break value;
         }
@@ -366,8 +366,18 @@ pub(in crate::control) async fn collect_shell(
     };
     // Even after a save failure, retain the shell until its supervisor has
     // terminated and reaped the process and drained its output pumps.
-    if let Some(error) = save_failure {
-        return Err(error);
+    let publication = match owner {
+        ShellOwner::Schedule { endpoint, .. } => endpoint.take(),
+        _ => None,
+    };
+    let settlement_detail = match (publication, &save_failure) {
+        (Some(publication), _) => publication.retire(control).await,
+        (None, Some(error)) => return Err(error.clone()),
+        (None, None) => None,
+    };
+    if save_failure.is_some() {
+        // The supervisor drained the pipes, but not all output was saved.
+        completion.output_complete = false;
     }
     if completion.state == ShellState::Failed || !completion.output_complete {
         control.diagnostics.record(
@@ -381,7 +391,11 @@ pub(in crate::control) async fn collect_shell(
             },
         );
     }
-    save_completion(control, owner, execution, &completion).await?;
+    let saved = save_completion(control, owner, execution, &completion, settlement_detail).await;
+    if let Some(error) = save_failure {
+        return Err(error);
+    }
+    saved?;
     Ok(completion)
 }
 
@@ -390,6 +404,7 @@ async fn save_completion(
     owner: &ShellOwner,
     execution: &str,
     completion: &ShellCompletion,
+    settlement_detail: Option<ShellSettlementDetail>,
 ) -> Result<(), ApiError> {
     let current = owner.clone();
     let execution = execution.to_owned();
@@ -399,10 +414,6 @@ async fn save_completion(
     let store = control.store.clone();
     let registry = control.publications.clone();
     let effects = control.store.database.call(move|db|{let tx=db.transaction()?;
-        let settlement_detail = match &current {
-            ShellOwner::Schedule { endpoint: Some(publication), .. } => publication.retire(),
-            _ => None,
-        };
         let service = super::super::schedule::service_settlement(&tx,&execution)?;
         let state=serde_json::to_value(completed.state).unwrap_or(Value::Null);
         if tx.execute("UPDATE shell_execution SET state=CASE WHEN end_reason='schedule_timeout' THEN 'stopped' ELSE ?2 END,exit_code=CASE WHEN end_reason='schedule_timeout' THEN NULL ELSE ?3 END,end_reason=CASE WHEN end_reason IN ('schedule_timeout','owner_shutdown') THEN end_reason ELSE ?4 END,output_complete=?5,ended_at=?6,shell_json=json_set(shell_json,'$.completion',json(?7)) WHERE id=?1 AND state IN ('starting','running','stopping')",params![execution,state.as_str().unwrap_or("failed"),completed.exit_code,completed.reason,completed.output_complete,now(),json!({"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms,"settlement_detail":settlement_detail}).to_string()])? == 0 {
