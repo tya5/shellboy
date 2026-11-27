@@ -44,7 +44,7 @@ CLI追加はshell／外部CLIとも専用の補助nodeを作る。保存済みAs
 
 ## 指定消費と実体送信の別の事実（M9）
 
-新しい添付指定の保護は、その指定のready/unavailable/excludedメタデータを実際にadmitした最初の正常完了要求で解除する。不在・読取り不能・単体上限によるunavailableでも、指定の状態文を消費した正常要求後は過去扱いへ進める。失敗/取消/世代不一致では解除しない。解除対象は同attemptのattachment_sendへ保存された指定に限定する。後で復活/縮小したファイルも、過去添付として通常の古い順の容量除外へ従う。
+新しい添付指定の保護は、その指定のready/unavailable/excludedメタデータを実際にadmitした最初の正常完了要求で解除する。不在・読取り不能・単体上限によるunavailableでも、指定の状態文を消費した正常要求後は過去扱いへ進める。失敗/取消/世代不一致では解除しない。解除対象は同attemptのattachment_sendへ保存された指定に限定する。採用済みの省略スロットは、ファイルが復活しても送信容量に含めない。
 
 この消費は実体を送った事実とは別である。attachment_sendをsentへ進めhash比較基準に使うのはreadyだった実体だけで、unavailable/excludedは状態を維持し架空のhash/送信成功を保存しない。永続化については下記の固定スロット契約も参照。
 
@@ -127,8 +127,8 @@ node. Selection revision fencing still prevents a stale in-flight preparation
 from being adopted. Explicit retry re-prepares the original Turn: the source reference carries no
 binary, and a new exclusion notice goes at the tail. File unavailability is an
 alternative non-destructive workaround: preparation checks the existing path
-and sends a separate unavailable notice without binary. Restoring the path
-makes an active attachment eligible again. Never automatically move a user's
+and sends a separate unavailable notice without binary. Restoring the path does not make an adopted omission eligible for sending;
+reattach under a new ID. Never automatically move a user's
 file.
 
 
@@ -142,8 +142,9 @@ Adoption fixes each Thread/attachment ID's slot: live with the sent SHA-256, or
 permanently omitted if unavailable. A later adopted change or unavailability
 retires a live slot permanently. The adopted send ledger stores the omission
 reason (`next_attachment_omission`) alongside the observation, but only rows
-that actually supplied bytes become `sent`. Previous `sent` rows continue to
-provide the last known sent fingerprint for existing histories. Failed and
+that actually supplied bytes become `sent`. The first adopted byte-bearing slot provides its sent fingerprint. The
+migration also carries adopted unavailability forward from the send ledger,
+including a first unavailable slot that legacy code later resumed. Failed and
 non-adopted attempts fix nothing. A current observation can emit a bounded
 metadata-only tail notice and cannot become the slot's fingerprint.
 
@@ -153,3 +154,9 @@ fingerprint, `retained: false`, and how to read the current file or explicitly
 attach it again under a new ID. Unchanged live slots keep the existing shape.
 Omitted slots do not resume sending after recovery or reversion. Source payloads,
 spill payloads and the existing input-byte categories are unchanged.
+
+Preparation records bounded hash/size/format observations before selecting
+what fits the aggregate budget. Only live placements count; only admitted
+paths are encoded. A cold admitted path can be read again to encode it, and
+the second read must match its classified observation or preparation fails
+without adoption. Omitted paths keep only observation metadata.
