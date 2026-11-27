@@ -3320,7 +3320,11 @@ async fn received_attempt_fence(truncated: bool) {
     super::super::turn_interrupt::acknowledge(&control, &snapshot.thread, &snapshot.run)
         .await
         .unwrap();
-    let (old_turn, run, thread) = (snapshot.turn.clone(), snapshot.run.clone(), snapshot.thread.clone());
+    let (old_turn, run, thread) = (
+        snapshot.turn.clone(),
+        snapshot.run.clone(),
+        snapshot.thread.clone(),
+    );
     control.store.database.call(move |db| {
         let result = db.query_row("SELECT state,json_extract(input_manifest_json,'$.adoption.outcome'),json_extract(input_manifest_json,'$.adoption.reason'),ended_at FROM model_attempt WHERE id=?1",[attempt],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?;
         assert_eq!((&*result.0,&*result.1,&*result.2),(if truncated { "incomplete" } else { "completed" },"not_adopted","turn_fenced"));

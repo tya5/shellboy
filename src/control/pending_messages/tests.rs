@@ -1610,10 +1610,21 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
     let reopened = DbWorker::open(root.path().join("pending.db"))
         .await
         .unwrap();
-    reopened.call(|db| {
-        assert!(!db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE state='submitted')",[],|r|r.get::<_,bool>(0))?);
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt",[],|r|r.get::<_,i64>(0))?,16);Ok(())
-    }).await.unwrap();
+    reopened
+        .call(|db| {
+            assert!(!db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM draft WHERE state='submitted')",
+                [],
+                |r| r.get::<_, bool>(0)
+            )?);
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?,
+                16
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     reopened.shutdown().await.unwrap();
 }
 
@@ -1699,9 +1710,24 @@ async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batche
             .unwrap();
         assert_eq!(report.submitted_drafts_collected, expected);
     }
-    store.database.call(|db| {
-        assert_eq!(db.query_row("SELECT count(*) FROM draft WHERE state='submitted'",[],|r|r.get::<_,i64>(0))?,0);
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt",[],|r|r.get::<_,i64>(0))?,130);Ok(())
-    }).await.unwrap();
+    store
+        .database
+        .call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM draft WHERE state='submitted'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?,
+                130
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     store.database.shutdown().await.unwrap();
 }

@@ -1193,27 +1193,54 @@ async fn committed_selection_witness(control: &Control, thread: &str) -> StageWi
 async fn selected_window(control: &Control, thread: &str) -> HistoryWindow {
     let args: HistoryWindowArgs = serde_json::from_value(json!({
         "thread_id": thread, "before": 199, "after": 0, "excerpt_chars": 0,
-    })).unwrap();
-    let window = control.store.database.call(move |db| {
-        Ok(crate::history::window(db, &args)?)
-    }).await.unwrap();
-    assert_eq!(window.items.len() as u64, window.total, "fixture fits one window");
+    }))
+    .unwrap();
+    let window = control
+        .store
+        .database
+        .call(move |db| Ok(crate::history::window(db, &args)?))
+        .await
+        .unwrap();
+    assert_eq!(
+        window.items.len() as u64,
+        window.total,
+        "fixture fits one window"
+    );
     window
 }
 
 fn selected_replacements(window: &HistoryWindow, kind: &str) -> Vec<String> {
-    window.items.iter().filter(|node| node.kind == kind)
-        .map(|node| node.node_id.clone()).collect()
+    window
+        .items
+        .iter()
+        .filter(|node| node.kind == kind)
+        .map(|node| node.node_id.clone())
+        .collect()
 }
 
 async fn listed_compaction(control: &Control, thread: &str, attempt: &str) -> Option<Value> {
     let thread = thread.to_owned();
     let attempt = attempt.to_owned();
-    control.store.database.call(move |db| {
-        let args = CompactListArgs { thread_id: Some(thread.clone()), since: None, until: None, limit: 50 };
-        let page = crate::readback::compactions(db, &thread, &args)?;
-        Ok(page["items"].as_array().unwrap().iter().find(|item| item["attempt_id"] == attempt).cloned())
-    }).await.unwrap()
+    control
+        .store
+        .database
+        .call(move |db| {
+            let args = CompactListArgs {
+                thread_id: Some(thread.clone()),
+                since: None,
+                until: None,
+                limit: 50,
+            };
+            let page = crate::readback::compactions(db, &thread, &args)?;
+            Ok(page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["attempt_id"] == attempt)
+                .cloned())
+        })
+        .await
+        .unwrap()
 }
 
 const SAVED_RECORD: &str = "json_object('token',c.token,'outcome',COALESCE(c.outcome,'unknown'),'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json))";
@@ -1487,7 +1514,9 @@ async fn direct_boundary_case(
         .count() as i64;
     assert_eq!(
         after_window.revision as i64,
-        checkpoint_witness.selection_revision + i64::from(follows_active_summary) + newly_appended_audit_nodes,
+        checkpoint_witness.selection_revision
+            + i64::from(follows_active_summary)
+            + newly_appended_audit_nodes,
         "the public revision advances for the follow-on splice and appended audit nodes only"
     );
     assert_eq!(
@@ -1532,9 +1561,15 @@ async fn direct_boundary_case(
                 "protected/latest source {id} remains byte-identical across the real follow-on summary; ordinal shifts are caused by the selected summary replacement"
             );
         }
-        let [summary_id] = after_summary.as_slice() else { panic!("exactly one follow-on Summary: {after_summary:?}") };
-        let summary_path = final_path.iter().find(|entry| entry[1] == *summary_id && entry[3] == "summary").unwrap();
-        let summary_payload: Value = serde_json::from_str(summary_path[5].as_str().unwrap()).unwrap();
+        let [summary_id] = after_summary.as_slice() else {
+            panic!("exactly one follow-on Summary: {after_summary:?}")
+        };
+        let summary_path = final_path
+            .iter()
+            .find(|entry| entry[1] == *summary_id && entry[3] == "summary")
+            .unwrap();
+        let summary_payload: Value =
+            serde_json::from_str(summary_path[5].as_str().unwrap()).unwrap();
         let source_rows = after_fault_witness
             .replacement_provenance_and_source_bytes
             .as_array()
@@ -1573,7 +1608,11 @@ async fn direct_boundary_case(
             provenance_r, expected_r,
             "replacement provenance is exactly the ordered pre-summary active R"
         );
-        let summary = request(&control, Command::HistoryRead(serde_json::from_value(json!({"node_id": summary_id})).unwrap())).await;
+        let summary = request(
+            &control,
+            Command::HistoryRead(serde_json::from_value(json!({"node_id": summary_id})).unwrap()),
+        )
+        .await;
         assert_eq!(summary["source_node_ids"], json!(expected_r));
         assert_eq!(
             payload_r, expected_r,
@@ -1757,19 +1796,32 @@ async fn direct_boundary_case(
         expected_outcome(fault, scenario, checkpoint_outcome),
         "the captured observation preserves the fault's DB stage contract"
     );
-    let summary_committed = fault != Fault::RejectFact && (scenario.summary() || follows_active_summary);
+    let summary_committed =
+        fault != Fault::RejectFact && (scenario.summary() || follows_active_summary);
     if scenario == Scenario::ClosedSpill {
-        assert_eq!(!after_spills.is_empty(), fault != Fault::RejectFact,
-            "closed whole groups spill unless their adoption rejects");
+        assert_eq!(
+            !after_spills.is_empty(),
+            fault != Fault::RejectFact,
+            "closed whole groups spill unless their adoption rejects"
+        );
     }
     if scenario == Scenario::ClosedSummary {
         assert!(!after_spills.is_empty(), "closed spill precedes summary");
     }
-    assert_eq!(!after_summary.is_empty(), summary_committed, "only a committed Summary joins the selected path");
+    assert_eq!(
+        !after_summary.is_empty(),
+        summary_committed,
+        "only a committed Summary joins the selected path"
+    );
     for id in ["current-user", "g3-call", "g3-result"] {
-        assert!(after_window.items.iter().any(|node| node.node_id == id), "protected source {id} remains selected");
+        assert!(
+            after_window.items.iter().any(|node| node.node_id == id),
+            "protected source {id} remains selected"
+        );
     }
-    let listed = listed_compaction(&control, fixture.thread_id, fixture.attempt_id).await.unwrap();
+    let listed = listed_compaction(&control, fixture.thread_id, fixture.attempt_id)
+        .await
+        .unwrap();
     assert_eq!(listed["state"], terminal_outcome);
     assert_eq!(listed["trigger"]["input_tokens"], fixture.input_tokens);
     drop(boundary.into_guard());
@@ -1796,9 +1848,17 @@ async fn direct_boundary_case(
         "unknown receipts remain provisional; terminal outcomes are finalized"
     );
     let reopened_public = selected_window(&reopened, fixture.thread_id).await;
-    assert_eq!(selected_replacements(&reopened_public, "summary"), after_summary);
-    assert_eq!(selected_replacements(&reopened_public, "spill"), after_spills);
-    let listed = listed_compaction(&reopened, fixture.thread_id, fixture.attempt_id).await.unwrap();
+    assert_eq!(
+        selected_replacements(&reopened_public, "summary"),
+        after_summary
+    );
+    assert_eq!(
+        selected_replacements(&reopened_public, "spill"),
+        after_spills
+    );
+    let listed = listed_compaction(&reopened, fixture.thread_id, fixture.attempt_id)
+        .await
+        .unwrap();
     assert_eq!(listed["state"], terminal_outcome);
     let active_key = crate::compaction::CompactionKeys::new(fixture.thread_id).automatic_active();
     assert_eq!(
@@ -2038,12 +2098,7 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
         "failed"
     };
     assert!(
-        terminal_record_written(
-            &control,
-            &identity,
-            expected_outcome,
-        )
-        .await,
+        terminal_record_written(&control, &identity, expected_outcome,).await,
         "exact attempt/token terminal FINISH for {mutation:?}"
     );
     let record = automatic_attempt_record(&control, &fixture).await;
@@ -2061,7 +2116,9 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
     if expected_adoption {
         let selected = selected_window(&control, fixture.thread_id).await;
         let summaries = selected_replacements(&selected, "summary");
-        let [summary_id] = summaries.as_slice() else { panic!("exactly one adopted Summary: {summaries:?}") };
+        let [summary_id] = summaries.as_slice() else {
+            panic!("exactly one adopted Summary: {summaries:?}")
+        };
         let rows = after
             .replacement_provenance_and_source_bytes
             .as_array()
@@ -2069,7 +2126,11 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
             .iter()
             .filter(|row| row[1] == summary_id && row[2] == "summary")
             .collect::<Vec<_>>();
-        let summary = request(&control, Command::HistoryRead(serde_json::from_value(json!({"node_id": summary_id})).unwrap())).await;
+        let summary = request(
+            &control,
+            Command::HistoryRead(serde_json::from_value(json!({"node_id": summary_id})).unwrap()),
+        )
+        .await;
         let source_ids: Vec<_> = rows.iter().map(|row| row[4].clone()).collect();
         assert!(!source_ids.is_empty());
         assert_eq!(summary["source_node_ids"], json!(source_ids));
@@ -2727,9 +2788,7 @@ async fn prepare_driver_lifecycle(
                     }
                     continue;
                 }
-                if terminal_record_written(&control, identity, "adopted")
-                    .await
-                {
+                if terminal_record_written(&control, identity, "adopted").await {
                     break;
                 }
                 tokio::task::yield_now().await;
@@ -2852,9 +2911,16 @@ async fn prepare_driver_lifecycle(
             "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
         );
         let selected = selected_window(&control, &target).await;
-        let kind = if scenario.summary() { "summary" } else { "spill" };
-        assert_eq!(!selected_replacements(&selected, kind).is_empty(), fault != Fault::RejectFact,
-            "only committed adoption is visible in selected history");
+        let kind = if scenario.summary() {
+            "summary"
+        } else {
+            "spill"
+        };
+        assert_eq!(
+            !selected_replacements(&selected, kind).is_empty(),
+            fault != Fault::RejectFact,
+            "only committed adoption is visible in selected history"
+        );
         assert!(
             receive.try_recv().is_err(),
             "no provider continuation before the selected checkpoint"
@@ -2960,7 +3026,8 @@ async fn terminal_record_written(
     identity: &TerminalAttemptIdentity,
     expected_outcome: &str,
 ) -> bool {
-    listed_compaction(control, &identity.thread, &identity.attempt).await
+    listed_compaction(control, &identity.thread, &identity.attempt)
+        .await
         .is_some_and(|item| item["state"] == expected_outcome)
 }
 
