@@ -45,7 +45,7 @@ reads with expired `status` or state-filtered `thread list` cursors without
 those cursors. See [release upgrade notes](../release-v0.16.0.md#upgrade-notes)
 for database, CLI, and configuration details.
 
-Protocol next (#450) adds the required `Welcome.operation_epoch` and
+Protocol 50 (#450) adds the required `Welcome.operation_epoch` and
 `status.operation_epoch`, both `<instance_id>.<n>`. New operation IDs are
 `<operation_epoch>:<nonce>`; an unknown ID with any other prefix is refused
 with `operation_expired`. The owner moves to the next epoch, without a
@@ -55,7 +55,7 @@ gets `storage_limit` with `details.reason=operation_epoch_rolled` and
 `request_may_have_been_applied=false`. Clients that let the owner mint IDs
 read the epoch at each handshake. See
 [operation observability](operation-observability.md) and
-[the version note](protocol-versions/next-450.md).
+[the version note](protocol-versions/50.md).
 
 Core #294 adds `Welcome.owner_version` as optional metadata and does not bump
 protocol 7: existing Welcome decoders ignore additive fields, and older owners
