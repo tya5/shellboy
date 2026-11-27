@@ -1545,6 +1545,7 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
                     .prepare(sql)?
                     .query_map([], |r| r.get::<_, String>(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
+                assert!(!bodies.is_empty(), "redaction scan must see rows: {sql}");
                 for body in bodies {
                     assert!(!body.contains("fixture-token"));
                 }
