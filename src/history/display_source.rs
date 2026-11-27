@@ -234,7 +234,7 @@ pub(super) fn read_page(
         end: char_at(extent.end),
     };
     let outline = continuation.is_none().then(|| {
-        crate::presentation::display_outline(
+        crate::display_outline::display_outline(
             &args.node_id,
             kind,
             &decoded,

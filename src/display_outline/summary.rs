@@ -2,16 +2,16 @@
 use serde_json::Value;
 use std::collections::HashSet;
 
-pub(super) struct Part<'a> {
+pub(crate) struct Part<'a> {
     pub text: &'a str,
     pub start: usize,
     pub end: usize,
 }
-pub(super) struct Decoded<'a> {
+pub(crate) struct Decoded<'a> {
     pub body: &'a str,
     pub parts: Vec<Part<'a>>,
 }
-pub(super) fn decode(payload: &Value) -> Option<Decoded<'_>> {
+pub(crate) fn decode(payload: &Value) -> Option<Decoded<'_>> {
     if payload.get("summary_format")?.as_str()? != "shellboy-summary-v1" {
         return None;
     }
