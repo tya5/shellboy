@@ -5864,21 +5864,6 @@
     "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
     "source_tokens_sha256": "6dfbbecb97b20cfdb3d29c268f0336ce1def9d853e4f082d2fc1e00fd7dac72a"
   },
-  "src/presentation/fields.rs:b6843538a6083ac6:2": {
-    "category": "a",
-    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "f3e5f1d111cf15be2548c668dabd20a92a45748af47bae6db4e1232c837b2425"
-  },
-  "src/presentation/fields.rs:0bd8094b4f7e3147:2": {
-    "category": "a",
-    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "f3e5f1d111cf15be2548c668dabd20a92a45748af47bae6db4e1232c837b2425"
-  },
-  "src/presentation/fields.rs:83f34895c516aaa8:1": {
-    "category": "a",
-    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "f3e5f1d111cf15be2548c668dabd20a92a45748af47bae6db4e1232c837b2425"
-  },
   "src/presentation/fields.rs:88c1b9b97465f10f:1": {
     "category": "a",
     "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
@@ -7016,5 +7001,20 @@
     "category": "a",
     "reason": "Japanese tool-reason wording for the Ja renderer; presentation.messages::tool_reason supplies typed English wording.",
     "source_tokens_sha256": "3fbe57676a6b14a9e239c30604bb334dce781f304812ef6b0291c61e16dc9b7a"
+  },
+  "src/presentation/fields.rs:b6843538a6083ac6:2": {
+    "category": "a",
+    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
+    "source_tokens_sha256": "d58fb12b6beefa1c0a2d4be57bb3fb08acf748ea44636f1a28bea02be5312dd4"
+  },
+  "src/display_outline.rs:b6843538a6083ac6:1": {
+    "category": "a",
+    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
+    "source_tokens_sha256": "acaa8783695f191976436f6842acb9b4da45854e1ed74719aec6fd8ded44976b"
+  },
+  "src/display_outline.rs:83f34895c516aaa8:1": {
+    "category": "a",
+    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
+    "source_tokens_sha256": "5c661ef852937dc265929b6d8c9c860dd0e2f55c9da392afb2eca2d81bdd7109"
   }
 }
