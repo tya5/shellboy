@@ -7,7 +7,6 @@ pub(super) struct Source {
     pub(super) kind: String,
     pub(super) payload: Value,
     pub(super) attachment_paths: Vec<String>,
-    pub(super) raw_expected: bool,
     pub(super) _permit: OwnedSemaphorePermit,
 }
 /// Which node kinds a Thread/all-history selection takes in.
@@ -39,9 +38,6 @@ impl IndexService {
         let mut seen = HashSet::new();
         kinds.retain(|kind| seen.insert(kind.clone()));
         kinds
-    }
-    pub(super) async fn selected_sources(&self, args: &IndexArgs) -> Result<Vec<String>, ApiError> {
-        Ok(self.select_sources(args, KindFilter::Selected).await?.ids)
     }
     pub(super) async fn select_sources(
         &self,
@@ -136,7 +132,6 @@ impl IndexService {
                     }
                     _ => None,
                 };
-                let raw_expected = raw.is_some();
                 let raw = raw
                     .filter(|(_, state)| matches!(state.as_str(), "exited" | "failed" | "stopped"))
                     .map(|(witness, _)| witness);
@@ -154,12 +149,11 @@ impl IndexService {
                     kind,
                     body,
                     paths,
-                    raw_expected,
                 )))
             })
             .await
             .map_err(db_error)?;
-        let Some((witness, kind, body, attachment_paths, raw_expected)) = source else {
+        let Some((witness, kind, body, attachment_paths)) = source else {
             return Ok(None);
         };
         tokio::task::spawn_blocking(move || {
@@ -174,7 +168,6 @@ impl IndexService {
                 kind,
                 payload,
                 attachment_paths,
-                raw_expected,
                 _permit: permit,
             }))
         })
