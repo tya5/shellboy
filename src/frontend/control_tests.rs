@@ -733,7 +733,7 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
             .unwrap();
     }
     crate::test_watchdog::watchdog(
-        "cancel remains available at full receipt budget without creating a receipt",
+        "ordinary wait admission fills",
         async {
             loop {
                 drain(&incoming);
@@ -819,7 +819,7 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
         })
         .unwrap();
     crate::test_watchdog::watchdog(
-        "cancel remains available at full receipt budget without creating a receipt",
+        "priority Thread stop settles",
         async {
             loop {
                 drain(&incoming);
