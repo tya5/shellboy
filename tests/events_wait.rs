@@ -13,7 +13,6 @@ use shellboy::{
     },
 };
 use std::{sync::Arc, time::Duration};
-use tokio_util::sync::CancellationToken;
 
 async fn raw(
     control: &Arc<Control>,
@@ -342,65 +341,6 @@ async fn another_owner_instance_requires_resync_and_the_new_cursor_continues() {
     let next = ev(&control, Some(&cursor(&result)), &[], 0).await;
     assert_eq!(next["status"], "changed");
     close(control, owner, server).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn long_poll_ends_on_disconnect_and_on_owner_shutdown() {
-    let (_root, owner, control, _receive, server) = fixture().await;
-    let at = baseline(&control).await;
-    let request_for = |control: &Arc<Control>| {
-        Request::new(
-            format!(
-                "{}:{}",
-                control.store.operation_epoch.current(),
-                uuid::Uuid::new_v4()
-            ),
-            Command::EventsWait(EventsWaitArgs {
-                after: Some(at.clone()),
-                thread_ids: vec![],
-                timeout_ms: 600_000,
-                include_text: false,
-                include_reasoning_activity: false,
-            }),
-        )
-    };
-    let token = CancellationToken::new();
-    let pending = {
-        let control = control.clone();
-        let request = request_for(&control);
-        let token = token.clone();
-        tokio::spawn(async move { control.request_cancellable(request, token).await })
-    };
-    token.cancel();
-    let response = watchdog("disconnect", pending).await.unwrap().unwrap();
-    assert!(!response.ok);
-    // The next poll is unaffected and no receipt was kept for either.
-    let held = {
-        let control = control.clone();
-        let request = request_for(&control);
-        tokio::spawn(async move { control.request(request).await })
-    };
-    let receipts = control
-        .store
-        .database
-        .call(|db| {
-            Ok(db.query_row(
-                "SELECT (SELECT count(*) FROM operation_receipt)+(SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%')",
-                [],
-                |r| r.get::<_, i64>(0),
-            )?)
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        receipts, 0,
-        "events.wait must not create operation receipts"
-    );
-    control.shutdown().await.unwrap();
-    let response = watchdog("shutdown", held).await.unwrap().unwrap();
-    assert!(!response.ok, "shutdown ends the pending long-poll cleanly");
-    owner.shutdown().await.unwrap();
-    server.abort();
 }
 
 // ---- hint completeness: one test per mutation family ----

@@ -128,15 +128,19 @@ impl Selection {
     pub(super) fn note_pause_notification(&mut self) {
         self.pause_notification_epoch = self.pause_notification_epoch.wrapping_add(1);
     }
-    pub(super) fn accepts_initial_activity(
-        &self,
-        thread: &str,
-        generation: u64,
-        epoch: u64,
-        pause_notification_epoch: u64,
-    ) -> bool {
-        self.pause_notification_epoch == pause_notification_epoch
-            && self.accepts(thread, generation, epoch)
+    pub(super) async fn handle_initial_activity(
+        &mut self,
+        updates: &impl UpdateTarget,
+        dirty_threads: &mut std::collections::HashSet<String>,
+        (thread, generation, epoch, pause_epoch): (String, u64, u64, u64),
+        result: Result<activity::Projection, ApiError>,
+    ) {
+        if self.pause_notification_epoch == pause_epoch {
+            self.publish_activity(updates, thread, generation, epoch, result)
+                .await;
+        } else if self.accepts(&thread, generation, epoch) {
+            dirty_threads.insert(thread);
+        }
     }
     pub(super) fn accepts(&self, thread: &str, generation: u64, epoch: u64) -> bool {
         self.active_thread.as_deref() == Some(thread)
@@ -213,18 +217,55 @@ mod refresh_scope_tests {
             }],
         }
     }
-    #[test]
-    fn switching_threads_rejects_a_late_progress_result() {
+    #[tokio::test]
+    async fn initial_activity_handler_rejects_results_from_an_old_selection_or_pause() {
         let mut selected = Selection::default();
         selected.select_thread("a".into(), 1);
         let old_epoch = selected.progress_epoch;
         let pause_epoch = selected.pause_notification_epoch;
-        assert!(selected.accepts_initial_activity("a", 1, old_epoch, pause_epoch));
-
         selected.select_thread("b".into(), 2);
-        assert!(!selected.accepts_initial_activity("a", 1, old_epoch, pause_epoch));
-        assert!(!selected.accepts("a", 1, old_epoch));
-        assert!(selected.accepts_initial_activity("b", 2, selected.progress_epoch, pause_epoch));
+        let epoch = selected.progress_epoch;
+        let (updates, incoming) = std::sync::mpsc::sync_channel(4);
+        let mut dirty = std::collections::HashSet::new();
+        let error = || {
+            Err(ApiError::new(
+                crate::protocol::ErrorCode::IoFailed,
+                "synthetic read failure",
+            ))
+        };
+        selected
+            .handle_initial_activity(
+                &updates,
+                &mut dirty,
+                ("a".into(), 1, old_epoch, pause_epoch),
+                error(),
+            )
+            .await;
+        assert!(incoming.try_recv().is_err());
+        assert!(dirty.is_empty());
+        selected.note_pause_notification();
+        selected
+            .handle_initial_activity(
+                &updates,
+                &mut dirty,
+                ("b".into(), 2, epoch, pause_epoch),
+                error(),
+            )
+            .await;
+        assert!(incoming.try_recv().is_err());
+        assert_eq!(dirty, std::collections::HashSet::from(["b".to_owned()]));
+        let current_pause = selected.pause_notification_epoch;
+        selected
+            .handle_initial_activity(
+                &updates,
+                &mut dirty,
+                ("b".into(), 2, epoch, current_pause),
+                error(),
+            )
+            .await;
+        assert!(
+            matches!(incoming.try_recv().unwrap(), UiUpdate::ActivityUnavailable {thread_id, generation:2, ..} if thread_id == "b")
+        );
     }
 
     #[tokio::test]
