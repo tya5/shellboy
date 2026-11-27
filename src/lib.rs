@@ -31,6 +31,7 @@ mod json_pointer;
 pub mod maintenance;
 pub mod memory;
 pub mod model;
+pub mod omitted_content;
 mod operations;
 #[cfg(unix)]
 mod os_signals;

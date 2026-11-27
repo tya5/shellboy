@@ -27,7 +27,7 @@ pub(super) fn mark_success_rows_tx(
     for id in ids {
         tx.execute("UPDATE attachment_send SET state='sent' WHERE attempt_id=?1 AND attachment_id=?2 AND state='ready'",params![attempt,id]).map_err(sql_error)?;
         tx.execute(
-            "UPDATE attachment_selection SET protected=0 WHERE thread_id=?1 AND attachment_id=?2 AND EXISTS(SELECT 1 FROM attachment_send s WHERE s.attempt_id=?3 AND s.attachment_id=?2 AND s.state IN ('ready','sent','unavailable','excluded'))",
+            "UPDATE attachment_selection SET protected=0 WHERE thread_id=?1 AND attachment_id=?2 AND EXISTS(SELECT 1 FROM attachment_send s WHERE s.attempt_id=?3 AND s.attachment_id=?2 AND s.state IN ('ready','sent','observed','unavailable','excluded'))",
             params![thread, id, attempt],
         )
         .map_err(sql_error)?;

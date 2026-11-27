@@ -70,24 +70,14 @@ Rust補助API AttachmentService::add/add_txは製品wire APIではないが、�
 
 ## Attachment replay and adopted notices (#382)
 
-The original source slot contains the ordered reference's ID, source, path,
-current binary hash (null when no binary is sent), and the currently authorized
-binary if present. First inclusion, previous hashes, and status or error text
-are not rendered at that position. The existing attempt manifest remains the
-audit record for those facts and for the exact API coordinates.
+An unchanged live slot renders the original ordered reference and its sent
+bytes. Under [#469's fixed-slot contract](attachments.md#fixed-attachment-slots-469),
+a change or unavailability replaces the slot with a fixed omission at adoption.
+Once omitted, it does not resume sending when the file reappears or reverts.
+The request manifest records the observation and exact API coordinates without
+claiming that observed bytes were sent.
 
-A changed or restored binary, or removal of a previously sent binary, can
-break the prefix at that slot once for the transition. Identical authorized
-bytes render identically; unavailable and excluded both render a reference
-without binary. Selection, file checks, and byte limits still take precedence.
-No historical bytes are retained to reconstruct a prefix. Deploying this
-renderer can itself change earlier input once.
-
-First-inclusion, change, and availability/exclusion advisories go in a bounded
-developer suffix. A successfully adopted response saves exactly the sent suffix
-in the selected history before the answer, atomically with consumption and the
-hash baseline. Later requests replay it as historical context, not a fresh
-update. Failed or non-adopted attempts save nothing to replay and do not advance
-comparison state. Detached exclusions retain their separate bounded batches
-and existing provenance. No additional notification ledger, queue, or schema
-change is needed.
+Advisories use the existing bounded developer suffix. Successful adoption
+saves the sent suffix before the answer; unsuccessful attempts leave the slot
+and observation baseline untouched. Detached exclusions retain their separate
+bounded batches and existing provenance.

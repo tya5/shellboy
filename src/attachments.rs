@@ -8,6 +8,7 @@ mod selection;
 use crate::runtime_pin::PinLease;
 use selection::snapshot_selection_tx;
 mod success;
+use crate::omitted_content::{OmissionReason, OmittedContent};
 use crate::{
     config::Config,
     protocol::{
@@ -177,7 +178,9 @@ struct Selected {
     protected: bool,
     active: bool,
     reason: Option<String>,
-    previous_hash: Option<String>,
+    sent_fingerprint: Option<String>,
+    observation_hash: Option<String>,
+    omission: Option<OmissionReason>,
     previous_state: Option<String>,
     detached: bool,
 }
@@ -191,6 +194,8 @@ pub struct AttachmentManifest {
     pub api_content_count: usize,
     pub first_inclusion: bool,
     pub previous_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omission_reason: Option<OmissionReason>,
     pub path: PathBuf,
     pub kind: String,
     pub state: String,
@@ -512,7 +517,7 @@ impl AttachmentService {
         }
         let mut protected = 0u64;
         let mut total = 0u64;
-        for s in selected.iter().filter(|s| s.active) {
+        for s in selected.iter().filter(|s| s.active && s.omission.is_none()) {
             if let Some(Ok(bytes)) = sizes.get(&s.path) {
                 total = total
                     .checked_add(*bytes)
@@ -528,7 +533,10 @@ impl AttachmentService {
             return Err(ApiError::new(ErrorCode::InputLimit,"Current protected attachment files exceed the request limit; request is held for explicit retry").hint("Reduce the selection with shellboy attachment remove --thread THREAD_ID --attachment ATTACHMENT_ID.").details(json!({"protected_bytes":protected,"limit_bytes":self.config.limits.attachment_request_bytes})));
         }
         let mut excluded = Vec::new();
-        for s in selected.iter().filter(|s| s.active && !s.protected) {
+        for s in selected
+            .iter()
+            .filter(|s| s.active && !s.protected && s.omission.is_none())
+        {
             if total <= self.config.limits.attachment_request_bytes {
                 break;
             }
@@ -602,7 +610,8 @@ impl AttachmentService {
                 api_content_index: None,
                 api_content_count: 0,
                 first_inclusion: s.previous_state.is_none() && s.protected,
-                previous_hash: s.previous_hash.clone(),
+                previous_hash: s.sent_fingerprint.clone(),
+                omission_reason: s.omission,
                 path: s.path.clone(),
                 kind: kind.into(),
                 state: "ready".into(),
@@ -645,36 +654,39 @@ impl AttachmentService {
                         manifest.raw_size = Some(content.raw_size);
                         manifest.content_hash = Some(content.hash.clone());
                         manifest.mime_type = Some(content.mime.clone());
-                        manifest.changed = s
-                            .previous_hash
+                        let differs_from_sent = s
+                            .sent_fingerprint
                             .as_ref()
                             .is_some_and(|hash| hash != &content.hash);
-                        if manifest.changed {
-                            let notice = format!(
-                                "[Shellboy attachment changed update] id={} source={} previous_hash={} current_hash={}",
-                                s.id,
-                                s.source_node_id,
-                                s.previous_hash.as_deref().unwrap_or("unknown"),
-                                content.hash
-                            );
-                            result.notices.push(notice);
-                            status.push(format!("Shellboy attachment updates v1: {}", json!([{
-                                "attachment_id": s.id, "source_node_id": s.source_node_id,
-                                "previous_hash": manifest.previous_hash, "content_hash": content.hash,
-                                "update_id": format!("{}:{}:{}", s.id, s.previous_hash.as_deref().unwrap_or(""), content.hash),
-                            }])));
-                        } else if s.previous_state.as_deref() == Some("unavailable") {
-                            status.push(format!(
-                                "Attachment available again: id={} source={}",
-                                s.id, s.source_node_id
-                            ));
+                        manifest.omission_reason = s
+                            .omission
+                            .or(differs_from_sent.then_some(OmissionReason::AttachmentChanged));
+                        if manifest.omission_reason.is_some() {
+                            manifest.state = "observed".into();
+                            // Report a new observation, not a newly sent version of this slot.
+                            let previous = s.observation_hash.as_deref();
+                            manifest.changed = previous != Some(content.hash.as_str());
+                            if manifest.changed {
+                                result.notices.push(format!(
+                                    "[Shellboy attachment changed update] id={} source={} previous_hash={} current_hash={}",
+                                    s.id, s.source_node_id, previous.unwrap_or("unknown"), content.hash
+                                ));
+                                status.push(format!("Shellboy attachment updates v1: {}", json!([{
+                                    "attachment_id": s.id, "source_node_id": s.source_node_id, "path": s.path,
+                                    "previous_hash": previous, "content_hash": content.hash,
+                                    "update_id": format!("{}:{}:{}", s.id, previous.unwrap_or(""), content.hash),
+                                }])));
+                            }
+                        } else {
+                            let data = format!("data:{};base64,{}", content.mime, content.base64);
+                            expansion.push(if s.kind==AttachmentKind::Image{json!({"type":"input_image","image_url":data,"detail":"auto"})}else{json!({"type":"input_file","filename":s.path.file_name().unwrap_or_default().to_string_lossy(),"file_data":data})});
+                            result._resources.push(content.clone());
                         }
-                        let data = format!("data:{};base64,{}", content.mime, content.base64);
-                        expansion.push(if s.kind==AttachmentKind::Image{json!({"type":"input_image","image_url":data,"detail":"auto"})}else{json!({"type":"input_file","filename":s.path.file_name().unwrap_or_default().to_string_lossy(),"file_data":data})});
-                        result._resources.push(content.clone());
                     }
                     Err(error) => {
                         manifest.state = "unavailable".into();
+                        manifest.omission_reason =
+                            s.omission.or(Some(OmissionReason::AttachmentUnavailable));
                         manifest.error = Some(error.clone());
                         let notice = format!(
                             "Attachment unavailable: {} ({error}); inspect the saved selection with shellboy attachment list --thread {thread_id}",
@@ -696,10 +708,22 @@ impl AttachmentService {
             }
             let mut content = Vec::new();
             if !s.detached {
-                let facts = json!({"attachment_id":s.id,"source_node_id":s.source_node_id,
-                    "source_element_index":s.source_element_index,"path":s.path,
-                    "content_hash":manifest.content_hash});
-                content.push(json!({"type":"input_text","text":format!("[Shellboy attachment metadata] {facts}")}));
+                let text = if let Some(reason) = manifest.omission_reason {
+                    let fact = OmittedContent {
+                        reason,
+                        reference: json!({"attachment_id":s.id,"path":s.path,"kind":kind}),
+                        fingerprint: s.sent_fingerprint.clone(),
+                        retained: false,
+                        read: "No copy of the previous content is held. Read the current text file through the shell, or use shellboy attach PATH --kind KIND to send it as a new attachment.",
+                    };
+                    format!("[Shellboy omitted content] {}", json!(fact))
+                } else {
+                    let facts = json!({"attachment_id":s.id,"source_node_id":s.source_node_id,
+                        "source_element_index":s.source_element_index,"path":s.path,
+                        "content_hash":manifest.content_hash});
+                    format!("[Shellboy attachment metadata] {facts}")
+                };
+                content.push(json!({"type":"input_text","text":text}));
             }
             content.extend(expansion);
             if s.detached {
@@ -1034,7 +1058,12 @@ pub fn record_prepared_tx(
                 "Attachment expansion must be bound to its API source before attempt admission",
             ));
         }
-        tx.execute("INSERT INTO attachment_send(attempt_id,ordinal,attachment_id,state,raw_size,content_hash,mime_type,error_json)VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![attempt_id,ordinal as i64,m.attachment_id,m.state,m.raw_size.map(|v|i64::try_from(v).unwrap_or(i64::MAX)),m.content_hash,m.mime_type,m.error.as_ref().map(|e|json!({"message":e}).to_string())]).map_err(sql_error)?;
+        tx.execute("INSERT INTO attachment_send(attempt_id,ordinal,attachment_id,state,raw_size,content_hash,mime_type,error_json,omission_reason)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![attempt_id,ordinal as i64,m.attachment_id,m.state,m.raw_size.map(|v|i64::try_from(v).unwrap_or(i64::MAX)),m.content_hash,m.mime_type,m.error.as_ref().map(|e|json!({"message":e}).to_string()),match m.omission_reason {
+            Some(OmissionReason::AttachmentChanged) => Some("attachment_changed"),
+            Some(OmissionReason::AttachmentUnavailable) => Some("attachment_unavailable"),
+            Some(OmissionReason::Spilled) => return Err(ApiError::new(ErrorCode::InvalidState, "Attachment cannot own a spill omission")),
+            None => None,
+        }]).map_err(sql_error)?;
     }
     Ok(())
 }
