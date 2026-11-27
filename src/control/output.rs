@@ -258,9 +258,8 @@ impl OutputStreamReader {
                 decode_errors |= bad;
             }
             self.done = true;
-            if let Some(mut pin) = self.pin.take() {
-                pin.release().await?;
-            }
+            // Dropping the lease lets the maintenance Pins pass delete the row.
+            drop(self.pin.take());
         }
         Ok(Some(DecodedOutputPage {
             text,
@@ -396,7 +395,7 @@ impl ShellOutputReader {
             .as_deref()
             .map(OutputCursor::decode)
             .transpose()?;
-        let mut pin = ReadPin::new(&self.database, self.instance.to_string());
+        let pin = ReadPin::new(&self.database, self.instance.to_string());
         let execution = args.execution_id.clone();
         let (pin_id, lease) = (pin.id.clone(), pin.lease.clone());
         let instance = pin.instance.clone();
@@ -434,14 +433,8 @@ impl ShellOutputReader {
             }
             Err(error) => Err(error),
         };
-        let released = pin.release().await;
-        match result {
-            Ok(value) => {
-                released?;
-                Ok(value)
-            }
-            Err(error) => Err(error),
-        }
+        drop(pin);
+        result
     }
     async fn read_pinned(
         &self,
@@ -576,7 +569,7 @@ impl ShellOutputReader {
         if limit_bytes == 0 {
             return Ok(String::new());
         }
-        let mut pin = ReadPin::new(&self.database, self.instance.to_string());
+        let pin = ReadPin::new(&self.database, self.instance.to_string());
         let execution = execution_id.to_owned();
         let (pin_id, lease) = (pin.id.clone(), pin.lease.clone());
         let instance = pin.instance.clone();
@@ -595,12 +588,9 @@ impl ShellOutputReader {
             Ok(state) => self.excerpt_pinned(execution_id, state, limit_bytes).await,
             Err(error) => Err(error),
         };
-        let released = pin.release().await;
+        drop(pin);
         match result {
-            Ok(value) => {
-                released?;
-                Ok(value)
-            }
+            Ok(value) => Ok(value),
             Err(error) if error.code == ErrorCode::OutputExpired => {
                 let reason = error
                     .details
@@ -853,11 +843,9 @@ pub(crate) fn canonical_encoding(label: &str) -> Result<&'static Encoding> {
             .ok_or_else(|| error(ErrorCode::InvalidArgument, "unknown output encoding")),
     }
 }
-/// One `shell_output` pin under its own lease: an explicit release deletes it
-/// at once; a pin never released (cancelled or failed) is reconciled by the
-/// maintenance owner once the lease is dropped.
+/// One `shell_output` pin under its own lease: the row is deleted only by the
+/// maintenance Pins pass once the lease's last clone has dropped.
 struct ReadPin {
-    database: DbWorker,
     lease: crate::runtime_pin::PinLease,
     id: String,
     instance: String,
@@ -877,22 +865,10 @@ impl ReadPin {
     fn new(database: &DbWorker, instance: String) -> Self {
         let lease = crate::runtime_pin::PinLease::new(database);
         Self {
-            database: database.clone(),
             id: crate::runtime_pin::pin_id(lease.prefix(), 0),
             lease,
             instance,
         }
-    }
-    async fn release(&mut self) -> Result<()> {
-        let id = self.id.clone();
-        self.database
-            .call(move |db| {
-                db.execute("DELETE FROM runtime_pin WHERE id=?1", [id])?;
-                Ok(())
-            })
-            .await
-            .map_err(StorageError::into_api_error)?;
-        Ok(())
     }
 }
 fn error(code: ErrorCode, message: impl Into<String>) -> ApiError {
