@@ -19,6 +19,21 @@
       "title": "Accepted",
       "type": "object"
     },
+    "ActivityCounts": {
+      "properties": {
+        "awaiting_you": {
+          "$ref": "#/definitions/CappedActivityCount"
+        },
+        "running": {
+          "$ref": "#/definitions/CappedActivityCount"
+        }
+      },
+      "required": [
+        "running",
+        "awaiting_you"
+      ],
+      "type": "object"
+    },
     "ActivityPhase": {
       "enum": [
         "idle",
@@ -40,6 +55,54 @@
         "completed"
       ],
       "type": "string"
+    },
+    "After": {
+      "oneOf": [
+        {
+          "const": "Pending",
+          "description": "No later model request has started yet.",
+          "type": "string"
+        },
+        {
+          "const": "Unreported",
+          "description": "The request exists but the provider reported no input tokens.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Tokens": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "Tokens"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Amount": {
+      "description": "Summary request tokens: a known sum, and whether some requests reported none.",
+      "properties": {
+        "known": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "partial": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "partial"
+      ],
+      "type": "object"
     },
     "Api": {
       "enum": [
@@ -716,6 +779,23 @@
         "running",
         "pruned_originals",
         "size"
+      ],
+      "type": "object"
+    },
+    "CappedActivityCount": {
+      "properties": {
+        "capped": {
+          "type": "boolean"
+        },
+        "count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "capped"
       ],
       "type": "object"
     },
@@ -2390,7 +2470,7 @@
           "type": "integer"
         },
         "outcome": {
-          "$ref": "#/definitions/Outcome"
+          "$ref": "#/definitions/Outcome2"
         },
         "phase": {
           "$ref": "#/definitions/CompactionPhase"
@@ -3913,6 +3993,28 @@
       },
       "required": [
         "execution_id"
+      ],
+      "type": "object"
+    },
+    "ExpectedRunSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "turn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ExpectedTurn"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "thread_id"
       ],
       "type": "object"
     },
@@ -5763,6 +5865,47 @@
       ],
       "type": "object"
     },
+    "HistoryWindowBranch": {
+      "properties": {
+        "alternatives": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowBranchAlternative"
+          },
+          "type": "array"
+        },
+        "anchor_node_id": {
+          "type": "string"
+        },
+        "current": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "anchor_node_id",
+        "current",
+        "alternatives"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowBranchAlternative": {
+      "properties": {
+        "excerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "type": "object"
+    },
     "HistoryWindowCommittedAttempt": {
       "properties": {
         "attempt_id": {
@@ -5775,6 +5918,21 @@
       "required": [
         "attempt_id",
         "node_id"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowCompaction": {
+      "properties": {
+        "facts": {
+          "$ref": "#/definitions/MarkerFacts"
+        },
+        "node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "facts"
       ],
       "type": "object"
     },
@@ -5862,11 +6020,26 @@
         "activity": {
           "$ref": "#/definitions/HistoryWindowActivity"
         },
+        "branches": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowBranch"
+          },
+          "type": "array"
+        },
         "committed_attempts": {
           "items": {
             "$ref": "#/definitions/HistoryWindowCommittedAttempt"
           },
           "type": "array"
+        },
+        "compactions": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowCompaction"
+          },
+          "type": "array"
+        },
+        "observed_at": {
+          "type": "string"
         },
         "pending": {
           "$ref": "#/definitions/HistoryWindowPending"
@@ -5888,6 +6061,11 @@
           },
           "type": "array"
         },
+        "received_root_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "recovery": {
           "items": {
             "$ref": "#/definitions/HistoryWindowRecovery"
@@ -5906,12 +6084,14 @@
       },
       "required": [
         "read_sequence",
+        "observed_at",
         "pending",
         "committed_attempts",
         "activity",
         "tools",
         "recovery",
-        "usage"
+        "usage",
+        "received_root_revision"
       ],
       "type": "object"
     },
@@ -6018,9 +6198,14 @@
         },
         "recovery_wait": {
           "type": "boolean"
+        },
+        "source_revision": {
+          "format": "int64",
+          "type": "integer"
         }
       },
       "required": [
+        "source_revision",
         "node_id",
         "kind",
         "recovery_wait"
@@ -6094,6 +6279,9 @@
         "node_id": {
           "type": "string"
         },
+        "relationship": {
+          "$ref": "#/definitions/InputSource"
+        },
         "reply_excerpt": {
           "type": [
             "string",
@@ -6106,16 +6294,13 @@
             "null"
           ]
         },
-        "revisit": {
-          "type": "boolean"
-        },
         "sender": {
           "$ref": "#/definitions/MessageSender"
         }
       },
       "required": [
         "node_id",
-        "revisit",
+        "relationship",
         "sender"
       ],
       "type": "object"
@@ -6163,6 +6348,9 @@
         "group_id": {
           "type": "string"
         },
+        "has_output": {
+          "type": "boolean"
+        },
         "node_id": {
           "type": "string"
         },
@@ -6207,11 +6395,29 @@
         "result_state": {
           "type": "string"
         },
+        "retention_generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "shell_exit_code": {
           "format": "int64",
           "type": [
             "integer",
             "null"
+          ]
+        },
+        "shell_owner": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellReadOwner"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "shell_state": {
@@ -6978,6 +7184,17 @@
       ],
       "type": "object"
     },
+    "InputSource": {
+      "enum": [
+        "Human",
+        "Parent",
+        "SelfModel",
+        "OtherModel",
+        "Revisit",
+        "Unknown"
+      ],
+      "type": "string"
+    },
     "InstructionObservation": {
       "enum": [
         "first_seen",
@@ -7079,6 +7296,97 @@
         "none"
       ],
       "type": "string"
+    },
+    "MarkerFacts": {
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/After"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "None when the item omits the linkage keys (not applicable, e.g. a summary\na fork inherited)."
+        },
+        "automatic": {
+          "type": "boolean"
+        },
+        "cost": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/definitions/Amount"
+            },
+            {
+              "$ref": "#/definitions/Amount"
+            }
+          ],
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "fired_at": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "has_summary": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "$ref": "#/definitions/Outcome"
+        },
+        "source_nodes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "spilled_groups": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "summary_chars": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "summary_rejected": {
+          "description": "A spill was adopted but its summary was rejected.",
+          "type": "boolean"
+        },
+        "threshold": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "automatic",
+        "outcome",
+        "has_summary",
+        "summary_rejected"
+      ],
+      "type": "object"
     },
     "MessageAccepted": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7192,6 +7500,14 @@
             "null"
           ]
         },
+        "archive_order": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "message_id": {
           "type": "string"
         },
@@ -7288,16 +7604,6 @@
         },
         "sender": {
           "$ref": "#/definitions/MessageSender"
-        },
-        "source": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/MessageSource"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "thread_id": {
           "type": "string"
@@ -7659,6 +7965,9 @@
           },
           "type": "array"
         },
+        "message_id": {
+          "type": "string"
+        },
         "selection_revision": {
           "format": "uint64",
           "minimum": 0,
@@ -7672,6 +7981,7 @@
         }
       },
       "required": [
+        "message_id",
         "thread_id",
         "selection_revision",
         "text",
@@ -8099,6 +8409,27 @@
       "type": "object"
     },
     "Outcome": {
+      "oneOf": [
+        {
+          "enum": [
+            "Adopted",
+            "Unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "Skipped",
+          "description": "Proactive attempt found no safe target (`no_target`/`no_safe_reduction`).",
+          "type": "string"
+        },
+        {
+          "const": "Rejected",
+          "description": "Failed or rejected, so nothing was adopted.",
+          "type": "string"
+        }
+      ]
+    },
+    "Outcome2": {
       "oneOf": [
         {
           "additionalProperties": false,
@@ -8707,8 +9038,13 @@
     },
     "Page": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "activity_evidence": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ThreadActivityEvidence"
+          },
+          "type": "object"
+        },
         "filters": {
           "$ref": "#/definitions/ThreadListFilters"
         },
@@ -8728,14 +9064,34 @@
             "string",
             "null"
           ]
+        },
+        "read_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "root_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "root_count_exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
         "items",
         "limit",
-        "filters"
+        "filters",
+        "read_sequence"
       ],
-      "title": "RecordPage",
+      "title": "ThreadListPage",
       "type": "object"
     },
     "PageCursor": {
@@ -12113,6 +12469,16 @@
     "RunRetryArgs": {
       "additionalProperties": false,
       "properties": {
+        "expected_selection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ExpectedRunSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "expected_turn": {
           "anyOf": [
             {
@@ -12176,6 +12542,16 @@
         {
           "additionalProperties": false,
           "properties": {
+            "expected_selection": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ExpectedRunSelection"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "run_id": {
               "type": "string"
             }
@@ -13179,6 +13555,12 @@
             "null"
           ]
         },
+        "ended_after": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "limit": {
           "default": 50,
           "format": "uint32",
@@ -13226,6 +13608,12 @@
       "properties": {
         "all": {
           "type": "boolean"
+        },
+        "ended_after": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "run_id": {
           "type": [
@@ -13493,6 +13881,16 @@
       "additionalProperties": true,
       "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "activity_counts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ActivityCounts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "consistency": {
           "type": "string"
         },
@@ -13843,6 +14241,63 @@
       ],
       "type": "string"
     },
+    "ThreadActivityEvidence": {
+      "properties": {
+        "answer_excerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "answer_limited": {
+          "type": "boolean"
+        },
+        "parent_deleted": {
+          "type": "boolean"
+        },
+        "parent_title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pending_messages": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recovery_error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApiError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recovery_limited": {
+          "type": "boolean"
+        },
+        "shell": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityShell"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "parent_deleted",
+        "pending_messages",
+        "recovery_limited",
+        "answer_limited"
+      ],
+      "type": "object"
+    },
     "ThreadActivityRecoveryCounts": {
       "properties": {
         "active_shells": {
@@ -14011,6 +14466,49 @@
       ],
       "type": "object"
     },
+    "ThreadActivityShell": {
+      "properties": {
+        "command_excerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command_limited": {
+          "type": "boolean"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "last_output_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "execution_id",
+        "command_limited",
+        "state"
+      ],
+      "type": "object"
+    },
     "ThreadActivityTools": {
       "properties": {
         "cancelled": {
@@ -14048,6 +14546,12 @@
     },
     "ThreadActivityTurn": {
       "properties": {
+        "answer_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "context_reduction": {
           "anyOf": [
             {
@@ -14135,6 +14639,21 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "ThreadCompletion": {
+      "properties": {
+        "ended_at": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "ended_at"
+      ],
       "type": "object"
     },
     "ThreadCreateArgs": {
@@ -14259,6 +14778,36 @@
       "required": [
         "thread_ids",
         "preview_marker"
+      ],
+      "type": "object"
+    },
+    "ThreadDescendants": {
+      "properties": {
+        "by_state": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "capped": {
+          "type": "boolean"
+        },
+        "cycle": {
+          "type": "boolean"
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "by_state",
+        "capped",
+        "cycle"
       ],
       "type": "object"
     },
@@ -14594,6 +15143,15 @@
             "null"
           ]
         },
+        "include_activity": {
+          "type": "boolean"
+        },
+        "include_activity_evidence": {
+          "type": "boolean"
+        },
+        "include_descendant_count": {
+          "type": "boolean"
+        },
         "limit": {
           "default": 50,
           "format": "uint32",
@@ -14605,6 +15163,12 @@
         },
         "query": {
           "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "root": {
           "type": [
             "string",
             "null"
@@ -14656,6 +15220,15 @@
         "cwd_omitted": {
           "type": "boolean"
         },
+        "include_activity": {
+          "type": "boolean"
+        },
+        "include_activity_evidence": {
+          "type": "boolean"
+        },
+        "include_descendant_count": {
+          "type": "boolean"
+        },
         "order": {
           "anyOf": [
             {
@@ -14668,6 +15241,12 @@
         },
         "query_omitted": {
           "type": "boolean"
+        },
+        "root": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "state": {
           "anyOf": [
@@ -14714,7 +15293,10 @@
         "recovery_wait",
         "completed",
         "stopped",
-        "failed"
+        "failed",
+        "awaiting_you",
+        "active_work",
+        "other_work"
       ],
       "type": "string"
     },
@@ -14877,6 +15459,16 @@
         "activity": {
           "$ref": "#/definitions/ActivityPhase"
         },
+        "activity_detail": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "archived_at": {
           "type": [
             "string",
@@ -14935,6 +15527,16 @@
         "cwd": {
           "type": "string"
         },
+        "descendants": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadDescendants"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "excerpt": {
           "type": "string"
         },
@@ -14947,6 +15549,16 @@
         },
         "last_input": {
           "default": null
+        },
+        "latest_completion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "latest_run_stop_reason": {
           "type": [
@@ -18063,87 +18675,15 @@
     },
     "message.get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "properties": {
-        "assignment": {
-          "$ref": "#/definitions/Assignment"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/MessageDetails"
         },
-        "context": {
-          "$ref": "#/definitions/ExecutionContext"
-        },
-        "delivery_status": {
-          "$ref": "#/definitions/DeliveryStatus"
-        },
-        "expect_reply": {
-          "type": "boolean"
-        },
-        "held_by": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/MessageHeldBy"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "hint": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "message_id": {
-          "type": "string"
-        },
-        "reply": true,
-        "reply_to": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "run_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "sender": {
-          "$ref": "#/definitions/MessageSender"
-        },
-        "source": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/MessageSource"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "thread_id": {
-          "type": "string"
-        },
-        "to_human": {
-          "type": "boolean"
-        },
-        "turn_id": {
-          "type": [
-            "string",
-            "null"
-          ]
+        {
+          "$ref": "#/definitions/MessageSource"
         }
-      },
-      "required": [
-        "sender",
-        "context",
-        "message_id",
-        "thread_id",
-        "delivery_status",
-        "assignment"
       ],
-      "title": "MessageDetails",
-      "type": "object"
+      "title": "MessageGetResult"
     },
     "message.list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -19025,7 +19565,25 @@
       "title": "RecordPage",
       "type": "object"
     },
-    "thread.delete": true,
+    "thread.delete": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "deleted_thread_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "title": "ThreadDeleteResult",
+      "type": "object"
+    },
     "thread.delete_preview": true,
     "thread.delete_set": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -19289,8 +19847,13 @@
     },
     "thread.list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "description": "A resumable owner record list. Readers own selection and cursor issuance;\nthis envelope owns the public page fields.",
       "properties": {
+        "activity_evidence": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ThreadActivityEvidence"
+          },
+          "type": "object"
+        },
         "filters": {
           "$ref": "#/definitions/ThreadListFilters"
         },
@@ -19310,14 +19873,34 @@
             "string",
             "null"
           ]
+        },
+        "read_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "root_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "root_count_exact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
         "items",
         "limit",
-        "filters"
+        "filters",
+        "read_sequence"
       ],
-      "title": "RecordPage",
+      "title": "ThreadListPage",
       "type": "object"
     },
     "thread.prune": true,

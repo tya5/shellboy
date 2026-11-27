@@ -4006,5 +4006,595 @@ async fn save_draft(
     compose_call::<crate::protocol::Accepted>(
         owner,
         Command::DraftSave(crate::protocol::DraftSaveArgs {
-            expected_thread_revision: expected_source.as_ref().map(|source| source.selection_revision),
+            expected_thread_revision: expected_source
+                .as_ref()
+                .map(|source| source.selection_revision),
             expected_source_message: expected_source.map(|source| source.message_id),
+            thread_id,
+            draft: Box::new(draft),
+            anchor,
+            follow_tail,
+        }),
+        Some(operation),
+    )
+    .await
+    .map(|_| ())
+}
+
+async fn native_header(
+    data_dir: &Path,
+    instance_id: &str,
+    thread: &str,
+) -> Result<header::RawHeader, ApiError> {
+    let request = Command::ThreadGet(ThreadGetArgs {
+        thread_id: Some(thread.to_owned()),
+        display: true,
+    });
+    let details: ThreadDetails = native_history::Owner {
+        data_dir,
+        instance: instance_id,
+    }
+    .call(request)
+    .await?;
+    if details.thread_id != thread || details.display_coverage.is_none() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "Native Thread header response did not match its display request",
+        ));
+    }
+    Ok(header::RawHeader::from_native(details))
+}
+#[allow(clippy::too_many_arguments)]
+async fn select_thread(
+    owner: native_history::Owner<'_>,
+    language: UiLanguage,
+    updates: &dyn UpdateTarget,
+    thread: &str,
+    generation: u64,
+    view_revision: u64,
+    known_view: Option<(ViewAnchor, bool)>,
+    render_width: u16,
+    known: Vec<native_page::KnownSubmission>,
+) -> Result<(), ApiError> {
+    let header = native_header(owner.data_dir, owner.instance, thread).await?;
+    let state: crate::protocol::DraftState = compose_call(
+        &owner,
+        Command::DraftGet(crate::protocol::DraftGetArgs {
+            thread_id: Some(thread.into()),
+            operation_id: None,
+        }),
+        None,
+    )
+    .await?;
+    let draft = state.draft;
+    let view = state.view.map(|view| (view.anchor, view.follow_tail));
+    let details = presentation_work(move || header.prepare_for_ui(language)).await?;
+    update(
+        updates,
+        UiUpdate::Thread {
+            generation,
+            details,
+            draft,
+        },
+    )
+    .await;
+    let restore = known_view.is_none();
+    if let Some((anchor, follow)) = known_view.or(view) {
+        if restore {
+            update(
+                updates,
+                UiUpdate::ViewState {
+                    thread_id: thread.into(),
+                    generation,
+                    view_revision,
+                    anchor: anchor.clone(),
+                    follow,
+                },
+            )
+            .await;
+        }
+        HistoryReader::new(owner, language, updates, render_width)
+            .with_submissions(known)
+            .page(
+                &Reply::new(thread, generation),
+                None,
+                if follow { None } else { Some(anchor) },
+            )
+            .await?;
+    } else {
+        HistoryReader::new(owner, language, updates, render_width)
+            .with_submissions(known)
+            .page(&Reply::new(thread, generation), None, None)
+            .await?;
+    }
+    Ok(())
+}
+/// Publish saved progress facts; return whether foreground polling is needed.
+/// An answered Run with owned background work remains visible through Changed
+/// and local display clocks without periodic database polling.
+pub async fn progress(
+    control: &Control,
+    updates: &SyncSender<UiUpdate>,
+    thread: &str,
+) -> Result<bool, ApiError> {
+    let projection = activity::read(control, thread).await?;
+    update(updates, projection.progress_update(thread)).await;
+    Ok(projection.poll_running)
+}
+
+fn expired_history_cursor() -> ApiError {
+    ApiError::new(
+        ErrorCode::CursorExpired,
+        "History selection changed; reload from the latest page",
+    )
+}
+
+// Called only inside the existing bounded presentation worker. Chrono Local
+// may consult OS timezone files, including on a cache refresh.
+fn thread_display_times(threads: &[ThreadSummary]) -> Vec<crate::ui::ThreadDisplayTime> {
+    threads
+        .iter()
+        .map(|thread| {
+            let (date_time, time) = match chrono::DateTime::parse_from_rfc3339(&thread.updated_at) {
+                Ok(time) => {
+                    let local = time.with_timezone(&chrono::Local);
+                    (
+                        local.format("%m-%d %H:%M").to_string(),
+                        local.format("%H:%M").to_string(),
+                    )
+                }
+                Err(_) => (thread.updated_at.clone(), thread.updated_at.clone()),
+            };
+            crate::ui::ThreadDisplayTime {
+                thread_id: thread.thread_id.clone(),
+                raw_updated_at: thread.updated_at.clone(),
+                date_time,
+                time,
+            }
+        })
+        .collect()
+}
+
+fn tool_preview(
+    page: crate::control::output::preview::PreviewPage,
+    language: UiLanguage,
+) -> ToolPreview {
+    tool_preview_at(page, chrono::Utc::now(), language)
+}
+
+fn tool_preview_at(
+    page: crate::control::output::preview::PreviewPage,
+    observed_at: chrono::DateTime<chrono::Utc>,
+    language: UiLanguage,
+) -> ToolPreview {
+    use crate::presentation::{BlockKind, OutputStream, PresentationBlock};
+    let mut notices = Vec::new();
+    if page.skipped {
+        notices.push(i18n::local!(
+            language,
+            "前方を省略した末尾抜粋です。全文は原文から取得できます",
+            "Tail excerpt; earlier output is omitted. Read the original for full text."
+        ));
+    }
+    if page.decode_uncertain {
+        notices.push(i18n::local!(
+            language,
+            "末尾からの文字変換は不確実です。原文を参照してください",
+            "Tail decoding is uncertain. Consult the original."
+        ));
+    }
+    if page.decode_errors {
+        notices.push(i18n::local!(
+            language,
+            "文字変換エラーがあります",
+            "Decoding errors are present."
+        ));
+    }
+    if !page.output_complete {
+        notices.push(if page.terminal {
+            i18n::local!(
+                language,
+                "未回収の出力があります",
+                "Some output is uncollected."
+            )
+        } else {
+            i18n::local!(
+                language,
+                "実行中の出力スナップショットです",
+                "Output snapshot of a running process."
+            )
+        });
+    }
+    let blocks = [
+        (page.stdout, OutputStream::Stdout),
+        (page.stderr, OutputStream::Stderr),
+    ]
+    .into_iter()
+    .filter(|(text, _)| !text.is_empty())
+    .map(|(text, stream)| PresentationBlock {
+        kind: BlockKind::ToolResult,
+        stream: Some(stream),
+        text,
+        // Display tails cannot claim canonical node character offsets.
+        source_exact: false,
+        ..Default::default()
+    })
+    .collect();
+    ToolPreview {
+        blocks,
+        refresh_error: None,
+        // Store the observation label once in the existing budgeted payload.
+        // Paint/cache hits must not advance a snapshot's apparent read time.
+        notice: Some(ui_diagnostics::preview_notice(
+            language,
+            observed_at,
+            &notices,
+        )),
+    }
+}
+
+async fn presentation_work<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, ApiError> {
+    crate::presentation::work(work).await
+}
+#[derive(Clone, Copy)]
+enum NodePosition {
+    At(usize),
+    FromEnd(usize),
+}
+impl NodePosition {
+    fn offset(self, total: usize) -> usize {
+        match self {
+            Self::At(offset) => offset.min(total),
+            Self::FromEnd(offset) => total.saturating_sub(offset),
+        }
+    }
+}
+fn node_role(kind: &str) -> &'static str {
+    match kind {
+        "user" | "user_message" | "message" => "user",
+        "tool_result" => "tool",
+        "event" => "shellboy",
+        // The model's saved context line (#183); not a transcript row.
+        "context" => "context",
+        "summary" | "compact_summary" => "summary",
+        "spill" => "spill",
+        _ => "assistant",
+    }
+}
+fn image_acquisition_error(mut error: ApiError, language: crate::config::UiLanguage) -> ApiError {
+    error.message.push_str(match language {
+        crate::config::UiLanguage::Ja => {
+            "。画像ファイルがあれば /attach パス で下書きに添付できます"
+        }
+        crate::config::UiLanguage::En => {
+            ". If you have an image file, use /attach PATH to attach it to the draft"
+        }
+    });
+    error
+}
+pub async fn copy_source(
+    control: &Control,
+    node_id: String,
+    code_block: Option<usize>,
+) -> Result<String, ApiError> {
+    checked_storage(
+        control,
+        copying::text(
+            control.store.config.ui.language,
+            &selected_owner(control),
+            node_id,
+            code_block,
+            None,
+        )
+        .await,
+    )
+    .await
+}
+pub fn fenced_code_block(text: &str, index: usize) -> Option<String> {
+    source_code_block(text, index, true)
+}
+
+fn source_code_block(text: &str, index: usize, source_complete: bool) -> Option<String> {
+    crate::presentation::markdown_code_blocks(text)
+        .nth(index)
+        .filter(|block| block.is_complete(text.len(), source_complete))
+        .map(|block| block.text)
+}
+
+#[cfg(test)]
+mod code_copy_tests {
+    use super::source_code_block;
+
+    #[test]
+    fn incomplete_pages_never_copy_a_block_that_can_continue() {
+        for text in [
+            "```",
+            "```rust\n",
+            "```rust\nx",
+            "```rust\nx\n``",
+            "    code\n",
+        ] {
+            assert!(source_code_block(text, 0, false).is_none(), "{text:?}");
+            assert!(
+                source_code_block(text, 0, true).is_some(),
+                "complete source {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_closing_and_container_ends_remain_copyable_on_partial_pages() {
+        for (text, expected) in [
+            ("```\n```", ""),
+            ("```rust\nx\n```", "x\n"),
+            ("```\r\nx\r\n```", "x\n"),
+            ("- item\n\n    ```\n    nested\n    ```", "nested\n"),
+            ("> ```\n> quoted\n> ```", "quoted\n"),
+            ("> ```\n> quoted\n\nprose", "quoted\n"),
+            ("    indented\n\nprose", "indented\n"),
+        ] {
+            assert_eq!(
+                source_code_block(text, 0, false).as_deref(),
+                Some(expected),
+                "{text:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn thread_time_projection_runs_on_bounded_worker_and_preserves_raw_identity() {
+        let ui_thread = std::thread::current().id();
+        let rows = vec![
+            ThreadSummary {
+                descendants: None,
+                activity_detail: None,
+                latest_completion: None,
+                awaiting_reply: 0,
+                awaiting_thread_replies: 0,
+                awaiting_named_count_exact: true,
+                awaiting_named_count: 0,
+                awaiting_thread_count: 0,
+                awaiting_thread_count_exact: true,
+                awaiting_replies_count_exact: true,
+                awaiting_named_oldest_at: None,
+                awaiting_replies: 0,
+                archived_at: None,
+                tags: Vec::new(),
+                last_end_message: None,
+                last_input: None,
+                activity: crate::activity::ActivityPhase::Idle,
+                latest_run_stop_reason: None,
+                revisit: None,
+                thread_id: "valid".into(),
+                title: String::new(),
+                cwd: String::new(),
+                parent_thread_id: None,
+                state: "idle".into(),
+                updated_at: "2026-10-25T09:30:00Z".into(),
+                created_at: None,
+                excerpt: String::new(),
+                excerpt_complete: true,
+            },
+            ThreadSummary {
+                descendants: None,
+                activity_detail: None,
+                latest_completion: None,
+                awaiting_reply: 0,
+                awaiting_thread_replies: 0,
+                awaiting_named_count_exact: true,
+                awaiting_named_count: 0,
+                awaiting_thread_count: 0,
+                awaiting_thread_count_exact: true,
+                awaiting_replies_count_exact: true,
+                awaiting_named_oldest_at: None,
+                awaiting_replies: 0,
+                archived_at: None,
+                tags: Vec::new(),
+                last_end_message: None,
+                last_input: None,
+                activity: crate::activity::ActivityPhase::Idle,
+                latest_run_stop_reason: None,
+                revisit: None,
+                thread_id: "unknown".into(),
+                title: String::new(),
+                cwd: String::new(),
+                parent_thread_id: None,
+                state: "idle".into(),
+                updated_at: "unknown timezone/date".into(),
+                created_at: None,
+                excerpt: String::new(),
+                excerpt_complete: true,
+            },
+        ];
+        let (worker_thread, times) =
+            presentation_work(move || (std::thread::current().id(), thread_display_times(&rows)))
+                .await
+                .unwrap();
+        assert_ne!(worker_thread, ui_thread);
+        assert_eq!(times[0].thread_id, "valid");
+        assert_eq!(times[0].raw_updated_at, "2026-10-25T09:30:00Z");
+        assert_eq!(times[0].date_time.len(), 11);
+        assert_eq!(times[0].time.len(), 5);
+        assert_eq!(times[1].thread_id, "unknown");
+        assert_eq!(times[1].date_time, "unknown timezone/date");
+        assert_eq!(times[1].time, times[1].raw_updated_at);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn metadata_omission_rerender_stays_bounded_and_measures_worker_time() {
+        let source = format!(
+            "{}[link](https://example.com)\n\n{}",
+            "paragraph with **bold** repeated words. ".repeat(1500),
+            "trailing prose with `code` repeated words.\n".repeat(100),
+        );
+        let anchor = source.find("[link]").unwrap();
+        let payload = serde_json::to_string(&serde_json::json!({"text":source})).unwrap();
+        let worker = crate::presentation::work(move || {
+            // The owner's display extent, projected and laid out like the client.
+            let make = |offset: Option<usize>| {
+                let (value, text, _) =
+                    crate::history::display_source::decode("assistant", Some(&payload), None);
+                let (extent, _) = crate::history::display_source::extent(&text, offset);
+                let window = &text[extent.clone()];
+                let base = text[..extent.start].chars().count();
+                let mut presentation =
+                    crate::presentation::project("assistant", &value, window, base);
+                crate::presentation::render_markdown(&mut presentation, 76);
+                UiNode {
+                    text: window.into(),
+                    presentation,
+                    ..Default::default()
+                }
+            };
+            let full_started = std::time::Instant::now();
+            let full = make(None);
+            let full_elapsed = full_started.elapsed();
+            let anchored_started = std::time::Instant::now();
+            let anchored = make(Some(anchor));
+            let anchored_elapsed = anchored_started.elapsed();
+            (full, anchored, full_elapsed, anchored_elapsed)
+        })
+        .await
+        .unwrap();
+        let (full, anchored, full_elapsed, anchored_elapsed) = worker;
+        assert!(full.presentation.metadata_limited);
+        assert!(anchored.text.len() <= crate::history::display_source::MAX_ANCHORED_BODY_BYTES);
+        assert!(anchored.presentation.metadata_limited);
+        assert!(anchored.presentation.blocks.iter().any(|block| {
+            block
+                .rendered
+                .as_ref()
+                .is_some_and(|rendered| rendered.omitted)
+        }));
+        assert!(
+            anchored
+                .presentation
+                .links
+                .iter()
+                .any(|link| link.url == "https://example.com")
+        );
+        eprintln!(
+            "Markdown presentation worker: full-window={} ms, anchored-window={} ms, bytes={}/{}",
+            full_elapsed.as_millis(),
+            anchored_elapsed.as_millis(),
+            full.text.len(),
+            anchored.text.len(),
+        );
+    }
+
+    #[test]
+    fn oversized_delta_releases_unused_capacity_and_preserves_unicode_source_offsets() {
+        let mut body = StreamBody::default();
+        let incoming = "界".repeat(MAX_BODY_BYTES as usize);
+        body.append(&incoming, true);
+        assert!(body.text.len() <= MAX_BODY_BYTES as usize);
+        assert!(body.text.capacity() <= MAX_BODY_BYTES as usize * 2);
+        assert_eq!(body.base + body.text.chars().count(), body.total);
+        assert_eq!(body.reasoning_ranges, vec![(0, MAX_BODY_BYTES as usize)]);
+        body.append("answer", false);
+        assert!(body.text.ends_with("answer"));
+        assert_eq!(body.base + body.text.chars().count(), body.total);
+        assert_eq!(body.reasoning_ranges, vec![(0, MAX_BODY_BYTES as usize)]);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod control_tests;
+
+#[cfg(test)]
+mod delivery_performance;
+
+#[cfg(test)]
+mod catalogue_glyph_tests {
+    use super::catalogue_title;
+    use crate::ui::text_width;
+
+    #[test]
+    fn operation_catalogue_titles_follow_selected_language_and_terminal_width() {
+        for (observed, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            text_width::set_terminal_width(observed);
+            let id = crate::operations::OperationId::ShellList;
+            let en = crate::ui::operation_catalogue_label(id, crate::config::UiLanguage::En);
+            let ja = crate::ui::operation_catalogue_label(id, crate::config::UiLanguage::Ja);
+            assert_eq!(catalogue_title(&en), format!("Shell{separator}List"));
+            assert_eq!(catalogue_title(&ja), format!("shell{separator}一覧"));
+            assert_eq!(catalogue_title("Owner shutdown"), "Owner shutdown");
+        }
+        text_width::clear_terminal_width();
+    }
+}
+
+#[cfg(test)]
+mod tool_preview_tests {
+    use super::*;
+    use crate::control::output::preview::PreviewPage;
+    use crate::presentation::OutputStream;
+
+    #[test]
+    fn complete_preview_still_identifies_observation_time_and_refresh() {
+        let preview = tool_preview_at(
+            PreviewPage {
+                stdout: "complete".into(),
+                stderr: String::new(),
+                raw_bytes: 8,
+                inspected_rows: 1,
+                skipped: false,
+                decode_uncertain: false,
+                decode_errors: false,
+                terminal: true,
+                output_complete: true,
+            },
+            chrono::DateTime::parse_from_rfc3339("2026-10-30T04:05:06Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            UiLanguage::Ja,
+        );
+        assert_eq!(
+            preview.notice.as_deref(),
+            Some("取得 2026-10-30 04:05:06 UTC | 閉じて開くと再取得")
+        );
+    }
+
+    #[test]
+    fn inline_tail_keeps_streams_distinct_and_discloses_only_known_limits() {
+        let page = PreviewPage {
+            stdout: "last stdout".into(),
+            stderr: "last stderr".into(),
+            raw_bytes: 2048,
+            inspected_rows: 3,
+            skipped: true,
+            decode_uncertain: true,
+            decode_errors: false,
+            terminal: true,
+            output_complete: false,
+        };
+        let observed_at = chrono::DateTime::parse_from_rfc3339("2026-10-30T04:05:06Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let preview = tool_preview_at(page, observed_at, UiLanguage::Ja);
+        assert_eq!(preview.blocks.len(), 2);
+        assert_eq!(preview.blocks[0].stream, Some(OutputStream::Stdout));
+        assert_eq!(preview.blocks[1].stream, Some(OutputStream::Stderr));
+        assert_eq!(preview.blocks[0].text, "last stdout");
+        assert!(
+            preview
+                .blocks
+                .iter()
+                .all(|block| !block.source_exact && block.markdown.is_empty())
+        );
+        let notice = preview.notice.unwrap();
+        assert!(notice.contains("取得 2026-10-30 04:05:06 UTC"));
+        assert!(notice.contains("閉じて開くと再取得"));
+        assert!(
+            notice.contains("末尾抜粋") && notice.contains("不確実") && notice.contains("未回収")
+        );
+        assert!(!notice.contains("行") && !notice.contains("文字変換エラー"));
+    }
+}

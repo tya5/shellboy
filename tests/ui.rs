@@ -1254,7 +1254,7 @@ fn accepted_snapshot_releases_body_and_restores_from_correlated_immutable_source
         other => panic!("{other:?}"),
     };
     ui.apply(UiUpdate::RestoredSnapshot {
-        source: shellboy::protocol::DraftSourceFence {
+        source: shellboy::draft::RestoredSource {
             message_id: "immutable-message".into(),
             selection_revision: 17,
         },
@@ -1281,7 +1281,7 @@ fn accepted_snapshot_releases_body_and_restores_from_correlated_immutable_source
     text(&mut ui, "new typing");
     let edited = ui.view().draft.text.clone();
     ui.apply(UiUpdate::RestoredSnapshot {
-        source: shellboy::protocol::DraftSourceFence {
+        source: shellboy::draft::RestoredSource {
             message_id: "immutable-message".into(),
             selection_revision: 17,
         },
