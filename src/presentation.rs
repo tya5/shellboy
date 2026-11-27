@@ -480,7 +480,7 @@ fn saved_background_and_unexecuted_tool_reasons_remain_distinct_in_japanese() {
         "背景移行の要求で待機を解除"
     );
     assert_eq!(
-        tool_reason("prior_wait_shell_background"),
+        tool_reason("previous_wait_released_by_shell_background"),
         "先行する呼出しを背景へ移したため未実行"
     );
 }
