@@ -86,7 +86,11 @@ pub(super) async fn fixture_with_settings(extra: &str) -> Fixture {
 pub(super) async fn rpc(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;
@@ -353,7 +357,10 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
         .find(|o| o.execution_id == execution)
         .unwrap()
         .clone();
-    let operation = format!("{}:self-stop-registration", control.store.instance_id);
+    let operation = format!(
+        "{}:self-stop-registration",
+        control.store.operation_epoch.current()
+    );
     let mut request = Request::new(
         operation.clone(),
         Command::ShellStop(ExecutionTarget {
@@ -771,7 +778,10 @@ async fn saved_self_stop_replay_does_not_create_a_new_grace_owner_or_stop_effect
         .lock()
         .await
         .insert(origin.token.clone(), origin.clone());
-    let operation = format!("{}:saved-self-stop", control.store.instance_id);
+    let operation = format!(
+        "{}:saved-self-stop",
+        control.store.operation_epoch.current()
+    );
     let mut request = Request::new(
         operation.clone(),
         Command::ShellStop(ExecutionTarget {

@@ -24,7 +24,7 @@ fn attachment_path() -> std::path::PathBuf {
 }
 fn request() -> Request {
     Request::new(
-        "instance:attach",
+        "instance.0:attach",
         Command::AttachmentAdd(AttachmentAddArgs {
             thread_id: Some("thread".into()),
             path: attachment_path().to_str().unwrap().into(),
@@ -72,7 +72,7 @@ async fn human_cli_attachment_is_anchored_to_its_own_immutable_event_once_withou
     store
         .execute(
             Request::new(
-                "instance:delete",
+                "instance.0:delete",
                 Command::ThreadDelete(ThreadDeleteArgs {
                     preview_marker: None,
                     thread_id: "thread".into(),
@@ -144,7 +144,7 @@ async fn authenticated_cli_reference_uses_dedicated_pending_node_and_a_stale_pla
         })
         .await
         .unwrap();
-    let stale = Request::new("instance:stale", request().command);
+    let stale = Request::new("instance.0:stale", request().command);
     assert_eq!(
         store
             .execute_with_plan(stale, None, plan(0))

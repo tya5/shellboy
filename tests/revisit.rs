@@ -72,7 +72,11 @@ async fn owner(root: &std::path::Path, url: &str) -> DataOwner {
 async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;
@@ -294,7 +298,7 @@ async fn human_reply_completes_its_turn_before_a_waiting_revisit() {
         .store
         .execute(
             Request::new(
-                format!("{}:question", f.control.store.instance_id),
+                format!("{}:question", f.control.store.operation_epoch.current()),
                 Command::MessageAsk(MessageAskArgs {
                     human: false,
                     sender_label: None,

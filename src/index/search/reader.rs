@@ -778,7 +778,7 @@ mod tests {
         });
         let control = crate::control::Control::new(&owner, root.path().into());
         let search = control.request(Request::new(
-            format!("{}:search", owner.instance_id),
+            format!("{}:search", owner.operation_epoch.current()),
             Command::HistorySearch(HistorySearchArgs {
                 query: "synthetic".into(),
                 limit: 10,
@@ -796,7 +796,7 @@ mod tests {
         server.await.unwrap();
         let changed = control
             .request(Request::new(
-                format!("{}:later-mutation", owner.instance_id),
+                format!("{}:later-mutation", owner.operation_epoch.current()),
                 Command::ThreadSet(Box::new(ThreadSetArgs {
                     thread_id: Some("thread".into()),
                     title: Some("owner remained available".into()),

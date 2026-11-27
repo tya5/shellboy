@@ -126,7 +126,11 @@ async fn runtime_with_io_and_drain_timeout(
 }
 async fn command(control: &Arc<Control>, command: Command) -> Value {
     let request = Request::new(
-        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+        format!(
+            "{}:{}",
+            control.store.operation_epoch.current(),
+            uuid::Uuid::new_v4()
+        ),
         command,
     );
     let response = control.request(request).await;
@@ -188,7 +192,11 @@ async fn accepted_send_operation_id_is_projected_after_driver_admission() {
     );
     let send = || {
         Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageSend(MessageSendArgs {
                 max_model_requests: None,
                 thread_id: Some(thread_id.into()),
@@ -1236,7 +1244,10 @@ async fn raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdow
     .await;
     let reply = control
         .request(Request::new(
-            format!("{}:after-save-failure", control.store.instance_id),
+            format!(
+                "{}:after-save-failure",
+                control.store.operation_epoch.current()
+            ),
             Command::ThreadList(ThreadListArgs::default()),
         ))
         .await;
@@ -1534,7 +1545,7 @@ async fn shell_output_wait_wakes_after_commit_while_shell_and_model_remain_block
         .await
         .unwrap();
     assert_eq!(empty.raw_bytes, 0);
-    let operation = format!("{}:output-wait", control.store.instance_id);
+    let operation = format!("{}:output-wait", control.store.operation_epoch.current());
     let request = Request::new(
         operation.clone(),
         Command::Wait(WaitArgs {
@@ -1640,7 +1651,7 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     .await
     .unwrap();
     let write = Request::new(
-        format!("{}:write-once", control.store.instance_id),
+        format!("{}:write-once", control.store.operation_epoch.current()),
         Command::ShellWrite(ShellWriteArgs {
             execution_id: execution.clone(),
             text: "once\n".into(),
@@ -1729,7 +1740,7 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     // A fresh EOF against closed stdin is rejected, including after the
     // live handle retires. Replaying the same operation returns its receipt.
     let repeat = Request::new(
-        format!("{}:terminal-eof", control.store.instance_id),
+        format!("{}:terminal-eof", control.store.operation_epoch.current()),
         Command::ShellEof(ExecutionTarget {
             execution_id: execution.clone(),
         }),
@@ -1748,7 +1759,10 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     assert_eq!(control.request(repeat).await, first);
     let fresh = control
         .request(Request::new(
-            format!("{}:fresh-terminal-eof", control.store.instance_id),
+            format!(
+                "{}:fresh-terminal-eof",
+                control.store.operation_epoch.current()
+            ),
             Command::ShellEof(ExecutionTarget {
                 execution_id: execution.clone(),
             }),
@@ -1757,7 +1771,7 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     assert_eq!(fresh.error.unwrap().code, ErrorCode::InvalidState);
     let late_write = control
         .request(Request::new(
-            format!("{}:terminal-write", control.store.instance_id),
+            format!("{}:terminal-write", control.store.operation_epoch.current()),
             Command::ShellWrite(ShellWriteArgs {
                 execution_id: execution.clone(),
                 text: "late".into(),
@@ -1768,7 +1782,7 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     assert_eq!(late_write.error.unwrap().code, ErrorCode::InvalidState);
     let missing = control
         .request(Request::new(
-            format!("{}:unknown-eof", control.store.instance_id),
+            format!("{}:unknown-eof", control.store.operation_epoch.current()),
             Command::ShellEof(ExecutionTarget {
                 execution_id: "unknown-execution".into(),
             }),
@@ -2232,7 +2246,7 @@ async fn real_shell_cli_backgrounds_only_the_execution_named_by_the_message_hold
     assert_foreground(&control, &sender.thread_id, &other, true).await;
     let stale = control
         .request(Request::new(
-            format!("{}:old-foreground", control.store.instance_id),
+            format!("{}:old-foreground", control.store.operation_epoch.current()),
             Command::ShellBackground(ExecutionTarget {
                 execution_id: target,
             }),
@@ -2586,7 +2600,10 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
         .unwrap();
     let response = control
         .request(Request::new(
-            format!("{}:missing-attachment-target", control.store.instance_id),
+            format!(
+                "{}:missing-attachment-target",
+                control.store.operation_epoch.current()
+            ),
             Command::AttachmentAdd(AttachmentAddArgs {
                 thread_id: Some("typo-thread".into()),
                 path: "fixture.txt".into(),
@@ -2635,7 +2652,10 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
     .await;
     let error = control
         .send_draft(
-            format!("{}:deleted-draft-target", control.store.instance_id),
+            format!(
+                "{}:deleted-draft-target",
+                control.store.operation_epoch.current()
+            ),
             args,
             Some(target.clone()),
             "retained draft".into(),
@@ -2646,7 +2666,10 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
     assert_eq!(error.code, ErrorCode::ThreadNotFound);
     let error = control
         .edit_request(
-            format!("{}:deleted-edit-target", control.store.instance_id),
+            format!(
+                "{}:deleted-edit-target",
+                control.store.operation_epoch.current()
+            ),
             target,
             "old-node".into(),
             "retained edit".into(),
@@ -2696,7 +2719,10 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
         }).await.unwrap();
         if let Some(id)=row {break id;}tokio::task::yield_now().await;
     }}).await.unwrap();
-    let operation = format!("{}:graceful-real-wait", control.store.instance_id);
+    let operation = format!(
+        "{}:graceful-real-wait",
+        control.store.operation_epoch.current()
+    );
     let wait = tokio::spawn({
         let control = control.clone();
         let execution = execution.clone();
@@ -3396,7 +3422,11 @@ async fn startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch() {
                 .store
                 .execute(
                     Request::new(
-                        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                        format!(
+                            "{}:{}",
+                            control.store.operation_epoch.current(),
+                            uuid::Uuid::new_v4()
+                        ),
                         Command::ThreadCreate(ThreadCreateArgs {
                             agents: None,
                             connection: None,
@@ -3594,7 +3624,11 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
     assert!(read["stdout_start_offset"].as_u64().unwrap() >= 24576);
     let expired = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::ShellRead(ShellReadArgs {
                 tail: false,
                 segments: false,

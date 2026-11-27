@@ -598,7 +598,7 @@ async fn low_disk_holds_the_turn_and_explicit_retry_resumes_after_space_returns(
     crate::gc::force_free_for_test(&data, Some(100 << 30));
     let retried = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, id()),
+            format!("{}:{}", control.store.operation_epoch.current(), id()),
             Command::RunRetry(RunTarget {
                 run_id: accepted.run_id.clone().unwrap(),
             }),
@@ -680,7 +680,10 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
                 control
                     .store
                     .execute(
-                        Request::new(format!("{}:{case}", owner.instance_id), command),
+                        Request::new(
+                            format!("{}:{case}", owner.operation_epoch.current()),
+                            command,
+                        ),
                         None,
                     )
                     .await

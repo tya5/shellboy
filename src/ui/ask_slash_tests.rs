@@ -70,7 +70,7 @@ async fn thread_ask_slash_opens_one_duty_and_send_opens_none() {
         root.path().into(),
         "fixture".into(),
     );
-    let request = |id: &str, command| Request::new(format!("fixture:{id}"), command);
+    let request = |id: &str, command| Request::new(format!("fixture.0:{id}"), command);
     let owed = || async {
         store
             .execute(

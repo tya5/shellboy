@@ -30,7 +30,7 @@ async fn fixture_with_policy(
         .store
         .execute(
             Request::new(
-                format!("{}:create", owner.instance_id),
+                format!("{}:create", owner.operation_epoch.current()),
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
                     connection: None,
@@ -52,7 +52,7 @@ async fn fixture_with_policy(
         .store
         .execute(
             Request::new(
-                format!("{}:send", owner.instance_id),
+                format!("{}:send", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -96,7 +96,7 @@ async fn add_human_attachment(
     control
         .store
         .send_draft(
-            format!("{}:{}", control.store.instance_id, id()),
+            format!("{}:{}", control.store.operation_epoch.current(), id()),
             ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -129,7 +129,7 @@ async fn outstanding_now_receipt_applies_at_the_normal_driver_boundary() {
     use crate::protocol::{Deliver, WaitArgs, WaitCondition};
     let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
     let request = Request::new(
-        format!("{}:legacy-now", owner.instance_id),
+        format!("{}:legacy-now", owner.operation_epoch.current()),
         Command::MessageSend(MessageSendArgs {
             max_model_requests: None,
             resume_recovery: false,
@@ -715,7 +715,7 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .store
         .execute(
             Request::new(
-                format!("{}:cancelled-input", owner.instance_id),
+                format!("{}:cancelled-input", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -759,7 +759,7 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
     };
     let cancellation = control
         .request(Request::new(
-            format!("{}:cancel-input", owner.instance_id),
+            format!("{}:cancel-input", owner.operation_epoch.current()),
             Command::MessageCancel(crate::protocol::MessageCancelArgs {
                 message_ids: vec![message_id.clone()],
             }),
@@ -805,7 +805,7 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
     );
     let generating = control
         .request(Request::new(
-            format!("{}:generating-hold", owner.instance_id),
+            format!("{}:generating-hold", owner.operation_epoch.current()),
             Command::MessageGet(crate::protocol::MessageTarget {
                 message_id: accepted.message_id.clone(),
             }),
@@ -853,7 +853,7 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .store
         .execute(
             Request::new(
-                format!("{}:later-input", owner.instance_id),
+                format!("{}:later-input", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -1770,12 +1770,12 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
             tokio::task::yield_now().await;
         };
         assert_ne!(other["execution_id"], execution);
-        let send = |suffix: &str, deliver| Request::new(format!("{}:{suffix}", owner.instance_id),
+        let send = |suffix: &str, deliver| Request::new(format!("{}:{suffix}", owner.operation_epoch.current()),
             Command::MessageSend(MessageSendArgs { max_model_requests: None, resume_recovery: false,
                 human: false, sender_label: None, deliver, thread_id: Some(snapshot.thread.clone()), text: "fresh queued input".into() }));
         let earlier = control.request(send("earlier", crate::protocol::Deliver::Next)).await.result.unwrap();
         let named = control.store.execute(Request::new(
-            format!("{}:named-between-inputs", owner.instance_id),
+            format!("{}:named-between-inputs", owner.operation_epoch.current()),
             Command::MessageAsk(crate::protocol::MessageAskArgs {
                 to: Some("human".into()), human: false, sender_label: None,
                 deliver: crate::protocol::Deliver::Next, thread_id: None,
@@ -1789,7 +1789,7 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
         assert_ne!(earlier["message_id"], named["message_id"]);
         let pending = control.request(send("pending", crate::protocol::Deliver::Next)).await.result.unwrap();
         let revisit = control.request(send("revisit", crate::protocol::Deliver::Complete)).await.result.unwrap();
-        let get = |value: &Value| Request::new(format!("{}:hold", owner.instance_id),
+        let get = |value: &Value| Request::new(format!("{}:hold", owner.operation_epoch.current()),
             Command::MessageGet(crate::protocol::MessageTarget { message_id: value["message_id"].as_str().unwrap().into() }));
         let message_get = get(&pending);
         let detail = control.request(message_get.clone()).await.result.unwrap();
@@ -1802,9 +1802,9 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
             assert_eq!(detail["held_by"], json!({"kind":"unknown"}));
         }
         let accepted = if wire {
-            let wrong = control.request(Request::new(format!("{}:stale", owner.instance_id), Command::ShellBackground(crate::protocol::ExecutionTarget { execution_id: "stale".into() }))).await;
+            let wrong = control.request(Request::new(format!("{}:stale", owner.operation_epoch.current()), Command::ShellBackground(crate::protocol::ExecutionTarget { execution_id: "stale".into() }))).await;
             assert_eq!(wrong.error.unwrap().details.unwrap()["reason"], "execution_not_found");
-            let request = Request::new(format!("{}:background", owner.instance_id), Command::ShellBackground(crate::protocol::ExecutionTarget { execution_id: execution.clone() }));
+            let request = Request::new(format!("{}:background", owner.operation_epoch.current()), Command::ShellBackground(crate::protocol::ExecutionTarget { execution_id: execution.clone() }));
             let response = control.request(request.clone()).await;
             let replayed = control.request(request).await;
             assert_eq!(replayed.result, response.result);
@@ -1929,7 +1929,7 @@ async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
         ).await.unwrap();
         // The driver's outcome is already chosen, but its owned slot still exists.
         let stopped = control.store.execute(Request::new(
-            format!("{}:stop", owner.instance_id), Command::RunStop(RunTarget { run_id:run.clone() }),
+            format!("{}:stop", owner.operation_epoch.current()), Command::RunStop(RunTarget { run_id:run.clone() }),
         ), None).await.unwrap();
         assert_eq!(stopped.stop_runs, vec![run.clone()]);
         assert!(matches!(next(&control, &accepted.thread_id, run).await.unwrap(), Next::Done));
@@ -1967,7 +1967,7 @@ async fn stopping_keeps_queued_input_held_with_the_recorded_reason() {
                 .store
                 .execute(
                     Request::new(
-                        format!("{}:stop", owner.instance_id),
+                        format!("{}:stop", owner.operation_epoch.current()),
                         Command::RunStop(RunTarget { run_id: run }),
                     ),
                     None,
@@ -2008,7 +2008,7 @@ async fn concurrent_stop_completion_does_not_start_model_work() {
     crate::test_watchdog::watchdog("serialized absent-driver stop handoff", async {
         let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
         let run = accepted.run_id.as_ref().unwrap();
-        control.store.execute(Request::new(format!("{}:stop",owner.instance_id),
+        control.store.execute(Request::new(format!("{}:stop",owner.operation_epoch.current()),
             Command::RunStop(RunTarget {run_id:run.clone()})), None).await.unwrap();
         let (one,two)=tokio::join!(try_stop_without_driver(&control,run),try_stop_without_driver(&control,run));
         one.unwrap();two.unwrap();
@@ -2130,7 +2130,7 @@ async fn cancelled_reply_notice_reaches_next_admission_without_changing_current_
             .store
             .execute(
                 Request::new(
-                    format!("{}:expected", owner.instance_id),
+                    format!("{}:expected", owner.operation_epoch.current()),
                     Command::MessageAsk(crate::protocol::MessageAskArgs {
                         to: None,
                         human: false,
@@ -2153,7 +2153,7 @@ async fn cancelled_reply_notice_reaches_next_admission_without_changing_current_
         .store
         .execute(
             Request::new(
-                format!("{}:cancel-duty", owner.instance_id),
+                format!("{}:cancel-duty", owner.operation_epoch.current()),
                 Command::MessageCancel(crate::protocol::MessageCancelArgs {
                     message_ids: vec![accepted.message_id.clone()],
                 }),
@@ -2411,7 +2411,7 @@ async fn ordinary_admission_and_completion_preserve_long_model_names_with_gc_ena
                 .store
                 .execute(
                     Request::new(
-                        format!("{}:{}", owner.instance_id, id()),
+                        format!("{}:{}", owner.operation_epoch.current(), id()),
                         Command::ThreadSet(Box::new(ThreadSetArgs {
                             thread_id: Some(accepted.thread_id.clone()),
                             model: Some(model.clone()),
@@ -2543,7 +2543,6 @@ async fn enter_synthetic_recovery_wait(
 
 async fn seed_completed_outgoing_attachment(
     control: &Arc<Control>,
-    instance: &str,
     root: &std::path::Path,
     accepted: &MessageAccepted,
     attempt: &str,
@@ -2552,7 +2551,10 @@ async fn seed_completed_outgoing_attachment(
         .store
         .execute(
             Request::new(
-                format!("{instance}:attachment-destination"),
+                format!(
+                    "{}:attachment-destination",
+                    control.store.operation_epoch.current()
+                ),
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
                     connection: None,
@@ -2575,7 +2577,11 @@ async fn seed_completed_outgoing_attachment(
     let group = id();
     let call = "settlement-attachment-call".to_owned();
     let execution = id();
-    let operation = format!("{instance}:outgoing-attachment-{}", id());
+    let operation = format!(
+        "{}:outgoing-attachment-{}",
+        control.store.operation_epoch.current(),
+        id()
+    );
     let origin = json!({
         "kind":"shell","thread_id":accepted.thread_id,"run_id":accepted.run_id,
         "turn_id":accepted.turn_id,"execution_id":execution
@@ -2650,7 +2656,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
         .store
         .execute(
             Request::new(
-                format!("{}:admitted-input", owner.instance_id),
+                format!("{}:admitted-input", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -2722,7 +2728,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
         .store
         .execute(
             Request::new(
-                format!("{}:held", owner.instance_id),
+                format!("{}:held", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -2741,7 +2747,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
     let held_id = held["message_id"].as_str().unwrap().to_owned();
     let detail = control
         .request(Request::new(
-            format!("{}:recovery-hold", owner.instance_id),
+            format!("{}:recovery-hold", owner.operation_epoch.current()),
             Command::MessageGet(crate::protocol::MessageTarget {
                 message_id: held_id.clone(),
             }),
@@ -2758,14 +2764,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
         ))).await.unwrap()
     };
     let (destination, outgoing_node, outgoing_operation, outgoing_origin) =
-        seed_completed_outgoing_attachment(
-            &control,
-            &owner.instance_id,
-            root.path(),
-            &accepted,
-            &failed_attempt,
-        )
-        .await;
+        seed_completed_outgoing_attachment(&control, root.path(), &accepted, &failed_attempt).await;
     let outgoing_body_id = outgoing_node.clone();
     let outgoing_body_before = control
         .store
@@ -2781,7 +2780,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
         .unwrap();
     let response = control
         .request(Request::new(
-            format!("{}:atomic-rewind", owner.instance_id),
+            format!("{}:atomic-rewind", owner.operation_epoch.current()),
             Command::ThreadRewind(crate::protocol::ThreadRewindArgs {
                 thread_id: Some(accepted.thread_id.clone()),
                 node_id: accepted.message_id.clone(),
@@ -2848,7 +2847,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
         .store
         .execute(
             Request::new(
-                format!("{}:after-rewind", owner.instance_id),
+                format!("{}:after-rewind", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -2931,7 +2930,7 @@ async fn recovery_rewind_refuses_retained_driver_without_cancelling_or_mutating(
         .unwrap();
     let response = control
         .request(Request::new(
-            format!("{}:refused-rewind", owner.instance_id),
+            format!("{}:refused-rewind", owner.operation_epoch.current()),
             Command::ThreadRewind(crate::protocol::ThreadRewindArgs {
                 thread_id: Some(thread.clone()),
                 node_id: accepted.message_id.clone(),
@@ -2985,7 +2984,7 @@ async fn recovery_rewind_group_boundary_failure_rolls_back_stop_path_branch_and_
         .store
         .execute(
             Request::new(
-                format!("{}:rollback-held", owner.instance_id),
+                format!("{}:rollback-held", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -3030,14 +3029,8 @@ async fn recovery_rewind_group_boundary_failure_rolls_back_stop_path_branch_and_
         .await
         .unwrap();
     let (_destination, _outgoing_node, outgoing_operation, _outgoing_origin) =
-        seed_completed_outgoing_attachment(
-            &control,
-            &owner.instance_id,
-            _root.path(),
-            &accepted,
-            &failed_attempt,
-        )
-        .await;
+        seed_completed_outgoing_attachment(&control, _root.path(), &accepted, &failed_attempt)
+            .await;
     let outgoing_operation_before = outgoing_operation.clone();
     let outgoing_before = control.store.database.call(move |db| Ok(db.query_row(
         "SELECT status,thread_id,origin_json,(SELECT payload_json FROM node WHERE id=attachment_delivery.node_id) FROM attachment_delivery WHERE operation_id=?1",
@@ -3055,7 +3048,7 @@ async fn recovery_rewind_group_boundary_failure_rolls_back_stop_path_branch_and_
     }).await.unwrap();
     let response = control
         .request(Request::new(
-            format!("{}:rollback-rewind", owner.instance_id),
+            format!("{}:rollback-rewind", owner.operation_epoch.current()),
             Command::ThreadRewind(crate::protocol::ThreadRewindArgs {
                 thread_id: Some(accepted.thread_id.clone()),
                 node_id: "synthetic-call".into(),
@@ -3151,7 +3144,7 @@ async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
         .store
         .execute(
             Request::new(
-                format!("{}:reply-order-rewind", owner.instance_id),
+                format!("{}:reply-order-rewind", owner.operation_epoch.current()),
                 Command::ThreadRewind(crate::protocol::ThreadRewindArgs {
                     thread_id: Some(accepted.thread_id.clone()),
                     node_id: accepted.message_id.clone(),
@@ -3286,7 +3279,7 @@ async fn received_attempt_fence(truncated: bool) {
         .store
         .execute(
             Request::new(
-                format!("{}:queued", owner.instance_id),
+                format!("{}:queued", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,
@@ -3403,6 +3396,7 @@ async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reco
     let thread_id = snapshot.thread.clone();
     let run_id = snapshot.run.clone();
     let instance = owner.instance_id.clone();
+    let epoch = control.store.operation_epoch.current();
     let (thread, status, point) = control
         .store
         .database
@@ -3417,6 +3411,7 @@ async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reco
                     ..StatusArgs::default()
                 },
                 &instance,
+                &epoch,
             )
             .unwrap();
             let raw = observation::read_status_tx(

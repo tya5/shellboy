@@ -444,7 +444,11 @@ mod tests {
         owner.db.call(|db| { db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('thread','/','/AGENTS.md','not-configured','not-configured','now')",[])?; Ok(()) }).await.unwrap();
         let mut operations = Vec::new();
         for explicit in [false, false, true, false] {
-            let operation = format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4());
+            let operation = format!(
+                "{}:{}",
+                owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            );
             let command = if explicit {
                 Command::ContextEdit(edit())
             } else {

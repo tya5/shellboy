@@ -16,6 +16,7 @@ impl Store {
             args.thread_id = caller.as_ref().map(|origin| origin.thread_id.clone());
         }
         let instance = self.instance_id.clone();
+        let epoch = self.operation_epoch.current();
         let path = self.database.path().to_path_buf();
         let observer = self.database.clone();
         let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
@@ -29,7 +30,7 @@ impl Store {
             let mut db = open_inspection(&path)?;
             observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
                 let tx = db.transaction().map_err(sql_error)?;
-                let result = crate::status::snapshot(&tx, &args, &instance)?;
+                let result = crate::status::snapshot(&tx, &args, &instance, &epoch)?;
                 tx.commit().map_err(sql_error)?;
                 MutationResult::value(result)
             })

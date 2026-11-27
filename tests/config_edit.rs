@@ -983,7 +983,7 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
                 change("shell.env.OWNER_VAR", json!("owner-secret-value")),
             ],
         };
-        let operation = format!("{}:config-1", control.store.instance_id);
+        let operation = format!("{}:config-1", control.store.operation_epoch.current());
         let first = set(&control, &operation, args.clone()).await.unwrap();
         assert_eq!(first["written"], true);
         crate::operation_result_schema::assert_result("config.set", &first);
@@ -1020,7 +1020,7 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
         assert_eq!(error.code, ErrorCode::OperationConflict);
 
         // A failed change is saved too, and a stale hash reaches the caller.
-        let operation = format!("{}:config-2", control.store.instance_id);
+        let operation = format!("{}:config-2", control.store.operation_epoch.current());
         let moved = format!("{original}# Edited elsewhere\n");
         std::fs::write(&path, &moved).unwrap();
         let error = set(&control, &operation, args.clone()).await.unwrap_err();
@@ -1077,7 +1077,10 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
 
         let written = set(
             &control,
-            &format!("{}:restart-required", control.store.instance_id),
+            &format!(
+                "{}:restart-required",
+                control.store.operation_epoch.current()
+            ),
             ConfigSetArgs {
                 expected_hash: hash.clone(),
                 changes: vec![change("shell.env.CONFIG_MARK_TEST", json!("set"))],
@@ -1105,7 +1108,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
 
         let no_op = set(
             &control,
-            &format!("{}:no-op", control.store.instance_id),
+            &format!("{}:no-op", control.store.operation_epoch.current()),
             ConfigSetArgs {
                 expected_hash: written["content_hash"].as_str().unwrap().to_owned(),
                 changes: vec![change("default_model", json!("fixture"))],
@@ -1129,7 +1132,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
 
         let refused = set(
             &control,
-            &format!("{}:refused", control.store.instance_id),
+            &format!("{}:refused", control.store.operation_epoch.current()),
             ConfigSetArgs {
                 expected_hash: hash,
                 changes: vec![change("default_model", json!("stale"))],
@@ -1196,7 +1199,7 @@ async fn removing_a_connection_a_thread_uses_stops_it_until_it_is_moved() {
             .unwrap()
             .to_owned();
         // config.set doesn't consult the database: this is accepted.
-        let operation = format!("{}:remove", control.store.instance_id);
+        let operation = format!("{}:remove", control.store.operation_epoch.current());
         let args = ConfigSetArgs {
             expected_hash: hash,
             changes: vec![removal("connections.p")],
@@ -1233,14 +1236,14 @@ async fn removing_a_connection_a_thread_uses_stops_it_until_it_is_moved() {
         };
         let response = control
             .request(Request::new(
-                format!("{}:model-only", control.store.instance_id),
+                format!("{}:model-only", control.store.operation_epoch.current()),
                 args(None),
             ))
             .await;
         assert!(!response.ok, "the saved connection no longer exists");
         let moved = control
             .request(Request::new(
-                format!("{}:moved", control.store.instance_id),
+                format!("{}:moved", control.store.operation_epoch.current()),
                 args(Some("q")),
             ))
             .await;
@@ -1267,7 +1270,7 @@ async fn concurrent_sets_with_one_hash_leave_one_winner() {
                 expected_hash: hash.clone(),
                 changes: vec![change("default_model", json!(format!("winner-{n}")))],
             };
-            let operation = format!("{}:race-{n}", control.store.instance_id);
+            let operation = format!("{}:race-{n}", control.store.operation_epoch.current());
             tasks.push(tokio::spawn(async move {
                 set(&control, &operation, args).await
             }));
@@ -1544,7 +1547,10 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
     }
     config_spill(
         &control,
-        &format!("{}:spill-connection-off", control.store.instance_id),
+        &format!(
+            "{}:spill-connection-off",
+            control.store.operation_epoch.current()
+        ),
         false,
     )
     .await;
@@ -1564,7 +1570,10 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
     assert_eq!(off["spill"], false);
     config_spill(
         &control,
-        &format!("{}:spill-connection-on", control.store.instance_id),
+        &format!(
+            "{}:spill-connection-on",
+            control.store.operation_epoch.current()
+        ),
         true,
     )
     .await;
@@ -1584,7 +1593,10 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
     assert_eq!(on["spill"], true);
     config_spill(
         &control,
-        &format!("{}:spill-connection-off-again", control.store.instance_id),
+        &format!(
+            "{}:spill-connection-off-again",
+            control.store.operation_epoch.current()
+        ),
         false,
     )
     .await;

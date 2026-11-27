@@ -1089,7 +1089,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     // Another Thread changes after the preview (#257): the reviewed Y must still work.
     let changed = observer
         .request(Request::new(
-            format!("{}:preview-race", observer.store.instance_id),
+            format!("{}:preview-race", observer.store.operation_epoch.current()),
             Command::ThreadSet(Box::new(ThreadSetArgs {
                 auto_compact_target_percent: None,
                 summary_max_chars: None,
@@ -1533,7 +1533,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     let control = Control::new(&owner, root.path().into());
     let accepted = control
         .send_draft(
-            format!("{}:start", control.store.instance_id),
+            format!("{}:start", control.store.operation_epoch.current()),
             ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -1631,7 +1631,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     );
     let response = observer
         .request(Request::new(
-            format!("{}:after-failure", observer.store.instance_id),
+            format!("{}:after-failure", observer.store.operation_epoch.current()),
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -2683,7 +2683,10 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     use shellboy::protocol::{Command, Request, ThreadSetArgs};
     let response = observer
         .request(Request::new(
-            format!("{}:metadata-refresh", observer.store.instance_id),
+            format!(
+                "{}:metadata-refresh",
+                observer.store.operation_epoch.current()
+            ),
             Command::ThreadSet(Box::new(ThreadSetArgs {
                 auto_compact_target_percent: None,
                 summary_max_chars: None,
@@ -3136,7 +3139,7 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         .store
         .execute(
             Request::new(
-                format!("{}:thread", control.store.instance_id),
+                format!("{}:thread", control.store.operation_epoch.current()),
                 Command::ThreadCreate(ThreadCreateArgs {
                     agents: None,
                     connection: None,

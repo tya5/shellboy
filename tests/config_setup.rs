@@ -432,7 +432,7 @@ async fn first_send_failure_has_source_and_missing_details_and_localized_next_ac
     };
     let error = store
         .send_new_thread(
-            format!("fixture:{}", uuid::Uuid::new_v4()),
+            format!("fixture.0:{}", uuid::Uuid::new_v4()),
             args,
             "test only".into(),
         )
@@ -483,7 +483,11 @@ language = 'ja'
     control.start().await.unwrap();
     let request = |command| {
         Request::new(
-            format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                owner.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         )
     };

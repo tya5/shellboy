@@ -897,7 +897,7 @@ mod tests {
             "memory facts do not enable activity-list navigation"
         );
         assert!(!work_status(&Command::OperationGet(OperationTarget {
-            operation_id: "fixture:receipt".into(),
+            operation_id: "fixture.0:receipt".into(),
         })));
         assert!(!work_status(&Command::ThreadGet(
             crate::protocol::ThreadGetArgs {

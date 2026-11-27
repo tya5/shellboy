@@ -773,7 +773,7 @@ mod tests {
                 limit: 200,
                 ..Default::default()
             };
-            let canonical = super::super::snapshot(&db, &args, "fixture").unwrap();
+            let canonical = super::super::snapshot(&db, &args, "fixture", "fixture.0").unwrap();
             assert_eq!(canonical.page.items.len(), 5);
             let run = canonical
                 .page
@@ -833,7 +833,7 @@ mod tests {
                 [saved.to_string()],
             )
             .unwrap();
-            let page = super::super::snapshot(&db, &args, "fixture").unwrap();
+            let page = super::super::snapshot(&db, &args, "fixture", "fixture.0").unwrap();
             let turn = page.page.items.into_iter().find(|v| v.id == "t").unwrap();
             assert_eq!(turn.reason.as_deref(), Some(reason));
             assert_eq!(turn.message.as_deref(), message);
@@ -872,7 +872,7 @@ mod tests {
                 [body.to_string()],
             )
             .unwrap();
-            let page = super::super::snapshot(&db, &args, "fixture").unwrap();
+            let page = super::super::snapshot(&db, &args, "fixture", "fixture.0").unwrap();
             let expected = page.page.items.into_iter().find(|v| v.id == "a").unwrap();
             assert_eq!(expected.compaction_outcome.is_some(), !extra);
             let prepared = prepare(
@@ -905,7 +905,7 @@ mod tests {
                 [value.to_string()],
             )
             .unwrap();
-            let page = super::super::snapshot(&db, &args, "fixture").unwrap();
+            let page = super::super::snapshot(&db, &args, "fixture", "fixture.0").unwrap();
             assert!(
                 page.page
                     .items

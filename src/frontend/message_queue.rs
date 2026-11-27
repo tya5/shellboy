@@ -524,7 +524,7 @@ mod tests {
             "INSERT INTO receipt VALUES(?1,?2,?3,'2026-10-30T00:00:00Z',?4,?5,?6,?7,'thread')",
             params![
                 id,
-                format!("fixture:{id}"),
+                format!("fixture.0:{id}"),
                 sender.to_string(),
                 state,
                 (state == "held").then_some("terminal_before_path_admission"),
@@ -1043,7 +1043,7 @@ mod retention_tests {
             .await
             .unwrap();
         let request = Request::new(
-            format!("{}:retention-cancel", owner.instance_id),
+            format!("{}:retention-cancel", owner.operation_epoch.current()),
             Command::MessageCancel(MessageCancelArgs {
                 message_ids: vec!["retention-message".into()],
             }),

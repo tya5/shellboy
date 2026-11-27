@@ -2477,7 +2477,7 @@ async fn real_thread_delete_hides_path_only_sources_until_gc_reclaims_payload_an
     store
         .execute(
             shellboy::protocol::Request::new(
-                "delete-fixture:delete",
+                "delete-fixture.0:delete",
                 shellboy::protocol::Command::ThreadDelete(shellboy::protocol::ThreadDeleteArgs {
                     preview_marker: None,
                     thread_id: "deleted".into(),
@@ -3921,7 +3921,7 @@ async fn history_search_hit_omits_the_creating_send_operation_id() {
         f._temp.path().to_owned(),
         "fixture".into(),
     );
-    let operation_id = "fixture:send-search-provenance";
+    let operation_id = "fixture.0:send-search-provenance";
     let sent = store
         .execute(
             Request::new(
@@ -3942,7 +3942,7 @@ async fn history_search_hit_omits_the_creating_send_operation_id() {
     let get = store
         .execute(
             Request::new(
-                "fixture:get-search-provenance",
+                "fixture.0:get-search-provenance",
                 Command::HistoryRead(serde_json::from_value(json!({"node_id":node})).unwrap()),
             ),
             None,

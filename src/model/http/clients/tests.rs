@@ -402,7 +402,7 @@ async fn control_catalog_requests_reuse_the_owner_client_pool() {
     for i in 0..2 {
         let result = control
             .request(Request::new(
-                format!("{}:catalog-{i}", owner.instance_id),
+                format!("{}:catalog-{i}", owner.operation_epoch.current()),
                 Command::ModelList(ModelListArgs {
                     connection: Some("catalog".into()),
                     thread_id: None,
@@ -485,7 +485,7 @@ async fn control_conversations_reuse_owner_client_for_chunked_sse() {
     let control = Control::new(&owner, root.path().into());
     let create = control
         .request(Request::new(
-            format!("{}:create", owner.instance_id),
+            format!("{}:create", owner.operation_epoch.current()),
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 cwd: None,
@@ -504,7 +504,7 @@ async fn control_conversations_reuse_owner_client_for_chunked_sse() {
     for n in 0..2 {
         let sent = control
             .request(Request::new(
-                format!("{}:send-{n}", owner.instance_id),
+                format!("{}:send-{n}", owner.operation_epoch.current()),
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
                     resume_recovery: false,

@@ -32,7 +32,7 @@ async fn thread_list_exposes_latest_stop_reason_and_new_run_clears_it() {
     );
     let list = |id: &str| {
         Request::new(
-            format!("instance:{id}"),
+            format!("instance.0:{id}"),
             Command::ThreadList(ThreadListArgs::default()),
         )
     };

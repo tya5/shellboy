@@ -21,7 +21,10 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
     let saved = control
         .store
         .execute(
-            Request::new(format!("{}:saved-request", owner.instance_id), command),
+            Request::new(
+                format!("{}:saved-request", owner.operation_epoch.current()),
+                command,
+            ),
             None,
         )
         .await
@@ -32,7 +35,10 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
         serde_json::from_value(json!({"command":"history.read","args":{"node_id":node}})).unwrap();
     let (baseline, _) = control
         .evaluate(
-            Request::new(format!("{}:x", owner.instance_id), command.clone()),
+            Request::new(
+                format!("{}:x", owner.operation_epoch.current()),
+                command.clone(),
+            ),
             CancellationToken::new(),
         )
         .await;
@@ -46,7 +52,11 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
     for delta in [-1i64, 0, 1] {
         let length = (crate::protocol::MAX_FRAME_BYTES - baseline_bytes + 1) as i64 + delta;
         let request = Request::new(
-            format!("{}:{}", owner.instance_id, "x".repeat(length as usize)),
+            format!(
+                "{}:{}",
+                owner.operation_epoch.current(),
+                "x".repeat(length as usize)
+            ),
             command.clone(),
         );
         request.validate().unwrap();
@@ -134,7 +144,7 @@ async fn notification_all_history_handlers_fit_receipt_and_replay_at_exact_frame
         let (baseline, _) = control
             .evaluate(
                 Request::new(
-                    format!("{}:{discriminator}", owner.instance_id),
+                    format!("{}:{discriminator}", owner.operation_epoch.current()),
                     command.clone(),
                 ),
                 CancellationToken::new(),
@@ -168,7 +178,7 @@ async fn notification_all_history_handlers_fit_receipt_and_replay_at_exact_frame
             let request = Request::new(
                 format!(
                     "{}:{}",
-                    owner.instance_id,
+                    owner.operation_epoch.current(),
                     discriminator.to_string().repeat(length as usize)
                 ),
                 command.clone(),
@@ -268,7 +278,7 @@ async fn history_read_keeps_summary_parts_text_and_cursor_at_exact_frame_boundar
         json!({"command":"history.read","args":{"node_id":"summary","parts":true,"limit_bytes":32}}),
     )
     .unwrap();
-    let short = format!("{}:parts", owner.instance_id);
+    let short = format!("{}:parts", owner.operation_epoch.current());
     let (baseline, _) = control
         .evaluate(
             Request::new(short.clone(), command.clone()),

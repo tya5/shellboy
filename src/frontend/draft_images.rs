@@ -161,8 +161,13 @@ async fn call(
     draft: &str,
     action: DraftImageAction,
 ) -> Result<DraftImageResult, ApiError> {
-    let op = matches!(action, DraftImageAction::Commit { .. })
-        .then(|| format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()));
+    let op = matches!(action, DraftImageAction::Commit { .. }).then(|| {
+        format!(
+            "{}:{}",
+            control.store.operation_epoch.current(),
+            uuid::Uuid::new_v4()
+        )
+    });
     super::compose_call(
         control,
         Command::DraftImage(DraftImageArgs {

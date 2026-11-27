@@ -337,6 +337,8 @@ impl Default for StartupProgress {
 }
 pub struct DataOwner {
     pub instance_id: String,
+    /// Operation-ID epoch shared by the IPC handshake and the receipt store.
+    pub operation_epoch: Arc<crate::control::OperationEpoch>,
     pub loaded: LoadedConfig,
     pub db: DbWorker,
     pub diagnostics: crate::diagnostics::Diagnostics,
@@ -498,8 +500,10 @@ impl DataOwner {
         for failure in report.failures {
             diagnostics.record_tool_repair_failure(failure);
         }
+        let instance_id = uuid::Uuid::new_v4().to_string();
         Ok(Self {
-            instance_id: uuid::Uuid::new_v4().to_string(),
+            operation_epoch: crate::control::OperationEpoch::new(&instance_id),
+            instance_id,
             loaded,
             db,
             diagnostics,

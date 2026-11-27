@@ -26,7 +26,7 @@ async fn store() -> (TempDir, Store) {
     )
 }
 fn request(command: Command) -> Request {
-    Request::new(format!("instance:{}", uuid::Uuid::new_v4()), command)
+    Request::new(format!("instance.0:{}", uuid::Uuid::new_v4()), command)
 }
 async fn run(store: &Store, command: Command) -> Result<Value, ApiError> {
     store

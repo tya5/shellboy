@@ -116,7 +116,6 @@ struct Chat<'a, W: Write> {
     timeout: Option<Duration>,
     data: PathBuf,
     origin: Option<Origin>,
-    instance: String,
     human: bool,
     json: bool,
     out: &'a mut W,
@@ -154,8 +153,9 @@ impl<W: Write> Chat<'_, W> {
         let _ = self.out.flush();
     }
     async fn call<T: DeserializeOwned>(&self, command: Command) -> Result<T, ChatError> {
-        let operation = format!("{}:chat-{}", self.instance, uuid::Uuid::new_v4());
-        let response = ipc::call(&self.data, command, Some(operation), self.origin.clone())
+        // The handshake mints each ID in the owner's current operation epoch,
+        // so a long session keeps working after the epoch rolls (#450).
+        let response = ipc::call(&self.data, command, None, self.origin.clone())
             .await
             .map_err(ChatError::api)?;
         if !response.ok {
@@ -195,12 +195,6 @@ impl<W: Write> Chat<'_, W> {
                 ApiError::new(ErrorCode::InvalidState, "Owner rejected connection probe")
             })));
         }
-        self.instance = response
-            .operation_id
-            .split_once(':')
-            .map(|(id, _)| id.to_owned())
-            .filter(|id| !id.is_empty())
-            .ok_or_else(|| ChatError::new(6, "Owner probe returned no instance-scoped ID"))?;
         Ok(())
     }
 
@@ -768,7 +762,6 @@ pub async fn run<R: AsyncBufRead + Unpin, W: Write>(
         timeout: options.timeout_ms.map(Duration::from_millis),
         data: data.into(),
         origin,
-        instance: String::new(),
         human: env.stdin_is_tty,
         json: options.json,
         out,

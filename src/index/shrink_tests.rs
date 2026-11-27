@@ -1256,7 +1256,7 @@ async fn command_dispatch_and_started_workers_convert_without_any_api_call() {
     control.start().await.unwrap();
     let send = |n: &'static str, command: Command| {
         let control = control.clone();
-        let id = format!("{}:{n}", owner.instance_id);
+        let id = format!("{}:{n}", owner.operation_epoch.current());
         async move { control.request(Request::new(id, command)).await }
     };
     let preview = send(

@@ -1065,7 +1065,7 @@ mod tests {
         ] {
             let result = control
                 .request(Request::new(
-                    format!("{}:start-{id}", owner.instance_id),
+                    format!("{}:start-{id}", owner.operation_epoch.current()),
                     Command::ServiceStart(ServiceTarget {
                         service_id: id.into(),
                     }),
@@ -1165,7 +1165,7 @@ mod tests {
                 preview_marker: None,
             };
             let request = Request::new(
-                format!("{}:delete", owner.instance_id),
+                format!("{}:delete", owner.operation_epoch.current()),
                 Command::ThreadDelete(args.clone()),
             );
             let cwd = root.path().to_string_lossy().into_owned();
@@ -1373,7 +1373,9 @@ mod tests {
         let (sender, requests) = tokio::sync::mpsc::channel(4);
         let server = crate::ipc::LocalServer::bind(&owner, sender).await.unwrap();
         let dispatcher = tokio::spawn(control.clone().serve(requests));
-        let request = |id, command| Request::new(format!("{}:{id}", owner.instance_id), command);
+        let request = |id, command| {
+            Request::new(format!("{}:{id}", owner.operation_epoch.current()), command)
+        };
         let add = control
             .request(request(
                 "add",
@@ -1555,7 +1557,11 @@ mod tests {
         maintain().await.unwrap();
         let removed = control
             .request(Request::new(
-                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    owner.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::ScheduleRemove(crate::protocol::ScheduleTarget {
                     schedule_id: "removed".into(),
                 }),
@@ -1596,7 +1602,11 @@ mod tests {
         }).await.unwrap();
         let request = || {
             Request::new(
-                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    owner.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::ScheduleRemove(crate::protocol::ScheduleTarget {
                     schedule_id: "q".into(),
                 }),
@@ -1637,7 +1647,7 @@ mod tests {
         assert!(
             control
                 .request(Request::new(
-                    format!("{}:get", owner.instance_id),
+                    format!("{}:get", owner.operation_epoch.current()),
                     Command::ShellGet(crate::protocol::ExecutionTarget {
                         execution_id: "x".into()
                     })
@@ -1693,7 +1703,11 @@ mod tests {
         let control = Control::new(&owner, root.path().into());
         let request = |command| {
             Request::new(
-                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    owner.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 command,
             )
         };
@@ -1830,7 +1844,11 @@ mod tests {
         async fn call(control: &Arc<Control>, command: Command) -> serde_json::Value {
             let result = control
                 .request(Request::new(
-                    format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                    format!(
+                        "{}:{}",
+                        control.store.operation_epoch.current(),
+                        uuid::Uuid::new_v4()
+                    ),
                     command,
                 ))
                 .await;
@@ -2249,7 +2267,11 @@ mod tests {
         let thread = accepted.thread_id;
         let request = |command| {
             Request::new(
-                format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    owner.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 command,
             )
         };

@@ -491,10 +491,16 @@ Shellboy. The bridge is a program you adapt, not a built-in connector.
    connecting the approved external conversation.
 5. For each event, save its stable, namespaced external ID, mapped Thread,
    original request text, and full operation ID **before** submitting. For a
-   new event, form `SHELLBOY_INSTANCE_ID:EVENT_KEY` with the namespaced event ID
-   as the nonce. Reuse that exact key and payload on redelivery; never replace
-   the prefix after a restart. The same retained operation returns its saved
-   outcome. If the Ask response is lost and `error.details.next_operation`
+   new event, read `operation_epoch` from `shellboy status` and form
+   `OPERATION_EPOCH:EVENT_KEY` with the namespaced event ID as the nonce. The
+   epoch is `<instance_id>.<n>`; it changes after a restart and when the owner
+   reclaims receipt space, and only an ID with the current epoch can start new
+   work. Reuse that exact key and payload on redelivery; never replace the
+   prefix of a saved ID. The same retained operation returns its saved outcome.
+   If the Ask fails with `storage_limit` and
+   `details.reason=operation_epoch_rolled`, the Ask was not applied: read the
+   new epoch, save the new ID in the journal entry, and submit once with it. If
+   the Ask response is lost and `error.details.next_operation`
    supplies `operation.get` for that exact ID, follow it against the same owner
    data directory. In the template the CLI inherits `SHELLBOY_DATA_DIR`; from
    a separate terminal, select that same directory explicitly. A successful

@@ -58,7 +58,7 @@ impl Fixture {
                 Request::new(
                     format!(
                         "{}:{}",
-                        self.control.store.instance_id,
+                        self.control.store.operation_epoch.current(),
                         uuid::Uuid::new_v4()
                     ),
                     command,

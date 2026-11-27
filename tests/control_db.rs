@@ -58,11 +58,16 @@ async fn spill_store() -> (TempDir, Store) {
     )
 }
 
+/// A request in the store's current operation epoch (it moves when the owner
+/// reclaims receipt space).
+fn request_in(store: &Store, command: Command) -> Request {
+    Request::new(format!("{}:{}", store.operation_epoch.current(), uuid::Uuid::new_v4()), command)
+}
 fn request(command: Command) -> Request {
-    Request::new(format!("instance:{}", uuid::Uuid::new_v4()), command)
+    Request::new(format!("instance.0:{}", uuid::Uuid::new_v4()), command)
 }
 async fn execute(store: &Store, command: Command) -> MutationResult {
-    store.execute(request(command), None).await.unwrap()
+    store.execute(request_in(store, command), None).await.unwrap()
 }
 #[tokio::test]
 async fn thread_list_state_pages_current_failures_in_update_order() {
@@ -239,7 +244,7 @@ async fn same_operation_is_durable_idempotent_conflict_checked_and_old_instance_
     );
     assert_eq!(newer.execute(req, None).await.unwrap().result, first.result);
     let unknown = Request::new(
-        "instance:not-recorded",
+        "instance.0:not-recorded",
         Command::ThreadList(ThreadListArgs::default()),
     );
     assert_eq!(
@@ -1164,7 +1169,7 @@ async fn first_send_creates_thread_and_message_atomically_and_retransmits_once()
     assert_eq!(
         store
             .send_new_thread(
-                "instance:first-failed".into(),
+                "instance.0:first-failed".into(),
                 args.clone(),
                 "keep this draft".into()
             )
@@ -1191,7 +1196,7 @@ async fn first_send_creates_thread_and_message_atomically_and_retransmits_once()
         .unwrap();
     let first = store
         .send_new_thread(
-            "instance:first-success".into(),
+            "instance.0:first-success".into(),
             args.clone(),
             "accepted once".into(),
         )
@@ -1199,7 +1204,7 @@ async fn first_send_creates_thread_and_message_atomically_and_retransmits_once()
         .unwrap();
     let again = store
         .send_new_thread(
-            "instance:first-success".into(),
+            "instance.0:first-success".into(),
             args,
             "accepted once".into(),
         )
@@ -1631,6 +1636,11 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
         effort: None,
         parent_thread_id: None,
     }));
+    // The refused request moves the epoch (finished identities hold the space);
+    // its own ID is then outside the epoch and never executes.
+    let rolled = store.execute(new_request.clone(), None).await.unwrap_err();
+    assert_eq!(rolled.code, ErrorCode::StorageLimit);
+    assert_eq!(rolled.details.unwrap()["reason"], "operation_epoch_rolled");
     for _ in 0..3 {
         assert_eq!(
             store
@@ -1638,7 +1648,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
                 .await
                 .unwrap_err()
                 .code,
-            ErrorCode::StorageLimit
+            ErrorCode::OperationExpired
         );
         assert_eq!(
             store
@@ -1665,7 +1675,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
     );
     let status = store
         .execute(
-            request(Command::OperationGet(OperationTarget {
+            request_in(&store, Command::OperationGet(OperationTarget {
                 operation_id: intent.operation_id.clone(),
             })),
             None,
@@ -1677,7 +1687,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
     assert_eq!(status["result_uncertain"], true);
     assert_eq!(
         store
-            .execute(request(Command::Status(StatusArgs::default())), None)
+            .execute(request_in(&store, Command::Status(StatusArgs::default())), None)
             .await
             .unwrap()
             .result["receipt_budget"]["at_limit"],
@@ -1814,7 +1824,7 @@ async fn quota_refusal_follows_complete_bounded_reclamation_without_accepting_ne
     let (_directory, store) = store().await;
     store.database.call(|db|{
         let tx=db.transaction()?;
-        tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES('instance:full','instance','null','hash','pending','2000-01-01',268435456)",[])?;
+        tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES('instance.0:full','instance','null','hash','pending','2000-01-01',268435456)",[])?;
         for n in 0..300 {tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json)VALUES(?1,'old','null','hash','completed','2000-01-01','{}')",[format!("old:{n}")])?;}
         tx.commit()?;Ok(())
     }).await.unwrap();
@@ -1961,7 +1971,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     let thread = create(&store, None).await;
     let (message, _) = send(&store, &thread.thread_id, "work to stop").await;
     let run_id = message.run_id.unwrap();
-    let pressure_id = "instance:receipt-pressure".to_owned();
+    let pressure_id = "instance.0:receipt-pressure".to_owned();
     assert!(matches!(
         store
             .reserve_internal(
@@ -2021,7 +2031,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(
         store
             .reserve_runtime(
-                request(Command::ShellWrite(ShellWriteArgs {
+                request_in(&store, Command::ShellWrite(ShellWriteArgs {
                     execution_id: "not-started".into(),
                     text: "not written".into(),
                     encoding: "UTF-8".into(),
@@ -2036,7 +2046,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
 
     // ShellStop retains the runtime intent contract while consuming the stop
     // allowance. A concurrent same-ID observer cannot execute it twice.
-    let shell_stop = request(Command::ShellStop(ExecutionTarget {
+    let shell_stop = request_in(&store, Command::ShellStop(ExecutionTarget {
         execution_id: "fixture-shell".into(),
     }));
     assert!(matches!(
@@ -2068,7 +2078,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
 
     // RunStop takes the DB path, changes state and generation once, and saves
     // its result in the same transaction while the shell reservation is live.
-    let run_stop = request(Command::RunStop(RunTarget {
+    let run_stop = request_in(&store, Command::RunStop(RunTarget {
         run_id: run_id.clone(),
     }));
     let stopped = store.execute(run_stop.clone(), None).await.unwrap();
@@ -2105,7 +2115,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(
         store
             .execute(
-                request(Command::RunStop(RunTarget {
+                request_in(&store, Command::RunStop(RunTarget {
                     run_id: run_id.clone()
                 })),
                 None
@@ -2118,7 +2128,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(
         store
             .reserve_runtime(
-                request(Command::ShellStop(ExecutionTarget {
+                request_in(&store, Command::ShellStop(ExecutionTarget {
                     execution_id: "fresh-stop".into()
                 })),
                 None
@@ -2164,7 +2174,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(status["receipt_budget"]["available_bytes"], 0);
     assert_eq!(
         store
-            .execute(request(Command::Status(StatusArgs::default())), None)
+            .execute(request_in(&store, Command::Status(StatusArgs::default())), None)
             .await
             .unwrap()
             .result["receipt_budget"]["at_limit"],
@@ -2705,7 +2715,7 @@ async fn public_thread_get_reports_raw_spill_and_effective_default() {
 
     let null_is_omission = Request::from_value(serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
-        "operation_id": "instance:null-spill-no-change",
+        "operation_id": "instance.0:null-spill-no-change",
         "command": "thread.set",
         "args": {"thread_id": thread.clone(), "title": "keep explicit off", "spill": null}
     }))

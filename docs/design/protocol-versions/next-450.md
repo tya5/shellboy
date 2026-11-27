@@ -1,0 +1,25 @@
+# Protocol next (#450)
+
+## Operation-ID epoch
+
+`Welcome` and the `status` result gain the required string `operation_epoch`,
+`<instance_id>.<n>`. `n` starts at 0 for each owner instance and is kept in
+memory. Only an unknown operation ID whose prefix before `:` equals the current
+epoch may execute; any other prefix, including the bare `instance_id` that
+earlier protocols used, is refused with `operation_expired`. Saved receipts of
+any prefix keep returning their saved outcome or `result_expired`.
+
+The owner moves to the next epoch when a receipt reservation still finds no
+room after a full reclamation pass without outside writes, and finished
+current-epoch receipts that no pending delivery or compaction protects exist.
+The request that triggered the move is refused with `storage_limit`,
+`details.reason: "operation_epoch_rolled"` and
+`request_may_have_been_applied: false`; it was not reserved or applied.
+Reusing its ID returns `operation_expired`. Send the request again with an ID
+in the new epoch. Earlier-epoch finished receipts then fall under the ordinary
+7-day / pressure deletion rule.
+
+Clients that mint IDs themselves read `operation_epoch` from `Welcome` (or
+`shellboy status`) instead of `instance_id`. The bundled CLI, chat and exec
+clients mint from the handshake. `status.receipt_budget.recovery` is now
+`same_id_replay_or_expired_status_internal_gc_epoch_roll`.

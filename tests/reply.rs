@@ -17,7 +17,7 @@ async fn fixture() -> (tempfile::TempDir, Store) {
     (root, store)
 }
 fn request(command: Command) -> Request {
-    Request::new(format!("fixture:{}", uuid::Uuid::new_v4()), command)
+    Request::new(format!("fixture.0:{}", uuid::Uuid::new_v4()), command)
 }
 fn send(expected: bool) -> Command {
     if expected {
@@ -1372,7 +1372,7 @@ async fn missing_reply_target_lists_only_calling_threads_pending_duties() {
 async fn id_resolve_is_a_receipt_free_observation() {
     let (_root, store) = fixture().await;
     let resolve_request = Request::new(
-        "fixture:id-resolve-observation",
+        "fixture.0:id-resolve-observation",
         Command::IdResolve(IdResolveArgs {
             kind: IdKind::Thread,
             prefix: "recipien".into(),

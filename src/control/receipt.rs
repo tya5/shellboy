@@ -99,6 +99,70 @@ pub(crate) fn operation_envelope(
         "replay_policy":if state=="pending" {"do_not_reexecute"} else if expired {"operation_expired"} else {"return_saved_outcome"},"targets":targets})
 }
 type Result<T> = std::result::Result<T, ApiError>;
+
+/// The operation-ID epoch `<instance_id>.<n>` (#450). Only an unknown ID whose
+/// prefix is the current epoch may execute; a saved identity with another
+/// prefix is deletable by the ordinary retention rule. `n` lives in memory and
+/// starts at 0 for each owner instance. The DB worker is the only writer and
+/// reads it inside the same job as the admission check, so a roll and an
+/// admission are serialized.
+pub struct OperationEpoch {
+    instance: String,
+    rolls: std::sync::atomic::AtomicU64,
+}
+impl OperationEpoch {
+    pub fn new(instance: &str) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            instance: instance.to_owned(),
+            rolls: std::sync::atomic::AtomicU64::new(0),
+        })
+    }
+    pub fn instance(&self) -> &str {
+        &self.instance
+    }
+    pub fn current(&self) -> String {
+        let rolls = self.rolls.load(std::sync::atomic::Ordering::SeqCst);
+        format!("{}.{rolls}", self.instance)
+    }
+    /// A fresh operation ID in the current epoch.
+    pub fn mint(&self) -> String {
+        format!("{}:{}", self.current(), uuid::Uuid::new_v4())
+    }
+    /// True when an unknown operation with this ID may execute.
+    pub fn admits(&self, operation_id: &str) -> bool {
+        operation_id
+            .split_once(':')
+            .is_some_and(|(prefix, nonce)| prefix == self.current() && !nonce.is_empty())
+    }
+    /// Moves to the next epoch when current-epoch finished identities that no
+    /// pending delivery or compaction protects exist. Those identities then
+    /// fall under the old-prefix retention rule. Runs on the DB worker.
+    pub(super) fn roll_if_reclaimable(&self, db: &Connection) -> Result<bool> {
+        let reclaimable: bool = db
+            .query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM operation_receipt o WHERE state IN ('completed','failed') AND substr(operation_id,1,length(?1)+1)=?1||':' {UNPROTECTED})"),
+                [self.current()],
+                |r| r.get(0),
+            )
+            .map_err(sql)?;
+        if reclaimable {
+            self.rolls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(reclaimable)
+    }
+}
+/// Refusal of the request that rolled the epoch. Its receipt was never
+/// reserved, so the request was not applied; its ID is now outside the epoch.
+pub(super) fn epoch_rolled(mut error: ApiError) -> ApiError {
+    error.hint = Some("The operation epoch moved so earlier identities can be reclaimed. The request was not applied; send it again with an operation ID in the new epoch (shellboy status shows operation_epoch). Reusing this ID returns operation_expired.".into());
+    error.details =
+        Some(json!({"reason":"operation_epoch_rolled","request_may_have_been_applied":false}));
+    error
+}
+/// Saved identities that pending deliveries or compactions still reference.
+const UNPROTECTED: &str = "AND NOT EXISTS(SELECT 1 FROM receipt r WHERE r.client_operation_id=o.operation_id AND r.state IN ('accepted','held'))
+        AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.operation_id=o.operation_id AND d.status IN ('accepted','held'))
+        AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(CASE WHEN json_valid(m.value) THEN m.value ELSE '[]' END) x WHERE ((m.key>='compact.pending.' AND m.key<'compact.pending/') OR (m.key>='compact.inflight.' AND m.key<'compact.inflight/')) AND x.value=o.operation_id)";
 fn sql(_: rusqlite::Error) -> ApiError {
     crate::storage::save_error("Cannot maintain operation receipts")
 }
@@ -127,9 +191,10 @@ fn usage_lanes(db: &Connection, instance: &str) -> Result<(u64, u64)> {
 pub(super) fn usage(db: &Connection, instance: &str) -> Result<u64> {
     Ok(usage_lanes(db, instance)?.0)
 }
-/// Protected intent is never removed. Current identities keep an expired-result
-/// marker; only old-instance identities may be deleted. All call sites own a
-/// transaction, and one pass touches at most CLEANUP_BATCH rows.
+/// Protected intent is never removed. Identities of the current operation
+/// epoch keep an expired-result marker; only identities whose prefix is not the
+/// current epoch may be deleted. All call sites own a transaction, and one pass
+/// touches at most CLEANUP_BATCH rows.
 #[cfg(test)]
 pub(super) fn collect(db: &Connection, instance: &str, pressure: bool) -> Result<u64> {
     collect_range(db, instance, pressure, None).map(|(collected, _)| collected)
@@ -179,7 +244,7 @@ pub(super) fn collect_window(
     };
     let due: Option<f64> = db
         .query_row(
-            &format!("SELECT MIN(julianday(created_at)+CASE WHEN (instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':') THEN {RESULT_RETENTION_SECONDS}/86400.0 ELSE 7 END) FROM operation_receipt WHERE rowid>?2 AND rowid<=?3 AND state IN ('completed','failed') AND (instance_id<>?1 OR (result_ref_json IS NOT NULL AND result_ref_json<>?4 AND octet_length(result_ref_json)>1))"),
+            &format!("SELECT MIN(julianday(created_at)+CASE WHEN substr(operation_id,1,length(?1)+1)=?1||':' THEN {RESULT_RETENTION_SECONDS}/86400.0 ELSE 7 END) FROM operation_receipt WHERE rowid>?2 AND rowid<=?3 AND state IN ('completed','failed') AND (substr(operation_id,1,length(?1)+1)<>?1||':' OR (result_ref_json IS NOT NULL AND result_ref_json<>?4 AND octet_length(result_ref_json)>1))"),
             params![instance, after, end, EXPIRED_OUTCOME],
             |r| r.get(0),
         )
@@ -207,15 +272,12 @@ fn collect_range(
         None => ("AND ?6 IS NULL AND ?7 IS NULL", "created_at,operation_id"),
     };
     let (low, high) = range.map_or((None, None), |(low, high)| (Some(low), Some(high)));
-    let mut statement=db.prepare(&format!("SELECT operation_id,(instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':'),COALESCE(octet_length(result_ref_json),0),o.rowid FROM operation_receipt o
-        WHERE state IN ('completed','failed') {bounds}
-        AND NOT EXISTS(SELECT 1 FROM receipt r WHERE r.client_operation_id=o.operation_id AND r.state IN ('accepted','held'))
-        AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.operation_id=o.operation_id AND d.status IN ('accepted','held'))
-        AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(CASE WHEN json_valid(m.value) THEN m.value ELSE '[]' END) x WHERE ((m.key>='compact.pending.' AND m.key<'compact.pending/') OR (m.key>='compact.inflight.' AND m.key<'compact.inflight/')) AND x.value=o.operation_id)
-        AND (((instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':')
+    let mut statement=db.prepare(&format!("SELECT operation_id,substr(operation_id,1,length(?1)+1)=?1||':',COALESCE(octet_length(result_ref_json),0),o.rowid FROM operation_receipt o
+        WHERE state IN ('completed','failed') {bounds} {UNPROTECTED}
+        AND ((substr(operation_id,1,length(?1)+1)=?1||':'
             AND result_ref_json IS NOT NULL AND result_ref_json<>?4 AND octet_length(result_ref_json)>1
             AND (?2 OR julianday(created_at)<=julianday('now',?5)))
-          OR (instance_id<>?1 AND substr(operation_id,1,length(?1)+1)<>?1||':'
+          OR (substr(operation_id,1,length(?1)+1)<>?1||':'
             AND (?2 OR julianday(created_at)<=julianday('now','-7 days'))))
         ORDER BY {order} LIMIT ?3")).map_err(sql)?;
     let rows = statement
@@ -335,7 +397,7 @@ fn reserve_in_lane(
             ErrorCode::StorageLimit,
             "Operation receipt budget is full; the command was not accepted",
         );
-        error.hint=Some("Current terminal results are reclaimed under pressure before this refusal. Inspect shellboy operation get --operation ID and pending/protected work with shellboy status. Wait for pending work to finish; if identity metadata or protected receipts still fill the budget, finish current work and restart the owner explicitly. Same-ID replay may return operation_expired and never reexecutes the command.".into());
+        error.hint=Some("Current terminal results are reclaimed under pressure before this refusal. Inspect shellboy operation get --operation ID and pending/protected work with shellboy status. Wait for pending work to finish. When finished identities fill the budget, the owner moves to a new operation epoch so they can be reclaimed. Same-ID replay may return operation_expired and never reexecutes the command.".into());
         return Err(error);
     }
     db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,lane)VALUES(?1,?2,?3,?4,'pending',?5,?6,?7)",params![operation,instance,origin,fingerprint,now,MAX_OUTCOME_BYTES as i64,if wait { "wait" } else { "normal" }]).map_err(sql)?;
@@ -370,7 +432,7 @@ pub(crate) fn summary(db: &Connection, instance: &str) -> Result<Value> {
     let used = usage(db, instance)?;
     let protected_old:i64=db.query_row("SELECT q.logical_bytes-(SELECT COALESCE(SUM(512+octet_length(operation_id)+octet_length(instance_id)+octet_length(origin_json)+octet_length(request_hash)+octet_length(created_at)+COALESCE(octet_length(result_ref_json),0)),0) FROM operation_receipt INDEXED BY operation_receipt_pending_budget WHERE instance_id=?1 AND state='pending') FROM quota_counter q WHERE category='operation_receipt.pending_actual'",[instance],|r|r.get(0)).map_err(sql)?;
     Ok(
-        json!({"accounted_bytes":used,"limit_bytes":TOTAL_BYTES,"max_outcome_bytes":MAX_OUTCOME_BYTES,"result_retention_seconds":RESULT_RETENTION_SECONDS,"result_retention":"24h_or_pressure","expired_replay":"operation_expired","control_headroom_bytes":CONTROL_HEADROOM_BYTES,"control_limit_bytes":CONTROL_TOTAL_BYTES,"control_available_bytes":CONTROL_TOTAL_BYTES.saturating_sub(used),"protected_old_pending_bytes":protected_old,"at_limit":used>=TOTAL_BYTES,"available_bytes":TOTAL_BYTES.saturating_sub(used),"full_result_admission_blocked":used.saturating_add(MAX_OUTCOME_BYTES)>TOTAL_BYTES,"recovery":"same_id_replay_or_expired_status_internal_gc_explicit_restart"}),
+        json!({"accounted_bytes":used,"limit_bytes":TOTAL_BYTES,"max_outcome_bytes":MAX_OUTCOME_BYTES,"result_retention_seconds":RESULT_RETENTION_SECONDS,"result_retention":"24h_or_pressure","expired_replay":"operation_expired","control_headroom_bytes":CONTROL_HEADROOM_BYTES,"control_limit_bytes":CONTROL_TOTAL_BYTES,"control_available_bytes":CONTROL_TOTAL_BYTES.saturating_sub(used),"protected_old_pending_bytes":protected_old,"at_limit":used>=TOTAL_BYTES,"available_bytes":TOTAL_BYTES.saturating_sub(used),"full_result_admission_blocked":used.saturating_add(MAX_OUTCOME_BYTES)>TOTAL_BYTES,"recovery":"same_id_replay_or_expired_status_internal_gc_epoch_roll"}),
     )
 }
 

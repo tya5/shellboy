@@ -240,7 +240,11 @@ async fn streamed_fixture(malformed_final: bool) {
     let control = Control::new(&owner, root.path().into());
     let create = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::ThreadCreate(ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -258,7 +262,11 @@ async fn streamed_fixture(malformed_final: bool) {
         .to_owned();
     let sent = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::MessageSend(MessageSendArgs {
                 max_model_requests: None,
                 resume_recovery: false,

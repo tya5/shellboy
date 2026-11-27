@@ -42,7 +42,7 @@ fn input(db: &Connection, id: &str, sender: Option<&Origin>) -> rusqlite::Result
 }
 fn request(id: &str, ids: &[&str]) -> Request {
     Request::new(
-        format!("fixture:{id}"),
+        format!("fixture.0:{id}"),
         Command::MessageCancel(MessageCancelArgs {
             message_ids: ids.iter().map(|id| (*id).into()).collect(),
         }),
@@ -101,7 +101,7 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
 
     let ask = |operation: &'static str, text: &'static str| {
         Request::new(
-            format!("fixture:{operation}"),
+            format!("fixture.0:{operation}"),
             Command::MessageAsk(MessageAskArgs {
                 human: false,
                 sender_label: None,
@@ -176,7 +176,7 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
     let first_reply = store
         .execute(
             Request::new(
-                "fixture:reply-after-admission",
+                "fixture.0:reply-after-admission",
                 Command::MessageReply(MessageReplyArgs {
                     message_id: first_id.clone(),
                     text: "first synthetic answer".into(),
@@ -205,7 +205,7 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
     let second_reply = store
         .execute(
             Request::new(
-                "fixture:reply-before-admission",
+                "fixture.0:reply-before-admission",
                 Command::MessageReply(MessageReplyArgs {
                     message_id: second_id.clone(),
                     text: "second synthetic answer".into(),
@@ -290,7 +290,7 @@ async fn human_question_reply_cancel_and_attachment_frontier_preserve_fifo() {
         )
         .await
         .unwrap();
-    let attachment_operation = "fixture:attachment-a";
+    let attachment_operation = "fixture.0:attachment-a";
     store
         .execute_with_plan(
             Request::new(
@@ -446,7 +446,7 @@ async fn held_frontier_defers_the_replied_question_and_later_attachment() {
     let question = store
         .execute(
             Request::new(
-                "fixture:held-frontier-question",
+                "fixture.0:held-frontier-question",
                 Command::MessageAsk(MessageAskArgs {
                     human: false,
                     sender_label: None,
@@ -464,7 +464,7 @@ async fn held_frontier_defers_the_replied_question_and_later_attachment() {
     let reply = store
         .execute(
             Request::new(
-                "fixture:held-frontier-reply",
+                "fixture.0:held-frontier-reply",
                 Command::MessageReply(MessageReplyArgs {
                     message_id: question_id.clone(),
                     text: "R depends on Q".into(),
@@ -499,7 +499,7 @@ async fn held_frontier_defers_the_replied_question_and_later_attachment() {
     store
         .execute_with_plan(
             Request::new(
-                "fixture:held-frontier-attachment",
+                "fixture.0:held-frontier-attachment",
                 Command::AttachmentAdd(AttachmentAddArgs {
                     thread_id: Some("t".into()),
                     path: path.to_string_lossy().into_owned(),
@@ -512,7 +512,7 @@ async fn held_frontier_defers_the_replied_question_and_later_attachment() {
         .await
         .unwrap();
     let attachment_id = store.database.call(|db| Ok(db.query_row(
-        "SELECT node_id FROM attachment_delivery WHERE thread_id='t' AND operation_id='fixture:held-frontier-attachment'",
+        "SELECT node_id FROM attachment_delivery WHERE thread_id='t' AND operation_id='fixture.0:held-frontier-attachment'",
         [], |r| r.get::<_,String>(0),
     )?)).await.unwrap();
 
@@ -568,7 +568,7 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
         let ask = store
             .execute(
                 Request::new(
-                    format!("fixture:question-{index}"),
+                    format!("fixture.0:question-{index}"),
                     Command::MessageAsk(MessageAskArgs {
                         human: false,
                         sender_label: None,
@@ -589,7 +589,7 @@ async fn bounded_admission_prefix_keeps_the_129th_question_before_its_reply() {
         let answer = store
             .execute(
                 Request::new(
-                    format!("fixture:reply-{index}"),
+                    format!("fixture.0:reply-{index}"),
                     Command::MessageReply(MessageReplyArgs {
                         message_id: question.clone(),
                         text: format!("R{index}"),
@@ -872,19 +872,19 @@ fn submission(op: &str, source: &str, revision: u64, text: &str) -> DraftSubmiss
 async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_without_touching_newer_editable_draft()
  {
     let (root, store) = store().await;
-    let frozen = submission("fixture:frozen", "editable", 7, "frozen send");
+    let frozen = submission("fixture.0:frozen", "editable", 7, "frozen send");
     store
-        .prepare_draft_submission("fixture:frozen", Some("t"), &frozen)
+        .prepare_draft_submission("fixture.0:frozen", Some("t"), &frozen)
         .await
         .unwrap();
     store
-        .prepare_draft_submission("fixture:frozen", Some("t"), &frozen)
+        .prepare_draft_submission("fixture.0:frozen", Some("t"), &frozen)
         .await
         .unwrap();
-    let conflicting = submission("fixture:frozen", "editable", 7, "changed content");
+    let conflicting = submission("fixture.0:frozen", "editable", 7, "changed content");
     assert_eq!(
         store
-            .prepare_draft_submission("fixture:frozen", Some("t"), &conflicting)
+            .prepare_draft_submission("fixture.0:frozen", Some("t"), &conflicting)
             .await
             .unwrap_err()
             .code,
@@ -892,7 +892,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
     );
     store.database.call(|db| {
         db.execute("INSERT INTO draft VALUES('editable','t',8,?1,'editing','later')",[json!({"draft_id":"editable","revision":8,"text":"newer unsent edit","attachments":[]}).to_string()])?;
-        db.execute_batch("CREATE TRIGGER fail_frozen_send BEFORE INSERT ON receipt WHEN new.client_operation_id='fixture:frozen' BEGIN SELECT RAISE(ABORT,'synthetic precommit failure'); END;")?; Ok(())
+        db.execute_batch("CREATE TRIGGER fail_frozen_send BEFORE INSERT ON receipt WHEN new.client_operation_id='fixture.0:frozen' BEGIN SELECT RAISE(ABORT,'synthetic precommit failure'); END;")?; Ok(())
     }).await.unwrap();
     let args = ThreadCreateArgs {
         agents: None,
@@ -911,7 +911,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
     assert!(
         store
             .send_draft_content(
-                "fixture:frozen".into(),
+                "fixture.0:frozen".into(),
                 args.clone(),
                 Some("t".into()),
                 crate::attachments::DraftContent::appended("frozen send".into(), 0),
@@ -942,9 +942,9 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
         .await
         .unwrap();
     // A different operation has a different frozen identity; the failed operation remains immutable.
-    let frozen = submission("fixture:accepted", "editable", 7, "frozen send");
+    let frozen = submission("fixture.0:accepted", "editable", 7, "frozen send");
     store
-        .prepare_draft_submission("fixture:accepted", Some("t"), &frozen)
+        .prepare_draft_submission("fixture.0:accepted", Some("t"), &frozen)
         .await
         .unwrap();
     let options = DraftSendOptions {
@@ -955,7 +955,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
     };
     let accepted = store
         .send_draft_content(
-            "fixture:accepted".into(),
+            "fixture.0:accepted".into(),
             args.clone(),
             Some("t".into()),
             crate::attachments::DraftContent::appended("frozen send".into(), 0),
@@ -966,7 +966,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
         .unwrap();
     let replay = store
         .send_draft_content(
-            "fixture:accepted".into(),
+            "fixture.0:accepted".into(),
             args,
             Some("t".into()),
             crate::attachments::DraftContent::appended("frozen send".into(), 0),
@@ -1030,9 +1030,9 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
 #[tokio::test]
 async fn frozen_first_send_survives_without_thread_and_binds_only_at_acceptance() {
     let (_root, store) = store().await;
-    let frozen = submission("fixture:first-thread", "new-composer", 3, "first request");
+    let frozen = submission("fixture.0:first-thread", "new-composer", 3, "first request");
     store
-        .prepare_draft_submission("fixture:first-thread", None, &frozen)
+        .prepare_draft_submission("fixture.0:first-thread", None, &frozen)
         .await
         .unwrap();
     store
@@ -1052,7 +1052,7 @@ async fn frozen_first_send_survives_without_thread_and_binds_only_at_acceptance(
         .unwrap();
     let accepted = store
         .send_draft_content(
-            "fixture:first-thread".into(),
+            "fixture.0:first-thread".into(),
             ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -1167,7 +1167,11 @@ async fn actual_control_draft_replay_precedes_missing_files_and_old_owner_checks
         .await
         .unwrap();
     let control = Control::new(&owner, root.path().into());
-    let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
+    let operation = format!(
+        "{}:{}",
+        control.store.operation_epoch.current(),
+        uuid::Uuid::new_v4()
+    );
     let old_instance = control.store.instance_id.clone();
     let file = root.path().join("original.txt");
     std::fs::write(&file, b"fixture").unwrap();
@@ -1364,7 +1368,7 @@ async fn frozen_budget_preserves_tiny_raw_text_limits_and_json_escaping_with_sep
     .into_iter()
     .enumerate()
     {
-        let operation = format!("fixture:raw-budget-{n}");
+        let operation = format!("fixture.0:raw-budget-{n}");
         let frozen = submission(&operation, &format!("source-{n}"), 1, &text);
         store
             .prepare_draft_submission(&operation, Some("t"), &frozen)
@@ -1411,17 +1415,18 @@ async fn frozen_budget_preserves_tiny_raw_text_limits_and_json_escaping_with_sep
             .await
             .unwrap();
     }
-    let too_much_text = submission("fixture:raw-too-long", "source-long", 1, &"a".repeat(129));
+    let too_much_text = submission("fixture.0:raw-too-long", "source-long", 1, &"a".repeat(129));
     let error = store
-        .prepare_draft_submission("fixture:raw-too-long", Some("t"), &too_much_text)
+        .prepare_draft_submission("fixture.0:raw-too-long", Some("t"), &too_much_text)
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InputLimit);
     assert!(error.message.contains("text"));
-    let mut too_much_metadata = submission("fixture:metadata-too-long", "source-metadata", 1, "a");
+    let mut too_much_metadata =
+        submission("fixture.0:metadata-too-long", "source-metadata", 1, "a");
     too_much_metadata.snapshot["extra_metadata"] = json!("z".repeat(MAX_FRAME_BYTES + 4096));
     let error = store
-        .prepare_draft_submission("fixture:metadata-too-long", Some("t"), &too_much_metadata)
+        .prepare_draft_submission("fixture.0:metadata-too-long", Some("t"), &too_much_metadata)
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InputLimit);
@@ -1475,7 +1480,7 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
         Arc::new(attachments),
     );
     for n in 0..16 {
-        let operation = format!("fixture:retention-{n}");
+        let operation = format!("fixture.0:retention-{n}");
         let text = format!("submitted text {n} {}", "x".repeat(8192));
         let frozen = submission(&operation, "composer", n, &text);
         store
@@ -1590,13 +1595,13 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
 async fn submitting_and_unknown_copies_survive_collection_and_database_reopen() {
     let (root, store) = store().await;
     let frozen = submission(
-        "fixture:uncommitted-copy",
+        "fixture.0:uncommitted-copy",
         "composer",
         4,
         "recover this unsent text",
     );
     store
-        .prepare_draft_submission("fixture:uncommitted-copy", Some("t"), &frozen)
+        .prepare_draft_submission("fixture.0:uncommitted-copy", Some("t"), &frozen)
         .await
         .unwrap();
     store.database.call(|db| {

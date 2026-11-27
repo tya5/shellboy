@@ -322,7 +322,7 @@ async fn actual_store_history_window_existing_read_lane_reuses_caller_transactio
     // a bare history::window(&Connection) call cannot detect nested BEGIN.
     let result = store
         .execute(
-            Request::new("fixture:public-window", Command::HistoryWindow(args())),
+            Request::new("fixture.0:public-window", Command::HistoryWindow(args())),
             None,
         )
         .await;

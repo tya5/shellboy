@@ -183,7 +183,11 @@ async fn call(
 ) -> Result<Value, shellboy::protocol::ApiError> {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;
@@ -608,7 +612,7 @@ async fn the_key_value_is_never_returned_logged_hashed_or_put_in_config() {
             "{:?}",
             Request::new("x".to_owned(), command.clone())
         )));
-        let operation = format!("{}:leak-1", control.store.instance_id);
+        let operation = format!("{}:leak-1", control.store.operation_epoch.current());
         let response = control
             .request(Request::new(operation.clone(), command.clone()))
             .await;
@@ -1300,7 +1304,7 @@ async fn a_conflicting_stored_key_retry_explains_the_per_process_salt() {
         let mock = mock().await;
         write_config(root.path(), &proxy_config(&mock.url, ""));
         let (_owner, control) = start(root.path()).await;
-        let operation = format!("{}:retry-1", control.store.instance_id);
+        let operation = format!("{}:retry-1", control.store.operation_epoch.current());
         let first = control
             .request(Request::new(operation.clone(), set("proxy", KEY)))
             .await;

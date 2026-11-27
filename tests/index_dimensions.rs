@@ -624,7 +624,11 @@ async fn probe_mutation_receipt_replays_without_another_embedding_request() {
     .await
     .unwrap();
     let control = Control::new(&owner, root.path().into());
-    let operation = format!("{}:{}", owner.instance_id, uuid::Uuid::new_v4());
+    let operation = format!(
+        "{}:{}",
+        owner.operation_epoch.current(),
+        uuid::Uuid::new_v4()
+    );
     let command = Command::IndexProbe(IndexProbeArgs {
         dimensions: Some(3),
     });

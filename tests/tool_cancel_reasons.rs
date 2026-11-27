@@ -104,7 +104,11 @@ async fn runtime_with_io(url: &str, io: &str) -> (tempfile::TempDir, DataOwner, 
 }
 async fn command(control: &Arc<Control>, command: Command) -> Value {
     let request = Request::new(
-        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+        format!(
+            "{}:{}",
+            control.store.operation_epoch.current(),
+            uuid::Uuid::new_v4()
+        ),
         command,
     );
     let response = control.request(request).await;

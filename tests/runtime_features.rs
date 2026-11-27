@@ -217,7 +217,11 @@ async fn owner_with_retries(root: &std::path::Path, url: &str, retries: u32) -> 
 pub(crate) async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             command,
         ))
         .await;
@@ -599,7 +603,11 @@ async fn draft_references_and_first_message_commit_together_and_changed_missing_
     std::fs::write(&file, b"first-content").unwrap();
     let accepted = control
         .send_draft(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             ThreadCreateArgs {
                 agents: None,
                 cwd: None,
@@ -1070,7 +1078,11 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
         .unwrap();
     settled(&control, &thread).await;
     crate::test_watchdog::watchdog("tests/runtime_features.rs: editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_settings",async{loop{let target=thread.clone();if control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
-    let operation = format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4());
+    let operation = format!(
+        "{}:{}",
+        control.store.operation_epoch.current(),
+        uuid::Uuid::new_v4()
+    );
     let node = accepted["message_id"].as_str().unwrap().to_owned();
     let args = ThreadCreateArgs {
         agents: None,
@@ -1165,7 +1177,11 @@ async fn edited_request_refuses_active_run_without_stopping_it() {
     for _ in 0..2 {
         let error = control
             .edit_request(
-                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    control.store.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 thread.clone(),
                 node.clone(),
                 "replacement".into(),
@@ -3129,7 +3145,7 @@ async fn headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_count
                     write_frame(&mut stream,&json!({"protocol_version":PROTOCOL_VERSION})).await.unwrap();
                     let welcome:Value=read_frame(&mut stream).await.unwrap().unwrap();
                     assert_eq!(welcome["instance_id"],first_instance);
-                    let request=Request::new(format!("{}:{}",endpoint.instance_id,uuid::Uuid::new_v4()),Command::OwnerShutdown(OwnerShutdownArgs{instance_id:endpoint.instance_id}));
+                    let request=Request::new(format!("{}:{}",welcome["operation_epoch"].as_str().unwrap(),uuid::Uuid::new_v4()),Command::OwnerShutdown(OwnerShutdownArgs{instance_id:endpoint.instance_id}));
                     write_frame(&mut stream,&request).await.unwrap();
                     drop(stream);
                 }
