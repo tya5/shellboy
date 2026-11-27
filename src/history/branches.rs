@@ -289,7 +289,7 @@ fn excerpt_of(node_id: String, payload: Option<String>) -> Excerpt {
     let text = payload
         .and_then(|body| serde_json::from_str::<Value>(&body).ok())
         .map(|payload| super::conversation_excerpt(&payload, EXCERPT_CHARS + 1))
-        .map(|text| crate::presentation::sanitize_plain(&text, 0).0)
+        .map(|text| crate::plain_text::sanitize_plain(&text, 0).0)
         .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "));
     let truncated = text
         .as_ref()
