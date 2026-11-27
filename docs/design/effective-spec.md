@@ -220,6 +220,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | origin | 発行元の誤識別防止。OSユーザー隔離やpermission engineではない | [control](control.md)、[operation](operation-observability.md)。tokenを表示/モデル入力/保存結果へ複製しない |
 | receipt | 観測はreceipt不要で再観測。変更/waitの同ID/同要求は保全中結果、異要求はconflict。24時間経過保守/圧迫で結果だけを回収し同IDを期限切れにする。pending/参照保護を維持 | [operation](operation-observability.md)。保存outcome8MiB/operation receipt256MiB、事前予約・旧terminal回収・receipt不要status照会 |
 | AGENTS読込 | 新Turnごとに有限file workerで本文を読み直す。同Turn retryは保存済みsnapshotを維持。送信時だけ実snapshot pathを安全に示す1行を本文先頭へ付け、本文/hash保存・優先順位は変えない | [control](control.md)。mtime/size一致の内容変更も反映する。ファイルの原子的snapshotは保証しない |
+| Unix shell起動のfd headroom (#450) | ownerは起動時にsoft `RLIMIT_NOFILE`をhard範囲で1,024に設定。開始受付で `open + 起動追加10 + IPC予約(MAX_CONNECTIONS) <= soft`（macOSは`kern.maxfilesperproc`との小さい方）を生存値で検査し、不足は`invalid_state`/`descriptor_budget`、実行はfailed・reason `descriptor_budget`。Windowsは対象外 | [shell設計](shell.md#descriptor-headroom-at-shell-start-450)、[protocol](protocol.md)。permit・queue・設定・status項目・process/memory上限なし |
 | shell stdin EOF | 既知の閉鎖済みstdinへのEOF再送は`invalid_state`で拒否される。未知IDやwriteの閉鎖済み入力への送信は別に検証 | [shell設計](shell.md)。acceptedは新規閉鎖・送信・shell終了の証拠ではない |
 
 接続ごとの `ssl_verify` は既定true。明示falseだけHTTPS証明書検証を無効化し、会話・要約・embedding・モデル一覧へ一貫して適用する。

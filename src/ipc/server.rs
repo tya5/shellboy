@@ -25,7 +25,7 @@ use endpoint::EndpointFiles;
 
 pub(crate) const MAX_WAIT_WORK: usize = 32;
 const CONNECTION_HEADROOM: usize = 8;
-const MAX_CONNECTIONS: usize = MAX_WAIT_WORK
+pub(crate) const MAX_CONNECTIONS: usize = MAX_WAIT_WORK
     + MAX_IPC_WORK
     + MAX_CONTROL_WORK
     + MAX_OBSERVATION_WORK

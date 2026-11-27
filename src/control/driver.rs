@@ -1333,13 +1333,14 @@ async fn run_shell(
                 return cancel_unstarted_shell(&control, &execution).await;
             }
             let execution = execution.clone();
+            let saved_error = error.clone();
             control.origins.lock().await.remove(&origin.token);
             let wait_wakes = control.waits.keyed.clone();
             control
                 .store
                 .database
                 .call(move |db| {
-                    if super::state::fail_shell_spawn(db, &execution, &now())? != 0 {
+                    if super::state::fail_shell_spawn(db, &execution, &now(), &saved_error)? != 0 {
                         wait_wakes.publish(Key::shell_terminal(execution));
                     }
                     Ok(())

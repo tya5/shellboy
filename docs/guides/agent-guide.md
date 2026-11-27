@@ -331,6 +331,12 @@ waiting on an interactive prompt; it is not by itself proof. Stop it with
 `shellboy shell stop --execution ID`, then confirm the resulting state. See the
 [Shell guide](shell.md#finding-and-stopping-a-stalled-shell) for the procedure.
 
+On Unix a shell start can be refused with `invalid_state` and
+`details.reason: descriptor_budget` when the owner is short of file descriptors;
+the execution is saved `failed` with that reason and did not run. Stop background
+shells you no longer need (`shellboy shell list --state running`, then
+`shellboy shell stop --execution ID`) and start it again.
+
 Use `shellboy shell background --execution ID` to release a Turn’s foreground
 shell wait without stopping the process. The tool result remains `running` with
 reason `shell_backgrounded`; later unexecuted calls in that group are cancelled.
