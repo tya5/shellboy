@@ -937,7 +937,7 @@ async fn run_with_delivery(
     };
     // Only the embedded launch composition owns this policy. Its completion
     // participates in the existing terminal grace and force-close UI.
-    run_client(
+    Box::pin(run_client(
         control,
         actions,
         updates,
@@ -952,7 +952,7 @@ async fn run_with_delivery(
         owner.shutdown(),
         #[cfg(test)]
         startup,
-    )
+    ))
     .await
 }
 
