@@ -8955,6 +8955,7 @@ mod tool_refresh_tests {
             last_input: None,
             last_compaction: None,
             summarizing: false,
+            activity: None,
             thread_id: "t".into(),
             title: "paired header".into(),
             cwd: "/".into(),

@@ -150,7 +150,8 @@ async fn read_current(
         ),
         None => None,
     };
-    let activity = activity::read_cancellable(control, owner, thread, stop).await?;
+    let activity =
+        activity::project_native(control, owner, thread, details.activity().cloned(), stop).await?;
     Ok(Current {
         details: details.prepare_for_ui(language),
         page,
