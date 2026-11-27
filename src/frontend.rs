@@ -47,8 +47,6 @@ mod recovery;
 mod refresh;
 mod selection;
 #[cfg(test)]
-pub(crate) mod sql_trace;
-#[cfg(test)]
 pub(crate) mod stream_metrics;
 mod streaming;
 mod streams;

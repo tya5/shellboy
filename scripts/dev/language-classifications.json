@@ -5862,17 +5862,7 @@
   "src/presentation/fields.rs:b6843538a6083ac6:2": {
     "category": "a",
     "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "f3e5f1d111cf15be2548c668dabd20a92a45748af47bae6db4e1232c837b2425"
-  },
-  "src/presentation/fields.rs:0bd8094b4f7e3147:2": {
-    "category": "a",
-    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "f3e5f1d111cf15be2548c668dabd20a92a45748af47bae6db4e1232c837b2425"
-  },
-  "src/presentation/fields.rs:83f34895c516aaa8:1": {
-    "category": "a",
-    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "f3e5f1d111cf15be2548c668dabd20a92a45748af47bae6db4e1232c837b2425"
+    "source_tokens_sha256": "d58fb12b6beefa1c0a2d4be57bb3fb08acf748ea44636f1a28bea02be5312dd4"
   },
   "src/presentation/fields.rs:88c1b9b97465f10f:1": {
     "category": "a",
@@ -7000,7 +6990,7 @@
   "src/presentation/projection.rs:7e22a79422a7e15c:1": {
     "category": "a",
     "reason": "Japanese display-label sentinel for an outline count field in the native display-outline projection, matching the saved-field walk in presentation::fields. The English renderer recognises the fixed count label and adds the count suffix; displayed values and field paths are unchanged. Ja returns the original label.",
-    "source_tokens_sha256": "664a35d23a8a12178b9353e1d8147dd1fc0d31b7de0806a1b625562823f62dd7"
+    "source_tokens_sha256": "4141f6fe1bc42efc6756dc47cb449d1246a1c71cd0ee122c68a871c37f2b62fe"
   },
   "src/ui/operations.rs:1f1292043737783a:1": {
     "category": "a",
@@ -7015,6 +7005,6 @@
   "src/operations.rs:6bdf82c7272c75a5:1": {
     "category": "a",
     "reason": "Japanese AttachmentReload catalogue label paired with English \"Attachment · Reload\" in src/ui/operations/metadata.rs::operation_label_for (same OperationId arm; rustfmt wraps that arm in a block, so the automatic same-ID pairing does not match it).",
-    "source_tokens_sha256": "4019372a836fc5c6495cb23ca7c5b8d556eab1ceb34c8753c7d5d1a86f4b19a7"
+    "source_tokens_sha256": "32332ed36cbfea7fc6ffcdc7afe56ac6d2690a96280b9b2518f02b51cf1c9def"
   }
 }
