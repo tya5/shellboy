@@ -386,9 +386,9 @@ async fn moving_a_live_thread_changes_organization_without_run_ownership() {
     // child no longer has it as parent.
     let stopped = store
         .execute(
-            request(Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                run_id: old_run["run_id"].as_str().unwrap().into(),
-            })),
+            request(Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+                old_run["run_id"].as_str().unwrap().into(),
+            ))),
             Some(old_origin.clone()),
         )
         .await

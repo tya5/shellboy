@@ -1,33 +1,37 @@
-//! Same-transaction target guard followed by the existing canonical reducers.
+//! Exact saved Run selection fences for stop and retry.
 use super::*;
-use crate::control::run_action::{ExpectedRun, RunAction};
 
-impl Store {
-    pub(crate) async fn execute_expected_run(
-        &self,
-        operation_id: String,
-        expected: ExpectedRun,
-        action: RunAction,
-    ) -> Result<MutationResult> {
-        expected.validate()?;
-        let command = action.command(&expected);
-        command.validate()?;
-        let fingerprint = serde_json::to_string(
-            &json!({"kind":"expected_run_action","expected":expected,"command":command}),
+pub(super) fn check_selection(
+    tx: &Transaction<'_>,
+    run: &str,
+    expected: Option<&ExpectedRunSelection>,
+) -> Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let actual: Option<(String, Option<String>, Option<i64>)> = tx.query_row(
+        "SELECT r.id,u.id,u.generation FROM thread t JOIN run r ON r.id=(SELECT id FROM run WHERE thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1) LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1) WHERE t.id=?1 AND t.deleted_at IS NULL",
+        [&expected.thread_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).optional().map_err(sql_error)?;
+    let (id, generation) = match &expected.turn {
+        Some(turn) => (
+            Some(turn.turn_id.as_str()),
+            i64::try_from(turn.generation).ok(),
+        ),
+        None => (None, None),
+    };
+    if actual
+        .as_ref()
+        .map(|(run, id, generation)| (run.as_str(), id.as_deref(), *generation))
+        != Some((run, id, generation))
+    {
+        return Err(error(
+            ErrorCode::InvalidState,
+            "The displayed Run or Turn changed; refresh before acting",
         )
-        .expect("Typed Run intent serializes");
-        let store = self.clone();
-        self.receipt_job(None, None, move |db,pressure|Ok(store.transact(db,&operation_id,&fingerprint,None,Admission::for_command(&command),pressure,|tx,now| {
-            let actual:Option<(String,Option<String>,Option<i64>)>=tx.query_row(
-                "SELECT r.id,u.id,u.generation FROM thread t JOIN run r ON r.id=(SELECT id FROM run WHERE thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1) LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1) WHERE t.id=?1 AND t.deleted_at IS NULL",
-                [&expected.thread_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-            ).optional().map_err(sql_error)?;
-            if actual!=Some((expected.run_id.clone(),expected.turn_id.clone(),expected.turn_generation.map(|n|n as i64))) {
-                return Err(error(ErrorCode::InvalidState,"The displayed Run/Turn changed; refresh the Watch target before acting"));
-            }
-            store.dispatch(tx,&command,None,&operation_id,now)
-        }))).await
+        .details(json!({"reason":"expected_turn_changed","request_may_have_been_applied":false})));
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -47,6 +51,16 @@ mod tests {
         );
         (root, store)
     }
+    struct ExpectedRun {
+        thread_id: String,
+        run_id: String,
+        turn_id: Option<String>,
+        turn_generation: Option<u64>,
+    }
+    enum RunAction {
+        Stop,
+        Retry,
+    }
     fn expected() -> ExpectedRun {
         ExpectedRun {
             thread_id: "t".into(),
@@ -54,6 +68,38 @@ mod tests {
             turn_id: Some("u".into()),
             turn_generation: Some(4),
         }
+    }
+    async fn execute(
+        store: &Store,
+        operation: String,
+        expected: ExpectedRun,
+        action: RunAction,
+    ) -> Result<MutationResult> {
+        let turn = match (expected.turn_id, expected.turn_generation) {
+            (Some(turn_id), Some(generation)) => Some(ExpectedTurn {
+                turn_id,
+                generation,
+            }),
+            (None, None) => None,
+            _ => return Err(error(ErrorCode::InvalidArgument, "Incomplete test witness")),
+        };
+        let expected_selection = Some(ExpectedRunSelection {
+            thread_id: expected.thread_id,
+            turn,
+        });
+        let run_id = expected.run_id;
+        let command = match action {
+            RunAction::Stop => Command::RunStop(RunStopTarget::Run {
+                run_id,
+                expected_selection,
+            }),
+            RunAction::Retry => Command::RunRetry(RunRetryArgs {
+                run_id,
+                expected_turn: None,
+                expected_selection,
+            }),
+        };
+        store.execute(Request::new(operation, command), None).await
     }
     async fn state(store: &Store) -> (String, String, i64) {
         store.database.call(|db|Ok(db.query_row("SELECT r.state,u.state,u.generation FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id='r'",[],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?)).await.unwrap()
@@ -70,8 +116,7 @@ mod tests {
     async fn guarded_stop_reuses_canonical_effects_and_replay_has_no_repeated_effects() {
         crate::test_watchdog::watchdog("guarded Run mutation and cleanup", async {
             let (_root, store) = fixture().await;
-            let first = store
-                .execute_expected_run("fixture:stop".into(), expected(), RunAction::Stop)
+            let first = execute(&store, "fixture:stop".into(), expected(), RunAction::Stop)
                 .await
                 .unwrap();
             assert_eq!(first.stop_runs, ["r"]);
@@ -79,8 +124,7 @@ mod tests {
                 state(&store).await,
                 ("stopping".into(), "recovery_wait".into(), 5)
             );
-            let replay = store
-                .execute_expected_run("fixture:stop".into(), expected(), RunAction::Stop)
+            let replay = execute(&store, "fixture:stop".into(), expected(), RunAction::Stop)
                 .await
                 .unwrap();
             assert_eq!(replay.result, first.result);
@@ -88,8 +132,7 @@ mod tests {
             let mut changed = expected();
             changed.turn_generation = Some(5);
             assert_eq!(
-                store
-                    .execute_expected_run("fixture:stop".into(), changed, RunAction::Stop)
+                execute(&store, "fixture:stop".into(), changed, RunAction::Stop)
                     .await
                     .unwrap_err()
                     .code,
@@ -126,8 +169,7 @@ mod tests {
             }
             let before = state(&store).await;
             assert!(
-                store
-                    .execute_expected_run(format!("fixture:bad-{case}"), guard, RunAction::Stop)
+                execute(&store, format!("fixture:bad-{case}"), guard, RunAction::Stop)
                     .await
                     .is_err()
             );
@@ -140,25 +182,27 @@ mod tests {
     async fn retry_requires_exact_recovery_generation_and_uses_existing_quiet_wake() {
         crate::test_watchdog::watchdog("guarded Run mutation and cleanup", async {
             let (_root, store) = fixture().await;
-            let first = store
-                .execute_expected_run("fixture:retry".into(), expected(), RunAction::Retry)
+            let first = execute(&store, "fixture:retry".into(), expected(), RunAction::Retry)
                 .await
                 .unwrap();
             assert_eq!(first.quiet_wake_threads, ["t"]);
             assert!(first.stop_runs.is_empty());
             assert_ne!(state(&store).await.1, "recovery_wait");
-            let replay = store
-                .execute_expected_run("fixture:retry".into(), expected(), RunAction::Retry)
+            let replay = execute(&store, "fixture:retry".into(), expected(), RunAction::Retry)
                 .await
                 .unwrap();
             no_effects(&replay);
             let mut current = expected();
             current.turn_generation = Some(5);
             assert!(
-                store
-                    .execute_expected_run("fixture:retry-again".into(), current, RunAction::Retry)
-                    .await
-                    .is_err(),
+                execute(
+                    &store,
+                    "fixture:retry-again".into(),
+                    current,
+                    RunAction::Retry
+                )
+                .await
+                .is_err(),
                 "exact identity alone cannot retry a non-recovery Turn"
             );
             store.database.shutdown().await.unwrap();
@@ -174,14 +218,19 @@ mod tests {
             guard.turn_id = None;
             guard.turn_generation = None;
             assert!(
-                store
-                    .execute_expected_run(
-                        "fixture:unexpected-turn".into(),
-                        guard.clone(),
-                        RunAction::Stop
-                    )
-                    .await
-                    .is_err()
+                execute(
+                    &store,
+                    "fixture:unexpected-turn".into(),
+                    ExpectedRun {
+                        thread_id: guard.thread_id.clone(),
+                        run_id: guard.run_id.clone(),
+                        turn_id: None,
+                        turn_generation: None
+                    },
+                    RunAction::Stop
+                )
+                .await
+                .is_err()
             );
             store
                 .database
@@ -191,8 +240,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let stopped = store
-                .execute_expected_run("fixture:no-turn".into(), guard, RunAction::Stop)
+            let stopped = execute(&store, "fixture:no-turn".into(), guard, RunAction::Stop)
                 .await
                 .unwrap();
             assert_eq!(stopped.stop_runs, ["r"]);
@@ -207,8 +255,7 @@ mod tests {
         let (_root, store) = fixture().await;
         store.database.call(|db|{db.execute_batch("CREATE TRIGGER reject_guarded_stop BEFORE UPDATE OF state ON run BEGIN SELECT RAISE(ABORT,'synthetic rollback'); END;")?;Ok(())}).await.unwrap();
         assert!(
-            store
-                .execute_expected_run("fixture:rollback".into(), expected(), RunAction::Stop)
+            execute(&store, "fixture:rollback".into(), expected(), RunAction::Stop)
                 .await
                 .is_err()
         );

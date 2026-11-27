@@ -37,6 +37,25 @@ pub fn display_payload(payload: &Value) -> (String, Vec<(usize, usize)>) {
 }
 /// Prefer received answer deltas. Alternatives are mutually exclusive so the
 /// final event and item-done copies never repeat the same paid response.
+pub(crate) fn received_preview_visible(kind: &str, payload: &Value, text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    if kind != "model_stream_observation" {
+        return true;
+    }
+    // Mismatch classifications describe JSON structure as well as prose. A
+    // metadata/content/call-id difference must not duplicate a paid answer.
+    let Some(final_response) = payload.get("raw_response") else {
+        return false;
+    };
+    if !final_response.get("output").is_some_and(Value::is_array) {
+        return false;
+    }
+    let final_body = received_body(&serde_json::json!({"raw_response": final_response}));
+    received_body(payload) != final_body
+}
+
 pub(crate) fn received_body(payload: &Value) -> (String, Vec<(usize, usize)>) {
     fn fallback(payload: &Value, reasoning: bool) -> String {
         let wanted = if reasoning { "reasoning" } else { "message" };

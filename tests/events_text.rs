@@ -753,7 +753,7 @@ async fn the_entry_is_freed_when_the_attempt_is_stopped_or_interrupted() {
                         .unwrap()
                 };
                 if stop {
-                    let request = wait_request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run }));
+                    let request = wait_request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::exact(run)));
                     assert!(control.request(request).await.ok);
                 } else {
                     control.interrupt_turn(turn).await.unwrap();

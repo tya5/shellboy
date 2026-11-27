@@ -261,9 +261,7 @@ async fn parked_waits_leave_ordinary_and_stop_admission_available() {
     let stop = fixture
         .connect_command(
             34,
-            Command::RunStop(crate::protocol::RunStopTarget::Run {
-                run_id: "run".into(),
-            }),
+            Command::RunStop(crate::protocol::RunStopTarget::exact("run".into())),
         )
         .await;
     for _ in 0..2 {
@@ -360,9 +358,7 @@ async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded()
         (MAX_IPC_WORK, Command::Status(StatusArgs::default())),
         (
             MAX_IPC_WORK + 1,
-            Command::RunStop(crate::protocol::RunStopTarget::Run {
-                run_id: "run".into(),
-            }),
+            Command::RunStop(crate::protocol::RunStopTarget::exact("run".into())),
         ),
     ] {
         let client = fixture.connect_command(number, command).await;
@@ -403,9 +399,7 @@ async fn each_reserved_class_is_bounded_and_releases_only_its_own_capacity() {
             fixture
                 .connect_command(
                     100 + number,
-                    Command::RunStop(crate::protocol::RunStopTarget::Run {
-                        run_id: "run".into(),
-                    }),
+                    Command::RunStop(crate::protocol::RunStopTarget::exact("run".into())),
                 )
                 .await,
         );
@@ -422,9 +416,7 @@ async fn each_reserved_class_is_bounded_and_releases_only_its_own_capacity() {
     for (number, command) in [
         (
             300,
-            Command::RunStop(crate::protocol::RunStopTarget::Run {
-                run_id: "run".into(),
-            }),
+            Command::RunStop(crate::protocol::RunStopTarget::exact("run".into())),
         ),
         (
             301,

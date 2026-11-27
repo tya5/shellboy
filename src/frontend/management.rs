@@ -1043,7 +1043,7 @@ mod tests {
         assert!(
             matches!(follow(&value,"",crate::ui::ManagementFollow::Refresh).unwrap(),Command::Status(a) if a.cursor.is_none())
         );
-        let dangerous = serde_json::json!({"targets":[Command::RunStop(crate::protocol::RunStopTarget::Run {run_id:"owner".into()})]});
+        let dangerous = serde_json::json!({"targets":[Command::RunStop(crate::protocol::RunStopTarget::exact("owner".into()))]});
         assert!(follow(&dangerous, "", crate::ui::ManagementFollow::Inspect).is_err());
         let english = follow_in(
             &json!({"other":true}),

@@ -440,7 +440,7 @@ impl<W: Write> Chat<'_, W> {
                         return Ok(Flow::Exit);
                     }
                     if let Some(run) = self.run.clone() {
-                        let _: Value = self.call(Command::RunStop(crate::protocol::RunStopTarget::Run { run_id: run })).await?;
+                        let _: Value = self.call(Command::RunStop(crate::protocol::RunStopTarget::exact(run))).await?;
                         self.emit(Event{kind:"run_stopping",state:Some("stopping".into()),..Default::default()},
                             "[stop] stopping the Run; press Ctrl+C again to leave chat");
                     }
@@ -467,9 +467,9 @@ impl<W: Write> Chat<'_, W> {
             return Ok(false);
         }
         let _: Value = self
-            .call(Command::RunStop(crate::protocol::RunStopTarget::Run {
-                run_id: run.clone(),
-            }))
+            .call(Command::RunStop(crate::protocol::RunStopTarget::exact(
+                run.clone(),
+            )))
             .await?;
         self.run = Some(run);
         self.emit(

@@ -349,9 +349,9 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
         .unwrap();
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: parent.run_id.clone().unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            parent.run_id.clone().unwrap(),
+        )),
     )
     .await;
     state(&control, "run", parent.run_id.as_ref().unwrap(), "stopped").await;
@@ -366,9 +366,7 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
     for run in [&child_run, &grand_run] {
         command(
             &control,
-            Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                run_id: run.clone(),
-            }),
+            Command::RunStop(shellboy::protocol::RunStopTarget::exact(run.clone())),
         )
         .await;
         state(&control, "run", run, "stopped").await;
@@ -388,9 +386,9 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
     assert_eq!(adopted, 0);
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: independent.run_id.unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            independent.run_id.unwrap(),
+        )),
     )
     .await;
     crate::test_watchdog::watchdog("tests/runtime_hierarchy.rs: stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_independent", async {
@@ -675,7 +673,7 @@ async fn model_cli_may_write_to_and_stop_an_independent_live_run() {
     .await;
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: target_run }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(target_run)),
     )
     .await;
     crate::test_watchdog::watchdog(
@@ -784,17 +782,17 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
     state(&control, "turn", "recovery-child-turn", "completed").await;
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: parent.run_id.unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            parent.run_id.unwrap(),
+        )),
     )
     .await;
     state(&control, "run", "recovery-grandchild", "live").await;
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: "recovery-grandchild".into(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            "recovery-grandchild".into(),
+        )),
     )
     .await;
     state(&control, "run", "recovery-grandchild", "stopped").await;

@@ -645,9 +645,9 @@ async fn run_stop_classifies_admitted_and_queued_input_before_restart_and_explic
     assert!(!before.on_path && before.admission == "unadmitted");
     rpc(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: first.run_id.clone().unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            first.run_id.clone().unwrap(),
+        )),
     )
     .await;
     bounded("RunStop terminal repair", async {

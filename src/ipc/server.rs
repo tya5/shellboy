@@ -99,6 +99,9 @@ impl WorkAdmission {
             | Command::TurnInterrupt(_)
             | Command::ShellBackground(_)
             | Command::OwnerShutdown(_) => (&self.control, &self.refused.stop),
+            Command::RunRetry(args) if args.expected_selection.is_some() => {
+                (&self.control, &self.refused.stop)
+            }
             Command::Status(args) if args.memory => {
                 (&self.memory_observation, &self.refused.memory)
             }

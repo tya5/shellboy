@@ -1308,9 +1308,7 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     let response = control
         .request(super::operation(
             &control,
-            Command::RunStop(crate::protocol::RunStopTarget::Run {
-                run_id: "target-run".into(),
-            }),
+            Command::RunStop(crate::protocol::RunStopTarget::exact("target-run".into())),
         ))
         .await;
     assert!(response.ok, "{response:?}");
@@ -1431,9 +1429,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
             false,
         ),
         (
-            Command::RunStop(crate::protocol::RunStopTarget::Run {
-                run_id: "target-run".into(),
-            }),
+            Command::RunStop(crate::protocol::RunStopTarget::exact("target-run".into())),
             true,
             true,
         ),

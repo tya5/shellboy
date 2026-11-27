@@ -21,14 +21,6 @@ tokio::task_local! { pub(crate) static READ_CONTEXT:ReadContext; }
 pub(crate) fn read_context() -> ReadContext {
     READ_CONTEXT.try_with(|value| *value).unwrap_or_default()
 }
-pub(crate) async fn with_trigger<T>(
-    trigger: UsageTrigger,
-    future: impl std::future::Future<Output = T>,
-) -> T {
-    let mut context = read_context();
-    context.trigger = trigger;
-    READ_CONTEXT.scope(context, future).await
-}
 #[cfg(test)]
 pub(crate) async fn with_test_elapsed<T>(
     elapsed: std::time::Duration,

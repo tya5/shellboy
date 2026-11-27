@@ -451,7 +451,7 @@ async fn run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_i
     let request = tokio::spawn(async move {
         rpc(
             &stopping,
-            Command::RunStop(crate::protocol::RunStopTarget::Run { run_id: target }),
+            Command::RunStop(crate::protocol::RunStopTarget::exact(target)),
         )
         .await
     });

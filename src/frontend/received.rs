@@ -1,5 +1,6 @@
 //! Read-only display of saved failed responses; never a model replay source.
 use super::*;
+#[cfg(test)]
 use crate::history::display_source::received_body as body;
 mod list;
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
 };
 
 pub(super) const ROLE: &str = "received_response";
-const SAVED_BYTES: usize = 1024 * 1024;
 
 fn received_title(language: UiLanguage, observation: bool) -> String {
     match language {
@@ -100,25 +100,10 @@ pub(super) fn project(
     node
 }
 
-fn preview_visible(kind: &str, payload: &Value, text: &str) -> bool {
-    if text.is_empty() {
-        return false;
-    }
-    if kind != "model_stream_observation" {
-        return true;
-    }
-    // Mismatch classifications describe JSON structure as well as prose. A
-    // metadata/content/call-id difference must not duplicate a paid answer.
-    let Some(final_response) = payload.get("raw_response") else {
-        return false;
-    };
-    if !final_response.get("output").is_some_and(Value::is_array) {
-        return false;
-    }
-    let final_body = body(&serde_json::json!({"raw_response": final_response}));
-    body(payload) != final_body
-}
+#[cfg(test)]
+use crate::history::display_source::received_preview_visible as preview_visible;
 
+#[cfg(test)]
 struct PreviewRow {
     id: String,
     after: Option<String>,
@@ -132,10 +117,12 @@ struct PreviewRow {
     recovery_wait: bool,
 }
 #[derive(Clone, Copy)]
+#[cfg(test)]
 pub(super) struct Scope {
     pub(super) selection_revision: u64,
     pub(super) view_revision: Option<u64>,
 }
+#[cfg(test)]
 pub(super) struct RawSnapshot {
     rows: Vec<PreviewRow>,
     selection_revision: u64,
@@ -149,66 +136,7 @@ pub(super) struct Prepared {
 }
 
 /// Read in the caller's transaction; at most two bounded saved responses.
-pub(super) fn query_tx(
-    db: &rusqlite::Connection,
-    thread: &str,
-    scope: Scope,
-) -> Result<Option<RawSnapshot>, crate::storage::StorageError> {
-    let selection =
-        crate::history::selection_revision(db, thread, crate::history::ThreadScope::Live)?;
-    if selection as u64 != scope.selection_revision {
-        return Ok(None);
-    }
-    let root_revision = db
-        .query_row(
-            "SELECT value FROM app_meta WHERE key='root_revision'",
-            [],
-            |row| row.get::<_, String>(0),
-        )?
-        .parse::<i64>()
-        .ok()
-        .and_then(|revision| u64::try_from(revision).ok())
-        .ok_or_else(|| {
-            crate::storage::StorageError::Schema("root revision metadata is malformed".into())
-        })?;
-    let mut statement=db.prepare(r#"SELECT n.id,n.kind,
-          coalesce(substr(json_extract(n.payload_json,'$.partial_text'),1,16384),''),
-          coalesce(substr(json_extract(n.payload_json,'$.partial_reasoning'),1,16384),''),
-          coalesce(length(json_extract(n.payload_json,'$.partial_text')),0)+coalesce(length(json_extract(n.payload_json,'$.partial_reasoning')),0),
-          CASE WHEN length(CAST(n.payload_json AS BLOB))<=?2 THEN n.payload_json END,
-          substr(json_extract(n.payload_json,'$.differences'),1,4096),
-          substr(json_extract(n.payload_json,'$.delta_differences'),1,4096),
-          (SELECT p.node_id FROM thread_path p JOIN node prior ON prior.id=p.node_id
-           WHERE p.thread_id=u.thread_id AND prior.turn_id=n.turn_id AND prior.rowid<n.rowid
-           ORDER BY p.ordinal DESC LIMIT 1),u.state='recovery_wait'
-          FROM node n JOIN turn u ON u.id=n.turn_id JOIN thread t ON t.id=u.thread_id
-          WHERE u.thread_id=?1 AND t.deleted_at IS NULL
-            AND n.kind IN ('incomplete_response','model_stream_observation')
-            AND n.deleted_reason IS NULL AND json_valid(n.payload_json)
-          ORDER BY n.rowid DESC LIMIT 2"#)?;
-    let rows = statement
-        .query_map(rusqlite::params![thread, SAVED_BYTES as i64], |r| {
-            Ok(PreviewRow {
-                id: r.get(0)?,
-                after: r.get(8)?,
-                kind: r.get(1)?,
-                partial: r.get(2)?,
-                reasoning: r.get(3)?,
-                total: r.get(4)?,
-                saved: r.get(5)?,
-                differences: r.get(6)?,
-                delta_differences: r.get(7)?,
-                recovery_wait: r.get(9)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(Some(RawSnapshot {
-        rows,
-        selection_revision: selection as u64,
-        root_revision,
-    }))
-}
-
+#[cfg(test)]
 pub(super) fn prepare(snapshot: RawSnapshot, width: u16, language: UiLanguage) -> Prepared {
     let RawSnapshot {
         rows,
@@ -239,6 +167,7 @@ pub(super) fn prepare(snapshot: RawSnapshot, width: u16, language: UiLanguage) -
     }
 }
 
+#[cfg(test)]
 pub(super) async fn apply(
     updates: &dyn UpdateTarget,
     thread: &str,
@@ -260,28 +189,53 @@ pub(super) async fn apply(
     .await;
 }
 
-pub(super) async fn refresh(
-    control: &Control,
-    updates: &dyn UpdateTarget,
-    thread: &str,
-    generation: u64,
+pub(super) async fn read_native(
+    owner: &native_history::Owner<'_>,
+    page: &history_reader::Page,
     width: u16,
-    scope: Scope,
-) -> Result<(), ApiError> {
-    let language = control.store.config.ui.language;
-    let target = thread.to_owned();
-    let snapshot = control
-        .store
-        .database
-        .call(move |db| query_tx(db, &target, scope))
-        .await
-        .map_err(storage_error)?;
-    let Some(snapshot) = snapshot else {
-        return Ok(());
-    };
-    let prepared = presentation_work(move || prepare(snapshot, width, language)).await?;
-    apply(updates, thread, generation, scope, prepared).await;
-    Ok(())
+    language: UiLanguage,
+) -> Result<Prepared, ApiError> {
+    read_observation(
+        owner,
+        &page.observation,
+        page.info.revision,
+        width,
+        language,
+    )
+    .await
+}
+
+async fn read_observation(
+    owner: &native_history::Owner<'_>,
+    observation: &HistoryWindowObservation,
+    selection_revision: u64,
+    width: u16,
+    language: UiLanguage,
+) -> Result<Prepared, ApiError> {
+    let mut nodes = Vec::new();
+    for notice in observation.received.iter().rev() {
+        let Some(after) = &notice.after_node_id else {
+            continue;
+        };
+        let mut display = owner
+            .display(&notice.node_id, None, HistoryDisplayPosition::Tail)
+            .await?;
+        if display.kind != notice.kind || display.source_revision != notice.source_revision {
+            return Err(ApiError::new(
+                ErrorCode::CursorExpired,
+                "Received notice changed during read",
+            ));
+        }
+        display.received_recovery_wait = notice.recovery_wait;
+        let mut node = display.into_ui_node(notice.node_id.clone(), width, language);
+        node.presentation.read_revision = observation.read_sequence;
+        nodes.push((after.clone(), node));
+    }
+    Ok(Prepared {
+        nodes,
+        selection_revision,
+        root_revision: observation.received_root_revision,
+    })
 }
 
 pub(super) async fn list(
@@ -297,6 +251,43 @@ pub(super) async fn list(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    async fn refresh(
+        control: &Control,
+        updates: &dyn UpdateTarget,
+        thread: &str,
+        generation: u64,
+        width: u16,
+        scope: Scope,
+    ) -> Result<(), ApiError> {
+        let owner = native_history::Owner {
+            data_dir: compose_data_dir(control),
+            instance: &control.store.instance_id,
+        };
+        let window = owner
+            .window(history_reader::window_args(
+                thread,
+                history_reader::Anchor::Tail,
+                0,
+                0,
+                Vec::new(),
+            ))
+            .await?;
+        if window.revision != scope.selection_revision {
+            return Ok(());
+        }
+        let observation = window.observation.expect("included window observation");
+        let prepared = read_observation(
+            &owner,
+            &observation,
+            window.revision,
+            width,
+            control.store.config.ui.language,
+        )
+        .await?;
+        apply(updates, thread, generation, scope, prepared).await;
+        Ok(())
+    }
 
     #[test]
     fn received_labels_follow_ui_language_without_changing_source_facts() {
@@ -718,51 +709,40 @@ mod tests {
             rx.try_recv(),
             Err(std::sync::mpsc::TryRecvError::Empty)
         ));
-        for malformed in ["-1", "not-a-revision"] {
-            owner
-                .db
-                .call(move |db| {
-                    db.execute(
-                        "UPDATE app_meta SET value=?1 WHERE key='root_revision'",
-                        [malformed],
-                    )?;
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            assert!(
-                refresh(
-                    &control,
-                    &tx,
-                    "t",
-                    7,
-                    80,
-                    Scope {
-                        selection_revision: 0,
-                        view_revision: None
-                    }
-                )
-                .await
-                .is_err()
-            );
-            assert!(matches!(
-                rx.try_recv(),
-                Err(std::sync::mpsc::TryRecvError::Empty)
-            ));
-        }
         owner
             .db
             .call(|db| {
                 db.execute(
-                    "UPDATE app_meta SET value='0' WHERE key='root_revision'",
+                    "UPDATE app_meta SET value='-1' WHERE key='root_revision'",
                     [],
                 )?;
                 Ok(())
             })
             .await
             .unwrap();
+        let error = refresh(
+            &control,
+            &tx,
+            "t",
+            7,
+            80,
+            Scope {
+                selection_revision: 0,
+                view_revision: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::SaveFailed);
+        assert!(matches!(
+            rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
         server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
+        assert_eq!(
+            control.shutdown().await.unwrap_err().code,
+            ErrorCode::SaveFailed
+        );
         owner.shutdown().await.unwrap();
     }
     #[tokio::test]
@@ -870,6 +850,9 @@ mod tests {
             .await
             .unwrap();
         let control = Control::new(&owner, root.path().into());
+        let (rpc, receive) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(receive));
         refresh(
             &control,
             &tx,
@@ -912,6 +895,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(original, (payload.clone(), payload, 1));
+        server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

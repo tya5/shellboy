@@ -86,11 +86,14 @@ impl Store {
             let mut db = open_inspection(observer.path())?;
             observer.observe_inspection(&mut db, "MessageGet", queued_at, None, |db| {
                 let tx = db.transaction().map_err(sql_error)?;
-                let mut detail = message_details(&tx, &id)?;
-                if let Some(thread) = args.source_thread_id.as_deref() {
-                    detail.source = Some(message_source(&tx, thread, &id, limit)?);
-                }
-                detail.held_by = holds.read(&tx, [&*id]).map_err(sql_error)?.pop().flatten();
+                use crate::protocol::MessageGetResult;
+                let detail = if let Some(thread) = args.source_thread_id.as_deref() {
+                    MessageGetResult::Source(message_source(&tx, thread, &id, limit)?)
+                } else {
+                    let mut detail = message_details(&tx, &id)?;
+                    detail.held_by = holds.read(&tx, [&*id]).map_err(sql_error)?.pop().flatten();
+                    MessageGetResult::Details(Box::new(detail))
+                };
                 tx.commit().map_err(sql_error)?;
                 Ok::<_, ApiError>(detail)
             })
@@ -129,19 +132,73 @@ fn observe(
         .collect::<Vec<_>>();
     let facts = crate::history::window_facts::read_window_facts(db, &items, extra)
         .map_err(StorageError::into_api_error)?;
-    let received = db.prepare_cached(
+    let received_root_revision = db
+        .query_row(
+            "SELECT value FROM app_meta WHERE key='root_revision'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(sql_error)?
+        .parse::<i64>()
+        .ok()
+        .and_then(|revision| u64::try_from(revision).ok())
+        .ok_or_else(|| {
+            StorageError::Schema("root revision metadata is malformed".into()).into_api_error()
+        })?;
+    let rows = db.prepare_cached(
         "SELECT n.id,n.kind,(SELECT p.node_id FROM thread_path p JOIN node prior ON prior.id=p.node_id
            WHERE p.thread_id=u.thread_id AND prior.turn_id=n.turn_id AND prior.rowid<n.rowid
-           ORDER BY p.ordinal DESC LIMIT 1),u.state='recovery_wait'
+           ORDER BY p.ordinal DESC LIMIT 1),u.state='recovery_wait',n.payload_revision,
+           CASE WHEN octet_length(n.payload_json)<=1048576 THEN n.payload_json END
          FROM node n JOIN turn u ON u.id=n.turn_id
          WHERE u.thread_id=?1 AND n.kind IN ('incomplete_response','model_stream_observation')
            AND n.deleted_reason IS NULL AND json_valid(n.payload_json)
          ORDER BY n.rowid DESC LIMIT 2",
     ).map_err(sql_error)?.query_map([&window.thread_id], |row| {
-        Ok(crate::protocol::HistoryWindowReceived {
-            node_id: row.get(0)?, kind: row.get(1)?, after_node_id: row.get(2)?, recovery_wait: row.get(3)?,
-        })
+        Ok((crate::protocol::HistoryWindowReceived {
+            node_id: row.get(0)?, kind: row.get(1)?, after_node_id: row.get(2)?, recovery_wait: row.get(3)?, source_revision: row.get(4)?,
+        }, row.get::<_, Option<String>>(5)?))
     }).map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+    let received = rows
+        .into_iter()
+        .filter_map(|(notice, payload)| {
+            if let Some(payload) = payload {
+                let value: Value = serde_json::from_str(&payload).ok()?;
+                let (text, _) = crate::history::display_source::received_body(&value);
+                if !crate::history::display_source::received_preview_visible(
+                    &notice.kind,
+                    &value,
+                    &text,
+                ) {
+                    return None;
+                }
+            } else if notice.kind == "model_stream_observation" {
+                return None;
+            }
+            Some(notice)
+        })
+        .collect();
+    let source_ids = extra
+        .iter()
+        .chain(window.items.iter().map(|item| &item.node_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let ids = items.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+    let branches = crate::history::branches::markers(db, &window.thread_id, &ids)?
+        .into_iter()
+        .map(|marker| HistoryWindowBranch {
+            anchor_node_id: marker.anchor_node_id,
+            current: marker.current,
+            alternatives: marker
+                .alternatives
+                .into_iter()
+                .map(|alternative| HistoryWindowBranchAlternative {
+                    thread_id: alternative.thread_id,
+                    excerpt: alternative.excerpt,
+                })
+                .collect(),
+        })
+        .collect();
     Ok(HistoryWindowObservation {
         read_sequence,
         pending: pending(db, &window.thread_id, holds).map_err(sql_error)?,
@@ -151,10 +208,12 @@ fn observe(
         recovery: facts.recovery,
         usage: facts.usage,
         received,
+        received_root_revision,
+        branches,
         pinned_sources: crate::history::window_facts::message_sources::pinned(
             db,
             &window.thread_id,
-            extra,
+            &source_ids,
         )
         .map_err(StorageError::into_api_error)?,
     })

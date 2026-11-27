@@ -1885,7 +1885,7 @@ async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
         ).await.unwrap();
         // The driver's outcome is already chosen, but its owned slot still exists.
         let stopped = control.store.execute(Request::new(
-            format!("{}:stop", owner.instance_id), Command::RunStop(crate::protocol::RunStopTarget::Run { run_id:run.clone() }),
+            format!("{}:stop", owner.instance_id), Command::RunStop(crate::protocol::RunStopTarget::exact(run.clone())),
         ), None).await.unwrap();
         assert_eq!(stopped.stop_runs, vec![run.clone()]);
         assert!(matches!(next(&control, &accepted.thread_id, run).await.unwrap(), Next::Done));
@@ -1924,7 +1924,7 @@ async fn stopping_keeps_queued_input_held_with_the_recorded_reason() {
                 .execute(
                     Request::new(
                         format!("{}:stop", owner.instance_id),
-                        Command::RunStop(crate::protocol::RunStopTarget::Run { run_id: run }),
+                        Command::RunStop(crate::protocol::RunStopTarget::exact(run)),
                     ),
                     None,
                 )
@@ -1965,7 +1965,7 @@ async fn concurrent_stop_completion_does_not_start_model_work() {
         let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
         let run = accepted.run_id.as_ref().unwrap();
         control.store.execute(Request::new(format!("{}:stop",owner.instance_id),
-            Command::RunStop(crate::protocol::RunStopTarget::Run {run_id:run.clone()})), None).await.unwrap();
+            Command::RunStop(crate::protocol::RunStopTarget::exact(run.clone()))), None).await.unwrap();
         let (one,two)=tokio::join!(try_stop_without_driver(&control,run),try_stop_without_driver(&control,run));
         one.unwrap();two.unwrap();
         let target=run.clone();

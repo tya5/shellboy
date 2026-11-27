@@ -219,9 +219,7 @@ async fn stopping_holds_existing_acceptance_and_thread_deletion_cancels_without_
         .execute(
             Request::new(
                 "instance:stop",
-                Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                    run_id: "run".into(),
-                }),
+                Command::RunStop(shellboy::protocol::RunStopTarget::exact("run".into())),
             ),
             None,
         )
@@ -463,9 +461,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
         .execute(
             Request::new(
                 "instance:stop-old",
-                Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                    run_id: run.clone(),
-                }),
+                Command::RunStop(shellboy::protocol::RunStopTarget::exact(run.clone())),
             ),
             None,
         )

@@ -120,3 +120,183 @@ pub(crate) async fn run_prepared(
     );
     Ok(ok && written)
 }
+
+/// Attach to the selected owner, or attempt one detached `serve` launch.
+/// Cancellation ends only this observation, including after the child acquires ownership.
+#[doc(hidden)]
+pub async fn attach_or_start(
+    profile: &crate::config::LoadedConfig,
+    cancel: &CancellationToken,
+) -> Result<Option<crate::ipc::Welcome>, ApiError> {
+    use tokio::time::{Duration, Instant};
+
+    let data = &profile.data_dir;
+    let result = async {
+        if let Some(welcome) = crate::ipc::probe_selected(data).await? {
+            return Ok(Some(welcome));
+        }
+        let lock_path = data.clone();
+        let free = tokio::task::spawn_blocking(move || profile_is_unowned(&lock_path))
+            .await
+            .map_err(|_| attach_error("Owner lock inspection failed"))??;
+        let mut child = if free {
+            if cancel.is_cancelled() {
+                return Ok(None);
+            }
+            Some(spawn_detached(profile.config_path.as_deref(), data)?)
+        } else {
+            None
+        };
+        let readiness = async {
+            loop {
+                if let Some(welcome) = crate::ipc::probe_selected(data).await? {
+                    return Ok(Some(welcome));
+                }
+                let exited = child
+                    .as_mut()
+                    .map(tokio::process::Child::try_wait)
+                    .transpose()
+                    .map_err(|_| attach_error("Cannot observe owner process"))?
+                    .flatten()
+                    .is_some();
+                if exited {
+                    child = None;
+                    let lock_path = data.clone();
+                    let free = tokio::task::spawn_blocking(move || profile_is_unowned(&lock_path))
+                        .await
+                        .map_err(|_| attach_error("Owner lock inspection failed"))??;
+                    if free {
+                        // A successful concurrent launcher may have published readiness
+                        // between the last probe and the losing child's exit.
+                        return crate::ipc::probe_selected(data)
+                            .await?
+                            .map(Some)
+                            .ok_or_else(|| {
+                                attach_error("The detached owner exited before becoming ready")
+                            });
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        };
+        tokio::time::timeout_at(Instant::now() + Duration::from_secs(30), readiness)
+            .await
+            .map_err(|_| attach_error("The selected owner did not become ready in time"))?
+    };
+    tokio::select! { biased;
+        _ = cancel.cancelled() => Ok(None),
+        result = result => result,
+    }
+}
+
+fn attach_error(message: &'static str) -> ApiError {
+    ApiError::new(ErrorCode::IoFailed, message)
+        .hint("Run shellboy serve explicitly for startup diagnostics")
+}
+
+fn profile_is_unowned(data: &std::path::Path) -> Result<bool, ApiError> {
+    use std::io::ErrorKind;
+    match std::fs::symlink_metadata(data) {
+        Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if metadata.uid() != unsafe { libc::geteuid() } {
+                    return Err(attach_error(
+                        "The selected data directory belongs to another user",
+                    ));
+                }
+            }
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+        _ => {
+            return Err(attach_error(
+                "The selected data directory cannot be verified",
+            ));
+        }
+    }
+    let path = data.join("owner.lock");
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+        Err(_) => {
+            return Err(attach_error(
+                "The selected owner lock cannot be opened safely",
+            ));
+        }
+    };
+    if !file
+        .metadata()
+        .is_ok_and(|m| m.is_file() && !m.is_symlink())
+    {
+        return Err(attach_error(
+            "The selected owner lock is not a regular file",
+        ));
+    }
+    match fs2::FileExt::try_lock_exclusive(&file) {
+        Ok(()) => {
+            fs2::FileExt::unlock(&file)
+                .map_err(|_| attach_error("Cannot release owner lock inspection"))?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == fs2::lock_contended_error().kind() => Ok(false),
+        Err(_) => Err(attach_error(
+            "The selected owner lock state cannot be verified",
+        )),
+    }
+}
+
+fn spawn_detached(
+    config: Option<&std::path::Path>,
+    data: &std::path::Path,
+) -> Result<tokio::process::Child, ApiError> {
+    use std::process::Stdio;
+    if !data.is_absolute() || data.to_str().is_none() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "serve requires an absolute UTF-8 data directory",
+        ));
+    }
+    let executable = std::env::current_exe()
+        .map_err(|_| attach_error("Cannot identify the Shellboy executable"))?;
+    let mut command = tokio::process::Command::new(executable);
+    command.arg("--data-dir").arg(data);
+    if let Some(config) = config {
+        command.arg("--config").arg(config);
+    }
+    command
+        .arg("serve")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    // setsid is async-signal-safe and prevents terminal hangup from following the child.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    #[cfg(windows)]
+    command.creation_flags(
+        windows_sys::Win32::System::Threading::DETACHED_PROCESS
+            | windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP,
+    );
+    command
+        .spawn()
+        .map_err(|_| attach_error("Cannot launch detached Shellboy owner"))
+}

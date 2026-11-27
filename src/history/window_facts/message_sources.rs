@@ -205,6 +205,37 @@ pub(crate) fn read_tx(
     })
 }
 
+pub(crate) fn relationship(
+    raw: &RawSource,
+    viewed: Option<&str>,
+    parent: Option<&str>,
+) -> crate::presentation::InputSource {
+    use crate::presentation::InputSource;
+    if raw.revisit {
+        InputSource::Revisit
+    } else {
+        match raw
+            .sender
+            .as_deref()
+            .and_then(|sender| serde_json::from_str::<serde_json::Value>(sender).ok())
+        {
+            Some(serde_json::Value::Null) => InputSource::Human,
+            Some(sender)
+                if sender.get("kind").and_then(serde_json::Value::as_str) == Some("human") =>
+            {
+                InputSource::Human
+            }
+            Some(sender) => match sender.get("thread_id").and_then(serde_json::Value::as_str) {
+                Some(sender) if Some(sender) == viewed => InputSource::SelfModel,
+                Some(sender) if Some(sender) == parent => InputSource::Parent,
+                Some(_) => InputSource::OtherModel,
+                None => InputSource::Unknown,
+            },
+            None => InputSource::Unknown,
+        }
+    }
+}
+
 pub(crate) fn pinned(
     db: &Connection,
     viewed: &str,
@@ -215,15 +246,16 @@ pub(crate) fn pinned(
     let selected = db.prepare_cached("SELECT DISTINCT p.node_id FROM json_each(?1) q JOIN thread_path p ON p.thread_id=?2 AND p.node_id=q.value")?
         .query_map(params![encoded, viewed], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(read_tx(db, Some(viewed), &selected)?
-        .rows
-        .into_iter()
-        .map(|row| {
+    let mut sources = Vec::with_capacity(selected.len());
+    for chunk in selected.chunks(MAX_NODES) {
+        let facts = read_tx(db, Some(viewed), chunk)?;
+        sources.extend(facts.rows.into_iter().map(|row| {
             let sender = MessageSender::from_saved(row.sender.as_deref());
+            let relationship = relationship(&row, facts.viewed.as_deref(), facts.parent.as_deref());
             HistoryWindowSource {
                 node_id: row.node_id,
                 created_at: row.created_at,
-                revisit: row.revisit,
+                relationship,
                 sender,
                 reply_state: row.reply_state.filter(|state| {
                     matches!(
@@ -235,6 +267,7 @@ pub(crate) fn pinned(
                     .reply_excerpt
                     .map(|text| text.chars().take(512).collect()),
             }
-        })
-        .collect())
+        }));
+    }
+    Ok(sources)
 }

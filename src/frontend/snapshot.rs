@@ -40,6 +40,7 @@ pub(super) async fn read_sequenced_guarded<T: Send + 'static>(
     .await
 }
 
+#[cfg(test)]
 pub(super) async fn read<T: Send + 'static>(
     path: PathBuf,
     stop: CancellationToken,

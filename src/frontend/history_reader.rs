@@ -170,11 +170,10 @@ fn display_position(position: NodePosition) -> HistoryDisplayPosition {
 }
 
 /// How a page reads its saved source metadata: the history worker's enrichment
-/// with branch and compaction markers, or the current view's read-only snapshot
-/// that never waits behind the owner's writer.
+/// with branch and compaction markers, or facts from the selected observation.
 pub(super) enum Metadata {
     Enriched,
-    Snapshot(CancellationToken),
+    Window,
 }
 
 /// Read and project one selected window. `wanted` names the node whose
@@ -245,24 +244,8 @@ async fn project_page(
         Metadata::Enriched => {
             message_metadata::enrich(control, Some(thread), &mut projected).await?
         }
-        Metadata::Snapshot(stop) => {
-            let ids = projected
-                .iter()
-                .map(|node| node.node_id.clone())
-                .collect::<Vec<_>>();
-            let viewed = thread.to_owned();
-            let facts = snapshot::read(
-                control.store.database.path().to_path_buf(),
-                stop,
-                move |db| message_metadata::read_tx(db, Some(&viewed), &ids),
-            )
-            .await;
-            let facts = checked_storage(control, facts).await?;
-            projected = presentation_work(move || {
-                message_metadata::apply(&mut projected, &facts);
-                projected
-            })
-            .await?;
+        Metadata::Window => {
+            message_metadata::apply_pinned(&mut projected, &observation.pinned_sources)
         }
     }
     let (mut projected, observation) = presentation_work(move || {
@@ -495,20 +478,27 @@ impl<'a> HistoryReader<'a> {
             }
         };
         let anchor = page.anchor.clone().unwrap_or_default();
-        let selection_revision = page.info.revision;
-        reply.deliver(self.updates, page, anchor).await;
-        received::refresh(
-            self.control,
-            self.updates,
-            thread,
-            reply.target.generation,
+        let received = received::read_native(
+            &self.owner(),
+            &page,
             self.width,
-            received::Scope {
-                selection_revision,
+            self.control.store.config.ui.language,
+        )
+        .await?;
+        reply.deliver(self.updates, page, anchor).await;
+        update(
+            self.updates,
+            UiUpdate::IncompleteResponses {
+                thread_id: reply.target.thread.clone(),
+                generation: reply.target.generation,
+                selection_revision: received.selection_revision,
                 view_revision: Some(reply.view_revision),
+                root_revision: received.root_revision,
+                nodes: received.nodes,
             },
         )
-        .await
+        .await;
+        Ok(())
     }
     pub(super) async fn window(
         &self,
@@ -563,20 +553,27 @@ impl<'a> HistoryReader<'a> {
                 "Requested history ordinal is no longer selected",
             )
         })?;
-        let selection_revision = page.info.revision;
-        reply.deliver(self.updates, page, anchor).await;
-        received::refresh(
-            self.control,
-            self.updates,
-            &reply.target.thread,
-            reply.target.generation,
+        let received = received::read_native(
+            &self.owner(),
+            &page,
             self.width,
-            received::Scope {
-                selection_revision,
+            self.control.store.config.ui.language,
+        )
+        .await?;
+        reply.deliver(self.updates, page, anchor).await;
+        update(
+            self.updates,
+            UiUpdate::IncompleteResponses {
+                thread_id: reply.target.thread.clone(),
+                generation: reply.target.generation,
+                selection_revision: received.selection_revision,
                 view_revision: Some(reply.view_revision),
+                root_revision: received.root_revision,
+                nodes: received.nodes,
             },
         )
-        .await
+        .await;
+        Ok(())
     }
     pub(super) async fn page(
         &self,
@@ -653,6 +650,13 @@ impl<'a> HistoryReader<'a> {
             }
         };
         let before_cursor = before_cursor(thread, page.info.first, page.info.revision)?;
+        let received = received::read_native(
+            &self.owner(),
+            &page,
+            self.width,
+            self.control.store.config.ui.language,
+        )
+        .await?;
         let Page { nodes, info, .. } = page;
         let selection_revision = info.revision;
         stream_commits(self.updates, thread, reply.generation, info.committed).await;
@@ -672,18 +676,19 @@ impl<'a> HistoryReader<'a> {
             },
         )
         .await;
-        received::refresh(
-            self.control,
+        update(
             self.updates,
-            thread,
-            reply.generation,
-            self.width,
-            received::Scope {
-                selection_revision,
+            UiUpdate::IncompleteResponses {
+                thread_id: thread.to_owned(),
+                generation: reply.generation,
+                selection_revision: received.selection_revision,
                 view_revision: None,
+                root_revision: received.root_revision,
+                nodes: received.nodes,
             },
         )
-        .await
+        .await;
+        Ok(())
     }
     /// Bounded selected-item facts. No off-page body is installed into history
     /// and no shell output bytes are read. Each source projects from its owner

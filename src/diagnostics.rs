@@ -87,6 +87,7 @@ pub(crate) const USAGE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum UsageTrigger {
+    #[cfg(test)]
     Open,
     #[default]
     Cli,

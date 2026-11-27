@@ -730,9 +730,7 @@ async fn ordinary_input_does_not_wake_foreground_and_stop_reaps_background_shell
     let run_id = accepted.run_id.unwrap();
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: run_id.clone(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(run_id.clone())),
     )
     .await;
     state(&control, "run", &run_id, "stopped").await;
@@ -1111,9 +1109,9 @@ async fn recovery_wait_without_live_driver_can_be_stopped() {
     }
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: accepted.run_id.clone().unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            accepted.run_id.clone().unwrap(),
+        )),
     )
     .await;
     state(
@@ -1937,9 +1935,7 @@ async fn real_shell_cli_may_write_and_stop_an_independent_runs_shell_and_run() {
     .await;
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: victim_run.clone(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(victim_run.clone())),
     )
     .await;
     state(&control, "run", &victim_run, "stopped").await;
@@ -3078,9 +3074,9 @@ async fn explicit_foreground_wait_is_durable_and_human_backgrounding_releases_on
             state(&control, "turn", turn, "completed").await;
             command(
                 &control,
-                Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                    run_id: accepted.run_id.clone().unwrap(),
-                }),
+                Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+                    accepted.run_id.clone().unwrap(),
+                )),
             )
             .await;
             state(
@@ -3324,9 +3320,7 @@ async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_r
             "stopped" => {
                 command(
                     &control,
-                    Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                        run_id: run.clone(),
-                    }),
+                    Command::RunStop(shellboy::protocol::RunStopTarget::exact(run.clone())),
                 )
                 .await;
             }
@@ -3374,7 +3368,7 @@ async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_r
         if outcome == "cancelled" {
             command(
                 &control,
-                Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run }),
+                Command::RunStop(shellboy::protocol::RunStopTarget::exact(run)),
             )
             .await;
         }

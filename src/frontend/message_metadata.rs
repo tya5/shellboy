@@ -1,7 +1,6 @@
 //! Bounded saved source facts for presentation, never inferred from rendered roles.
 use crate::{
     control::Control,
-    presentation::InputSource,
     protocol::{ApiError, ErrorCode},
     ui::UiNode,
 };
@@ -14,7 +13,7 @@ use rusqlite::{Connection, params};
 
 struct Metadata {
     created_at: Option<String>,
-    source: InputSource,
+    source: crate::presentation::InputSource,
     sender_label: Option<String>,
 }
 pub(super) fn apply(nodes: &mut [UiNode], facts: &SourceFacts) {
@@ -31,24 +30,52 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &SourceFacts) {
         node.presentation.created_at = metadata.created_at;
         node.presentation.input_source = metadata.source;
         node.presentation.input_sender_label = metadata.sender_label;
-        use crate::presentation::ReplyState;
-        node.presentation.reply_state = match raw.reply_state.as_deref() {
-            Some("pending") => Some(ReplyState::Pending),
-            Some("replied") => Some(ReplyState::Replied),
-            Some("ignored") => Some(ReplyState::Ignored),
-            Some("cancelled") => Some(ReplyState::Cancelled),
-            Some("recipient_deleted") => Some(ReplyState::RecipientDeleted),
-            _ => None,
+        apply_reply(
+            node,
+            raw.reply_state.as_deref(),
+            raw.reply_excerpt.as_deref(),
+        );
+    }
+}
+
+fn apply_reply(node: &mut UiNode, state: Option<&str>, excerpt: Option<&str>) {
+    use crate::presentation::ReplyState;
+    node.presentation.reply_state = match state {
+        Some("pending") => Some(ReplyState::Pending),
+        Some("replied") => Some(ReplyState::Replied),
+        Some("ignored") => Some(ReplyState::Ignored),
+        Some("cancelled") => Some(ReplyState::Cancelled),
+        Some("recipient_deleted") => Some(ReplyState::RecipientDeleted),
+        _ => None,
+    };
+    node.presentation.reply_excerpt = excerpt.map(|v| {
+        crate::presentation::sanitize_plain(v, 0)
+            .0
+            .replace(['\n', '\r'], " ")
+            .chars()
+            .take(512)
+            .collect()
+    });
+    node.presentation.bound_metadata();
+}
+
+pub(super) fn apply_pinned(nodes: &mut [UiNode], facts: &[crate::protocol::HistoryWindowSource]) {
+    for node in nodes {
+        let Some(fact) = facts.iter().find(|fact| fact.node_id == node.node_id) else {
+            continue;
         };
-        node.presentation.reply_excerpt = raw.reply_excerpt.as_deref().map(|v| {
-            crate::presentation::sanitize_plain(v, 0)
-                .0
-                .replace(['\n', '\r'], " ")
-                .chars()
-                .take(512)
-                .collect()
-        });
-        node.presentation.bound_metadata();
+        node.presentation.created_at.clone_from(&fact.created_at);
+        node.presentation.input_source = fact.relationship;
+        node.presentation.input_sender_label = fact
+            .sender
+            .label
+            .clone()
+            .filter(|label| !label.trim().is_empty());
+        apply_reply(
+            node,
+            fact.reply_state.as_deref(),
+            fact.reply_excerpt.as_deref(),
+        );
     }
 }
 
@@ -84,34 +111,11 @@ pub(super) async fn enrich(
     for (target, node) in nodes.iter_mut().zip(projected) {
         *target = node;
     }
-    super::branch_markers::enrich(control, viewed_thread, nodes).await;
     super::compaction_markers::enrich(control, viewed_thread, nodes).await
 }
 
 fn project(raw: &RawSource, viewed: Option<&str>, parent: Option<&str>) -> Metadata {
-    let source = if raw.revisit {
-        InputSource::Revisit
-    } else {
-        match raw
-            .sender
-            .as_deref()
-            .and_then(|sender| serde_json::from_str::<serde_json::Value>(sender).ok())
-        {
-            Some(serde_json::Value::Null) => InputSource::Human,
-            Some(sender)
-                if sender.get("kind").and_then(serde_json::Value::as_str) == Some("human") =>
-            {
-                InputSource::Human
-            }
-            Some(sender) => match sender.get("thread_id").and_then(serde_json::Value::as_str) {
-                Some(sender) if Some(sender) == viewed => InputSource::SelfModel,
-                Some(sender) if Some(sender) == parent => InputSource::Parent,
-                Some(_) => InputSource::OtherModel,
-                None => InputSource::Unknown,
-            },
-            None => InputSource::Unknown,
-        }
-    };
+    let source = crate::history::window_facts::message_sources::relationship(raw, viewed, parent);
     Metadata {
         created_at: raw.created_at.clone(),
         source,
@@ -138,6 +142,7 @@ mod tests {
     use crate::history::window_facts::message_sources::{
         COMMON_SOURCES, RECEIPTS_AT_STAMP, STAMP_CANDIDATES,
     };
+    use crate::presentation::InputSource;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();

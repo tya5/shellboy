@@ -601,6 +601,23 @@ async fn headless_ready_accepts_cli_after_stdin_eof_and_rejects_duplicate_owner(
             ready["protocol_version"],
             shellboy::protocol::PROTOCOL_VERSION
         );
+        let profile = shellboy::config::Config::load_with_overrides(
+            Some(&config),
+            Some(&data),
+            root.path(),
+            &shellboy::config::PathEnvironment::current(),
+        )
+        .unwrap();
+        for _ in 0..2 {
+            let attached = shellboy::serve::attach_or_start(
+                &profile,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(attached.instance_id, ready["instance_id"].as_str().unwrap());
+        }
         for _ in 0..2 {
             let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
                 .arg("--data-dir")
