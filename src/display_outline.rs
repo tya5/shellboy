@@ -9,6 +9,9 @@ pub(crate) mod summary;
 
 pub(crate) const MAX_FIELDS: usize = 128;
 pub(crate) const MAX_BLOCKS: usize = 128;
+/// The owner always emits the Unicode forms; clients that cannot draw them substitute on render.
+pub(crate) const TRUNCATED: &str = "…";
+pub(crate) const DEEP_STRUCTURE: &str = "[深い構造 · 詳細は原文参照]";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresentationField {
@@ -28,7 +31,7 @@ impl PresentationField {
 pub(crate) fn short(text: &str, limit: usize) -> String {
     let mut out: String = text.chars().take(limit).collect();
     if out.len() < text.len() {
-        out.push_str(crate::ui::text_width::glyphs::select("…", "..."));
+        out.push_str(TRUNCATED);
     }
     out
 }
@@ -117,11 +120,7 @@ pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
                 display: None,
                 key: path.into(),
                 label: short(path, 256),
-                value: crate::ui::text_width::glyphs::select(
-                    "[深い構造 · 詳細は原文参照]",
-                    "[深い構造 | 詳細は原文参照]",
-                )
-                .into(),
+                value: DEEP_STRUCTURE.into(),
             });
             return;
         }
@@ -459,5 +458,22 @@ fn tool(
         description,
         status,
         exit_code: get("exit_code").and_then(Value::as_i64),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_text_uses_the_unicode_forms_whatever_the_terminal_policy() {
+        assert_eq!(short("abcdef", 3), "abc…");
+        assert_eq!(short("abc", 3), "abc");
+        let mut deep = serde_json::json!("end");
+        for _ in 0..10 {
+            deep = serde_json::json!({ "k": deep });
+        }
+        let fields = fields_of_value(&deep);
+        assert!(fields.iter().any(|field| field.value == DEEP_STRUCTURE));
     }
 }

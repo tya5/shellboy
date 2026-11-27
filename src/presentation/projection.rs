@@ -70,7 +70,7 @@ pub(crate) fn project_display(
         } else {
             short(&f.path, 256)
         },
-        value: f.value.clone(),
+        value: client_glyphs(f.value.clone()),
         value_omitted: f.omitted,
         ..Default::default()
     };
@@ -116,9 +116,11 @@ pub(crate) fn project_display(
                 group_id: saved.group_id.clone(),
                 ordinal: saved.ordinal,
                 execution_id: saved.execution_id.clone(),
-                command: saved.command.clone().unwrap_or_default(),
-                description: crate::tool_description::label(saved.description.as_deref()),
-                status: saved.status.clone().unwrap_or_else(|| {
+                command: client_glyphs(saved.command.clone().unwrap_or_default()),
+                description: crate::tool_description::label(
+                    saved.description.clone().map(client_glyphs).as_deref(),
+                ),
+                status: saved.status.clone().map(client_glyphs).unwrap_or_else(|| {
                     if is_call {
                         "requested".into()
                     } else {
