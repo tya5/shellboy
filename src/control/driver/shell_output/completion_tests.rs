@@ -174,9 +174,15 @@ async fn unknown_legacy_facts_stay_unknown_and_mock_unconfirmed_cleanup_stays_fa
         elapsed_ms: None,
     };
     control.store.database.signals().take_seen();
-    save_completion(&control, &shell_owner, "mock-unconfirmed", &completion)
-        .await
-        .unwrap();
+    save_completion(
+        &control,
+        &shell_owner,
+        "mock-unconfirmed",
+        &completion,
+        None,
+    )
+    .await
+    .unwrap();
     // Producer contract (#171): terminal output is offered to raw retention.
     assert!(
         control
@@ -249,7 +255,7 @@ async fn repeated_or_late_completion_keeps_original_facts_and_one_event() {
         group_cleanup_confirmed: true,
         elapsed_ms: Some(42),
     };
-    save_completion(&control, &shell_owner, "execution", &result)
+    save_completion(&control, &shell_owner, "execution", &result, None)
         .await
         .unwrap();
     let original=control.store.database.call(|db| {
@@ -259,7 +265,7 @@ async fn repeated_or_late_completion_keeps_original_facts_and_one_event() {
     result.exit_code = Some(99);
     result.output_complete = false;
     result.reason = Some("late result".into());
-    save_completion(&control, &shell_owner, "execution", &result)
+    save_completion(&control, &shell_owner, "execution", &result, None)
         .await
         .unwrap();
     control.store.database.call(move|db| {

@@ -245,10 +245,13 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
         output_encoding: "utf-8".into(),
     };
     let mut env = shell_output::cli_environment(control, &shell.thread);
-    let endpoint = shell
-        .service
-        .then(|| super::service_endpoint::Publication::create(control, &shell.id))
-        .transpose();
+    let endpoint = if shell.service {
+        super::service_endpoint::Publication::create(control, &shell.id)
+            .await
+            .map(Some)
+    } else {
+        Ok(None)
+    };
     let (spawned, endpoint) = match endpoint {
         Ok(endpoint) => {
             if let Some(file) = &endpoint {
@@ -277,6 +280,10 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
             .await?;
         }
         Err(error) => {
+            let settlement_detail = match endpoint {
+                Some(publication) => publication.retire(control).await,
+                None => None,
+            };
             let shutdown = error
                 .details
                 .as_ref()
@@ -298,7 +305,6 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
                     } else {
                         super::state::fail_shell_spawn(&tx, &shell.id, &at, &saved_error)? != 0
                     };
-                    let settlement_detail = endpoint.as_ref().and_then(|publication| publication.retire());
                     if changed {
                         if let Some(detail) = settlement_detail {
                             tx.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.completion.settlement_detail',json(?2)) WHERE id=?1", params![shell.id, serde_json::json!(detail).to_string()])?;

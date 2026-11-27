@@ -1,6 +1,8 @@
 //! Per-execution publication owned by the scheduled shell collector.
 use super::{Control, schedule::service_not_found, storage_error};
-use crate::protocol::{ApiError, ErrorCode, ServiceEndpoint, ServiceEndpointArgs};
+use crate::protocol::{
+    ApiError, ErrorCode, ServiceEndpoint, ServiceEndpointArgs, ShellSettlementDetail,
+};
 use rusqlite::OptionalExtension;
 use std::{
     collections::HashMap,
@@ -21,7 +23,7 @@ fn path(data: &Path, instance: &str, execution: &str) -> PathBuf {
 pub(super) struct Publication(PathBuf);
 
 impl Publication {
-    pub(super) fn create(control: &Control, execution: &str) -> Result<Self, ApiError> {
+    pub(super) async fn create(control: &Control, execution: &str) -> Result<Self, ApiError> {
         let file = path(&control.data_dir, &control.store.instance_id, execution);
         if file.to_str().is_none() {
             return Err(ApiError::new(
@@ -29,18 +31,34 @@ impl Publication {
                 "Service endpoint path is not UTF-8",
             ));
         }
-        crate::atomic_file::create_private_required(&file).map_err(|_| {
-            ApiError::new(ErrorCode::IoFailed, "Cannot create service endpoint file")
-        })?;
-        Ok(Self(file))
+        control
+            .attachments
+            .workers
+            .execute_owned(move || {
+                crate::atomic_file::create_private_required(&file).map_err(|_| {
+                    ApiError::new(ErrorCode::IoFailed, "Cannot create service endpoint file")
+                })?;
+                Ok(Self(file))
+            })
+            .await
     }
 
-    pub(super) fn retire(&self) -> Option<crate::protocol::ShellSettlementDetail> {
-        match std::fs::remove_file(&self.0) {
-            Ok(()) => None,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => Some(crate::protocol::ShellSettlementDetail::ServiceEndpointRetirementFailed),
-        }
+    pub(super) async fn retire(&self, control: &Control) -> Option<ShellSettlementDetail> {
+        let file = self.0.clone();
+        control
+            .attachments
+            .workers
+            .execute_owned(move || match std::fs::remove_file(file) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(_) => Err(ApiError::new(
+                    ErrorCode::IoFailed,
+                    "Cannot retire service endpoint file",
+                )),
+            })
+            .await
+            .err()
+            .map(|_| ShellSettlementDetail::ServiceEndpointRetirementFailed)
     }
 
     pub(super) fn env_value(&self) -> String {
@@ -238,7 +256,7 @@ mod tests {
             db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,'service',?1,'stopping','.','{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')", [&saved])?;
             Ok(())
         }).await.unwrap();
-        let publication = Arc::new(Publication::create(&control, &execution).unwrap());
+        let publication = Arc::new(Publication::create(&control, &execution).await.unwrap());
         assert!(
             control
                 .shell_start_intent(&execution, true, Some(publication.clone()))
@@ -247,7 +265,7 @@ mod tests {
                 .0
         );
         assert!(control.publications.live(&execution).is_none());
-        assert_eq!(publication.retire(), None);
+        assert_eq!(publication.retire(&control).await, None);
         assert!(
             control
                 .shell_start_intent(&execution, false, None)
