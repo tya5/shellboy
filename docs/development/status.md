@@ -44,7 +44,7 @@ an exact artifact version as base64. The owner applies the scheme contract
 (`shellboy-app:` folder by relative path, `file:`/absolute path as one file,
 everything else refused), bounded by the smaller of `limits.attachment_file_bytes`
 and what fits one reply frame (refused by size before reading). The read runs on the attachment blocking-file pool.
-`artifact add/update --uri shellboy-app:./dir` joins the folder to the CLI cwd.
+`artifact add/update --uri shellboy-app:./dir` joins the folder to the CLI cwd and drops `.` components lexically.
 Protocol notes in `protocol-versions/next-445.md`; no schema migration. Not
 landed. The 8 MiB reply frame caps reads below the 20 MiB default
 `attachment_file_bytes`; no ranged read (decided 11/26).

@@ -1333,7 +1333,7 @@ Recovery rewind is available as `shellboy thread rewind --thread THREAD_ID --nod
 
 - `shellboy artifact read --thread THREAD_ID --artifact ARTIFACT_ID --version N [--path RELATIVE_PATH]` reads one file of that exact version. The result carries the bytes as `base64` with their count in `raw_bytes`; decode it yourself, for example by extracting `.result.base64` from the reply with `jq -r` and passing it to `base64 -d`.
 
-On add and update, the CLI joins a relative file path, and the relative folder of `shellboy-app:./dir`, to its own current working directory before sending it. It does not check file existence or normalize `..` beyond the path join. Absolute paths, URLs and other custom-scheme URIs are left unchanged. The owner stores the resulting string without resolving it against its own working directory.
+On add and update, the CLI joins a relative file path, and the relative folder of `shellboy-app:./dir`, to its own current working directory before sending it. It drops `.` components lexically after joining. It does not check file existence, resolve symlinks, or normalize `..` beyond the path join. Absolute paths, URLs and other custom-scheme URIs are left unchanged. The owner stores the resulting string without resolving it against its own working directory.
 
 `artifact read` is the only command that opens artifact content, and the owner decides what it may open from the version URI:
 
