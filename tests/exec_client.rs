@@ -1151,6 +1151,11 @@ fn cli_call(args: &[&str]) -> String {
         command.push(' ');
         command.push_str(&quote(arg));
     }
+    if cfg!(windows) {
+        // PowerShell reports 1 for a failing native command unless the script
+        // exits with its code; Shellboy adds no implicit exit.
+        command.push_str("; exit $LASTEXITCODE");
+    }
     tool_call(&command)
 }
 
