@@ -171,7 +171,7 @@ descendants are not deleted. Neither operation has a CLI or model-tool binding.
 The v16 additions for [artifacts, retained history export/Thread import, and
 Thread-owned services](protocol-versions/16.md) retain their individual cursor
 and ownership contracts.
-`artifact.read` ([#445](protocol-versions/next-445.md)) is the one operation
+`artifact.read` ([#445](protocol-versions/47.md)) is the one operation
 that opens artifact content; the version URI's scheme decides what it may read.
 
 ## Originの認証と保存境界（P3/W6）
