@@ -8,7 +8,8 @@ required; the read spans live, non-archived Threads. With both, the scheme
 filter is scoped to the given Thread. Per-Thread listing without a scheme is
 unchanged. The response echoes the supplied scope in `filters`, including the
 normalized scheme when supplied. Cursors bind the Thread and scheme and retain
-update-descending, ID-ascending order.
+update-descending, ID-ascending order. A scheme page can be empty or short
+and still carry a `next_cursor`; continue until it is absent.
 
 Migration `next_artifact_current_scheme` indexes the scheme of each artifact's
 latest saved version. No new operation or capability.

@@ -119,25 +119,38 @@ fn artifact_scheme_migration_backfills_latest_version() {
         .0;
     build_historical_schema(&mut db, version as usize);
     db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');
-        INSERT INTO artifact(id,thread_id,created_at,updated_at) VALUES ('a','t','now','now'),('b','t','now','now'),('c','t','now','now');
+        INSERT INTO artifact(id,thread_id,created_at,updated_at) VALUES ('a','t','now','now'),('b','t','now','now'),('c','t','now','now'),('nul-before','t','now','now'),('nul-after','t','now','now');
         INSERT INTO artifact_version(artifact_id,version,uri,title,created_at) VALUES
         ('a',1,'shellboy-app:/old','Old','now'),('a',2,'FiLe:///latest','Latest','now'),
-        ('b',1,'/path:with-colon','Path','now'),('c',1,'SHELLBOY-APP:/app','App','now');").unwrap();
+        ('b',1,'/path:with-colon','Path','now'),('c',1,'SHELLBOY-APP:/app','App','now'),
+        ('nul-before',1,'shellboy-app'||char(0)||':/bad','Opaque','now'),
+        ('nul-after',1,'shellboy-app:/ok'||char(0),'App','now');").unwrap();
     drop(db);
-    let db = open_connection(&path, None, None, true).unwrap();
-    for (id, expected) in [
-        ("a", Some("file")),
-        ("b", None),
-        ("c", Some("shellboy-app")),
-    ] {
-        let scheme: Option<String> = db
-            .query_row(
-                "SELECT current_scheme FROM artifact WHERE id=?",
-                [id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(scheme.as_deref(), expected);
-    }
+    let mut db = open_connection(&path, None, None, true).unwrap();
     assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
+    let tx = db.transaction().unwrap();
+    for (scheme, expected) in [
+        ("file", vec!["a"]),
+        ("shellboy-app", vec!["c", "nul-after"]),
+    ] {
+        let result = crate::artifacts::list(
+            &tx,
+            &crate::protocol::ArtifactListArgs {
+                thread_id: None,
+                scheme: Some(scheme.into()),
+                limit: 32,
+                cursor: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|item| item.artifact_id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(result.next_cursor.is_none());
+    }
 }
