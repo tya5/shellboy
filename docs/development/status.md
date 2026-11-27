@@ -71,7 +71,7 @@ open-duty indexes and adds the owner-Run index. Landed (Protocol 43, migration
 
 ## Core #421 Unit 2: operation evidence
 
-The public result registry describes the existing `operation.get` envelope as `OperationReceiptDetails`. Receipt storage and replay are unchanged; Studio adoption is separate.
+The public result registry describes the existing `operation.get` envelope as `OperationReceiptDetails`. Receipt storage and replay are unchanged; client adoption is separate.
 
 ## Core v0.16.0 release preparation
 
@@ -140,7 +140,7 @@ adopted requests save the bounded non-binary suffix before the response. Binary
 changes, lost authorization, and availability or budget transitions take
 precedence over cache stability. No schema or protocol change.
 
-## Core #381 Studio read bounds
+## Core #381 IPC client read bounds
 
 State-filtered Thread pages have a bounded candidate scan, status chooses SQL
 page keys before projection, and list reply counts disclose lower bounds.
@@ -445,7 +445,7 @@ branch `issue-306-saved-attempt-provenance-63724`, based on landed main
 `d4ddcdcf9408d270535942c22cf716069d0e62a0`. Producer is optional and history-node
 only; no schema/index/writer/migration/cache/UI-local state change, and canonical
 `(node_id,item_identity)` remains unchanged. Consumer contract was sent to existing
-Studio owner f797 (message `9b504772-1834-4d63-8690-fdb6e0e290f8`); no Studio source
+Client owner f797 (message `9b504772-1834-4d63-8690-fdb6e0e290f8`); no client source
 was edited.
 
 **Review.** Bounded source review accepted exact d4dd/source 576c with no scoped
@@ -453,7 +453,7 @@ P1/P2. Artifact `.local/leader/core306-d4dd-saved-attempt-source-review.md`, SHA
 `148cc0b20a0877789950d622839ba92381ae99ea91d47bb7f19bfde111063a4c`. It explicitly
 limits the query guarantee: index range for one selected node and <=36-byte Rust
 scalar result, but matching SQLite row count and temporary DISTINCT storage are not
-fixed. This is not a universal CPU/OOM/performance bound or Studio end-to-end
+fixed. This is not a universal CPU/OOM/performance bound or client end-to-end
 consumer/retirement proof.
 
 **Qualification.** Five exact producer/DTO/schema controls and guarded
@@ -857,7 +857,7 @@ transferred from 0ce or any intermediate closeout SHA.
 
 ## Core #326 IPC final frames
 
-A connection task owns one correlated final reply, distinguishes clean peer EOF from read errors or extra input, and holds the connection after writing until peer EOF or explicit shutdown. Listener failure does not itself cancel accepted connections. Windows Studio exact-pair qualification is separate from Core checks.
+A connection task owns one correlated final reply, distinguishes clean peer EOF from read errors or extra input, and holds the connection after writing until peer EOF or explicit shutdown. Listener failure does not itself cancel accepted connections. Windows client exact-pair qualification is separate from Core checks.
 
 ## Core #327 attachment list pages
 

@@ -506,11 +506,11 @@ mod extra_instruction_request_tests {
     fn extra_instructions_keep_global_prefix_separate_from_thread_role_and_stable() {
         let body = format!(
             "shellboy-saved-instruction-bundle-v1\n{}",
-            json!({"extra":[{"path":"/studio.md","body":"studio"},{"path":"/user.md","body":"common"}],"local":"thread role"})
+            json!({"extra":[{"path":"/client.md","body":"client"},{"path":"/user.md","body":"common"}],"local":"thread role"})
         );
         let first = leading_items(std::path::Path::new("/AGENTS.md"), Some(&body)).unwrap();
         assert_eq!(first.len(), 4);
-        assert!(first[1].to_string().contains("studio"));
+        assert!(first[1].to_string().contains("client"));
         assert!(first[2].to_string().contains("common"));
         assert!(first[3].to_string().contains("thread role"));
         assert_eq!(
