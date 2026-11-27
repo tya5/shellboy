@@ -1,14 +1,5 @@
 # P1 公開操作・ローカル通信の実装契約
 
-## Named service endpoints
-
-Authenticated local clients resolve a service name using `service.list` for one
-Thread, then call `service.endpoint` with the exact `service_id`. This read
-returns `{port, token}` only for the current running execution; do not persist or
-log it. The endpoint is not included in `service.list` or `service.get` and does
-not create an operation receipt. See [#462](protocol-versions/next-462.md) for
-arguments and typed refusals.
-
 ## Current-only contract (Issue #33, 0.2.0)
 
 Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.
@@ -185,6 +176,15 @@ that opens artifact content; the version URI's scheme decides what it may read.
 `artifact.list` accepts a current URI `scheme` with optional `thread_id` (or
 a Thread alone). Scheme lists include only live, non-archived Threads and
 return the owning `thread_id` with each artifact. See [Thread artifacts](thread-artifacts.md).
+
+## Named service endpoints
+
+Authenticated local clients resolve a service name using `service.list` for one
+Thread, then call `service.endpoint` with the exact `service_id`. This read
+returns `{port, token}` only for the current running execution; do not persist or
+log it. The endpoint is not included in `service.list` or `service.get` and does
+not create an operation receipt. See [#462](protocol-versions/next-462.md) for
+arguments and typed refusals.
 
 ## Originの認証と保存境界（P3/W6）
 
