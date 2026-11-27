@@ -451,9 +451,8 @@ struct Shared {
     slow_limit: Arc<Mutex<SlowJobLimit>>,
     /// Committed-change signals for background maintenance requesters.
     signals: Arc<crate::maintenance::Signals>,
-    /// Lease admission and the sending side of runtime-pin releases; the
-    /// worker thread owns the receiving side.
-    pin_releases: crate::runtime_pin::Releases,
+    /// Live runtime-pin leases of this owner instance (#450).
+    pin_leases: Arc<crate::runtime_pin::Leases>,
     checkpoint_attempts: Arc<AtomicUsize>,
     #[cfg(test)]
     background_steps: StepLog,
@@ -813,7 +812,6 @@ impl DbWorker {
         let next_job_id = Arc::new(AtomicU64::new(0));
         let checkpoint_attempts = Arc::new(AtomicUsize::new(0));
         let signals: Arc<crate::maintenance::Signals> = Arc::default();
-        let (pin_releases, pin_work) = crate::runtime_pin::channel();
         #[cfg(test)]
         let background_steps = Arc::new(Mutex::new(Vec::new()));
         let worker = WorkerState {
@@ -826,8 +824,6 @@ impl DbWorker {
             next_job_id: next_job_id.clone(),
             checkpoint_attempts: checkpoint_attempts.clone(),
             gc_coordinator: crate::compaction::WriterGcCoordinator::default(),
-            signals: signals.clone(),
-            pin_work,
             #[cfg(test)]
             background_steps: background_steps.clone(),
         };
@@ -866,8 +862,8 @@ impl DbWorker {
                 active_job,
                 activity_updates,
                 slow_limit,
+                pin_leases: Arc::new(crate::runtime_pin::Leases::new(signals.clone())),
                 signals,
-                pin_releases,
                 checkpoint_attempts,
                 #[cfg(test)]
                 background_steps,
@@ -994,8 +990,8 @@ impl DbWorker {
     pub fn signals(&self) -> &Arc<crate::maintenance::Signals> {
         &self.shared.signals
     }
-    pub(crate) fn pin_releases(&self) -> &crate::runtime_pin::Releases {
-        &self.shared.pin_releases
+    pub(crate) fn pin_leases(&self) -> &Arc<crate::runtime_pin::Leases> {
+        &self.shared.pin_leases
     }
 
     /// Subscribe to active-job and no-progress snapshots without using the DB queue.
@@ -1654,21 +1650,8 @@ struct WorkerState {
     next_job_id: Arc<AtomicU64>,
     checkpoint_attempts: Arc<AtomicUsize>,
     gc_coordinator: crate::compaction::WriterGcCoordinator,
-    signals: Arc<crate::maintenance::Signals>,
-    pin_work: crate::runtime_pin::ReleaseWork,
     #[cfg(test)]
     background_steps: StepLog,
-}
-
-/// What woke the worker thread.
-enum Woke {
-    Command(Command),
-    /// A runtime-pin release arrived (#450).
-    Release,
-}
-enum Wait {
-    Lane(Lane, Option<Command>),
-    Release(bool),
 }
 
 /// Two bounded lanes taken in strict alternation when both hold work, so a
@@ -1679,7 +1662,6 @@ struct LaneReceivers {
     background: mpsc::Receiver<Command>,
     foreground_open: bool,
     background_open: bool,
-    releases_open: bool,
     /// The previous job was foreground, so a waiting background job goes next.
     background_turn: bool,
     /// Blocks only the DB OS thread; no I/O or timer driver is enabled.
@@ -1705,7 +1687,7 @@ impl LaneReceivers {
         }
     }
 
-    fn next(&mut self, releases: &mut crate::runtime_pin::ReleaseWork) -> Option<Woke> {
+    fn next(&mut self) -> Option<Command> {
         loop {
             let order = if self.background_turn {
                 [Lane::Background, Lane::Foreground]
@@ -1714,7 +1696,7 @@ impl LaneReceivers {
             };
             for lane in order {
                 if let Some(command) = self.try_lane(lane) {
-                    return Some(Woke::Command(command));
+                    return Some(command);
                 }
             }
             if !self.foreground_open && !self.background_open {
@@ -1722,22 +1704,17 @@ impl LaneReceivers {
             }
             let (foreground_open, background_open) = (self.foreground_open, self.background_open);
             let (foreground, background) = (&mut self.foreground, &mut self.background);
-            let releases_open = self.releases_open;
             let woke = self.runtime.block_on(async {
                 tokio::select! {
                     biased;
-                    command = foreground.recv(), if foreground_open => Wait::Lane(Lane::Foreground, command),
-                    command = background.recv(), if background_open => Wait::Lane(Lane::Background, command),
-                    // A dropped lease's release wakes the worker like a job.
-                    open = releases.recv(), if releases_open => Wait::Release(open),
+                    command = foreground.recv(), if foreground_open => (Lane::Foreground, command),
+                    command = background.recv(), if background_open => (Lane::Background, command),
                 }
             });
             match woke {
-                Wait::Lane(_, Some(command)) => return Some(Woke::Command(command)),
-                Wait::Lane(Lane::Foreground, None) => self.foreground_open = false,
-                Wait::Lane(Lane::Background, None) => self.background_open = false,
-                Wait::Release(true) => return Some(Woke::Release),
-                Wait::Release(false) => self.releases_open = false,
+                (_, Some(command)) => return Some(command),
+                (Lane::Foreground, None) => self.foreground_open = false,
+                (Lane::Background, None) => self.background_open = false,
             }
         }
     }
@@ -1792,34 +1769,13 @@ fn run_worker(
         background,
         foreground_open: true,
         background_open: true,
-        releases_open: true,
         background_turn: false,
         runtime,
-    };
-    let diagnostics = state.diagnostics.clone();
-    let release_failed = move || {
-        if let Ok(guard) = diagnostics.try_lock()
-            && let Some(diagnostics) = guard.as_ref()
-        {
-            diagnostics.record(
-                crate::diagnostics::DiagnosticEvent::DatabaseFailure,
-                crate::diagnostics::DiagnosticIds::default(),
-            );
-        }
     };
     let mut checkpoint = IdleCheckpoint::new(Instant::now(), connection.total_changes());
     let mut budget_limit = SlowJobLimit::new();
     let mut no_progress_limit = SlowJobLimit::new();
-    while let Some(woke) = lanes.next(&mut state.pin_work) {
-        let command = match woke {
-            Woke::Command(command) => command,
-            Woke::Release => {
-                state
-                    .pin_work
-                    .service(&mut connection, &state.signals, &release_failed);
-                continue;
-            }
-        };
+    while let Some(command) = lanes.next() {
         match command {
             Command::Run {
                 job,
@@ -1871,10 +1827,6 @@ fn run_worker(
                     .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
                 drop(observation);
                 let run = started.elapsed();
-                // A release that waited for this job's insert goes now.
-                state
-                    .pin_work
-                    .service(&mut connection, &state.signals, &release_failed);
                 let diagnostics = state.diagnostics.try_lock().ok();
                 let diagnostics = diagnostics.as_ref().and_then(|guard| guard.as_ref());
                 let name = || kind.replace("::", ".");
@@ -1939,16 +1891,6 @@ fn run_worker(
             }
         }
         let now = Instant::now();
-        if lanes.is_empty() {
-            // The worker's idle maintenance point retries failed releases.
-            state.pin_work.retry_failed(
-                &mut connection,
-                &state.signals,
-                now,
-                IDLE_CHECKPOINT_INTERVAL,
-                &release_failed,
-            );
-        }
         let changes = connection.total_changes();
         if lanes.is_empty() && checkpoint.due(now, changes) {
             // PASSIVE never waits for readers. Partial/failed attempts stay dirty

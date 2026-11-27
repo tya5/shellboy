@@ -441,10 +441,8 @@ impl AttachmentService {
         let thread = thread_id.to_owned();
         let instance = self.instance_id.clone();
         // The lease exists before its rows: a failed or cancelled preparation releases them.
-        let pins = PinLease::acquire(&self.database)
-            .await
-            .map_err(storage_error)?;
-        let (prefix, insert) = (pins.prefix(), pins.insert_token());
+        let pins = PinLease::new(&self.database);
+        let (prefix, insert) = (pins.prefix().to_owned(), pins.clone());
         let snapshot = self
             .database
             .call(move |db| {
@@ -462,12 +460,7 @@ impl AttachmentService {
             selected,
             pinned,
         } = snapshot;
-        let pins = Arc::new(if pinned == 0 {
-            pins.settled();
-            None
-        } else {
-            Some(pins)
-        });
+        let pins = Arc::new((pinned != 0).then_some(pins));
         let deadline = self.deadline();
         let mut sizes = BTreeMap::new();
         let file_limit = self.config.limits.attachment_file_bytes;
@@ -1184,7 +1177,7 @@ pub struct ManagedImage {
     pub id: String,
     pub path: PathBuf,
     pub raw_size: u64,
-    _pin: Arc<PinLease>,
+    _pin: PinLease,
 }
 impl std::fmt::Debug for ManagedImage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1264,100 +1257,74 @@ impl AttachmentService {
             .data_dir
             .join("tmp")
             .join(format!("{managed}{TEMPORARY_SUFFIX}"));
+        let row = managed.clone();
         let location = path.to_string_lossy().into_owned();
         let instance = self.instance_id.clone();
-        let lease = PinLease::acquire(&self.database)
-            .await
-            .map_err(storage_error)?;
-        // Set when this caller stops waiting (dropped, cancelled or timed out).
-        struct Waiting(Arc<std::sync::atomic::AtomicBool>);
-        impl Drop for Waiting {
-            fn drop(&mut self) {
-                self.0.store(true, std::sync::atomic::Ordering::Release);
-            }
-        }
-        let abandoned = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let _waiting = Waiting(abandoned.clone());
-        let database = self.database.clone();
-        let runtime = tokio::runtime::Handle::current();
-        let row = managed.clone();
+        let lease = PinLease::new(&self.database);
+        let (pin_id, inserting) = (crate::runtime_pin::pin_id(lease.prefix(), 0), lease.clone());
+        self.database.call(move|db|{let _lease=inserting;let tx=db.transaction()?;tx.execute("INSERT INTO managed_file(id,absolute_path,state,created_at)VALUES(?1,?2,'creating',?3)",params![row,location,now()])?;tx.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,?2,'managed_file',?3,0,?4)",params![pin_id,instance,row,now()])?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+        let worker_lease = lease.clone();
         let output = path.clone();
         let limit = self.config.limits.attachment_file_bytes;
-        let writer_cancel = cancel.clone();
-        // The save owner (#450): this one writer closure inserts the `creating`
-        // row and its pin, writes the file, then settles. It marks the row ready
-        // only while its caller still waits; otherwise it marks it failed and
-        // deletes the pin in one transaction, after the writer is done, even
-        // when the caller was dropped or timed out meanwhile.
         let written = self
             .workers
             .execute(self.deadline(), cancel.clone(), move || {
-                let prefix = lease.prefix();
-                let (pin_id, insert) = (crate::runtime_pin::pin_id(&prefix, 0), lease.insert_token());
-                let (inserted, location_row) = (row.clone(), location);
-                runtime.block_on(database.call(move|db|{let _insert=insert;let tx=db.transaction()?;tx.execute("INSERT INTO managed_file(id,absolute_path,state,created_at)VALUES(?1,?2,'creating',?3)",params![inserted,location_row,now()])?;tx.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,?2,'managed_file',?3,0,?4)",params![pin_id,instance,inserted,now()])?;tx.commit()?;Ok(())})).map_err(storage_error)?;
-                let outcome = (|| {
-                    let bytes = encode()?;
-                    if bytes.len() as u64 > limit {
-                        return Err(ApiError::new(
-                            ErrorCode::InputLimit,
-                            "Encoded clipboard PNG exceeds the single-attachment limit",
-                        ));
-                    }
-                    std::fs::create_dir_all(output.parent().expect("managed parent"))
-                        .map_err(|e| io_error(e.to_string()))?;
-                    std::fs::create_dir_all(temporary.parent().expect("temporary parent"))
-                        .map_err(|e| io_error(e.to_string()))?;
-                    let mut options = std::fs::OpenOptions::new();
-                    options.write(true).create_new(true);
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::OpenOptionsExt;
-                        options.mode(0o600);
-                    }
-                    let mut file = options
-                        .open(&temporary)
-                        .map_err(|e| io_error(e.to_string()))?;
-                    use std::io::Write;
-                    file.write_all(&bytes)
-                        .and_then(|_| file.sync_all())
-                        .map_err(|e| io_error(e.to_string()))?;
-                    drop(file);
-                    std::fs::rename(&temporary, &output).map_err(|e| io_error(e.to_string()))?;
-                    // The file contents are durable before the rename. Persist both
-                    // directory entries before publishing this managed image as ready.
-                    #[cfg(unix)]
-                    for parent in [output.parent(), temporary.parent()] {
-                        std::fs::File::open(parent.expect("managed image parent"))
-                            .and_then(|directory| directory.sync_all())
-                            .map_err(|e| io_error(e.to_string()))?;
-                    }
-                    Ok(bytes.len() as u64)
-                })();
-                let waiting = !writer_cancel.is_cancelled()
-                    && !abandoned.load(std::sync::atomic::Ordering::Acquire);
-                match outcome {
-                    Ok(size) if waiting => {
-                        let ready = row.clone();
-                        let changed = runtime.block_on(database.call(move|db|Ok(db.execute("UPDATE managed_file SET state='ready',raw_size=?2 WHERE id=?1 AND state='creating'",params![ready,size as i64])?))).map_err(storage_error)?;
-                        if changed != 1 {
-                            return Err(stale());
-                        }
-                        Ok((size, lease))
-                    }
-                    other => {
-                        let reason = other.err().unwrap_or_else(cancelled);
-                        let description = reason.message.clone();
-                        let failed = row.clone();
-                        runtime.block_on(database.call(move|db|{let tx=db.transaction()?;tx.execute("UPDATE managed_file SET state='failed',deleted_reason=?2 WHERE id=?1 AND state='creating'",params![failed,description])?;crate::runtime_pin::delete_pins_tx(&tx,&prefix)?;tx.commit()?;Ok(())})).map_err(storage_error)?;
-                        lease.settled();
-                        database.signals().mark(crate::maintenance::Work::Managed);
-                        Err(reason)
-                    }
+                let _lease = worker_lease;
+                let bytes = encode()?;
+                if bytes.len() as u64 > limit {
+                    return Err(ApiError::new(
+                        ErrorCode::InputLimit,
+                        "Encoded clipboard PNG exceeds the single-attachment limit",
+                    ));
                 }
+                std::fs::create_dir_all(output.parent().expect("managed parent"))
+                    .map_err(|e| io_error(e.to_string()))?;
+                std::fs::create_dir_all(temporary.parent().expect("temporary parent"))
+                    .map_err(|e| io_error(e.to_string()))?;
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.mode(0o600);
+                }
+                let mut file = options
+                    .open(&temporary)
+                    .map_err(|e| io_error(e.to_string()))?;
+                use std::io::Write;
+                file.write_all(&bytes)
+                    .and_then(|_| file.sync_all())
+                    .map_err(|e| io_error(e.to_string()))?;
+                drop(file);
+                std::fs::rename(&temporary, &output).map_err(|e| io_error(e.to_string()))?;
+                // The file contents are durable before the rename. Persist both
+                // directory entries before publishing this managed image as ready.
+                #[cfg(unix)]
+                for parent in [output.parent(), temporary.parent()] {
+                    std::fs::File::open(parent.expect("managed image parent"))
+                        .and_then(|directory| directory.sync_all())
+                        .map_err(|e| io_error(e.to_string()))?;
+                }
+                Ok(bytes.len() as u64)
             })
             .await;
-        let (size, lease) = written?;
+        let size = match written {
+            Ok(size) if !cancel.is_cancelled() => size,
+            other => {
+                let reason = other.err().unwrap_or_else(cancelled);
+                let row = managed.clone();
+                let description = reason.message.clone();
+                if self.database.call(move|db|{db.execute("UPDATE managed_file SET state='failed',deleted_reason=?2 WHERE id=?1 AND state='creating'",params![row,description])?;Ok(())}).await.is_ok() {
+                    self.database.signals().mark(crate::maintenance::Work::Managed);
+                }
+                return Err(reason);
+            }
+        };
+        let row = managed.clone();
+        let changed=self.database.call(move|db|Ok(db.execute("UPDATE managed_file SET state='ready',raw_size=?2 WHERE id=?1 AND state='creating'",params![row,size as i64])?)).await.map_err(storage_error)?;
+        if changed != 1 {
+            return Err(stale());
+        }
         // A new ready image can push retained bytes past clipboard_bytes.
         self.database
             .signals()
@@ -1366,7 +1333,7 @@ impl AttachmentService {
             id: managed,
             path,
             raw_size: size,
-            _pin: Arc::new(lease),
+            _pin: lease,
         })
     }
     pub async fn capture_clipboard(
@@ -1382,8 +1349,6 @@ impl AttachmentService {
     /// Startup only, before admitting new operations. Do not call while another
     /// owner can be running against this database.
     pub async fn restart_cleanup(&self) -> Result<ManagedGcReport, ApiError> {
-        let instance = self.instance_id.clone();
-        self.database.call(move|db|{let tx=db.transaction()?;tx.execute("DELETE FROM runtime_pin WHERE instance_id<>?1",[instance])?;tx.execute("UPDATE managed_file SET state='failed',deleted_reason='creation interrupted by restart' WHERE state='creating' AND NOT EXISTS(SELECT 1 FROM runtime_pin p WHERE p.resource_kind='managed_file' AND p.resource_id=managed_file.id)",[])?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
         self.sweep_temporary_images().await?;
         self.collect_managed(chrono::Utc::now()).await
     }
@@ -1736,5 +1701,92 @@ mod mime_tests {
         assert_eq!(mime_type(b"RIFF\x00\x00\x00\x00WEBP"), "image/webp");
         assert_eq!(mime_type(b"binary\x00data"), "application/octet-stream");
         assert_eq!(mime_type(b"invalid\xffutf8"), "application/octet-stream");
+    }
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+    use crate::{config::Config, maintenance::Work};
+
+    /// #450: a caller dropped while the blocking writer runs leaves its
+    /// `creating` row and pin; once the writer is done the lease ends and the
+    /// maintenance pass this marks (no other job) fails the row and releases
+    /// the pin, so managed collection reclaims it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_save_dropped_at_its_writer_is_reconciled_by_the_maintenance_pass() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(temp.path().join("fixture.db"))
+            .await
+            .unwrap();
+        let config = Config::default();
+        let service = Arc::new(AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = crate::gc::GcService::new(
+            db.clone(),
+            Arc::new(config),
+            temp.path().to_owned(),
+            service.clone(),
+        );
+        let (started, writing) = tokio::sync::oneshot::channel::<()>();
+        let (open, gate) = std::sync::mpsc::channel::<()>();
+        let save = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .write_clipboard_png(
+                        move || {
+                            let _ = started.send(());
+                            let _ = gate.recv();
+                            Ok(vec![0; 8])
+                        },
+                        CancellationToken::new(),
+                    )
+                    .await
+                    .map(|_| ())
+            }
+        });
+        // The insert committed and the writer runs; cancel the caller now.
+        writing.await.unwrap();
+        save.abort();
+        assert!(save.await.unwrap_err().is_cancelled());
+        open.send(()).unwrap();
+        let mut pins = crate::maintenance::WorkSet::default();
+        pins.insert(Work::Pins);
+        crate::test_watchdog::watchdog("pins reconciled by maintenance", async {
+            loop {
+                let (left, state) = db
+                    .call(|db| {
+                        Ok((
+                            db.query_row("SELECT count(*) FROM runtime_pin", [], |r| {
+                                r.get::<_, i64>(0)
+                            })?,
+                            db.query_row("SELECT state FROM managed_file", [], |r| {
+                                r.get::<_, String>(0)
+                            })?,
+                        ))
+                    })
+                    .await
+                    .unwrap();
+                if left == 0 {
+                    assert_eq!(state, "failed");
+                    break;
+                }
+                db.signals().changed().await;
+                gc.collect_kinds(pins, chrono::Utc::now()).await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        let report = service.collect_managed(chrono::Utc::now()).await.unwrap();
+        assert!(
+            !report.deleted.is_empty(),
+            "the abandoned save is reclaimed"
+        );
+        db.shutdown().await.unwrap();
     }
 }

@@ -43,10 +43,12 @@ pub enum Work {
     /// definition or Thread was removed, or a reservation superseded an
     /// already collected execution. One full bounded marker sweep.
     RawMarkers = 1 << 13,
+    /// Runtime pins whose lease ended, and `creating` images of finished saves (#450).
+    Pins = 1 << 14,
 }
 
 impl Work {
-    pub const ALL: [Work; 14] = [
+    pub const ALL: [Work; 15] = [
         Work::Receipts,
         Work::Raw,
         Work::History,
@@ -61,6 +63,7 @@ impl Work {
         Work::Schedule,
         Work::UsageLimitRetry,
         Work::RawMarkers,
+        Work::Pins,
     ];
     /// Source deletion makes derived data eligible as well.
     pub const DELETION: [Work; 3] = [Work::History, Work::SummaryCache, Work::IndexSources];

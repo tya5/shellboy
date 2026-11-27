@@ -10,12 +10,12 @@ observation references the previous Turn's snapshot row; history GC's
 schedule/service executions with their markers; the latest execution of each
 definition stays. One marker owner (`Work::RawMarkers`) settles them from
 requests persisted in `app_meta` by the producing transaction, so a deferred or
-interrupted unit resumes. (7) Every `runtime_pin` row belongs to a `PinLease`
-admitted with one of 1024 finalization slots; the DB worker receives releases
-on its own wake and retries failed ones at its idle point. A clipboard save's
-writer closure alone settles a failed or abandoned save (row failed and pin
-deleted together); startup removes crash-left `tmp/<uuid>.png.tmp` in one
-forward scan of bounded visits. Not landed. Raw age retention not arming without a
+interrupted unit resumes from a saved position (rows visited). (7) Every
+`runtime_pin` row belongs to a `PinLease` registered as live; a dropped lease
+marks `Work::Pins` and the maintenance owner deletes pins whose lease is not
+live and fails `creating` images of finished saves, in bounded units (no
+release queue, slots or retry). Startup removes crash-left
+`tmp/<uuid>.png.tmp` in one forward scan of bounded visits. Not landed. Raw age retention not arming without a
 collect or capacity excess is #451; items 2, 3, 5, 6 and 8 remain.
 
 ## Core #449 opt-in notice for skipped schedule occurrences

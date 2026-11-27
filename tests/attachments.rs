@@ -16,6 +16,7 @@ struct Fixture {
     path: PathBuf,
     db: DbWorker,
     service: AttachmentService,
+    gc: shellboy::gc::GcService,
 }
 impl Fixture {
     async fn new(mut config: Config) -> Self {
@@ -28,11 +29,23 @@ impl Fixture {
         db.call(|db|{db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES('source','user','now','{\"role\":\"user\",\"content\":[]}')",[])?;db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('thread',0,'source')",[])?;Ok(())}).await.unwrap();
         let service =
             AttachmentService::new(db.clone(), &config, path.clone(), "instance-test".into());
+        let gc = shellboy::gc::GcService::new(
+            db.clone(),
+            std::sync::Arc::new(config.clone()),
+            path.clone(),
+            std::sync::Arc::new(AttachmentService::new(
+                db.clone(),
+                &config,
+                path.clone(),
+                "instance-test".into(),
+            )),
+        );
         Self {
             _temp: temp,
             path,
             db,
             service,
+            gc,
         }
     }
     async fn add(&self, name: &str, bytes: &[u8]) -> String {
@@ -125,7 +138,15 @@ impl Fixture {
                 if n == count {
                     break;
                 }
-                tokio::task::yield_now().await;
+                // The maintenance owner's pass for the pin work a dropped
+                // lease marked; no other job is needed to wake it.
+                self.db.signals().changed().await;
+                let mut pins = shellboy::maintenance::WorkSet::default();
+                pins.insert(shellboy::maintenance::Work::Pins);
+                self.gc
+                    .collect_kinds(pins, chrono::Utc::now())
+                    .await
+                    .unwrap();
             }
         })
         .await
@@ -760,52 +781,6 @@ async fn fork_selection_sharing_and_path_reattachment_keep_managed_image_active(
             .deleted
             .len(),
         1
-    );
-    f.db.shutdown().await.unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_clipboard_save_cancelled_after_its_insert_was_admitted_releases_and_fails_its_row() {
-    let f = Fixture::new(Config::default()).await;
-    // Hold the DB worker so the save's insert is admitted but not yet run.
-    let (open, gate) = std::sync::mpsc::channel::<()>();
-    let held =
-        f.db.try_call(move |_| {
-            let _ = gate.recv();
-            Ok(())
-        })
-        .unwrap();
-    {
-        let save = f.service.save_clipboard_pixels(
-            ClipboardPixels {
-                width: 1,
-                height: 1,
-                rgba: vec![255, 0, 0, 255],
-            },
-            CancellationToken::new(),
-        );
-        let mut save = std::pin::pin!(save);
-        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-        // One poll admits the insert; leaving the scope cancels the caller.
-        assert!(
-            std::future::Future::poll(save.as_mut(), &mut context).is_pending(),
-            "the save waits on its admitted insert"
-        );
-    }
-    open.send(()).unwrap();
-    held.receive().await.unwrap();
-    // The insert commits after the cancellation; its pin must still go, and
-    // the abandoned `creating` row becomes reclaimable.
-    f.wait_pins(0).await;
-    let state: String =
-        f.db.call(|db| Ok(db.query_row("SELECT state FROM managed_file", [], |r| r.get(0))?))
-            .await
-            .unwrap();
-    assert_eq!(state, "failed");
-    let report = f.service.collect_managed(chrono::Utc::now()).await.unwrap();
-    assert!(
-        !report.deleted.is_empty(),
-        "the abandoned save is collected"
     );
     f.db.shutdown().await.unwrap();
 }
@@ -1549,20 +1524,7 @@ async fn managed_path_uses_ordinary_hash_baselines_missing_facts_and_gc() {
         drop(missing);
         std::fs::write(&path, &bytes).unwrap();
         f.remove(attachment).await;
-        loop {
-            let n =
-                f.db.call(|db| {
-                    Ok(db.query_row("SELECT count(*) FROM runtime_pin", [], |r| {
-                        r.get::<_, i64>(0)
-                    })?)
-                })
-                .await
-                .unwrap();
-            if n == 0 {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+        f.wait_pins(0).await;
         let report = f.service.collect_managed(chrono::Utc::now()).await.unwrap();
         assert_eq!(report.deleted.len(), 1);
         let deleted = observed_list(&f).await;

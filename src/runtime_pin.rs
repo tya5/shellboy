@@ -1,85 +1,79 @@
 //! Runtime pins: `runtime_pin` rows that keep a resource out of retention
 //! while this owner instance reads or sends it.
 //!
-//! One [`PinLease`] owns every row whose id starts with its prefix. A lease is
-//! admitted only with one of [`LEASE_SLOTS`] finalization slots, so its
-//! release always has capacity; it is created before the job that inserts its
-//! rows, and that job holds the lease's insert token until it has run (or is
-//! dropped unrun). Dropping the lease sends its release, with the slot, to the
-//! DB worker, which wakes for it like for a job: nothing is spawned and `Drop`
-//! never retries. The worker releases a lease once its insert job is done, in
-//! its own transaction; the slot is freed when that commits. A failed release
-//! is recorded as a database failure in diagnostics and retried by the worker
-//! at its next idle maintenance point, not at every job. An owner that settles
-//! its own rows in one transaction (a failed clipboard save) closes the lease
-//! with [`PinLease::settled`] instead. Rows of an earlier instance are removed
-//! at startup.
+//! One [`PinLease`] owns every row whose id starts with its prefix. The lease
+//! is registered as live when it is made, before the job that inserts its
+//! rows, and that job holds a clone until it has run (or is dropped unrun), so
+//! the last clone ends only after nothing can insert under the prefix any
+//! more. Ending it unregisters the prefix and marks [`Work::Pins`]; nothing
+//! deletes rows at that point and nothing is spawned or retried.
+//!
+//! The maintenance owner reconciles: on its wake it deletes the rows whose
+//! prefix is not live ([`reconcile_tx`]), a bounded batch at a time. A
+//! managed image still `creating` whose pin goes this way is a save whose
+//! writer is done without settling it, so the same transaction marks it
+//! `failed` for managed collection. Rows of an earlier instance have no live
+//! prefix and go the same way after startup.
 use crate::maintenance::{Signals, Work};
-use crate::storage::{DbWorker, StorageError};
+use crate::storage::DbWorker;
 use rusqlite::{Connection, params};
-use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
-/// Outstanding leases, each holding one finalization slot until its release
-/// commits. Acquiring a lease waits for a slot.
-pub(crate) const LEASE_SLOTS: usize = 1024;
-/// Releases committed per transaction.
-const RELEASE_BATCH: usize = 128;
+/// The prefixes of this owner's live leases: one per lease that is held by an
+/// operation in flight, so it is bounded by those operations.
+pub(crate) struct Leases {
+    live: Mutex<HashSet<String>>,
+    signals: Arc<Signals>,
+}
 
-pub(crate) struct PinLease {
-    sender: mpsc::Sender<Release>,
+impl Leases {
+    pub(crate) fn new(signals: Arc<Signals>) -> Self {
+        Self {
+            live: Mutex::default(),
+            signals,
+        }
+    }
+    fn is_live(&self, prefix: &str) -> bool {
+        self.live.lock().expect("pin leases").contains(prefix)
+    }
+}
+
+/// Cloning shares the lease; the prefix stays live until the last clone drops.
+#[derive(Clone)]
+pub(crate) struct PinLease(Arc<Live>);
+
+struct Live {
     prefix: String,
-    /// Shared with the inserting job while it can still run.
-    insert: Arc<()>,
-    slot: Option<OwnedSemaphorePermit>,
+    leases: Arc<Leases>,
+}
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        self.leases
+            .live
+            .lock()
+            .expect("pin leases")
+            .remove(&self.prefix);
+        // After unregistering, so the pass this wakes sees the prefix as gone.
+        self.leases.signals.mark(Work::Pins);
+    }
 }
 
 impl PinLease {
-    /// Admit a lease with its finalization slot.
-    pub(crate) async fn acquire(database: &DbWorker) -> Result<Self, StorageError> {
-        let releases = database.pin_releases();
-        let slot = releases
-            .slots
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| StorageError::Closed)?;
-        Ok(Self {
-            sender: releases.sender.clone(),
-            prefix: uuid::Uuid::new_v4().to_string(),
-            insert: Arc::new(()),
-            slot: Some(slot),
-        })
+    pub(crate) fn new(database: &DbWorker) -> Self {
+        let leases = database.pin_leases().clone();
+        let prefix = uuid::Uuid::new_v4().to_string();
+        leases
+            .live
+            .lock()
+            .expect("pin leases")
+            .insert(prefix.clone());
+        Self(Arc::new(Live { prefix, leases }))
     }
     /// Id prefix for the rows this lease owns; [`pin_id`] makes each id.
-    pub(crate) fn prefix(&self) -> String {
-        self.prefix.clone()
-    }
-    /// Move this into the inserting job's closure; the release waits for it.
-    pub(crate) fn insert_token(&self) -> Arc<()> {
-        self.insert.clone()
-    }
-    /// No row was inserted, or the owner deleted them in its own transaction:
-    /// close the lease without a release.
-    pub(crate) fn settled(mut self) {
-        self.slot = None;
-    }
-}
-
-impl Drop for PinLease {
-    fn drop(&mut self) {
-        let Some(slot) = self.slot.take() else {
-            return;
-        };
-        // The channel holds `LEASE_SLOTS` and every queued release holds a
-        // slot, so it is never full. A closed worker means the owner is
-        // stopping; startup removes rows of this instance then.
-        let _ = self.sender.try_send(Release {
-            prefix: std::mem::take(&mut self.prefix),
-            insert: std::mem::replace(&mut self.insert, Arc::new(())),
-            _slot: slot,
-        });
+    pub(crate) fn prefix(&self) -> &str {
+        &self.0.prefix
     }
 }
 
@@ -88,239 +82,128 @@ pub(crate) fn pin_id(prefix: &str, n: usize) -> String {
     format!("{prefix}.{n}")
 }
 
-/// Owner-side delete of a lease's rows, for an owner that settles them itself.
-pub(crate) fn delete_pins_tx(tx: &Connection, prefix: &str) -> rusqlite::Result<usize> {
-    tx.execute(
-        "DELETE FROM runtime_pin WHERE id>?1 AND id<?2",
-        params![format!("{prefix}."), format!("{prefix}/")],
-    )
+/// One reconciliation unit's outcome.
+pub(crate) struct Reconciled {
+    /// The last row id visited; the next unit continues after it.
+    pub(crate) last: Option<String>,
+    /// The unit visited `limit` rows, so more may follow.
+    pub(crate) more: bool,
+    /// A managed-file or shell-output pin was released.
+    pub(crate) managed: bool,
+    pub(crate) raw: bool,
 }
 
-struct Release {
-    prefix: String,
-    insert: Arc<()>,
-    _slot: OwnedSemaphorePermit,
-}
-impl Release {
-    /// Its inserting job has run or will never run.
-    fn ready(&self) -> bool {
-        Arc::strong_count(&self.insert) == 1
-    }
-}
-
-/// The sending side, shared by every lease of one DB worker.
-pub(crate) struct Releases {
-    slots: Arc<Semaphore>,
-    sender: mpsc::Sender<Release>,
-}
-
-/// The DB worker's side: received releases waiting for their insert job, and
-/// failed ones waiting for the next maintenance point. Both are bounded by
-/// [`LEASE_SLOTS`], since every entry still holds its slot.
-pub(crate) struct ReleaseWork {
-    receiver: mpsc::Receiver<Release>,
-    waiting: Vec<Release>,
-    failed: Vec<Release>,
-    last_retry: Option<Instant>,
-}
-
-pub(crate) fn channel() -> (Releases, ReleaseWork) {
-    let (sender, receiver) = mpsc::channel(LEASE_SLOTS);
-    (
-        Releases {
-            slots: Arc::new(Semaphore::new(LEASE_SLOTS)),
-            sender,
-        },
-        ReleaseWork {
-            receiver,
-            waiting: Vec::new(),
-            failed: Vec::new(),
-            last_retry: None,
-        },
-    )
-}
-
-impl ReleaseWork {
-    /// The worker's wake: the next release sent by a dropped lease.
-    pub(crate) async fn recv(&mut self) -> bool {
-        match self.receiver.recv().await {
-            Some(release) => {
-                self.waiting.push(release);
-                true
+/// Maintenance owner: visit at most `limit` pin rows after `after` and delete
+/// those whose lease is not live. Rows visited, not rows deleted, are bounded.
+pub(crate) fn reconcile_tx(
+    tx: &Connection,
+    leases: &Leases,
+    after: &str,
+    limit: usize,
+) -> rusqlite::Result<Reconciled> {
+    let rows = tx
+        .prepare_cached(
+            "SELECT id,resource_kind,resource_id FROM runtime_pin WHERE id>?1 ORDER BY id LIMIT ?2",
+        )?
+        .query_map(params![after, limit as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut done = Reconciled {
+        last: rows.last().map(|row| row.0.clone()),
+        more: rows.len() == limit,
+        managed: false,
+        raw: false,
+    };
+    for (id, kind, resource) in &rows {
+        let prefix = id
+            .rsplit_once('.')
+            .map_or(id.as_str(), |(prefix, _)| prefix);
+        if leases.is_live(prefix) {
+            continue;
+        }
+        tx.execute("DELETE FROM runtime_pin WHERE id=?1", [id])?;
+        match kind.as_str() {
+            "managed_file" => {
+                tx.execute(
+                    "UPDATE managed_file SET state='failed',deleted_reason='creation abandoned' WHERE id=?1 AND state='creating'",
+                    [resource],
+                )?;
+                // A released image pin can make managed images and raw output
+                // collectable, as it did when the lease released directly.
+                done.managed = true;
+                done.raw = true;
             }
-            None => false,
+            "shell_output" => done.raw = true,
+            _ => {}
         }
     }
-    /// DB worker thread: release every received lease whose insert job is
-    /// done, in transactions of at most [`RELEASE_BATCH`].
-    pub(crate) fn service(&mut self, db: &mut Connection, signals: &Signals, failed: impl Fn()) {
-        while let Ok(release) = self.receiver.try_recv() {
-            self.waiting.push(release);
-        }
-        loop {
-            let mut batch = Vec::new();
-            let mut index = 0;
-            while index < self.waiting.len() && batch.len() < RELEASE_BATCH {
-                if self.waiting[index].ready() {
-                    batch.push(self.waiting.swap_remove(index));
-                } else {
-                    index += 1;
-                }
-            }
-            if batch.is_empty() {
-                return;
-            }
-            if !self.commit(db, signals, batch, &failed) {
-                return;
-            }
-        }
-    }
-    /// DB worker thread, at its idle maintenance point: retry failed releases
-    /// at most once per `interval`.
-    pub(crate) fn retry_failed(
-        &mut self,
-        db: &mut Connection,
-        signals: &Signals,
-        now: Instant,
-        interval: std::time::Duration,
-        failed: impl Fn(),
-    ) {
-        if self.failed.is_empty()
-            || self
-                .last_retry
-                .is_some_and(|last| now.duration_since(last) < interval)
-        {
-            return;
-        }
-        self.last_retry = Some(now);
-        let count = self.failed.len().min(RELEASE_BATCH);
-        let batch: Vec<Release> = self.failed.drain(..count).collect();
-        self.commit(db, signals, batch, &failed);
-    }
-    fn commit(
-        &mut self,
-        db: &mut Connection,
-        signals: &Signals,
-        batch: Vec<Release>,
-        failed: &impl Fn(),
-    ) -> bool {
-        match release_tx(db, &batch) {
-            Ok(managed) => {
-                if managed {
-                    // Released managed pins can make images and raw collectable.
-                    signals.mark_all(&[Work::Managed, Work::Raw]);
-                }
-                true
-            }
-            Err(_) => {
-                failed();
-                self.failed.extend(batch);
-                false
-            }
-        }
-    }
-}
-
-/// Returns whether any managed-file pin was released.
-fn release_tx(db: &mut Connection, batch: &[Release]) -> rusqlite::Result<bool> {
-    let tx = db.transaction()?;
-    let mut managed = false;
-    for release in batch {
-        let kinds = tx
-            .prepare_cached(
-                "DELETE FROM runtime_pin WHERE id>?1 AND id<?2 RETURNING resource_kind",
-            )?
-            .query_map(
-                params![
-                    format!("{}.", release.prefix),
-                    format!("{}/", release.prefix)
-                ],
-                |r| r.get::<_, String>(0),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        managed |= kinds.iter().any(|kind| kind == "managed_file");
-    }
-    tx.commit()?;
-    Ok(managed)
+    Ok(done)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    async fn pinned_lease(db: &DbWorker) -> PinLease {
-        let lease = PinLease::acquire(db).await.unwrap();
-        let (id, insert) = (pin_id(&lease.prefix(), 0), lease.insert_token());
+    fn insert(db: &Connection, id: &str, kind: &str, resource: &str) {
+        db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,'fixture',?2,?3,0,'now')", params![id, kind, resource]).unwrap();
+    }
+
+    /// A pin whose lease is gone is deleted by a reconciliation unit, in units
+    /// of bounded visits; a live lease's pin and a `creating` image of a live
+    /// save stay.
+    #[tokio::test]
+    async fn reconciliation_deletes_only_pins_of_leases_that_are_not_live() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(temp.path().join("fixture.db"))
+            .await
+            .unwrap();
+        let live = PinLease::new(&db);
+        let gone = PinLease::new(&db);
+        let (live_id, gone_id) = (pin_id(live.prefix(), 0), pin_id(gone.prefix(), 0));
+        let save = pin_id(gone.prefix(), 1);
         db.call(move |db| {
-            let _insert = insert;
-            db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,'fixture','shell_output','e',0,'now')", [id])?;
+            db.execute("INSERT INTO managed_file(id,absolute_path,state,created_at)VALUES('save','/x/save.png','creating','now')", [])?;
+            insert(db, &live_id, "shell_output", "e");
+            insert(db, &gone_id, "shell_output", "e");
+            insert(db, &save, "managed_file", "save");
             Ok(())
         })
         .await
         .unwrap();
-        lease
-    }
-
-    fn pins(path: &std::path::Path) -> i64 {
-        // A separate connection: observing must not be a job on the worker.
-        Connection::open(path)
-            .unwrap()
-            .query_row("SELECT count(*) FROM runtime_pin", [], |r| r.get(0))
-            .unwrap()
-    }
-
-    /// A lease dropped after the last job is released by the worker's own
-    /// wake, with no later job on its lanes.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_dropped_lease_is_released_without_another_job() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("fixture.db");
-        let db = DbWorker::open(&path).await.unwrap();
-        let lease = pinned_lease(&db).await;
-        assert!(pins(&path) > 0);
-        drop(lease);
-        crate::test_watchdog::watchdog("released by the worker's own wake", async {
-            while pins(&path) > 0 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        db.shutdown().await.unwrap();
-    }
-
-    /// A release whose transaction fails keeps its rows and slot; the worker
-    /// retries it at its idle maintenance point once storage works again.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_failed_release_is_retried_by_the_worker() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("fixture.db");
-        let db = DbWorker::open(&path).await.unwrap();
-        let lease = pinned_lease(&db).await;
-        db.call(|db| {
-            db.execute_batch("CREATE TRIGGER refuse_release BEFORE DELETE ON runtime_pin BEGIN SELECT RAISE(ABORT,'injected'); END;")?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-        drop(lease);
-        // Any job after the failed attempt: the release is still pending.
-        db.call(|_| Ok(())).await.unwrap();
-        assert!(pins(&path) > 0, "a failed release keeps its rows");
-        db.call(|db| {
-            db.execute_batch("DROP TRIGGER refuse_release")?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-        crate::test_watchdog::watchdog("retried at the idle maintenance point", async {
-            while pins(&path) > 0 {
-                db.call(|_| Ok(())).await.unwrap();
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+        let leases = db.pin_leases().clone();
+        drop(gone);
+        let mut after = String::new();
+        loop {
+            let (leases, cursor) = (leases.clone(), after.clone());
+            let done = db
+                .call(move |db| Ok(reconcile_tx(db, &leases, &cursor, 1)?))
+                .await
+                .unwrap();
+            let Some(last) = done.last.filter(|_| done.more) else {
+                break;
+            };
+            after = last;
+        }
+        let (pins, save_state) = db
+            .call(|db| {
+                Ok((
+                    db.query_row("SELECT group_concat(id) FROM runtime_pin", [], |r| {
+                        r.get::<_, String>(0)
+                    })?,
+                    db.query_row("SELECT state FROM managed_file WHERE id='save'", [], |r| {
+                        r.get::<_, String>(0)
+                    })?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(pins, pin_id(live.prefix(), 0));
+        assert_eq!(save_state, "failed");
         db.shutdown().await.unwrap();
     }
 }

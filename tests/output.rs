@@ -402,13 +402,30 @@ async fn streaming_snapshot_pins_raw_and_drops_pin_at_end_or_session_drop() {
     let stream = reader.stream("x").await.unwrap();
     assert_eq!(pin_count(&db).await, 1);
     drop(stream);
-    for _ in 0..10 {
-        tokio::task::yield_now().await;
-        if pin_count(&db).await == 0 {
-            return;
+    // The dropped lease marks pin maintenance; that pass releases the pin.
+    let config = shellboy::config::Config::default();
+    let data = _dir.path().to_owned();
+    let gc = shellboy::gc::GcService::new(
+        db.clone(),
+        std::sync::Arc::new(config.clone()),
+        data.clone(),
+        std::sync::Arc::new(shellboy::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            data,
+            "instance".into(),
+        )),
+    );
+    let mut pins = shellboy::maintenance::WorkSet::default();
+    pins.insert(shellboy::maintenance::Work::Pins);
+    crate::test_watchdog::watchdog("tests/output.rs: dropped stream pin", async {
+        while pin_count(&db).await != 0 {
+            db.signals().changed().await;
+            gc.collect_kinds(pins, chrono::Utc::now()).await.unwrap();
         }
-    }
-    panic!("dropped stream retained raw pin");
+    })
+    .await
+    .unwrap();
 }
 #[tokio::test]
 async fn expiry_scope_and_encoding_are_errors_instead_of_empty_success() {

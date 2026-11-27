@@ -258,8 +258,9 @@ impl OutputStreamReader {
                 decode_errors |= bad;
             }
             self.done = true;
-            // Dropping the lease queues its release on the DB worker.
-            drop(self.pin.take());
+            if let Some(mut pin) = self.pin.take() {
+                pin.release().await?;
+            }
         }
         Ok(Some(DecodedOutputPage {
             text,
@@ -297,14 +298,13 @@ impl ShellOutputReader {
         execution_id: &str,
         streams: StreamSelection,
     ) -> Result<OutputStreamReader> {
-        let pin = ReadPin::acquire(&self.database, self.instance.to_string()).await?;
+        let pin = ReadPin::new(&self.database, self.instance.to_string());
         let execution = execution_id.to_owned();
-        let pin_id = pin.id();
-        let insert = pin.insert_token();
+        let (pin_id, lease) = (pin.id.clone(), pin.lease.clone());
         let instance = pin.instance.clone();
         let state = self
             .db(move |db| {
-                let _insert = insert;
+                let _lease = lease;
                 let tx = db.transaction().map_err(sql_error)?;
                 let mut state = snapshot(&tx, &execution)?;
                 set_raw_start(&tx, &mut state, &execution)?;
@@ -396,17 +396,15 @@ impl ShellOutputReader {
             .as_deref()
             .map(OutputCursor::decode)
             .transpose()?;
-        let pin = ReadPin::acquire(&self.database, self.instance.to_string()).await?;
+        let mut pin = ReadPin::new(&self.database, self.instance.to_string());
         let execution = args.execution_id.clone();
-        let pin_id = pin.id();
-        let insert = pin.insert_token();
+        let (pin_id, lease) = (pin.id.clone(), pin.lease.clone());
         let instance = pin.instance.clone();
         let expected = old.clone();
         let requested = canonical.clone();
         let wakes = self.database.wait_wakes();
         let prepared=self.db(move|db|{
-            let _insert = insert;
-            let tx=db.transaction().map_err(sql_error)?;
+            let _lease=lease;let tx=db.transaction().map_err(sql_error)?;
             let mut state=snapshot(&tx,&execution)?;
             if let Some(cursor)=&expected{validate_cursor(&tx,&state,&execution,cursor,requested.as_deref(),Some(streams))?;}
             set_raw_start(&tx,&mut state,&execution)?;
@@ -436,8 +434,14 @@ impl ShellOutputReader {
             }
             Err(error) => Err(error),
         };
-        drop(pin);
-        result
+        let released = pin.release().await;
+        match result {
+            Ok(value) => {
+                released?;
+                Ok(value)
+            }
+            Err(error) => Err(error),
+        }
     }
     async fn read_pinned(
         &self,
@@ -572,14 +576,13 @@ impl ShellOutputReader {
         if limit_bytes == 0 {
             return Ok(String::new());
         }
-        let pin = ReadPin::acquire(&self.database, self.instance.to_string()).await?;
+        let mut pin = ReadPin::new(&self.database, self.instance.to_string());
         let execution = execution_id.to_owned();
-        let pin_id = pin.id();
-        let insert = pin.insert_token();
+        let (pin_id, lease) = (pin.id.clone(), pin.lease.clone());
         let instance = pin.instance.clone();
         let prepared = self
             .db(move |db| {
-                let _insert = insert;
+                let _lease = lease;
                 let tx = db.transaction().map_err(sql_error)?;
                 let mut state = snapshot(&tx, &execution)?;
                 set_raw_start(&tx, &mut state, &execution)?;
@@ -592,9 +595,12 @@ impl ShellOutputReader {
             Ok(state) => self.excerpt_pinned(execution_id, state, limit_bytes).await,
             Err(error) => Err(error),
         };
-        drop(pin);
+        let released = pin.release().await;
         match result {
-            Ok(value) => Ok(value),
+            Ok(value) => {
+                released?;
+                Ok(value)
+            }
             Err(error) if error.code == ErrorCode::OutputExpired => {
                 let reason = error
                     .details
@@ -847,9 +853,13 @@ pub(crate) fn canonical_encoding(label: &str) -> Result<&'static Encoding> {
             .ok_or_else(|| error(ErrorCode::InvalidArgument, "unknown output encoding")),
     }
 }
-/// One `shell_output` pin under its own lease, which releases it on drop.
+/// One `shell_output` pin under its own lease: an explicit release deletes it
+/// at once; a pin never released (cancelled or failed) is reconciled by the
+/// maintenance owner once the lease is dropped.
 struct ReadPin {
+    database: DbWorker,
     lease: crate::runtime_pin::PinLease,
+    id: String,
     instance: String,
 }
 impl ReadPin {
@@ -864,20 +874,25 @@ impl ReadPin {
     ) -> Result<usize> {
         tx.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?1,?2,'shell_output',?3,?4,?5)",params![id,instance,execution,generation as i64,chrono::Utc::now().to_rfc3339()]).map_err(sql_error)
     }
-    async fn acquire(database: &DbWorker, instance: String) -> Result<Self> {
-        Ok(Self {
-            lease: crate::runtime_pin::PinLease::acquire(database)
-                .await
-                .map_err(StorageError::into_api_error)?,
+    fn new(database: &DbWorker, instance: String) -> Self {
+        let lease = crate::runtime_pin::PinLease::new(database);
+        Self {
+            database: database.clone(),
+            id: crate::runtime_pin::pin_id(lease.prefix(), 0),
+            lease,
             instance,
-        })
+        }
     }
-    fn id(&self) -> String {
-        crate::runtime_pin::pin_id(&self.lease.prefix(), 0)
-    }
-    /// Move into the registering job's closure; the release waits for it.
-    fn insert_token(&self) -> Arc<()> {
-        self.lease.insert_token()
+    async fn release(&mut self) -> Result<()> {
+        let id = self.id.clone();
+        self.database
+            .call(move |db| {
+                db.execute("DELETE FROM runtime_pin WHERE id=?1", [id])?;
+                Ok(())
+            })
+            .await
+            .map_err(StorageError::into_api_error)?;
+        Ok(())
     }
 }
 fn error(code: ErrorCode, message: impl Into<String>) -> ApiError {
