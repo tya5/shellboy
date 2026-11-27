@@ -822,77 +822,164 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
     store.database.shutdown().await.unwrap();
 }
 
-#[tokio::test]
-async fn finished_identities_filling_the_budget_roll_the_epoch_without_applying_the_trigger() {
-    let (_dir, store) = fixture().await;
-    assert_eq!(store.operation_epoch.current(), "first.0");
-    // Finished current-epoch identities whose metadata fills the budget.
-    store.database.call(|db| {
-        for n in 1..=31 {
-            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,result_ref_json)VALUES(?1,'first','\"'||hex(zeroblob(4194304))||'\"','hash','completed',?2,0,'0')",rusqlite::params![format!("first.0:filler-{n}"),chrono::Utc::now().to_rfc3339()])?;
-        }
-        Ok(())
-    }).await.unwrap();
-    let create = || {
-        Command::ThreadCreate(ThreadCreateArgs {
-            agents: None,
-            parent_thread_id: None,
-            cwd: None,
-            connection: None,
-            model: None,
-            effort: None,
-        })
-    };
-    let trigger = request("first.0", create());
-    let refused = store.execute(trigger.clone(), None).await.unwrap_err();
-    assert_eq!(refused.code, ErrorCode::StorageLimit);
-    let details = refused.details.unwrap();
-    assert_eq!(details["reason"], "operation_epoch_rolled");
-    assert_eq!(details["request_may_have_been_applied"], false);
-    let status = store
-        .execute(
-            request(
-                &store.operation_epoch.current(),
-                Command::Status(StatusArgs::default()),
-            ),
-            None,
-        )
-        .await
-        .unwrap()
-        .result;
-    assert_eq!(status["operation_epoch"], "first.1");
-    assert_eq!(
-        store.execute(trigger.clone(), None).await.unwrap_err().code,
-        ErrorCode::OperationExpired,
-        "the triggering ID is outside the new epoch and never runs"
-    );
-    let retried = store
-        .execute(request(&store.operation_epoch.current(), create()), None)
-        .await
-        .unwrap();
-    assert!(retried.result["thread_id"].as_str().is_some());
-    store
-        .database
+const FILL_FINISHED: &str = "INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,result_ref_json)VALUES(?1,?2,'\"'||hex(zeroblob(4194304))||'\"','hash','completed',?3,0,'0')";
+
+fn create_thread() -> Command {
+    Command::ThreadCreate(ThreadCreateArgs {
+        agents: None,
+        parent_thread_id: None,
+        cwd: None,
+        connection: None,
+        model: None,
+        effort: None,
+    })
+}
+
+/// An owner served over its real IPC socket whose receipt budget is full of
+/// finished current-epoch identities.
+async fn full_owner() -> (
+    tempfile::TempDir,
+    DataOwner,
+    shellboy::ipc::LocalServer,
+    tokio::task::JoinHandle<()>,
+) {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = shellboy::control::Control::new(&owner, root.path().into());
+    control.start().await.unwrap();
+    let instance = owner.instance_id.clone();
+    owner
+        .db
         .call(move |db| {
-            assert_eq!(
-                db.query_row("SELECT count(*) FROM thread", [], |row| row
-                    .get::<_, i64>(0))?,
-                1
-            );
-            assert_eq!(
-                db.query_row(
-                    "SELECT count(*) FROM operation_receipt WHERE operation_id LIKE 'first.0:%'",
-                    [],
-                    |row| row.get::<_, i64>(0)
-                )?,
-                0,
-                "earlier-epoch identities are reclaimed under pressure"
-            );
+            for n in 1..=31 {
+                db.execute(
+                    FILL_FINISHED,
+                    rusqlite::params![
+                        format!("{instance}.0:filler-{n}"),
+                        instance,
+                        chrono::Utc::now().to_rfc3339()
+                    ],
+                )?;
+            }
             Ok(())
         })
         .await
         .unwrap();
-    store.database.shutdown().await.unwrap();
+    let (send, receive) = tokio::sync::mpsc::channel(8);
+    let server = shellboy::ipc::LocalServer::bind(&owner, send)
+        .await
+        .unwrap();
+    let serving = tokio::spawn(async move {
+        let _ = control.serve(receive).await;
+    });
+    (root, owner, server, serving)
+}
+
+async fn thread_count(data: &std::path::Path) -> usize {
+    let response = shellboy::ipc::call(
+        data,
+        Command::ThreadList(ThreadListArgs {
+            limit: 100,
+            ..Default::default()
+        }),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    response.result.unwrap()["items"].as_array().unwrap().len()
+}
+
+#[tokio::test]
+async fn client_mutation_after_an_epoch_roll_mints_in_the_new_epoch_and_applies_once() {
+    let (_root, owner, server, serving) = full_owner().await;
+    let data = owner.loaded.data_dir.clone();
+    let mut announced = Vec::new();
+    let refused = shellboy::ipc::call_announcing(&data, create_thread(), None, &mut |id| {
+        announced.push(id.to_owned())
+    })
+    .await
+    .unwrap();
+    assert_eq!(announced, std::slice::from_ref(&refused.operation_id));
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, ErrorCode::StorageLimit);
+    let details = error.details.unwrap();
+    assert_eq!(details["reason"], "operation_epoch_rolled");
+    assert_eq!(details["request_may_have_been_applied"], false);
+    assert_eq!(thread_count(&data).await, 0);
+    // The rolled request's ID is outside the new epoch and never runs.
+    let reused = shellboy::ipc::call(&data, create_thread(), Some(refused.operation_id), None)
+        .await
+        .unwrap();
+    assert_eq!(reused.error.unwrap().code, ErrorCode::OperationExpired);
+    assert_eq!(thread_count(&data).await, 0);
+    // A fresh request without a supplied ID is minted in the new epoch.
+    let mut fresh = Vec::new();
+    let created = shellboy::ipc::call_announcing(&data, create_thread(), None, &mut |id| {
+        fresh.push(id.to_owned())
+    })
+    .await
+    .unwrap();
+    assert!(created.ok, "{:?}", created.error);
+    assert_ne!(fresh, announced);
+    assert_eq!(thread_count(&data).await, 1);
+    server.shutdown().await.unwrap();
+    serving.abort();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn concurrent_admissions_of_one_id_during_a_roll_never_report_not_applied_for_an_admitted_request()
+ {
+    let (_root, owner, server, serving) = full_owner().await;
+    let data = owner.loaded.data_dir.clone();
+    let id = format!("{}.0:same-id", owner.instance_id);
+    let calls = (0..6).map(|_| {
+        let (data, id) = (data.clone(), id.clone());
+        tokio::spawn(async move {
+            shellboy::ipc::call(&data, create_thread(), Some(id), None)
+                .await
+                .unwrap()
+        })
+    });
+    let mut applied = 0;
+    let mut not_applied = 0;
+    for call in calls {
+        let response = call.await.unwrap();
+        match response.error {
+            None => applied += 1,
+            Some(error) => {
+                if error
+                    .details
+                    .as_ref()
+                    .is_some_and(|d| d["request_may_have_been_applied"] == false)
+                {
+                    not_applied += 1;
+                }
+            }
+        }
+    }
+    let threads = thread_count(&data).await;
+    assert!(threads <= 1, "one ID runs at most once");
+    if threads == 1 {
+        assert!(
+            applied >= 1 && not_applied == 0,
+            "an admitted ID is never answered as not applied"
+        );
+    } else {
+        assert_eq!(applied, 0);
+    }
+    server.shutdown().await.unwrap();
+    serving.abort();
+    owner.shutdown().await.unwrap();
 }
 
 #[tokio::test]

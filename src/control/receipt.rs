@@ -134,21 +134,12 @@ impl OperationEpoch {
             .split_once(':')
             .is_some_and(|(prefix, nonce)| prefix == self.current() && !nonce.is_empty())
     }
-    /// Moves to the next epoch when current-epoch finished identities that no
-    /// pending delivery or compaction protects exist. Those identities then
-    /// fall under the old-prefix retention rule. Runs on the DB worker.
-    pub(super) fn roll_if_reclaimable(&self, db: &Connection) -> Result<bool> {
-        let reclaimable: bool = db
-            .query_row(
-                &format!("SELECT EXISTS(SELECT 1 FROM operation_receipt o WHERE state IN ('completed','failed') AND substr(operation_id,1,length(?1)+1)=?1||':' {UNPROTECTED})"),
-                [self.current()],
-                |r| r.get(0),
-            )
-            .map_err(sql)?;
-        if reclaimable {
-            self.rolls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
-        Ok(reclaimable)
+    /// Moves to the next epoch so identities of the current one fall under the
+    /// old-prefix retention rule. Only the admission job on the DB worker calls
+    /// this, after a valid completed reclamation pass reported a finished,
+    /// unprotected current-epoch identity (`Window::reclaimable`).
+    pub(super) fn roll(&self) {
+        self.rolls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 /// The one place an operation ID is built: `<epoch>:<nonce>`. In-process
@@ -217,6 +208,9 @@ pub(super) struct Window {
     pub collected: u64,
     pub next: Option<i64>,
     pub due: Option<f64>,
+    /// The window holds a finished current-epoch identity that no pending
+    /// delivery or compaction protects: an epoch roll would let it be reclaimed.
+    pub reclaimable: bool,
 }
 
 /// One bounded background unit over the next rowid window after `after`.
@@ -239,6 +233,7 @@ pub(super) fn collect_window(
             collected: 0,
             next: None,
             due: None,
+            reclaimable: false,
         });
     };
     let (collected, last) = collect_range(db, instance, pressure, Some((after, end)))?;
@@ -258,10 +253,18 @@ pub(super) fn collect_window(
     let now: f64 = db
         .query_row("SELECT julianday('now')", [], |r| r.get(0))
         .map_err(sql)?;
+    let reclaimable: bool = db
+        .query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM operation_receipt o WHERE o.rowid>?2 AND o.rowid<=?3 AND state IN ('completed','failed') AND substr(operation_id,1,length(?1)+1)=?1||':' {UNPROTECTED})"),
+            params![instance, after, end],
+            |r| r.get(0),
+        )
+        .map_err(sql)?;
     Ok(Window {
         collected,
         next,
         due: due.filter(|due| *due > now),
+        reclaimable,
     })
 }
 

@@ -130,6 +130,13 @@ pub enum RuntimeReservation {
     Saved(std::result::Result<Value, ApiError>),
 }
 
+/// Facts a completed reclamation pass hands to its final admission job.
+struct PassFacts {
+    changes: u64,
+    epoch: String,
+    reclaimable: bool,
+}
+
 /// Result of one receipt-collection pass (storage design #171).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ReceiptPass {
@@ -284,9 +291,50 @@ impl Store {
         .map_err(StorageError::into_api_error)
     }
 
+    /// The admission job that ends a completed reclamation pass. Replay of a
+    /// saved ID, the capacity refusal and the epoch roll are decided here, in
+    /// one DB job. The pass is valid when no write outside our own windows and
+    /// no epoch change happened since it was observed; only then may a still-full
+    /// budget refuse, and only a valid pass that saw a finished, unprotected
+    /// current-epoch identity rolls the epoch (#450). Returns the outcome, whether
+    /// it is settled (admitted, or refused by a valid pass), and `total_changes`.
+    async fn receipt_final<T, F>(
+        &self,
+        kind: Option<execute_kind::Kind>,
+        requester: Option<&'static str>,
+        pass: PassFacts,
+        attempt: F,
+    ) -> Result<(Result<T>, bool, u64)>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection, &mut bool) -> std::result::Result<Result<T>, StorageError>
+            + Send
+            + 'static,
+    {
+        let epoch = self.operation_epoch.clone();
+        let job = move |db: &mut Connection| {
+            let valid = pass.changes == db.total_changes() && pass.epoch == epoch.current();
+            let mut pressure = false;
+            let mut result = attempt(db, &mut pressure)?;
+            if pressure && valid && pass.reclaimable {
+                epoch.roll();
+                result = result.map_err(super::receipt::epoch_rolled);
+            }
+            Ok((result, !pressure || valid, db.total_changes()))
+        };
+        match kind {
+            Some(kind) => {
+                execute_kind::call_with_requester(&self.database, kind, requester, job).await
+            }
+            None => self.database.call_with_requester(requester, job).await,
+        }
+        .map_err(StorageError::into_api_error)
+    }
+
     /// Retry admission outside the writer between bounded background windows.
     /// Concurrent writes invalidate an exhausted scan, so refusal is based on
-    /// a complete pass with no intervening changes outside our own windows.
+    /// a complete pass with no intervening changes outside our own windows; the
+    /// final admission job (`receipt_final`) validates that itself.
     async fn receipt_job<T, F>(
         &self,
         kind: Option<execute_kind::Kind>,
@@ -305,10 +353,26 @@ impl Store {
         // and conservatively detects changes even if their transaction rolls back.
         let mut observed = None;
         let mut dirty = false;
+        let mut pass_epoch = None::<String>;
+        let mut reclaimable = false;
         loop {
             let attempt = operation.clone();
-            let (result, pressure, changes) =
-                self.receipt_attempt(kind, origin_kind, attempt).await?;
+            let (result, pressure, changes) = if after.is_none() && !dirty {
+                let facts = PassFacts {
+                    changes: observed.expect("completed pass"),
+                    epoch: pass_epoch.clone().expect("completed pass"),
+                    reclaimable,
+                };
+                let (result, settled, changes) = self
+                    .receipt_final(kind, origin_kind, facts, attempt)
+                    .await?;
+                if settled {
+                    return result;
+                }
+                (result, true, changes)
+            } else {
+                self.receipt_attempt(kind, origin_kind, attempt).await?
+            };
             if !pressure {
                 return result;
             }
@@ -316,11 +380,10 @@ impl Store {
                 dirty = true;
             }
             if after.is_none() {
-                if !dirty {
-                    return self.roll_epoch(result).await;
-                }
                 after = Some(0);
                 dirty = false;
+                pass_epoch = None;
+                reclaimable = false;
             }
             observed = Some(changes);
             loop {
@@ -349,31 +412,33 @@ impl Store {
                         let before = db.total_changes();
                         let result = {
                             let tx = db.transaction()?;
+                            let current = epoch.current();
                             match super::receipt::collect_window(
-                                &tx,
-                                &epoch.current(),
-                                true,
-                                cursor,
-                                window,
+                                &tx, &current, true, cursor, window,
                             ) {
                                 Ok(window) => {
                                     tx.commit()?;
-                                    Ok(window)
+                                    Ok((window, current))
                                 }
                                 Err(error) => Err(error),
                             }
                         };
-                        Ok(result.map(|window| (window, before, db.total_changes())))
+                        Ok(result
+                            .map(|(window, epoch)| (window, epoch, before, db.total_changes())))
                     })
                     .await
                     .map_err(StorageError::into_api_error)?;
                 drop(requester);
                 match unit {
                     crate::storage::Background::Done(window) => {
-                        let (window, before, after_changes) = window?;
-                        if observed.is_some_and(|previous| previous != before) {
+                        let (window, epoch, before, after_changes) = window?;
+                        if observed.is_some_and(|previous| previous != before)
+                            || pass_epoch.as_ref().is_some_and(|seen| *seen != epoch)
+                        {
                             dirty = true;
                         }
+                        pass_epoch = Some(epoch);
+                        reclaimable |= window.reclaimable;
                         observed = Some(after_changes);
                         after = window.next;
                         break;
@@ -381,23 +446,6 @@ impl Store {
                     crate::storage::Background::Deferred => tokio::task::yield_now().await,
                 }
             }
-        }
-    }
-
-    /// A full pass without outside writes still left no room. When finished
-    /// identities of the current epoch hold the space, move to the next epoch
-    /// so the ordinary old-prefix rule can reclaim them, and tell the caller
-    /// that this request was not applied (#450).
-    async fn roll_epoch<T: Send + 'static>(&self, refusal: Result<T>) -> Result<T> {
-        let epoch = self.operation_epoch.clone();
-        let rolled = self
-            .database
-            .call(move |db| Ok(epoch.roll_if_reclaimable(db)))
-            .await
-            .map_err(StorageError::into_api_error)??;
-        match refusal {
-            Err(error) if rolled => Err(super::receipt::epoch_rolled(error)),
-            refusal => refusal,
         }
     }
 
@@ -671,18 +719,19 @@ impl Store {
         thread_id: Option<&str>,
         submission: &DraftSubmission,
     ) -> Result<()> {
-        if !self.operation_epoch.admits(operation_id) {
-            return Err(error(
-                ErrorCode::OperationExpired,
-                "Draft submission has no active owner operation identity",
-            ));
-        }
+        let epoch = self.operation_epoch.clone();
         let operation = operation_id.to_owned();
         let thread = thread_id.map(str::to_owned);
         let submission = submission.clone();
         let config = self.config.clone();
         self.database
             .call(move |db| {
+                if !epoch.admits(&operation) {
+                    return Err(StorageError::from(error(
+                        ErrorCode::OperationExpired,
+                        "Draft submission has no active owner operation identity",
+                    )));
+                }
                 super::pending_messages::prepare_submission(
                     db,
                     &operation,

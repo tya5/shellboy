@@ -135,9 +135,6 @@ impl Failure {
 struct Session {
     data: PathBuf,
     origin: Option<Origin>,
-    /// Operation epoch read from the probe's handshake-minted ID; every later
-    /// ID is minted before sending so its progress can name it (#450).
-    epoch: String,
     deadline: Instant,
     progress: Progress,
 }
@@ -192,18 +189,6 @@ impl Session {
                 ApiError::new(ErrorCode::InvalidState, "Owner rejected connection probe")
             })));
         }
-        self.epoch = response
-            .operation_id
-            .split_once(':')
-            .map(|(id, _)| id.to_owned())
-            .filter(|id| !id.is_empty())
-            .ok_or_else(|| {
-                Failure::new(
-                    6,
-                    "owner_error",
-                    "Owner probe returned no epoch-scoped operation ID",
-                )
-            })?;
         Ok(())
     }
     async fn verify_end_message_support(&mut self) -> Result<(), Failure> {
@@ -249,15 +234,19 @@ impl Session {
                 "Client deadline expired; no target was stopped",
             ));
         }
-        let operation = crate::control::mint_operation_id(&self.epoch);
-        self.progress.operation_id = Some(operation.clone());
-        if stage == "send" {
-            self.progress.send_operation_id = Some(operation.clone());
-        }
-        if stage == "create" {
-            self.progress.create_operation_id = Some(operation.clone());
-        }
-        let response=timeout_at(self.deadline,ipc::call(&self.data,command,Some(operation),self.origin.clone())).await
+        // The handshake mints the ID in the owner's current operation epoch;
+        // progress names it before the request is sent (#450).
+        let progress = &mut self.progress;
+        let mut announce = |operation: &str| {
+            progress.operation_id = Some(operation.to_owned());
+            if stage == "send" {
+                progress.send_operation_id = Some(operation.to_owned());
+            }
+            if stage == "create" {
+                progress.create_operation_id = Some(operation.to_owned());
+            }
+        };
+        let response=timeout_at(self.deadline,ipc::call_announcing(&self.data,command,self.origin.clone(),&mut announce)).await
             .map_err(|_|Failure::new(5,"timeout","Client deadline expired; inspect the reported IDs before resending; no target was stopped"))?.map_err(|error|if end_message_read {Failure::end_message_read(error)}else{Failure::api(error)})?;
         if !response.ok {
             let error = response.error.unwrap_or_else(|| {
@@ -875,7 +864,6 @@ pub async fn execute(
     let mut session = Session {
         data: data.into(),
         origin,
-        epoch: String::new(),
         deadline: Instant::now() + Duration::from_millis(options.timeout_ms),
         progress: Progress {
             thread_id: options.thread_id.clone(),
