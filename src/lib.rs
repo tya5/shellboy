@@ -19,6 +19,7 @@ pub mod deletion;
 pub mod diagnostics;
 mod digest;
 pub mod docs;
+pub mod draft;
 pub mod exec_client;
 pub mod frontend;
 pub mod gc;

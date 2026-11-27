@@ -35,6 +35,7 @@ pub mod thread_patch;
 pub mod watch;
 pub use details::{DetailSourceFacts, DetailSourceSnapshot};
 pub(crate) mod draft;
+pub use crate::draft::{DraftSnapshot, EditRequestTarget, PasteFold, UiAttachment, ViewAnchor};
 mod help;
 mod history_interaction;
 mod history_items;
@@ -119,68 +120,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct UiAttachment {
-    pub id: String,
-    pub path: PathBuf,
-    pub kind: String,
-    pub state: String,
-    /// Byte position of the owned marker. Metadata awaiting marker placement
-    /// uses explicit null; a sendable draft must contain a concrete position.
-    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
-    pub position: Option<usize>,
-}
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct PasteFold {
-    pub id: u64,
-    pub start: usize,
-    pub end: usize,
-    pub expanded: bool,
-}
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct EditRequestTarget {
-    pub thread_id: String,
-    pub node_id: String,
-    pub run_id: Option<String>,
-}
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct DraftSnapshot {
-    pub draft_id: String,
-    pub revision: u64,
-    pub text: String,
-    pub cursor: usize,
-    pub attachments: Vec<UiAttachment>,
-    pub folds: Vec<PasteFold>,
-    pub literal_paste: bool,
-    /// Contiguous manually entered prefix in bytes; never restored from storage.
-    #[serde(skip)]
-    pub typed_prefix: usize,
-    #[serde(default)]
-    pub edit: Option<EditRequestTarget>,
-}
-impl Default for DraftSnapshot {
-    fn default() -> Self {
-        Self {
-            draft_id: uuid::Uuid::new_v4().to_string(),
-            revision: 0,
-            text: String::new(),
-            cursor: 0,
-            attachments: Vec::new(),
-            folds: Vec::new(),
-            literal_paste: false,
-            typed_prefix: 0,
-            edit: None,
-        }
-    }
-}
 /// One bounded, transient source window used only to verify a completion anchor.
 #[derive(Clone, Debug)]
 pub struct StreamRebase {
@@ -190,13 +129,6 @@ pub struct StreamRebase {
     pub node_id: String,
     pub source: UiNode,
     pub anchor: ViewAnchor,
-}
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct ViewAnchor {
-    pub node_id: Option<String>,
-    pub char_offset: usize,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UiNode {
@@ -4575,7 +4507,7 @@ impl UiState {
             return vec![];
         }
         self.active_view_mut().composer.stop_recall();
-        let text = match draft::decode(
+        let text = match crate::draft::decode(
             &self.view().draft.text,
             self.view().draft.attachments.clone(),
         ) {
@@ -6331,7 +6263,7 @@ fn retained_body_bytes(view: &ThreadView, working: &[String]) -> usize {
 fn valid_draft(draft: &DraftSnapshot) -> bool {
     draft.cursor <= draft.text.len()
         && draft.text.is_char_boundary(draft.cursor)
-        && draft::decode(&draft.text, draft.attachments.clone()).is_ok()
+        && crate::draft::decode(&draft.text, draft.attachments.clone()).is_ok()
         && draft.folds.iter().all(|f| {
             f.start <= f.end
                 && f.end <= draft.text.len()

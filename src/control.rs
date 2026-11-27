@@ -392,7 +392,7 @@ async fn maintenance_loop(
 }
 
 pub(crate) fn native_draft_input(
-    draft: &crate::ui::DraftSnapshot,
+    draft: &crate::draft::DraftSnapshot,
 ) -> Result<
     (
         crate::attachments::DraftContent,
@@ -400,7 +400,7 @@ pub(crate) fn native_draft_input(
     ),
     ApiError,
 > {
-    let (content, ordered) = crate::ui::draft::decode(&draft.text, draft.attachments.clone())?;
+    let (content, ordered) = crate::draft::decode(&draft.text, draft.attachments.clone())?;
     let files = ordered
         .into_iter()
         .map(|attachment| {
@@ -1056,7 +1056,7 @@ impl Control {
                 )
             })?;
         let draft = args.draft;
-        crate::ui::draft::validate_positions(&draft, self.store.config.limits.draft_bytes)?;
+        crate::draft::validate_positions(&draft, self.store.config.limits.draft_bytes)?;
         let edit = draft.edit.clone();
         let (content, files) = native_draft_input(&draft)?;
         let submission = db::DraftSubmission {
