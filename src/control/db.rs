@@ -6468,7 +6468,10 @@ mod thread_deletion_notification_tests {
                 else {
                     panic!("unexpected deletion event: {event:?}")
                 };
-                assert!(notified.insert(thread_id), "one notification per target");
+                assert!(
+                    notified.insert(thread_id.clone()),
+                    "mode={mode}: duplicate deletion notification for {thread_id}"
+                );
             }
             let committed = owner
                 .db
