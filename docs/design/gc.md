@@ -36,10 +36,11 @@ creates it, so nothing is lost between a commit and the owner's pass:
   markers stay), by the owner's first pass after startup, and by an explicit
   `storage collect --category raw`/`all`.
 
-Each producer marks `RawMarkers` after its commit. A unit settles at most 128
-rows: the first pending definition, else one page of the full sweep, saving
-its progress (request removed, or sweep key advanced) in the same
-transaction. A deferred unit restores the kind and the next pass continues
+Each producer marks `RawMarkers` after its commit. A unit visits at most 128
+rows: the first pending definition (its executions newest to oldest from the
+saved position, a new request restarting at the newest), else one page of the
+full sweep, saving its position (request removed, or position advanced) in the
+same transaction. A deferred unit restores the kind and the next pass continues
 from the saved state; an interrupted pass leaves the state for the next mark
 or startup. The raw byte total and the age deadline never gate the owner. No
 timer is added.
@@ -287,29 +288,25 @@ with no deadline.
 ## Runtime pin release and crash temporaries (#450)
 
 Every `runtime_pin` row belongs to one `PinLease` (`src/runtime_pin.rs`): its
-id is the lease's prefix plus an ordinal. A lease is admitted only with one of
-`LEASE_SLOTS` (1024) finalization slots, so its release always has capacity;
-acquiring a lease waits for a slot. It is created before the job that inserts
-its rows, and that job holds the lease's insert token until it has run or been
-dropped unrun. Dropping the lease, after success, an error, or a caller
-cancelled after the DB worker admitted the insert, sends the release with its
-slot to the DB worker, which wakes for it like for a job; no task is spawned
-and `Drop` never retries. The worker releases a lease once its insert job is
-done, at most 128 per transaction, and the slot is freed when that commits. A
-failed release keeps its rows and slot, is recorded as a `database_failure` in
-diagnostics, and is retried by the worker at its idle maintenance point (the
-lanes are empty), at most once per second, never at every job. Releasing
-managed pins marks managed and raw maintenance; releasing read pins marks
-nothing. Only rows of an earlier owner instance are left to startup cleanup,
-which deletes pins of other instances.
+id is the lease's prefix plus an ordinal. The lease is registered as live in
+the owner's in-memory registry before the job that inserts its rows, and that
+job holds a clone until it has run or been dropped unrun. When the last clone
+drops (success, an error, or a cancelled caller), the prefix is unregistered
+and `Work::Pins` is marked; nothing is spawned, queued or retried. The
+maintenance owner's `Pins` pass reconciles: it deletes the rows whose prefix is
+not live, visiting at most 128 rows per unit and continuing from a saved
+cursor after a deferred unit. A failed or skipped release needs no bookkeeping:
+the rows stay until a later pass, and the lease's own drop marks that pass.
+Read pins still delete their row with an awaited explicit release when they
+can. Releasing managed or read pins marks managed and raw maintenance. Rows of
+an earlier instance have no live prefix and are reconciled the same way.
 
-A clipboard save has exactly one owner of its outcome: the writer closure on
-the attachment file worker. It inserts the `creating` row and its pin, writes
-and renames the file, then settles: `ready` only while its caller still waits;
-otherwise (an error, cancellation, a timed-out or dropped caller) it marks the
-row `failed` and deletes the pin in one transaction after the writer is done,
-so managed collection reclaims the row and its files. The pin finalizer never
-touches managed rows.
+A clipboard save inserts the `creating` row and its pin before its writer
+runs; the writer holds a lease clone until it is done. A save is settled
+`ready` or `failed` by its caller as before. When the caller is gone (dropped,
+cancelled, timed out), the row stays `creating` until the lease ends, and the
+same reconciliation transaction that deletes its pin marks it `failed`, so
+managed collection reclaims the row and its files.
 
 Startup cleanup, run by the owner while it holds the owner lock, also removes
 `tmp/<uuid>.png.tmp` files that a crashed save left (only the writer's

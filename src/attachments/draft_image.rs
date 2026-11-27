@@ -455,15 +455,23 @@ mod tests {
         signals.take_seen();
         assert!(native(Command::DraftSave(save.clone())).await.unwrap().ok);
         crate::test_watchdog::watchdog(
-            "upload runtime pin is released after durable adoption",
+            "upload runtime pin lease ends after durable adoption",
             async {
-                while !signals.take_seen().contains(crate::maintenance::Work::Raw) {
+                while !signals.take_seen().contains(crate::maintenance::Work::Pins) {
                     signals.changed().await;
                 }
             },
         )
         .await
         .unwrap();
+        // The pass that mark wakes releases the pin row.
+        let mut pins = crate::maintenance::WorkSet::default();
+        pins.insert(crate::maintenance::Work::Pins);
+        control
+            .gc
+            .collect_kinds(pins, chrono::Utc::now())
+            .await
+            .unwrap();
         assert!(
             control
                 .attachments

@@ -388,15 +388,14 @@ the `db_job_slow` names.
   removal, its first pass after startup, an explicit raw collect. Units are
   at most 128 rows and save progress with their changes. See
   [GC](gc.md#raw-markers-and-thread-owned-executions-450).
-- **Runtime-pin releases (#450).** Why: a lease dropped without awaiting
-  (cancellation, a lease held by a file worker) must still release its rows,
-  and only after its insert job ran. Owner: the DB worker, which receives
-  releases on its own wake next to its two lanes. Bound: `LEASE_SLOTS` (1024)
-  finalization slots, one held by each lease from admission until its release
-  commits, so received, waiting and failed releases never exceed it. Failure:
-  recorded in diagnostics, retried at the worker's idle maintenance point.
-  Shutdown: releases left when the worker exits belong to this instance, whose
-  pins startup cleanup deletes. See [GC](gc.md#runtime-pin-release-and-crash-temporaries-450).
+- **Runtime pins (#450).** `Work::Pins` is the pin reconciliation. Why: a
+  lease dropped without awaiting (cancellation, a lease held by a file
+  worker) must still lose its rows, and a `creating` image of a save whose
+  caller left must become reclaimable. Owner: the maintenance owner, on its
+  existing wake; the lease's drop marks the kind. Bound: units of 128 rows
+  visited with a saved cursor; the live-lease registry holds one prefix per
+  operation in flight. Failure: the rows stay for a later pass. See
+  [GC](gc.md#runtime-pin-release-and-crash-temporaries-450).
 - **Schema22 (`0022_logical_usage_counters`).** Four `quota_counter` rows
   (`logical.history`, `logical.raw`, `logical.managed`, `logical.index`)
   maintained by AFTER INSERT/UPDATE OF/DELETE triggers on the 12 counted

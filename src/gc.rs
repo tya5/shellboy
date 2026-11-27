@@ -110,6 +110,8 @@ pub struct GcService {
     raw_cursor: Arc<std::sync::Mutex<RawCursor>>,
     /// The marker owner requests one full sweep on its first pass (#450).
     marker_sweep_requested: Arc<std::sync::atomic::AtomicBool>,
+    /// Where the pin reconciliation continues after a deferred unit (#450).
+    pin_cursor: Arc<std::sync::Mutex<String>>,
     history_batch: Arc<std::sync::Mutex<HistoryBatch>>,
     history_discovery: Arc<std::sync::Mutex<i64>>,
     history_candidate: Arc<std::sync::Mutex<Option<String>>>,
@@ -365,6 +367,7 @@ impl GcService {
             requester: Arc::new(Mutex::new(BackgroundRequester::new(database.clone()))),
             raw_cursor: Arc::default(),
             marker_sweep_requested: Arc::default(),
+            pin_cursor: Arc::default(),
             history_batch: Arc::new(std::sync::Mutex::new(HistoryBatch::new(String::new()))),
             history_discovery: Arc::default(),
             history_candidate: Arc::default(),
@@ -502,11 +505,7 @@ impl GcService {
         self.collect_held(&mut hold, works, at).await
     }
     /// Maintenance requester: only the signalled kinds (storage design #171).
-    pub(crate) async fn collect_kinds(
-        &self,
-        set: WorkSet,
-        at: DateTime<Utc>,
-    ) -> Result<CollectionReport> {
+    pub async fn collect_kinds(&self, set: WorkSet, at: DateTime<Utc>) -> Result<CollectionReport> {
         let works: Vec<Work> = GC_WORK.into_iter().filter(|w| set.contains(*w)).collect();
         let mut hold = self.hold().await;
         self.collect_held(&mut hold, &works, at).await
@@ -520,6 +519,9 @@ impl GcService {
         let requester = &mut *hold.0;
         let mut report = CollectionReport::default();
         let has = |work| works.contains(&work);
+        if has(Work::Pins) {
+            self.reconcile_pins(requester, &mut report).await?;
+        }
         if has(Work::Raw) {
             self.collect_raw(requester, at, &mut report).await?;
         }
@@ -970,6 +972,48 @@ impl GcService {
         report.raw_due = next_due;
         Ok(())
     }
+    /// Pin reconciliation (#450): delete pins whose lease is not live, one
+    /// bounded unit at a time, continuing from the saved cursor after a
+    /// deferred unit. A released pin can make managed images and raw output
+    /// collectable.
+    async fn reconcile_pins(
+        &self,
+        requester: &mut BackgroundRequester,
+        report: &mut CollectionReport,
+    ) -> Result<()> {
+        let leases = self.database.pin_leases().clone();
+        loop {
+            let after = self.pin_cursor.lock().expect("pin cursor").clone();
+            let leases = leases.clone();
+            let unit = requester
+                .unit(UNIT, move |db, limit| {
+                    let tx = db.transaction()?;
+                    let done =
+                        crate::runtime_pin::reconcile_tx(&tx, &leases, &after, limit.rows())?;
+                    tx.commit()?;
+                    Ok(done)
+                })
+                .await
+                .map_err(crate::app::storage_error)?;
+            let Background::Done(done) = unit else {
+                report.defer(Work::Pins);
+                return Ok(());
+            };
+            let signals = self.database.signals();
+            if done.managed {
+                signals.mark(Work::Managed);
+            }
+            if done.raw {
+                signals.mark(Work::Raw);
+            }
+            let next = done.last.filter(|_| done.more);
+            let finished = next.is_none();
+            *self.pin_cursor.lock().expect("pin cursor") = next.unwrap_or_default();
+            if finished {
+                return Ok(());
+            }
+        }
+    }
     /// The raw-marker owner (#450). Its pending work is persisted in
     /// `app_meta` by the transactions that make markers settleable: a
     /// `raw_settle.def.<definition>` request by a collection or a superseding
@@ -1235,7 +1279,8 @@ impl GcService {
 pub struct GcHold<'a>(tokio::sync::MutexGuard<'a, BackgroundRequester>);
 
 /// Garbage-collection kinds, in the order one pass runs them.
-const GC_WORK: [Work; 10] = [
+const GC_WORK: [Work; 11] = [
+    Work::Pins,
     Work::Raw,
     Work::RawMarkers,
     Work::EndedRuns,
@@ -1459,7 +1504,7 @@ pub(crate) fn request_definition_settlement_tx(
     definition: &str,
 ) -> rusqlite::Result<()> {
     tx.execute(
-        "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,'')",
+        "INSERT OR REPLACE INTO app_meta(key,value)VALUES(?1,'')",
         [format!("{SETTLE_DEFINITION}{definition}")],
     )?;
     Ok(())
@@ -1494,17 +1539,42 @@ fn settle_pending_tx(
     let mut executions = Vec::new();
     if let Some(key) = definition {
         let schedule = &key[SETTLE_DEFINITION.len()..];
-        executions = tx
+        // The scan runs newest to oldest through `shell_schedule_latest`; its
+        // saved position is the last row visited, so `limit` bounds the rows
+        // visited, not only those settled.
+        let saved: String =
+            tx.query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
+                r.get(0)
+            })?;
+        let (started, after) = serde_json::from_str::<(String, String)>(&saved)
+            .unwrap_or_else(|_| ("\u{10ffff}".to_owned(), String::new()));
+        let rows = tx
             .prepare(&format!(
-                "SELECT s.id FROM shell_execution s WHERE s.schedule_id=?1 AND {SETTLED} LIMIT ?2"
+                "SELECT s.id,s.started_at,{SETTLED} FROM shell_execution s WHERE s.schedule_id=?1 AND (s.started_at,s.id)<(?2,?3) ORDER BY s.started_at DESC,s.id DESC LIMIT ?4"
             ))?
-            .query_map(params![schedule, limit as i64], |r| r.get::<_, String>(0))?
+            .query_map(params![schedule, started, after, limit as i64], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for execution in &executions {
-            delete_settled(tx, execution)?;
+        for (execution, _, settled) in &rows {
+            if *settled {
+                delete_settled(tx, execution)?;
+                executions.push(execution.clone());
+            }
         }
-        if executions.len() < limit {
-            tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
+        match rows.last().filter(|_| rows.len() == limit) {
+            Some((id, started, _)) => {
+                tx.execute(
+                    "UPDATE app_meta SET value=?2 WHERE key=?1",
+                    params![
+                        key,
+                        serde_json::to_string(&(started, id)).expect("position")
+                    ],
+                )?;
+            }
+            None => {
+                tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
+            }
         }
     } else if let Some(after) = tx
         .query_row(
@@ -2119,6 +2189,84 @@ mod tests {
         .unwrap();
         gc.collect_kinds(set, chrono::Utc::now()).await.unwrap();
         assert_eq!(markers().await.unwrap(), 0);
+        db.shutdown().await.unwrap();
+    }
+
+    /// #450: a definition's settlement scan saves the position it reached
+    /// (rows visited), so a pass that stops partway is continued by the next
+    /// maintenance pass over the remaining rows and settles every old run.
+    #[tokio::test]
+    async fn an_interrupted_definition_scan_continues_from_its_saved_position() {
+        use super::{Work, WorkSet};
+        use std::sync::Arc;
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(temp.path().join("fixture.db"))
+            .await
+            .unwrap();
+        let config = crate::config::Config::default();
+        let attachments = Arc::new(crate::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = super::GcService::new(
+            db.clone(),
+            Arc::new(config),
+            temp.path().to_owned(),
+            attachments,
+        );
+        // More runs than one unit visits, all collected; the failure hits a
+        // run the scan reaches after its first unit (newest to oldest).
+        db.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now')", [])?;
+            db.execute("INSERT INTO schedule(id,thread_id,kind,cron,enabled,cwd,command) VALUES('s','t','time','0 * * * *',1,'/','true')", [])?;
+            for i in 0..300 {
+                let id = format!("run-{i:03}");
+                db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at) VALUES(?1,'s',?1,'exited','/','{}','UTF-8','UTF-8','closed',?2,?2)", rusqlite::params![id, format!("2020-01-01T00:{:02}:{:02}Z", i / 60, i % 60)])?;
+                db.execute("INSERT INTO app_meta(key,value) VALUES('raw_tombstone.'||?1,'{\"state\":\"deleted\"}')", [&id])?;
+            }
+            db.execute_batch("CREATE TRIGGER interrupt_scan BEFORE DELETE ON shell_execution WHEN OLD.id='run-100' BEGIN SELECT RAISE(ABORT,'injected'); END;")?;
+            let tx = db.transaction()?;
+            super::request_definition_settlement_tx(&tx, "s")?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let runs = || {
+            let db = db.clone();
+            async move {
+                db.call(|db| {
+                    Ok(
+                        db.query_row("SELECT count(*) FROM shell_execution", [], |r| {
+                            r.get::<_, i64>(0)
+                        })?,
+                    )
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let mut set = WorkSet::default();
+        set.insert(Work::RawMarkers);
+        // The startup sweep request is not part of this witness.
+        gc.marker_sweep_requested
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert!(gc.collect_kinds(set, chrono::Utc::now()).await.is_err());
+        let left = runs().await;
+        assert!(
+            left < 300 && left > 1,
+            "earlier units stay committed: {left}"
+        );
+        db.call(|db| {
+            db.execute_batch("DROP TRIGGER interrupt_scan")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        gc.collect_kinds(set, chrono::Utc::now()).await.unwrap();
+        assert_eq!(runs().await, 1, "only the definition's latest run stays");
         db.shutdown().await.unwrap();
     }
 

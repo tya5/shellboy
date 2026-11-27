@@ -1309,6 +1309,11 @@ async fn f8_foreign_attachment_list_tracks_saved_remove_with_exact_thread_and_no
     std::fs::write(&managed_path, b"synthetic managed GC fixture").unwrap();
     let managed_path_sql = managed_path.to_string_lossy().into_owned();
     let current_instance = control.store.instance_id.clone();
+    // The fixture pin belongs to a live lease, as a real read's does, so
+    // maintenance does not reconcile it away before the explicit release.
+    let fixture_lease = crate::runtime_pin::PinLease::new(&owner.db);
+    let fixture_pin = crate::runtime_pin::pin_id(fixture_lease.prefix(), 0);
+    let inserted_pin = fixture_pin.clone();
     owner.db.call(move |db| {
         db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('attachment-source','user','now','{}');
         INSERT INTO attachment_ref VALUES('saved-attachment','attachment-source','/does-not-exist-g5-observation','file','external','now');
@@ -1316,7 +1321,7 @@ async fn f8_foreign_attachment_list_tracks_saved_remove_with_exact_thread_and_no
         db.execute("INSERT INTO attachment_ref VALUES('managed-attachment','attachment-source',?1,'image','managed_clipboard','now')", [&managed_path_sql])?;
         db.execute("INSERT INTO attachment_selection(thread_id,attachment_id,state,reason,selected_at,selected_order)VALUES('independent','managed-attachment','excluded','fixture exclusion','now',1)", [])?;
         db.execute("INSERT INTO managed_file(id,absolute_path,attachment_id,state,raw_size,created_at)VALUES('example',?1,'managed-attachment','ready',27,'2000-01-01T00:00:00Z')", [&managed_path_sql])?;
-        db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES('attachment-managed-gc-pin',?1,'managed_file','example',0,'now')", [&current_instance])?;
+        db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?2,?1,'managed_file','example',0,'now')", [&current_instance, &inserted_pin])?;
         Ok(())
     }).await.unwrap();
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
@@ -1404,11 +1409,8 @@ async fn f8_foreign_attachment_list_tracks_saved_remove_with_exact_thread_and_no
     control
         .store
         .database
-        .call(|db| {
-            db.execute(
-                "DELETE FROM runtime_pin WHERE id='attachment-managed-gc-pin'",
-                [],
-            )?;
+        .call(move |db| {
+            db.execute("DELETE FROM runtime_pin WHERE id=?1", [&fixture_pin])?;
             Ok(())
         })
         .await

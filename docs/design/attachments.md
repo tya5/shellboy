@@ -6,7 +6,7 @@
 
 `plan_add` はThread cwdに対して相対パスを解決し、現在の保護対象と追加分の送信可能rawサイズをworkerで確認する。同一パスを複数追加した場合も別要素として合計する。単一上限超過や読取り不能は後の準備で通知して会話継続するため、その実体を合計要求へ含めない。追加保護分だけで要求上限を超える場合は不採用。Controlは `add_tx` をoperation receiptのtransaction内で使い、planのselection revisionを再検査する。`list_tx` と `remove_tx` も同じ共通操作へ接続する。removeは選択をexcludedへ変えるだけで外部ファイルを削除しない。`AttachmentService::add` は最終source payloadに宣言済みのIDを登録する補助APIで、本文へ後付けしない。単体transactionを行い、CLI重複受付保証はControlのreceipt層が担う。最終本文のINSERTと登録の順序は[添付provenanceのM12境界](attachment-provenance.md)に従う。
 
-`prepare(thread, cancel, force_reload)` は選択とrevisionをDBでsnapshot化する。managed画像には同じtransactionでruntime pinを張り、ready以外へpinを追加しない。pinは解放枠つきで受け付けた `PinLease` のID接頭辞を持ち、leaseはsnapshot前に作る。leaseのDropは解放をDB workerへ送り、DB workerは自分のwakeでINSERT完了後に削除する。clipboard保存の成否はwriter closureだけが確定し、呼出し側が去った場合もwriter完了後に行を `failed` にしてpinを同じtransactionで消す（#450、[GC](gc.md#runtime-pin-release-and-crash-temporaries-450)）。読取りは有限workerの枠を得てから開始し、timeoutは枠待ちを含む。開始済みOS I/Oがtimeout/取消し後も残る場合、実closureがpermitとpinを持ち続ける。timeoutで見かけ上worker数を増やしたり、late結果を送信へ採用したりしない。
+`prepare(thread, cancel, force_reload)` は選択とrevisionをDBでsnapshot化する。managed画像には同じtransactionでruntime pinを張り、ready以外へpinを追加しない。pinは `PinLease` のID接頭辞を持ち、leaseはsnapshot前に作る。leaseの最後のcloneがDropすると生存登録を外してmaintenanceを起こし、maintenanceが生存leaseを持たないpinを削除する。clipboard保存の呼出し側が去った場合も、writer完了でleaseが終わった後に同じpassが `creating` のままの行を `failed` にする（#450、[GC](gc.md#runtime-pin-release-and-crash-temporaries-450)）。読取りは有限workerの枠を得てから開始し、timeoutは枠待ちを含む。開始済みOS I/Oがtimeout/取消し後も残る場合、実closureがpermitとpinを持ち続ける。timeoutで見かけ上worker数を増やしたり、late結果を送信へ採用したりしない。
 
 準備はまず有効選択のファイルを開き、本文を読まずに raw サイズを確認する。保護対象と古い順の除外をこの時点で決め、採用した参照の合計だけを予約する。読込み時に再度開き、予約を超えて成長したファイルは unavailable とする。形式不一致など本文でしか判定できない結果では、同じ要求内で除外を取り消さない。raw 予算とは別に Base64 と JSON の表現分が必要になる。
 
@@ -18,7 +18,7 @@
 
 合計が要求上限を超えると、過去の非保護添付をselected_order順に除外候補へする。新規保護分が現在の内容で上限を超えれば全要求を保留する。自動除外はまだDBへ確定せず、`adopt_prepared_tx` をAPI attempt受付transaction内で呼ぶ。ここでThread selection CAS、attempt/Turn generation、live Runを検査し、除外とattachment_send manifestを原子的に記録する。除外があればThread/model_attemptのselection revisionを更新し、新revisionを返す。driverは後続採用CASにこのrevisionを使う。容量が減ってもexcludedを自動復活させない。
 
-正常completedのモデル応答をgeneration照合して採用する同じDB transactionで `mark_success_tx` を呼ぶ。completed/current generationを再検査し、同じThread・添付IDごとの送信済み比較hashと保護解除を原子的に確定する。途中切断・取消し・プロバイダー失敗で呼んでも更新しない。`PreparedAttachments` はHTTP attempt終了まで保持する。Drop時にpin解放をDbWorkerへ送り、runtime終了後なら次回startup cleanupが旧instance pinを除く。
+正常completedのモデル応答をgeneration照合して採用する同じDB transactionで `mark_success_tx` を呼ぶ。completed/current generationを再検査し、同じThread・添付IDごとの送信済み比較hashと保護解除を原子的に確定する。途中切断・取消し・プロバイダー失敗で呼んでも更新しない。`PreparedAttachments` はHTTP attempt終了まで保持する。Drop時にleaseの登録を外してmaintenanceを起こし、生存leaseを持たないpinはmaintenanceが削除する（旧instanceのpinも同じ）。
 
 clipboard画像は明示要求だけで取得する。`ClipboardAdapter` は有限8件queueと専用1 workerでOS APIを扱い、clipboardオブジェクトを保持してX11 ownershipの早期解放を避ける。timeout後も開始済みOS APIが残り得るが増員しない。取得RGBAは寸法/乗算overflow/128 MiB decoded上限を検査する。OS側で画像をdecodeする前のメモリ使用量まではarboard APIから制限できないことを未保証として区別する。
 
@@ -26,7 +26,7 @@ clipboard画像は明示要求だけで取得する。`ClipboardAdapter` は有�
 
 `collect_managed` はactive selection（別Thread/forkを含む）とruntime pinを同じDB順序で検査してからdeletingを確定する。deleting以降は新しい選択/pinで復活できない。unlinkはworkerへ分け、成功後にdeleted、失敗ならdeletingを保持し再試行する。対象はmanaged_fileだけで、さらにpathがdata-dir/managed/clipboard/<id>.pngと一致することを確認する。通常外部ファイルはunlinkしない。managed pathを再添付した参照も同じmanaged lifecycleとして保護する。retentionは承認済みの7日/256 MiBをConfigから使い、protected分が超過しても保護を破らない。論理残量と物理空きの回復を混同しない。
 
-`restart_cleanup` はowner lock取得後・新規受付前だけ呼ぶ。旧instance pinを除き、中断creatingをfailedにしてdeleting/failedの掃除を再開する。temp名は同じmanaged IDだけを削除する。プロセス異常終了を副作用再開へ置換しない。
+`restart_cleanup` はowner lock取得後・新規受付前だけ呼ぶ。crash時のtemp fileを掃除してdeleting/failedの掃除を再開する（旧instance pinと中断creatingはmaintenanceのPins passが整理する）。temp名は同じmanaged IDだけを削除する。プロセス異常終了を副作用再開へ置換しない。
 
 テキストcopyはOS API成功ならOsCopied、OSC52なら1個のterminal request bytesを返す。UI外で原文を取得し、罫線や描画折返しを混ぜない。OSC52は上限を超えたとき分割上書きせずエラー。autoはSSH環境変数を薄いヒントに使うだけで、設定でOS/OSC52を指定できる。OSC52到達を確認済みコピーと表示しない。clipboardの定期読取りやテキストpasteの横取りは行わない。
 
