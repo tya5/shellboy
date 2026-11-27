@@ -2601,7 +2601,7 @@ fn absolute_attachment(path: PathBuf, cwd: &Path) -> Result<String, ApiError> {
 }
 
 /// Joins a relative schemeless path, or the relative folder of a `shellboy-app:`
-/// URI, to the CLI's working directory. Every other URI is sent unchanged.
+/// URI, to the CLI's working directory, dropping lexical `.` components.
 fn artifact_uri_from_cli(uri: String, cwd: &Path) -> Result<String, ApiError> {
     let scheme = crate::artifacts::uri_scheme(&uri);
     if let Some(name) = scheme
@@ -2630,7 +2630,12 @@ fn artifact_path_from_cli(path: &str, cwd: &Path) -> Result<String, ApiError> {
     {
         return Ok(path.into());
     }
-    cwd.join(path).into_os_string().into_string().map_err(|_| {
+    let joined: PathBuf = cwd
+        .join(path)
+        .components()
+        .filter(|component| *component != std::path::Component::CurDir)
+        .collect();
+    joined.into_os_string().into_string().map_err(|_| {
         ApiError::new(
             ErrorCode::InvalidArgument,
             "The absolute artifact path is not valid UTF-8",

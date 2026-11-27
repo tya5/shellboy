@@ -1637,6 +1637,49 @@ async fn artifact_read_serves_a_published_app_folder_and_refuses_escapes() {
     assert!(std::path::Path::new(folder).is_absolute(), "{uri}");
     let listed = ok(&["artifact", "list", "--thread", thread]).await;
     assert_eq!(listed["items"][0]["latest"]["uri"], uri);
+    let actual_cwd = std::path::Path::new(folder).parent().unwrap();
+    let undotted = ok(&[
+        "artifact",
+        "add",
+        "--thread",
+        thread,
+        "--uri",
+        "shellboy-app:kanban",
+        "--title",
+        "Kanban",
+    ])
+    .await;
+    assert_eq!(undotted["version"]["uri"], uri);
+    let dotted = ok(&[
+        "artifact",
+        "add",
+        "--thread",
+        thread,
+        "--uri",
+        "a/./b",
+        "--title",
+        "Not created",
+    ])
+    .await;
+    assert_eq!(
+        dotted["version"]["uri"],
+        actual_cwd.join("a").join("b").to_str().unwrap()
+    );
+    let parent = ok(&[
+        "artifact",
+        "add",
+        "--thread",
+        thread,
+        "--uri",
+        "a/../b",
+        "--title",
+        "Parent retained",
+    ])
+    .await;
+    assert_eq!(
+        parent["version"]["uri"],
+        actual_cwd.join("a").join("..").join("b").to_str().unwrap()
+    );
     let read = async |version: &str, path: Option<&str>| -> (bool, Value) {
         let mut args = vec![
             "artifact",
