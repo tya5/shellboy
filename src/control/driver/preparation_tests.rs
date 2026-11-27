@@ -3126,16 +3126,15 @@ async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
     let thread = accepted.thread_id.clone();
     let old_run = accepted.run_id.clone().unwrap();
     let reply_node_after = reply_id.clone();
-    let (new_run, path, receipt, receipt_reply, event) = control.store.database.call(move |db| {
+    let (new_run, path, receipt, event) = control.store.database.call(move |db| {
         let new_run: String = db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state='live'", [&thread], |r|r.get(0))?;
         let path: Vec<String> = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?.query_map([&thread], |r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let old_state: String = db.query_row("SELECT state FROM run WHERE id=?1", [&old_run], |r|r.get(0))?;
         assert_eq!(old_state, "stopped");
         let receipt = crate::control::db::message_details(db, &reply_node_after).unwrap();
-        let receipt_reply = crate::control::db::named_reply_state(db, &reply_node_after);
         // The notice is untargeted until admitted; its delivery wakes the new Run.
         let event: (String,Option<String>,String) = db.query_row("SELECT e.kind,d.recipient_id,e.payload_ref_json FROM event e JOIN delivery d ON d.event_id=e.id WHERE e.id=?1 AND e.target_run_id IS NULL AND d.state='pending'", [format!("reply-outcome-{reply_node_after}")], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-        Ok((new_run,path,receipt,receipt_reply,event))
+        Ok((new_run,path,receipt,event))
     }).await.unwrap();
     assert_eq!(
         path.as_slice(),
@@ -3155,7 +3154,13 @@ async fn recovery_rewind_terminal_reply_creates_run_after_path_rewrite() {
         Some(accepted.turn_id.as_deref().unwrap())
     );
     assert_eq!(receipt.sender, sender);
-    assert_eq!(receipt_reply.as_deref(), Some("ignored"));
+    assert_eq!(
+        receipt
+            .reply
+            .as_ref()
+            .and_then(|reply| reply["state"].as_str()),
+        Some("ignored")
+    );
     assert_eq!(event.0, "reply_outcome");
     assert_eq!(event.1.as_deref(), Some(new_run.as_str()));
     assert_eq!(

@@ -474,6 +474,11 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
     )
     .await;
     assert_eq!(observer_read["text"], observed["output"]);
+    let sent_id = replies[0]["result"]["message_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let observer_id = observer.to_owned();
     control
         .store
         .database
@@ -492,7 +497,8 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
             ] {
                 assert_eq!(db.query_row(sql, [], |r| r.get::<_, i64>(0))?, 0);
             }
-            assert!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(sender_json,'$.execution_id') IS NOT NULL", [], |r| r.get::<_, i64>(0))? > 0);
+            let sender = shellboy::control::db::message_details(db, &sent_id)?.sender;
+            assert_eq!(sender.execution_id.as_deref(), Some(observer_id.as_str()));
             Ok(())
         })
         .await
