@@ -861,10 +861,10 @@ fn dispatch_shown_refresh(
     background_tx: &mpsc::Sender<BackgroundResult>,
     data_dir: &std::path::Path,
     language: UiLanguage,
-    shown: management_state::Shown,
 ) {
-    let generation = management.next_generation();
-    management.dispatched(generation, Some(shown.clone()));
+    let Some((generation, shown)) = management.start_refresh() else {
+        return;
+    };
     let control = control.clone();
     let sender = background_tx.clone();
     let data_dir = data_dir.to_owned();
@@ -2684,6 +2684,7 @@ async fn run_client(
                             }
                         });
                     }
+                    UiAction::ManagementClosed => management.close(),
                     UiAction::CancelWait => {
                         management.cancel_wait();
                         status(
@@ -3318,7 +3319,21 @@ async fn run_client(
                             _ => None,
                         }
                     });
-                    let management_id = management.begin_result();
+                    let management_id = match management.begin_result() {
+                        management_state::Arrival::Replace(id) => id,
+                        management_state::Arrival::Refresh => {
+                            // The shown result read again: update it in place; a failed
+                            // read leaves what is shown and the next mark reads again.
+                            if let Ok(report) = result {
+                                management.detail = report.detail.map(Arc::new);
+                                management_update(&updates, context, UiUpdate::ManagementRefreshed {
+                                    work_status, request_id: management.request_id,
+                                    fields: report.fields, omitted: report.omitted,
+                                }).await;
+                            }
+                            continue;
+                        }
+                    };
                     match result {
                         Ok(mut report) => {
                             if let Some(notice) = notice {
@@ -3442,12 +3457,10 @@ async fn run_client(
                                 dirty_threads.insert(thread);
                             }
                         }
-                        if let Some(shown) = management.shown().cloned()
-                            && shown.is_stale_after(&page, resync)
-                        {
+                        if management.wants_refresh(&page, resync) {
                             // The shown F8 result is read again with the command that made it.
                             match command_slots.clone().try_acquire_owned() {
-                                Ok(permit) => dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language, shown),
+                                Ok(permit) => dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language),
                                 Err(_) => {
                                     management.defer_refresh();
                                     #[cfg(test)]
@@ -3588,11 +3601,10 @@ async fn run_client(
             _=read_workers.join_next(),if !read_workers.is_empty()=> {},
             _=workers.join_next(),if !workers.is_empty()=> {
                 // The slot a stale shown result waited for is free again.
-                if management.refresh_pending()
+                if management.refresh_ready()
                     && let Ok(permit) = command_slots.clone().try_acquire_owned()
-                    && let Some(shown) = management.take_refresh()
                 {
-                    dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language, shown);
+                    dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language);
                 }
             },
             _=send_workers.join_next(),if !send_workers.is_empty()=> {},

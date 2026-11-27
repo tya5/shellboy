@@ -41,8 +41,6 @@ APIの明示長さcodeだけsegmentを有限に二分する。unknown provider e
 
 ## 管理表示と費用preview
 
-`management_status(IndexArgs) -> Result<serde_json::Value, ApiError>` はTUI用のread-only補足で、公開CLIの `IndexStatus` 型/応答は変更しない。返却は `spaces`（id/profile/model/dimension/state/selected）、`active_space`、表示対象 `selected_space`、`scope`、`coverage`、利用者が分類を判断できる `definitions`。資格情報/接続URLを含めない。明示spaceはそのspaceだけを数え、active/candidate/古いinactiveを合算しない。存在しないspaceは拒否する。引数のscope/Thread/sourceが全部空の場合、管理表示だけを全source観測とし、backfill/rebuildの明示選択要件は変えない。
-
 sourceの重複を除き、現在のpayload revision/body hash、必要ならrawのretention generation/saved sequence/encodingまで一致するjobだけを数える。可視本文ではbody kind/span/本文hashも現在のsourceと照合する。doneは一致するembedding_chunkがある場合だけで、pending/running/failedやsplit親を完了扱いしない。長さerrorで分割された子のdone区間が元segment全体を覆う場合も完了coverageとして扱う。
 
 `coverage` のsource分類は互いに排他的:
