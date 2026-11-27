@@ -19,9 +19,11 @@ use tokio_util::sync::CancellationToken;
 mod peer;
 mod server;
 pub use server::LocalServer;
+#[cfg(unix)]
+pub(crate) use server::MAX_CONNECTIONS;
 #[cfg(test)]
 pub(crate) use server::tests::Fixture as TestServer;
-pub(crate) use server::{AdmissionRefusals, MAX_CONNECTIONS, MAX_WAIT_WORK, is_wait};
+pub(crate) use server::{AdmissionRefusals, MAX_WAIT_WORK, is_wait};
 
 const FRAME_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
