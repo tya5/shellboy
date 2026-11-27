@@ -287,7 +287,7 @@ value, for its 24-hour retention. `operation get` reads it, and `result.changed_
 `config_changed` diagnostic records the Origin IDs and field names, never values, in the rotating log, for
 after the receipt is gone. A successful file write also records a coalesced global `config_changed` mark on the
 existing `events.wait` cursor stream. It has no Thread ID or values; clients reread the file and loaded state with
-`config.get`. The mark applies even when a change requires restart and is absent for refused/no-op writes. TUI readers use the shared registry directly, without an event or file I/O.
+`config.get`. The mark applies even when a change requires restart and is absent for refused/no-op writes. `credentials.set` marks only when it newly stores a key for a connection that had none, and `credentials.clear` only when it removed a stored key, because `config.get` reports only whether a key is stored; replacing or re-setting a key does not mark. TUI readers use the shared registry directly, without an event or file I/O.
 
 **No owner.** `config get` and `config set` fail with `app_not_running`, and the hint names the alternative.
 There is no standalone edit path, since it would have no receipt or record. `--config` is refused on both,

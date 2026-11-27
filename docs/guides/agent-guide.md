@@ -1035,7 +1035,7 @@ Never write a credential value into the config file: set
 `api_key_env` to a variable's name and leave the value to the user's environment. On `operation_conflict`, read
 again and show the user what changed before repeating. Your identity is recorded with the change. UI clients can watch `events.wait` for
 `config_changed` and reread with `config get`; the global hint is cursor-based and
-works for changes from CLI or another device as well as this client. It reports no
+works for changes from CLI or another device as well as this client. A credential change marks only when a key becomes stored or is removed, not when one is replaced. It reports no
 values, so render only the subsequent read and show file and loaded values separately.
 
 ## Keys and connection checks
