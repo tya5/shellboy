@@ -3266,6 +3266,8 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         }
         assert_eq!(serde_json::from_str::<DraftSnapshot>(&draft).unwrap().text,"latest unsent draft");
         assert_eq!(db.query_row("SELECT COUNT(*) FROM receipt WHERE target_thread_id=?1",[&thread],|r|r.get::<_,i64>(0))?,1);
+        let raw: Option<String> = db.query_row("SELECT result_json FROM receipt WHERE target_thread_id=?1",[&thread],|r|r.get(0))?;
+        assert!(!raw.as_deref().is_some_and(|raw| raw.contains("queued instruction survives")), "the queued-at-quit receipt must not duplicate the submitted text");
         let (kind,body):(String,String)=db.query_row("SELECT n.kind,n.payload_json FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1",[thread],|r|Ok((r.get(0)?,r.get(1)?)))?;
         assert_eq!(kind,"user");
         let payload:serde_json::Value=serde_json::from_str(&body).unwrap();

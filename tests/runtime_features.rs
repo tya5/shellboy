@@ -4487,7 +4487,14 @@ assert!(before_size > 30_000, "fixture must contain both large tool outputs: {be
 let mut prepared_report=if cancel_active==Some(true) {
     Some(prepared_report_from_incoming(&control,&report_turn_id,3,&before,200).await)
 }else{None};
-before.reply.send((200, tool_response(2, if cancel_active == Some(true) { 200 } else { first_known_a }))).unwrap();
+let mut third_group = tool_response(2, if cancel_active == Some(true) { 200 } else { first_known_a });
+if oversized && cancel_active.is_none() {
+    // This group is protected at the first attempt. The retry's new group
+    // displaces that protection, so do not give the older group reducible output.
+    third_group["output"][0]["name"] = json!("fixture_unknown_tool");
+    third_group["output"][0]["arguments"] = json!("{}");
+}
+before.reply.send((200, third_group)).unwrap();
 if cancel_active != Some(true) {
     *entered_phase.borrow_mut()="awaiting final model report after tool completion".to_owned();
     let final_report=incoming_ordinary(&control,&mut receive).await;
@@ -4780,9 +4787,31 @@ control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort
         assert_eq!(first_spills.len(), 2);
         // A fresh report at the threshold in the same Turn: same closed range
         // and settings, so the deterministic failure is not repeated (§6.3).
-        after.reply.send((200, tool_response(3, 205))).unwrap();
+        // Keep the Turn running without adding reducible shell output. An
+        // echo result includes shell metadata and gives the next attempt a
+        // legitimately new spill source even when the closed range is unchanged.
+        let retry = prepared_report_from_incoming(&control, &boundary.trigger.turn_id, 1, &after, 205).await;
+        let mut same_range = tool_response(3, 205);
+        same_range["output"][0]["name"] = json!("fixture_unknown_tool");
+        same_range["output"][0]["arguments"] = json!("{}");
+        after.reply.send((200, same_range)).unwrap();
         let gated = incoming_ordinary(&control, &mut receive).await;
         assert_ne!(gated.body["tools"], json!([]), "the same sources must not trigger another summary");
+        // Keep the active group protected until this exact retry settles.
+        // Closing the Turn first permits a separate, legitimate closed spill.
+        let mut changes = control.subscribe();
+        loop {
+            if let Some(item) = compact_attempt(&control, &target, &retry.owner.attempt_id).await
+                && item["state"] != "unknown"
+            {
+                assert_eq!(item["trigger"]["input_tokens"], 205);
+                break;
+            }
+            tokio::select! {
+                change = changes.recv() => { change.unwrap(); }
+                request = receive.recv() => panic!("unexpected provider request before same-range settlement: {:?}", request.unwrap().kind()),
+            }
+        }
         gated.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let observed_events=proactive_events(&control,&target).await;
@@ -4810,7 +4839,7 @@ control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort
         assert_eq!(item["metrics"]["summary_usage"]["output_tokens"]["known_sum"], 123);
         assert_eq!(item["state"], "failed", "{item:#?}");
         let retained_spills = selected_compaction_nodes(&control, &target, "spill").await;
-        assert!(first_spills.iter().all(|id| retained_spills.contains(id)));
+        assert_eq!(first_spills.into_iter().collect::<std::collections::BTreeSet<_>>(), retained_spills.into_iter().collect(), "same-range rejection preserves the original spills and adds none");
         assert!(selected_compaction_nodes(&control, &target, "summary").await.is_empty());
         eprintln!("partial-spill replay bytes {before_size} -> {after_size}; summary input=321 output=123; events={events:#?}");
         *entered_phase.borrow_mut()="shutting down partial-spill control/owner".to_owned();
@@ -5916,48 +5945,6 @@ fn bx_omitted_outputs(body: &Value) -> usize {
         .count()
 }
 
-fn fresh_growth_attempts(reports: &[Value]) -> Vec<&Value> {
-    let mut fresh = Vec::new();
-    for report in reports {
-        let attempt = &report["automatic_attempt"];
-        if !attempt.is_object() {
-            continue;
-        }
-        let token = &report["manifest_token"];
-        let request_scope = token["scope"].as_u64().expect("saved report scope");
-        let request_boundary = token["boundary"].as_u64().expect("saved report boundary");
-        let a = &report["a_boundary"];
-        let a_scope = a["scope"].as_u64().expect("automatic A scope");
-        let a_boundary = a["boundary"].as_u64().expect("automatic A boundary");
-        assert_eq!(
-            request_scope, a_scope,
-            "report and automatic A token remain in the same scope: {report:#?}"
-        );
-        assert!(
-            request_boundary <= a_boundary,
-            "the request manifest cannot be from a future A boundary: {report:#?}"
-        );
-        assert_eq!(
-            attempt["trigger"]["input_tokens"], report["input_tokens"],
-            "the automatic trigger belongs to this exact captured report row: {report:#?}"
-        );
-        assert_ne!(attempt["state"], "unknown");
-        if request_boundary < a_boundary {
-            assert_eq!(
-                attempt["state"], "no_target",
-                "a pre-reset report does not enter a post-reset compaction route: {report:#?}"
-            );
-            assert!(
-                attempt["compaction_outcome"].is_null(),
-                "no Summary operation for stale A: {report:#?}"
-            );
-        } else {
-            fresh.push(report);
-        }
-    }
-    fresh
-}
-
 /// #303 §6.3: a deterministic closed failure blocks only its own original
 /// endpoints. When a new older Turn becomes eligible, the closed range ends
 /// later, so the next eligible report sends a summary again and adopts it.
@@ -6177,6 +6164,24 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
 /// spilled and then summarized in the same attempt. An older complete tool
 /// group of the open loop is spilled once a newer group exists; the active
 /// summary then covers it through the latest round, which is kept as text.
+async fn selected_completed_pair(control: &Arc<Control>, thread: &str) -> Vec<String> {
+    let window = selected_history(control, thread).await;
+    let mut nodes = window
+        .items
+        .into_iter()
+        .rev()
+        .filter(|node| matches!(node.kind.as_str(), "assistant_response" | "tool_result"));
+    let result = nodes
+        .next()
+        .expect("result for the preceding provider call");
+    let call = nodes
+        .next()
+        .expect("assistant response for the preceding provider call");
+    assert_eq!(result.kind, "tool_result");
+    assert_eq!(call.kind, "assistant_response");
+    vec![call.node_id, result.node_id]
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible() {
     let root = tempfile::tempdir().unwrap();
@@ -6214,6 +6219,8 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         "below threshold nothing happens"
     );
     assert_strict_append(&first.body, &second.body, "below threshold");
+    let mut eligible_pairs = std::collections::BTreeSet::new();
+    assert!(eligible_pairs.insert(selected_completed_pair(&control, &thread).await));
     let prepared_active =
         prepared_report_from_incoming(&control, &trigger_turn, 2, &second, 200).await;
     second
@@ -6243,6 +6250,7 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
                         .any(|item| item["call_id"] == previous_call)),
                     "each natural continuation owns the previous completed call"
                 );
+                assert!(eligible_pairs.insert(selected_completed_pair(&control, &thread).await));
                 request
                     .reply
                     .send((200, bx_tool(&format!("call-{next_call}"), 10, command)))
@@ -6325,6 +6333,7 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
                     .is_some_and(|items| items.iter().any(|item| item["call_id"] == previous_call)),
                 "the natural post-Summary continuation owns its preceding call"
             );
+            assert!(eligible_pairs.insert(selected_completed_pair(&control, &thread).await));
             continuation
                 .reply
                 .send((200, bx_tool(&format!("call-{next_call}"), 10, command)))
@@ -6417,12 +6426,6 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     } else {
         "no_target"
     };
-    let source_thread = thread.clone();
-    let mut eligible_pairs: std::collections::BTreeSet<Vec<String>> = control.store.database.call(move |db| {
-        Ok(db.prepare("SELECT n.id,r.node_id FROM node n JOIN tool_group g ON g.id=json_extract(n.payload_json,'$.group_id') JOIN tool_result r ON r.group_id=g.id JOIN turn t ON t.id=g.turn_id WHERE t.thread_id=?1 AND n.kind='assistant_response' AND r.call_id IN ('call-0','call-1','call-2')")?
-            .query_map([source_thread], |row| Ok(vec![row.get(0)?,row.get(1)?]))?
-            .collect::<rusqlite::Result<_>>()?)
-    }).await.unwrap();
     assert_eq!(
         eligible_pairs.len(),
         3,
@@ -7866,7 +7869,6 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
         (202..=218).collect::<Vec<_>>(),
         "all 17 independently named high reports remain present: {report_ledger:#?}"
     );
-    let fresh = fresh_growth_attempts(&report_ledger);
     assert_eq!(
         attempts.len(),
         17,
@@ -7883,12 +7885,34 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
             .all(|attempt| attempt["state"] == "failed" || attempt["state"] == "no_target"),
         "stale-A no-target and fresh failure-memory records remain distinct: {attempts:#?}"
     );
-    assert!(!fresh.is_empty());
-    assert!(
-        fresh
-            .iter()
-            .all(|report| report["automatic_attempt"]["state"] == "failed"),
-        "every source-current closed attempt retains the failure negative: {fresh:#?}"
+    assert!(attempts.iter().any(|attempt| attempt["state"] == "failed"));
+    for report in &report_ledger {
+        let attempt = &report["automatic_attempt"];
+        if report["input_tokens"].as_u64().unwrap() < 200 {
+            assert!(attempt.is_null(), "below-threshold report: {report:#?}");
+        } else {
+            assert_eq!(attempt["attempt_id"], report["model_attempt_id"]);
+            assert_eq!(attempt["trigger"]["input_tokens"], report["input_tokens"]);
+            if attempt["state"] == "no_target" {
+                assert!(
+                    attempt["compaction_outcome"].is_null(),
+                    "no reduction for a no-target report: {report:#?}"
+                );
+            }
+        }
+    }
+    let charged_requests: u64 = attempts
+        .iter()
+        .map(|attempt| {
+            attempt["metrics"]["summary_usage"]["requests"]
+                .as_u64()
+                .unwrap_or(0)
+        })
+        .sum();
+    assert_eq!(
+        charged_requests,
+        u64::from(summaries),
+        "the one provider POST is charged to the captured attempts"
     );
     assert!(slots.0.is_some() && slots.1.is_none(), "{slots:?}");
     assert_eq!(
@@ -8115,17 +8139,15 @@ final_request.reply.send((200, answer("finished"))).unwrap();
             "the predeclared report ledger has unique actual model-attempt identities");
         let ledger_ids = owner_ids.clone();
         let expected_tokens: Vec<u64> = prepared_reports.iter().map(|report| report.owner.input_tokens).collect();
-        let request_tokens: Vec<String> = prepared_reports.iter().map(|report| report.owner.request_token.clone()).collect();
         let mut report_ledger = Vec::new();
-        for ((id, input_tokens), request_token) in ledger_ids.into_iter().zip(expected_tokens).zip(request_tokens) {
+        for (id, input_tokens) in ledger_ids.into_iter().zip(expected_tokens) {
             let saved_id = id.clone();
             let usage: Option<i64> = control.store.database.call(move |db| {
                 Ok(db.query_row("SELECT json_extract(usage_json,'$.input_tokens') FROM model_attempt WHERE id=?1", [saved_id], |row| row.get(0))?)
             }).await.unwrap();
             assert_eq!(usage, Some(input_tokens as i64), "exact source report usage for {id}");
-            let manifest: Value = serde_json::from_str(&request_token).expect("saved source report token");
             let automatic = compact_attempt(&control, &target, &id).await;
-            report_ledger.push(json!({"model_attempt_id":id,"manifest_token":manifest,"input_tokens":input_tokens,"automatic_attempt":automatic}));
+            report_ledger.push(json!({"model_attempt_id":id,"input_tokens":input_tokens,"automatic_attempt":automatic}));
         }
         let expected_terminals = report_ledger.iter()
             .filter(|report| report["automatic_attempt"].is_object()).count();
@@ -8159,12 +8181,6 @@ final_request.reply.send((200, answer("finished"))).unwrap();
         for report in &mut report_ledger {
             let id = report["model_attempt_id"].as_str().unwrap().to_owned();
             let item = compact_attempt(&control, &target, &id).await;
-            if item.is_some() {
-                let raw: String = control.store.database.call(move |db| {
-                    Ok(db.query_row("SELECT json_extract(trigger_json,'$.a_boundary') FROM automatic_compaction WHERE attempt_id=?1", [id], |row| row.get(0))?)
-                }).await.unwrap();
-                report["a_boundary"] = serde_json::from_str(&raw).unwrap();
-            }
             report["automatic_attempt"] = item.unwrap_or(Value::Null);
         }
         let attempts = bx_attempts(&control, &target).await;

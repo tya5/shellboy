@@ -1730,13 +1730,36 @@ async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batche
                 )?,
                 0
             );
-            assert_eq!(
-                db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?,
-                130
-            );
             Ok(())
         })
         .await
         .unwrap();
+    for n in 0..130 {
+        let args = DraftSaveArgs {
+            thread_id: "t".into(),
+            draft: Box::new(crate::ui::DraftSnapshot {
+                draft_id: format!("old-source-{n:03}"),
+                revision: 7,
+                text: "must not resurface".into(),
+                ..Default::default()
+            }),
+            anchor: crate::ui::ViewAnchor::default(),
+            follow_tail: true,
+        };
+        let Err(refused) = store
+            .execute(
+                Request::new(format!("fixture:resave-{n:03}"), Command::DraftSave(args)),
+                None,
+            )
+            .await
+        else {
+            panic!("collected submitted revision {n} was allowed to resurface")
+        };
+        assert_eq!(refused.code, ErrorCode::OperationConflict);
+        assert_eq!(
+            refused.details.unwrap()["reason"],
+            "draft_revision_submitted"
+        );
+    }
     store.database.shutdown().await.unwrap();
 }
