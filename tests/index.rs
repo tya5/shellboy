@@ -270,6 +270,23 @@ impl Fixture {
         self.proxy.close().await;
     }
 }
+/// What `index.status --coverage` reports for one selection (empty means all).
+trait CoverageView {
+    async fn coverage_view(&self, args: IndexArgs) -> Result<Value, shellboy::protocol::ApiError>;
+}
+impl CoverageView for Arc<IndexService> {
+    async fn coverage_view(
+        &self,
+        mut args: IndexArgs,
+    ) -> Result<Value, shellboy::protocol::ApiError> {
+        if args.scope.is_none() && args.thread_ids.is_empty() && args.source_ids.is_empty() {
+            args.scope = Some(IndexScope::All);
+        }
+        let mut status: shellboy::protocol::IndexStatusArgs = args.into();
+        status.coverage = true;
+        Ok(serde_json::to_value(self.status(status).await?).unwrap())
+    }
+}
 fn args() -> IndexArgs {
     IndexArgs {
         kinds: Vec::new(),
@@ -840,7 +857,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     );
     let management = f
         .service
-        .management_status(IndexArgs {
+        .coverage_view(IndexArgs {
             kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["raw-node".into()],
@@ -848,8 +865,14 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
         })
         .await
         .unwrap();
-    assert_eq!(management["coverage"]["fully_indexed_sources"], 1);
-    assert_eq!(management["coverage"]["coverage_unverified_sources"], 0);
+    assert_eq!(
+        management["coverage_window"]["coverage"]["fully_indexed_sources"],
+        1
+    );
+    assert_eq!(
+        management["coverage_window"]["coverage"]["coverage_unverified_sources"],
+        0
+    );
     f.db.call(|db| {
         let tx = db.transaction()?;
         retire_index_source_tx(&tx, "raw-node", false).unwrap();
@@ -987,7 +1010,7 @@ async fn raw_retention_during_inflight_embedding_does_not_resurrect_vectors() {
     );
     let management = f
         .service
-        .management_status(IndexArgs {
+        .coverage_view(IndexArgs {
             kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["raw-node".into()],
@@ -995,8 +1018,14 @@ async fn raw_retention_during_inflight_embedding_does_not_resurrect_vectors() {
         })
         .await
         .unwrap();
-    assert_eq!(management["coverage"]["not_indexable_sources"], 1);
-    assert_eq!(management["coverage"]["eligible_sources"], 0);
+    assert_eq!(
+        management["coverage_window"]["coverage"]["not_indexable_sources"],
+        1
+    );
+    assert_eq!(
+        management["coverage_window"]["coverage"]["eligible_sources"],
+        0
+    );
     f.close().await;
 }
 
@@ -1222,18 +1251,30 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     f.db.call(|db|{db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('view','/tmp','/tmp/AGENTS.md','embed','model','now')",[])?;db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('view',0,'done'),('view',1,'untouched')",[])?;Ok(())}).await.unwrap();
     let before = f.db.call(|db| Ok(db.total_changes())).await.unwrap();
     let calls = f.proxy.count();
-    let status = f.service.management_status(args()).await.unwrap();
-    assert_eq!(status["coverage"]["eligible_sources"], 3);
-    assert_eq!(status["coverage"]["fully_indexed_sources"], 1);
-    assert_eq!(status["coverage"]["partially_indexed_sources"], 1);
-    assert_eq!(status["coverage"]["not_indexed_sources"], 1);
-    assert_eq!(status["coverage"]["not_indexable_sources"], 1);
+    let status = f.service.coverage_view(args()).await.unwrap();
+    assert_eq!(status["coverage_window"]["coverage"]["eligible_sources"], 3);
+    assert_eq!(
+        status["coverage_window"]["coverage"]["fully_indexed_sources"],
+        1
+    );
+    assert_eq!(
+        status["coverage_window"]["coverage"]["partially_indexed_sources"],
+        1
+    );
+    assert_eq!(
+        status["coverage_window"]["coverage"]["not_indexed_sources"],
+        1
+    );
+    assert_eq!(
+        status["coverage_window"]["coverage"]["not_indexable_sources"],
+        1
+    );
     assert_eq!(status["spaces"].as_array().unwrap().len(), 1);
     assert_eq!(status["spaces"][0]["dimension"], 3);
     assert_eq!(status["spaces"][0]["selected"], true);
     let selected = f
         .service
-        .management_status(IndexArgs {
+        .coverage_view(IndexArgs {
             kinds: Vec::new(),
             dimensions: None,
             thread_ids: vec!["view".into()],
@@ -1241,8 +1282,14 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
         })
         .await
         .unwrap();
-    assert_eq!(selected["coverage"]["eligible_sources"], 2);
-    assert_eq!(selected["coverage"]["partially_indexed_sources"], 0);
+    assert_eq!(
+        selected["coverage_window"]["coverage"]["eligible_sources"],
+        2
+    );
+    assert_eq!(
+        selected["coverage_window"]["coverage"]["partially_indexed_sources"],
+        0
+    );
     assert_eq!(
         f.db.call(|db| Ok(db.total_changes())).await.unwrap(),
         before
@@ -1272,7 +1319,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     .unwrap();
     let status = f
         .service
-        .management_status(IndexArgs {
+        .coverage_view(IndexArgs {
             kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["done".into()],
@@ -1280,9 +1327,15 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
         })
         .await
         .unwrap();
-    assert_eq!(status["coverage"]["not_indexed_sources"], 1);
-    assert_eq!(status["coverage"]["fully_indexed_sources"], 0);
-    assert_eq!(status["coverage"]["stale_segments"], 1);
+    assert_eq!(
+        status["coverage_window"]["coverage"]["not_indexed_sources"],
+        1
+    );
+    assert_eq!(
+        status["coverage_window"]["coverage"]["fully_indexed_sources"],
+        0
+    );
+    assert_eq!(status["coverage_window"]["coverage"]["stale_segments"], 1);
     assert_eq!(
         f.service
             .preview(IndexArgs {
@@ -1314,9 +1367,15 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
         .unwrap();
     let before = f.db.call(|db| Ok(db.total_changes())).await.unwrap();
     let calls = f.proxy.count();
-    let status = f.service.management_status(args()).await.unwrap();
-    assert_eq!(status["coverage"]["coverage_unverified_sources"], 1);
-    assert_eq!(status["coverage"]["fully_indexed_sources"], 0);
+    let status = f.service.coverage_view(args()).await.unwrap();
+    assert_eq!(
+        status["coverage_window"]["coverage"]["coverage_unverified_sources"],
+        1
+    );
+    assert_eq!(
+        status["coverage_window"]["coverage"]["fully_indexed_sources"],
+        0
+    );
     assert_eq!(
         f.db.call(|db| Ok(db.total_changes())).await.unwrap(),
         before
@@ -1332,19 +1391,19 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
         .await
         .unwrap();
     f.drain().await;
-    let status = f.service.management_status(args()).await.unwrap();
+    let status = f.service.coverage_view(args()).await.unwrap();
     assert_eq!(status["spaces"].as_array().unwrap().len(), 2);
-    assert_ne!(status["selected_space"], old);
+    assert_ne!(status["coverage_window"]["selected_space"], old);
     assert!(
         status["spaces"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|space| space["id"] == old && space["state"] == "inactive")
+            .any(|space| space["space_id"] == old && space["state"] == "inactive")
     );
     let explicit = f
         .service
-        .management_status(IndexArgs {
+        .coverage_view(IndexArgs {
             kinds: Vec::new(),
             dimensions: None,
             space_id: Some(old.clone()),
@@ -1353,12 +1412,23 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
         })
         .await
         .unwrap();
-    assert_eq!(explicit["selected_space"], old);
-    assert_eq!(explicit["coverage"]["coverage_unverified_sources"], 1);
+    assert_eq!(explicit["coverage_window"]["selected_space"], old);
+    assert_eq!(
+        explicit["coverage_window"]["coverage"]["coverage_unverified_sources"],
+        1
+    );
     f.db.call(|db|{db.execute("UPDATE shell_execution SET retention_generation=retention_generation+1 WHERE id='execution'",[])?;Ok(())}).await.unwrap();
-    let status = f.service.management_status(args()).await.unwrap();
-    assert_eq!(status["coverage"]["not_indexed_sources"], 1);
-    assert!(status["coverage"]["stale_segments"].as_u64().unwrap() > 0);
+    let status = f.service.coverage_view(args()).await.unwrap();
+    assert_eq!(
+        status["coverage_window"]["coverage"]["not_indexed_sources"],
+        1
+    );
+    assert!(
+        status["coverage_window"]["coverage"]["stale_segments"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     f.close().await;
 }
 
@@ -1388,8 +1458,11 @@ async fn fee_preview_credits_completed_length_split_children_without_api_or_new_
         f.db.call(|db| Ok(db.total_changes())).await.unwrap(),
         before
     );
-    let status = f.service.management_status(args()).await.unwrap();
-    assert_eq!(status["coverage"]["fully_indexed_sources"], 1);
+    let status = f.service.coverage_view(args()).await.unwrap();
+    assert_eq!(
+        status["coverage_window"]["coverage"]["fully_indexed_sources"],
+        1
+    );
     f.close().await;
 }
 
@@ -1426,9 +1499,6 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
             .as_deref(),
         Some(active.as_str())
     );
-    let view = f.service.management_status(args()).await.unwrap();
-    assert_eq!(view["preparation"]["enqueue_fence_present"], true);
-    assert_eq!(view["preparation"]["enqueue_fence_count"], 1);
     assert!(
         f.service
             .status(args().into())
@@ -1453,9 +1523,14 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
     config.embedding.model = Some("embedding-fixture".into());
     let restarted = IndexService::new(f.db.clone(), Arc::new(config));
     let workers = restarted.start().await.unwrap();
-    assert_eq!(
-        restarted.management_status(args()).await.unwrap()["preparation"]["enqueue_fence_present"],
-        true
+    assert!(
+        restarted
+            .status(args().into())
+            .await
+            .unwrap()
+            .reason
+            .unwrap()
+            .contains("admission")
     );
     assert_eq!(
         restarted
