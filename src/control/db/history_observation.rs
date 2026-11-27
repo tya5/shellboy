@@ -15,7 +15,7 @@ impl Store {
         shell: bool,
     ) -> Result<MutationResult> {
         if args.before.saturating_add(args.after).saturating_add(1) as usize
-            > crate::frontend::WINDOW_FACTS_LIMIT
+            > crate::history::window_facts::WINDOW_FACTS_LIMIT
         {
             return Err(error(
                 ErrorCode::InputLimit,
@@ -122,7 +122,7 @@ fn observe(
         .iter()
         .map(|item| (item.node_id.clone(), item.kind.clone()))
         .collect::<Vec<_>>();
-    let facts = crate::frontend::read_window_facts(db, &items, extra)
+    let facts = crate::history::window_facts::read_window_facts(db, &items, extra)
         .map_err(StorageError::into_api_error)?;
     Ok(HistoryWindowObservation {
         read_sequence,

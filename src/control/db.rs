@@ -2770,7 +2770,7 @@ fn read_thread_details(
 }
 
 fn title_text(text: &str) -> String {
-    crate::presentation::sanitize_plain(&text.replace('\r', "\n"), 0)
+    crate::plain_text::sanitize_plain(&text.replace('\r', "\n"), 0)
         .0
         .split_whitespace()
         .collect::<Vec<_>>()

@@ -189,7 +189,7 @@ pub(super) fn list_pending(
             let sender = crate::protocol::MessageSender::from_saved(Some(&row.get::<_,String>(5)?));
             let payload: Option<String> = row.get(6)?;
             let excerpt = payload.and_then(|v|serde_json::from_str::<Value>(&v).ok()).map(|v|crate::history::conversation_excerpt(&v,512)).unwrap_or_default();
-            let item = json!({"message_id":row.get::<_,String>(2)?,"created_at":time,"asked_by":model_thread_identity(&sender),"sender":sender,"recipient":match name {Some(name)=>json!({"kind":"name","name":name}),None=>json!({"kind":"thread","thread_id":thread})},"reply":row.get::<_,Option<String>>(7)?.and_then(|v|serde_json::from_str::<Value>(&v).ok()),"excerpt":crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""),0).0});
+            let item = json!({"message_id":row.get::<_,String>(2)?,"created_at":time,"asked_by":model_thread_identity(&sender),"sender":sender,"recipient":match name {Some(name)=>json!({"kind":"name","name":name}),None=>json!({"kind":"thread","thread_id":thread})},"reply":row.get::<_,Option<String>>(7)?.and_then(|v|serde_json::from_str::<Value>(&v).ok()),"excerpt":crate::plain_text::sanitize_plain(excerpt.lines().next().unwrap_or(""),0).0});
             Ok((time,id,item))
         })?.collect()
     };

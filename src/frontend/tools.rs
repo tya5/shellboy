@@ -63,13 +63,13 @@ WHERE r.group_id=?1 AND c.ordinal<?2 AND r.status<>'cancelled' AND json_valid(n.
 ORDER BY c.ordinal DESC LIMIT 1";
 
 #[derive(Default)]
-pub(super) struct ToolFacts {
+pub(crate) struct ToolFacts {
     sources: Vec<CallSource>,
     truncated_nodes: Vec<String>,
     notices: Vec<super::notices::Fact>,
 }
 impl ToolFacts {
-    pub(super) fn into_window(self) -> crate::protocol::HistoryWindowTools {
+    pub(crate) fn into_window(self) -> crate::protocol::HistoryWindowTools {
         crate::protocol::HistoryWindowTools {
             calls: self.sources,
             limited_node_ids: self.truncated_nodes,
@@ -80,7 +80,7 @@ impl ToolFacts {
     pub(super) fn sources(&self) -> &[CallSource] {
         &self.sources
     }
-    pub(super) fn append(&mut self, other: Self) {
+    pub(crate) fn append(&mut self, other: Self) {
         for notice in other.notices {
             if let Some(old) = self
                 .notices
@@ -305,7 +305,7 @@ struct ModernSource {
     whole: bool,
 }
 
-pub(super) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts, StorageError> {
+pub(crate) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts, StorageError> {
     if ids.len() > MAX_NODES {
         return Err(ApiError::new(
             ErrorCode::InputLimit,
