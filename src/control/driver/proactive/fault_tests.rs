@@ -1575,7 +1575,7 @@ async fn direct_boundary_case(
             .as_array()
             .unwrap()
             .iter()
-            .filter(|row| row[1] == summary_id && row[2] == "summary")
+            .filter(|row| row[1] == summary_id.as_str() && row[2] == "summary")
             .collect::<Vec<_>>();
         let checkpoint_path = checkpoint_witness
             .selected_path_source_bytes
@@ -1728,7 +1728,7 @@ async fn direct_boundary_case(
         );
         let summary_position = final_path
             .iter()
-            .position(|row| row[1] == summary_id)
+            .position(|row| row[1] == summary_id.as_str())
             .unwrap();
         let last_spilled_ordinal = checkpoint_path
             .iter()
@@ -1738,7 +1738,7 @@ async fn direct_boundary_case(
             .expect("committed spill has a selected checkpoint path position");
         let summary_ordinal = final_path
             .iter()
-            .find(|row| row[1] == summary_id)
+            .find(|row| row[1] == summary_id.as_str())
             .and_then(|row| row[0].as_i64())
             .unwrap();
         let summary_source_positions = source_rows
@@ -2124,7 +2124,7 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|row| row[1] == summary_id && row[2] == "summary")
+            .filter(|row| row[1] == summary_id.as_str() && row[2] == "summary")
             .collect::<Vec<_>>();
         let summary = request(
             &control,
