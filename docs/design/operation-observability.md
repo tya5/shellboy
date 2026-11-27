@@ -79,7 +79,10 @@ DB側は同ID再送でMutationResultのeffectsを復元せず、wake/停止等�
 保守は1回最大128rowと検証本文累積8MiB以内で、削除と結果縮退を合わせた処理件数を返す。予約前の圧迫回収が不足しても、回収済みbatchはStorageLimit拒否前にcommitし、新要求の副作用/receiptは作らない。結果とcompact.resultの回収は同じtransactionにし、失敗時はcounter/companionともrollbackする。
 
 Receipt maintenance uses bounded rowid windows, not globally oldest-first
-ordering. When capacity is insufficient, admission waits asynchronously while
+ordering. The draft writer checks the epoch for new submissions in the write job.
+An admitted edit carries its reserved operation ID and intent fingerprint into
+that job; a pending row alone never authorizes a continuation after a roll.
+When capacity is insufficient, admission waits asynchronously while
 the background requester reclaims one window at a time and retries after each
 window. It returns `storage_limit` only after an exhausted pass still cannot
 make room; concurrent writes invalidate that pass and cause a rescan. Existing
