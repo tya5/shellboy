@@ -296,8 +296,11 @@ impl Control {
             )
         };
         let thread = match command {
-            Command::ThreadDelete(args) => return Settlement(vec![args.thread_id.clone()]),
-            Command::ThreadDeleteSet(args) => return Settlement(args.thread_ids.clone()),
+            // The committed deletion effects own Thread change publication.
+            // Receipt reservation and settlement only wake receipt observers.
+            Command::ThreadDelete(_) | Command::ThreadDeleteSet(_) => {
+                return Settlement(Vec::new());
+            }
             Command::ShellWrite(args) => shell(&args.execution_id).await,
             Command::ShellEof(args) | Command::ShellStop(args) | Command::ShellBackground(args) => {
                 shell(&args.execution_id).await
