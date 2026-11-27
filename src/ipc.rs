@@ -474,6 +474,21 @@ where
     }
 }
 
+/// One request whose ID the handshake mints in the owner's current operation
+/// epoch; `announce` receives that ID before the request is sent.
+pub async fn call_announcing(
+    data_dir: &Path,
+    command: Command,
+    origin: Option<Origin>,
+    announce: &mut (dyn FnMut(&str) + Send),
+) -> Result<Response<Value>, ApiError> {
+    let endpoint = match environment_endpoint(data_dir)? {
+        Some(endpoint) => endpoint,
+        None => read_endpoint(data_dir).await?,
+    };
+    connect_with_capability(endpoint, command, None, origin, None, Some(announce)).await
+}
+
 /// Send a command only when the owner advertised the required capability in Welcome.
 pub async fn call_requiring_capability(
     data_dir: &Path,
@@ -486,7 +501,15 @@ pub async fn call_requiring_capability(
         Some(endpoint) => endpoint,
         None => read_endpoint(data_dir).await?,
     };
-    connect_with_capability(endpoint, command, operation_id, origin, Some(capability)).await
+    connect_with_capability(
+        endpoint,
+        command,
+        operation_id,
+        origin,
+        Some(capability),
+        None,
+    )
+    .await
 }
 
 fn environment_endpoint(data_dir: &Path) -> Result<Option<Endpoint>, ApiError> {
@@ -564,7 +587,7 @@ async fn connect(
     operation_id: Option<String>,
     origin: Option<Origin>,
 ) -> Result<Response<Value>, ApiError> {
-    connect_with_capability(endpoint, command, operation_id, origin, None).await
+    connect_with_capability(endpoint, command, operation_id, origin, None, None).await
 }
 
 async fn connect_with_capability(
@@ -573,6 +596,7 @@ async fn connect_with_capability(
     operation_id: Option<String>,
     origin: Option<Origin>,
     required_capability: Option<&str>,
+    announce: Option<&mut (dyn FnMut(&str) + Send)>,
 ) -> Result<Response<Value>, ApiError> {
     if endpoint.protocol_version != PROTOCOL_VERSION {
         let mut error = protocol_mismatch(PROTOCOL_VERSION, endpoint.protocol_version);
@@ -609,6 +633,7 @@ async fn connect_with_capability(
             operation_id,
             origin,
             required_capability,
+            announce,
         )
         .await
     }
@@ -637,6 +662,7 @@ async fn connect_with_capability(
             operation_id,
             origin,
             required_capability,
+            announce,
         )
         .await
     }
@@ -690,7 +716,8 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
     operation_id: Option<String>,
     origin: Option<Origin>,
 ) -> Result<Response<Value>, ApiError> {
-    call_stream_requiring_capability(stream, endpoint, command, operation_id, origin, None).await
+    call_stream_requiring_capability(stream, endpoint, command, operation_id, origin, None, None)
+        .await
 }
 
 async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
@@ -700,6 +727,7 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     operation_id: Option<String>,
     origin: Option<Origin>,
     required_capability: Option<&str>,
+    announce: Option<&mut (dyn FnMut(&str) + Send)>,
 ) -> Result<Response<Value>, ApiError> {
     write_frame(
         &mut stream,
@@ -746,6 +774,11 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     request.origin = origin;
     request.validate()?;
     let expected = request.operation_id.clone();
+    // The caller learns the chosen ID before anything is sent, so its progress
+    // names the request even if the reply never arrives (#450).
+    if let Some(announce) = announce {
+        announce(&expected);
+    }
     let encoded = encode_frame(&request).map_err(|mut error| {
         if matches!(request.command, Command::ThreadImport(_)) && error.code == ErrorCode::InputLimit {
             error = crate::thread_import::too_large();
@@ -2063,6 +2096,7 @@ mod frame_delivery_tests {
             None,
             None,
             Some("id.resolve"),
+            None,
         )
         .await
         .unwrap_err();
