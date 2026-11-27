@@ -110,6 +110,7 @@ mod localized_metadata_tests {
                 value: "x".repeat(600),
                 display: None,
                 value_omitted: false,
+                omission: None,
             })
             .collect();
         // Retained-byte limits intentionally count allocation capacity. Normalize

@@ -3335,7 +3335,7 @@ async fn run_client(
                     match result {
                         Ok(mut report) => {
                             if let Some(notice) = notice {
-                                report.fields.insert(0, crate::presentation::PresentationField { key: "/observation_notice".into(), label: i18n::local!(language, "観測", "Observation").into(), value: notice, display: None, value_omitted: false });
+                                report.fields.insert(0, crate::presentation::PresentationField { key: "/observation_notice".into(), label: i18n::local!(language, "観測", "Observation").into(), value: notice, display: None, value_omitted: false, omission: None });
                             }
                             management.detail = report.detail.map(Arc::new);
                             let structured = UiUpdate::StructuredManagement {

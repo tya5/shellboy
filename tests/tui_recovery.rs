@@ -234,6 +234,7 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
             omitted: false,
             fields: vec![shellboy::presentation::PresentationField {
                 value_omitted: false,
+                omission: None,
                 display: None,
                 key: "/run_id".into(),
                 label: "Run ID".into(),

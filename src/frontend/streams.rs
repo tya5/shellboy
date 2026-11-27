@@ -375,6 +375,7 @@ fn apply_preview(
                     ),
                     display: None,
                     value_omitted: false,
+                    omission: None,
                 },
             );
         }
@@ -390,6 +391,7 @@ fn apply_preview(
                     ),
                     display: None,
                     value_omitted: false,
+                    omission: None,
                 },
             );
             p.details_omitted = true;

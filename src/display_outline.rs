@@ -14,6 +14,8 @@ pub struct PresentationField {
     #[serde(default)]
     pub value_omitted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omission: Option<crate::protocol::HistoryDisplayOmission>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
     pub key: String,
     pub label: String,
@@ -483,29 +485,30 @@ mod tests {
         let payload = serde_json::json!({"deep": deep, "long": "x".repeat(1025), "literal": "x…"});
         let outline = display_outline("fixture", "user", &payload, "", &Range { start: 0, end: 0 });
         set_terminal_width(Some(2));
-        let en = crate::presentation::project_display("user", "", 0, &outline, UiLanguage::En);
-        let ja = crate::presentation::project_display("user", "", 0, &outline, UiLanguage::Ja);
+        let projected = crate::presentation::project_display("user", "", 0, &outline);
+        let deep = projected
+            .fields
+            .iter()
+            .find(|f| f.omission == Some(Omission::DeepStructure))
+            .unwrap();
+        let en = deep.localized_value(UiLanguage::En);
+        let ja = deep.localized_value(UiLanguage::Ja);
         clear_terminal_width();
         assert!(
-            en.fields
+            projected
+                .fields
                 .iter()
                 .any(|f| f.key == "/long" && f.value.ends_with("..."))
         );
         assert!(
-            en.fields
+            projected
+                .fields
                 .iter()
                 .any(|f| f.key == "/literal" && f.value == "x…")
         );
-        assert!(
-            en.fields
-                .iter()
-                .any(|f| f.value == "[Deep structure | see original]")
-        );
-        assert!(
-            ja.fields
-                .iter()
-                .any(|f| f.value == "[深い構造 | 詳細は原文参照]")
-        );
+        assert!(deep.value.is_empty());
+        assert_ne!(en, ja);
+        assert!(en.contains('|') && ja.contains('|'));
     }
 
     #[test]

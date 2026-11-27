@@ -50,6 +50,7 @@ pub(super) fn apply_window(nodes: &mut [UiNode], usage: &[crate::protocol::Histo
 fn field(key: &str, value: String) -> PresentationField {
     PresentationField {
         value_omitted: false,
+        omission: None,
         display: None,
         key: key.into(),
         label: crate::presentation::fields::attempt_label(key, crate::config::UiLanguage::Ja)

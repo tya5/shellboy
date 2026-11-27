@@ -257,6 +257,7 @@ fn sender_fields_for(
             value,
             display: None,
             value_omitted: false,
+            omission: None,
         })
         .collect()
 }
@@ -1007,6 +1008,7 @@ impl Details {
             value: self.node_id.clone(),
             display: None,
             value_omitted: false,
+            omission: None,
         }];
         if let Some(reason) = &source.unavailable_reason {
             fields.push(PresentationField {
@@ -1020,6 +1022,7 @@ impl Details {
                 value: reason.clone(),
                 display: None,
                 value_omitted: false,
+                omission: None,
             });
         } else {
             let node = UiNode {
@@ -1078,6 +1081,7 @@ impl Details {
         }
         let mut fields = vec![PresentationField {
             value_omitted: false,
+            omission: None,
             display: None,
             key: "node_id".into(),
             label: local!(self.language.get(), "履歴node ID", "History node ID").into(),
@@ -1685,12 +1689,7 @@ impl Details {
                                 } else {
                                     ": "
                                 },
-                                safe(&crate::presentation::fields::display_value(
-                                    &field.key,
-                                    &field.value,
-                                    field.displayed(),
-                                    language,
-                                ))
+                                safe(&field.localized_value(language))
                             ),
                             body.width,
                         )
@@ -1798,6 +1797,7 @@ mod tests {
             value: "index_manual_rebuild_required".into(),
             display: None,
             value_omitted: false,
+            omission: None,
         }];
         for (language, expected) in [
             (UiLanguage::En, "manual rebuild required"),
@@ -3015,6 +3015,44 @@ mod tests {
             assert!(!screen(&terminal).contains(&expected));
         }
     }
+    #[test]
+    fn details_draws_typed_deep_omission_under_language_and_glyph_policy() {
+        use crate::config::UiLanguage::{En, Ja};
+        use crate::ui::text_width::{clear_terminal_width, set_terminal_width};
+        let deep = (0..10).fold(
+            serde_json::json!("hidden"),
+            |value, _| serde_json::json!({"k": value}),
+        );
+        let mut ui = state();
+        ui.view_mut().nodes_mut_for_test()[0].presentation.fields =
+            crate::presentation::fields_of_value(&serde_json::json!({"deep": deep}));
+        let mut details = Details::new(ui.view(), false);
+        details.mode = Mode::Fields;
+        let field = details
+            .fields(ui.view())
+            .iter()
+            .find(|field| field.omission.is_some())
+            .unwrap()
+            .clone();
+        assert!(field.value.is_empty());
+        let mut rendered = Vec::new();
+        for language in [En, Ja] {
+            set_terminal_width(Some(2));
+            let label = field.localized_value(language);
+            let mut terminal = Terminal::new(TestBackend::new(120, 32)).unwrap();
+            terminal
+                .draw(|frame| {
+                    details.draw(frame, frame.area(), ui.view(), language);
+                })
+                .unwrap();
+            clear_terminal_width();
+            assert!(label.contains('|'));
+            assert!(screen(&terminal).contains(&label));
+            rendered.push(label);
+        }
+        assert_ne!(rendered[0], rendered[1]);
+    }
+
     #[test]
     fn literal_marker_in_history_detail_is_a_complete_value_not_an_original_request() {
         let literal = "入力の [詳細は原文参照] は値そのもの";

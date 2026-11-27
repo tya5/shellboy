@@ -59,23 +59,20 @@ fn outline_text(value: &crate::protocol::HistoryDisplayText) -> String {
     render_outline_text(value.text.clone(), value.truncated)
 }
 
-fn outline_value(
-    value: String,
-    truncated: bool,
-    omitted: Option<crate::protocol::HistoryDisplayOmission>,
-    language: crate::config::UiLanguage,
-) -> String {
-    use crate::protocol::HistoryDisplayOmission::DeepStructure;
-    match omitted {
-        Some(DeepStructure) => crate::ui::text_width::glyphs::localized!(
-            language,
-            "[深い構造 · 詳細は原文参照]",
-            "[深い構造 | 詳細は原文参照]",
-            "[Deep structure · see original]",
-            "[Deep structure | see original]"
-        )
-        .into(),
-        None => render_outline_text(value, truncated),
+impl PresentationField {
+    pub(crate) fn localized_value(&self, language: crate::config::UiLanguage) -> String {
+        use crate::protocol::HistoryDisplayOmission::DeepStructure;
+        match self.omission {
+            Some(DeepStructure) => crate::ui::text_width::glyphs::localized!(
+                language,
+                "[深い構造 · 詳細は原文参照]",
+                "[深い構造 | 詳細は原文参照]",
+                "[Deep structure · see original]",
+                "[Deep structure | see original]"
+            )
+            .into(),
+            None => fields::display_value(&self.key, &self.value, self.displayed(), language),
+        }
     }
 }
 
@@ -94,13 +91,9 @@ pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
                 short(&field.path, 256)
             },
             key: field.path,
-            value: outline_value(
-                field.value.text,
-                field.value.truncated,
-                field.omitted,
-                crate::config::UiLanguage::Ja,
-            ),
+            value: render_outline_text(field.value.text, field.value.truncated),
             value_omitted: field.value.truncated || field.omitted.is_some(),
+            omission: field.omitted,
             display: None,
         })
         .collect()

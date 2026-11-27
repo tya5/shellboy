@@ -19,7 +19,11 @@ the full named extent, which may be larger than the first page:
   Tool facts include exact call, group, and execution IDs when available, a
   call ordinal, and saved command, description, status, and exit code. These
   do not describe the current execution.
-- `fields`: bounded, redacted saved details as `path`, `value`, and `omitted`.
+- `fields`: bounded, redacted saved details include `path`, `value`, and the
+  boolean `truncated`. The optional `omitted` enum is `deep_structure` for a
+  depth-limited field, whose `value` is empty. Tool and envelope text facts
+  use `{text, truncated}`. Clients render omission labels and truncation
+  glyphs locally; the owner does not insert them into the saved text.
 - `links`: recognized URL, label, and source `range` within the extent.
 - `limited`: more structural metadata existed than the projection retained.
 

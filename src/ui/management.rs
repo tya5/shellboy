@@ -1097,12 +1097,7 @@ impl ManagementPopup {
                         if index == structured.selected {
                             selected_row = items.len();
                         }
-                        let displayed = crate::presentation::fields::display_value(
-                            &field.key,
-                            &field.value,
-                            field.displayed(),
-                            self.language,
-                        );
+                        let displayed = field.localized_value(self.language);
                         let value = crate::presentation::sanitize_plain(&displayed, 0).0;
                         let label = crate::presentation::sanitize_plain(
                             &crate::presentation::fields::display_label(

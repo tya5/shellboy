@@ -339,9 +339,6 @@ pub(crate) fn display_value(
         "保持済みの表示用コピーを継続表示。今回のraw再取得はIoFailed。現在のraw可用性は未確認。" => {
             "Showing the retained display copy. Raw refresh failed (IoFailed); current raw availability is unknown.".into()
         }
-        "[深い構造 · 詳細は原文参照]" | "[深い構造 | 詳細は原文参照]" => {
-            "[Deep structure; see original for details]".into()
-        }
         other => other.to_owned(),
     }
 }
@@ -975,10 +972,6 @@ mod tests {
         assert_eq!(
             display_value("/exit_code", "null", "未確定", En),
             "Undetermined"
-        );
-        assert_eq!(
-            display_value("/deep", "", "[深い構造 · 詳細は原文参照]", En),
-            "[Deep structure; see original for details]"
         );
         for state in [
             "accepted",

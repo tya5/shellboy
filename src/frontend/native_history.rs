@@ -221,14 +221,13 @@ pub(super) struct DisplayExtent {
 impl DisplayExtent {
     pub(super) fn project(
         &self,
-        language: crate::config::UiLanguage,
+        _language: crate::config::UiLanguage,
     ) -> crate::presentation::NodePresentation {
         let mut projection = crate::presentation::project_display(
             &self.kind,
             &self.text,
             self.range.start as usize,
             &self.outline,
-            language,
         );
         projection.output_limited = self.output_limited;
         projection

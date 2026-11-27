@@ -1310,5 +1310,41 @@ async fn positioned_display_outline_identifies_trim_and_clipped_tool_envelope() 
     let tool = block.tool.as_ref().unwrap();
     assert_eq!(tool.call_id.as_deref(), Some("exact-call"));
     assert_eq!(tool.group_id.as_deref(), Some("group"));
-    assert_eq!(tool.command.as_deref(), Some("echo synthetic"));
+    let command = tool.command.as_ref().unwrap();
+    assert_eq!(command.text, "echo synthetic");
+    assert!(!command.truncated);
+}
+
+#[tokio::test]
+async fn positioned_history_read_serializes_typed_outline_omissions() {
+    use shellboy::protocol::{HistoryDisplayPosition, HistoryDisplayRead};
+    let (_root, db, history) = repository().await;
+    let deep = (0..10).fold(json!("hidden"), |value, _| json!({"k":value}));
+    append(&db,"facts","user",json!({"role":"user","content":"fixture", "deep":deep,"long":"x".repeat(1025),"literal":"x…"})).await;
+    let mut read = body("facts", 8192, None);
+    read.display = Some(HistoryDisplayRead {
+        position: HistoryDisplayPosition::Tail,
+        selection: None,
+    });
+    let wire = serde_json::to_value(history.read(read).await.unwrap()).unwrap();
+    let fields = wire["display"]["outline"]["fields"].as_array().unwrap();
+    let long = fields
+        .iter()
+        .find(|field| field["path"] == "/long")
+        .unwrap();
+    assert_eq!(long["value"], "x".repeat(1024));
+    assert_eq!(long["truncated"], true);
+    assert!(long.get("omitted").is_none());
+    let deep = fields
+        .iter()
+        .find(|field| field["omitted"] == "deep_structure")
+        .unwrap();
+    assert_eq!(deep["value"], "");
+    let literal = fields
+        .iter()
+        .find(|field| field["path"] == "/literal")
+        .unwrap();
+    assert_eq!(literal["value"], "x…");
+    assert_eq!(literal["truncated"], false);
+    assert!(literal.get("omitted").is_none());
 }

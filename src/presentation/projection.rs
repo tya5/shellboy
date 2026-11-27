@@ -42,7 +42,6 @@ pub(crate) fn project_display(
     text: &str,
     base: usize,
     outline: &crate::protocol::HistoryDisplayOutline,
-    language: crate::config::UiLanguage,
 ) -> NodePresentation {
     use crate::protocol::{HistoryDisplayNode as Node, HistoryDisplayRole as Role};
     let (mut p, fallback) = initial(kind, &Value::Null);
@@ -71,8 +70,9 @@ pub(crate) fn project_display(
         } else {
             short(&f.path, 256)
         },
-        value: outline_value(f.value.clone(), f.truncated, f.omitted, language),
+        value: render_outline_text(f.value.clone(), f.truncated),
         value_omitted: f.truncated || f.omitted.is_some(),
+        omission: f.omitted,
         ..Default::default()
     };
     p.fields = outline.fields.iter().map(field).collect();

@@ -3833,6 +3833,7 @@ mod tests {
             value: value.into(),
             display: None,
             value_omitted: false,
+            omission: None,
         };
         let body = (0..120)
             .map(|i| format!("行{i:03} 日本語🙂 e\u{301} bounded body\n"))
@@ -5142,6 +5143,7 @@ mod tests {
                 title: "shell | exited | 失敗 exit 101".into(),
                 fields: vec![crate::presentation::PresentationField {
                     value_omitted: false,
+                    omission: None,
                     display: None,
                     key: "/exit_code".into(),
                     label: "exit".into(),
@@ -6099,6 +6101,7 @@ mod conversation_item_tests {
             value: execution.clone(),
             display: None,
             value_omitted: false,
+            omission: None,
         }];
         *view.nodes_mut_for_test() = vec![
             node(

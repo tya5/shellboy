@@ -46,6 +46,7 @@ fn report(context: ManagementContext, title: &str) -> UiUpdate {
             title: title.into(),
             fields: vec![PresentationField {
                 value_omitted: false,
+                omission: None,
                 key: "/run_id".into(),
                 label: "Run".into(),
                 value: "old-run-complete-id".into(),
@@ -160,6 +161,7 @@ fn index_preview_is_invalidated_on_close_and_same_scope_reopening_but_not_detail
             title: "index report".into(),
             fields: vec![PresentationField {
                 value_omitted: false,
+                omission: None,
                 key: "/paused".into(),
                 label: "一時停止".into(),
                 value: "true".into(),
@@ -495,6 +497,7 @@ fn index_status_key_refreshes_the_index_after_a_structured_retry_receipt() {
                 title: "index retry accepted".into(),
                 fields: vec![PresentationField {
                     value_omitted: false,
+                    omission: None,
                     key: "/accepted".into(),
                     label: "受付".into(),
                     value: "true".into(),
@@ -821,6 +824,7 @@ fn next_key_follows_the_shown_coverage_cursor_only_in_the_index_view() {
             title: "index".into(),
             fields: vec![PresentationField {
                 value_omitted: false,
+                omission: None,
                 key: key.into(),
                 label: "next".into(),
                 value: "CURSOR".into(),
@@ -844,6 +848,7 @@ fn next_key_follows_the_shown_coverage_cursor_only_in_the_index_view() {
 fn field(key: &str, value: &str) -> PresentationField {
     PresentationField {
         value_omitted: false,
+        omission: None,
         key: key.into(),
         label: key.into(),
         value: value.into(),

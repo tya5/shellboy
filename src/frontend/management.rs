@@ -239,6 +239,7 @@ pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Re
         0,
         PresentationField {
             value_omitted: false,
+            omission: None,
             display: None,
             key: String::new(),
             label: i18n::local!(language, "すべての詳細を見る", "View all details").into(),
@@ -288,6 +289,7 @@ pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Re
             1,
             PresentationField {
                 value_omitted: false,
+                omission: None,
                 display: None,
                 key: String::new(),
                 label: i18n::local!(language, "次にできること", "Available next actions").into(),
@@ -306,7 +308,7 @@ pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Re
     let detail =
         (heap_bytes(&safe).saturating_add(size_of::<[usize; 2]>()) <= budget).then_some(safe);
     if detail.is_none() {
-        fields.push(PresentationField { value_omitted: false, display: None, key: String::new(), label:i18n::local!(language, "詳細の保持", "Detail retention").into(), value:i18n::local!(language, "本文cache予算を超えるため詳細は未保持。対象IDで原文pageを取得、または範囲を絞って再照会してください", "Details exceed the body-cache budget and were not retained. Read an original page by ID or narrow the query").into() });
+        fields.push(PresentationField { value_omitted: false, omission: None, display: None, key: String::new(), label:i18n::local!(language, "詳細の保持", "Detail retention").into(), value:i18n::local!(language, "本文cache予算を超えるため詳細は未保持。対象IDで原文pageを取得、または範囲を絞って再照会してください", "Details exceed the body-cache budget and were not retained. Read an original page by ID or narrow the query").into() });
     }
     Report {
         fields,
@@ -352,6 +354,7 @@ fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
             };
             fields.push(PresentationField {
                 value_omitted: false,
+                omission: None,
                 display: None,
                 key: format!("/items/{index}"),
                 label: crate::ui::text_width::glyphs::formatted!(
@@ -381,6 +384,7 @@ fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
     if fields.is_empty() {
         fields.push(PresentationField {
             value_omitted: false,
+            omission: None,
             display: None,
             key: "/filters".into(),
             label: i18n::local!(language, "該当する保存状態", "Matching saved states").into(),
@@ -394,6 +398,7 @@ fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
     }
     fields.push(PresentationField {
         value_omitted: false,
+        omission: None,
         display: None,
         key: String::new(),
         label: i18n::local!(
@@ -415,6 +420,7 @@ fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
     if omitted {
         fields.push(PresentationField {
             value_omitted: false,
+            omission: None,
             display: None,
             key: String::new(),
             label: i18n::local!(language, "詳細未保持", "Details not retained").into(),

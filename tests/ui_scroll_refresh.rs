@@ -13,10 +13,11 @@ use shellboy::{
 fn tool_node(raw: bool) -> UiNode {
     let canonical = "saved combined preview";
     let mut node=UiNode{node_id:"tool".into(),role:"tool".into(),text:canonical.into(),base_char_offset:0,total_chars:canonical.chars().count(),reasoning_ranges:vec![],presentation:NodePresentation{
-        kind:PresentationKind::ToolResult,title:"shell · exited".into(),blocks:vec![PresentationBlock{kind:BlockKind::ToolResult,stream:Some(if raw{OutputStream::Stdout}else{OutputStream::Combined}),text:if raw{(0..80).map(|i|format!("R{i:03}\n")).collect()}else{canonical.into()},source_start:0,source_end:canonical.chars().count(),source_exact:false,..Default::default()}],fields:vec![PresentationField{value_omitted:false,display:None,key:"/ui_raw_stream_preview".into(),label:"出力の表示範囲".into(),value:if raw{"保持中rawの表示用先頭抜粋（API保存本文と別）。stdout/stderr末尾まで取得。"}else{"rawのstream識別を取得できません（IoFailed）。保存済みstream情報を維持し、未識別部分は統合抜粋を表示。"}.into()}],details_omitted:!raw,..Default::default()}};
+        kind:PresentationKind::ToolResult,title:"shell · exited".into(),blocks:vec![PresentationBlock{kind:BlockKind::ToolResult,stream:Some(if raw{OutputStream::Stdout}else{OutputStream::Combined}),text:if raw{(0..80).map(|i|format!("R{i:03}\n")).collect()}else{canonical.into()},source_start:0,source_end:canonical.chars().count(),source_exact:false,..Default::default()}],fields:vec![PresentationField{value_omitted:false,display:None,omission:None,key:"/ui_raw_stream_preview".into(),label:"出力の表示範囲".into(),value:if raw{"保持中rawの表示用先頭抜粋（API保存本文と別）。stdout/stderr末尾まで取得。"}else{"rawのstream識別を取得できません（IoFailed）。保存済みstream情報を維持し、未識別部分は統合抜粋を表示。"}.into()}],details_omitted:!raw,..Default::default()}};
     if !raw {
         node.presentation.fields.push(PresentationField {
             value_omitted: false,
+            omission: None,
             display: None,
             key: "/ui_raw_stream_preview_error".into(),
             label: "出力の表示取得エラー".into(),

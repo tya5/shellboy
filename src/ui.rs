@@ -7393,6 +7393,7 @@ mod layout_cache_tests {
             fields: vec![
                 PresentationField {
                     value_omitted: false,
+                    omission: None,
                     display: None,
                     key: "/first".into(),
                     label: "group › first".into(),
@@ -7400,6 +7401,7 @@ mod layout_cache_tests {
                 },
                 PresentationField {
                     value_omitted: false,
+                    omission: None,
                     display: None,
                     key: "/second".into(),
                     label: "group › second".into(),
@@ -8684,6 +8686,7 @@ mod recovery_context_tests {
             omitted: false,
             fields: vec![PresentationField {
                 value_omitted: false,
+                omission: None,
                 display: None,
                 key: "/run_id".into(),
                 label: "Run ID".into(),

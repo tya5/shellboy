@@ -780,7 +780,7 @@ impl<'a> HistoryReader<'a> {
                     let mut node=display.into_ui_node(node_id.clone(),width,language);
                     let mut fields=Vec::new();
                     let field=|key:String,label:&str,value:String| crate::presentation::PresentationField {
-                        key,label:label.into(),value,display:None,value_omitted:false,
+                        key,label:label.into(),value,display:None,value_omitted:false,omission:None,
                     };
                     fields.push(field("/ui/detail_preview_bounds".into(),local!(language, "詳細の取得範囲", "Detail retrieval limits"),crate::ui::text_width::glyphs::select(local!(language, "最大16呼出し・128項目・128リンク、既存metadata上限内 · O原文で確認", "Up to 16 calls, 128 fields and 128 links within metadata limits · O for original"), local!(language, "最大16呼出し・128項目・128リンク、既存metadata上限内 | O原文で確認", "Up to 16 calls, 128 fields and 128 links within metadata limits | O for original")).into()));
                     if current.len()>16 {

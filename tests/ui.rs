@@ -1676,6 +1676,7 @@ fn structured_management_focus_pages_and_wait_cancel_use_typed_worker_actions() 
         title: "待機結果".into(),
         fields: vec![shellboy::presentation::PresentationField {
             value_omitted: false,
+            omission: None,
             display: None,
             key: "".into(),
             label: "全結果の詳細".into(),
@@ -1755,6 +1756,7 @@ fn work_status_uses_read_actions_and_preserves_the_conversation_draft() {
         fields: vec![
             PresentationField {
                 value_omitted: false,
+                omission: None,
                 display: None,
                 key: "/items/0".into(),
                 label: "shell running".into(),
@@ -1762,6 +1764,7 @@ fn work_status_uses_read_actions_and_preserves_the_conversation_draft() {
             },
             PresentationField {
                 value_omitted: false,
+                omission: None,
                 display: None,
                 key: "".into(),
                 label: "全詳細".into(),
@@ -3800,6 +3803,7 @@ fn recovery_reason_survives_transient_results_and_retry_targets_the_current_run(
         omitted: false,
         fields: vec![PresentationField {
             value_omitted: false,
+            omission: None,
             display: None,
             key: "/run_id".into(),
             label: "Run ID".into(),
@@ -3880,6 +3884,7 @@ fn tab_in_management_detail_does_not_move_the_hidden_field_selection() {
         fields: vec![
             PresentationField {
                 value_omitted: false,
+                omission: None,
                 display: None,
                 key: "/first".into(),
                 label: "first".into(),
@@ -3887,6 +3892,7 @@ fn tab_in_management_detail_does_not_move_the_hidden_field_selection() {
             },
             PresentationField {
                 value_omitted: false,
+                omission: None,
                 display: None,
                 key: "/second".into(),
                 label: "second".into(),

@@ -118,6 +118,7 @@ fn present(
     let mut field = |key: &str, label: &str, value: String| {
         presentation.fields.push(PresentationField {
             value_omitted: false,
+            omission: None,
             key: format!("/saved_model_failures/{key}"),
             label: label.into(),
             value,
