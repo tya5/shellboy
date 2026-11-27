@@ -421,7 +421,7 @@ async fn oldest_past_attachments_excluded_only_at_admission_never_resurrect() {
         .unwrap();
     assert!(before[0].selected);
     drop(f.adopt(prepared, true).await);
-    std::fs::write(f.path.join("new"), b"x").unwrap();
+    std::fs::write(f.path.join("old"), b"x").unwrap();
     let next = f.prepare().await;
     assert_eq!(next.manifest[0].state, "excluded");
     assert_eq!(next.manifest[1].state, "ready");
