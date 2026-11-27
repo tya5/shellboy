@@ -42,7 +42,7 @@ impl Drop for Publication {
         if let Err(error) = std::fs::remove_file(&self.0)
             && error.kind() != std::io::ErrorKind::NotFound
         {
-            tracing::warn!("Could not remove service endpoint runtime file");
+            eprintln!("Could not remove service endpoint runtime file");
         }
     }
 }
