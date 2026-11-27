@@ -1297,7 +1297,7 @@
   "src/presentation/projection.rs:7e22a79422a7e15c:1": {
     "category": "a",
     "reason": "Japanese display-label sentinel for an outline count field in the native display-outline projection, matching the saved-field walk in presentation::fields. The English renderer recognises the fixed count label and adds the count suffix; displayed values and field paths are unchanged. Ja returns the original label.",
-    "source_tokens_sha256": "664a35d23a8a12178b9353e1d8147dd1fc0d31b7de0806a1b625562823f62dd7"
+    "source_tokens_sha256": "4141f6fe1bc42efc6756dc47cb449d1246a1c71cd0ee122c68a871c37f2b62fe"
   },
   "src/ui/history_interaction.rs:453abb19c1710843:1": {
     "category": "a",
