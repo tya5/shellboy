@@ -244,7 +244,7 @@ async fn service_endpoint_retires_even_when_output_cannot_be_saved() {
             .await
             .unwrap();
         let (stop, _) = control
-            .shell_start_intent(&execution, true, Some(publication.clone()))
+            .shell_start_intent(&execution, true, Some(Arc::downgrade(&publication)))
             .await
             .unwrap();
         assert!(!stop);

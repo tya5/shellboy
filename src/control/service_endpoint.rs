@@ -20,6 +20,7 @@ fn path(data: &Path, instance: &str, execution: &str) -> PathBuf {
     data.join(format!("service-endpoint-{instance}-{execution}.json"))
 }
 
+#[derive(Clone)]
 pub(super) struct Publication(PathBuf);
 
 impl Publication {
@@ -259,7 +260,7 @@ mod tests {
         let publication = Arc::new(Publication::create(&control, &execution).await.unwrap());
         assert!(
             control
-                .shell_start_intent(&execution, true, Some(publication.clone()))
+                .shell_start_intent(&execution, true, Some(Arc::downgrade(&publication)))
                 .await
                 .unwrap()
                 .0
@@ -273,6 +274,133 @@ mod tests {
                 .unwrap()
                 .0
         );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn service_endpoint_read_is_refused_after_reap_before_unlink() {
+        use crate::control::driver::shell_output::{ShellOwner, collect_shell};
+        use crate::shell::ShellSupervisor;
+        use crate::test_watchdog::watchdog;
+        use tokio::sync::oneshot;
+
+        let (root, owner, control, accepted) =
+            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let execution = uuid::Uuid::new_v4().to_string();
+        let saved = execution.clone();
+        let thread = accepted.thread_id;
+        let saved_thread = thread.clone();
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO schedule(id,thread_id,kind,enabled,cwd,command) VALUES('service',?1,'service',1,'.','echo fixture')", [&saved_thread])?;
+            db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,'service',?1,'starting','.','{}','utf-8','utf-8','open','2020-01-01T00:00:00Z')", [&saved])?;
+            Ok(())
+        }).await.unwrap();
+        let publication = Arc::new(Publication::create(&control, &execution).await.unwrap());
+        let file = PathBuf::from(publication.env_value());
+        std::fs::write(&file, br#"{"port":32101,"token":"fixture"}"#).unwrap();
+        let shell = ShellSupervisor::new(&owner.loaded.config)
+            .spawn(
+                execution.clone(),
+                root.path().into(),
+                serde_json::from_value(
+                    serde_json::json!({"command":"read -r go; exit 0", "stdin_open":true}),
+                )
+                .unwrap(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        let (stop, _) = control
+            .shell_start_intent(&execution, true, Some(Arc::downgrade(&publication)))
+            .await
+            .unwrap();
+        assert!(!stop);
+        let args = || ServiceEndpointArgs {
+            service_id: Some("service".into()),
+            thread_id: None,
+            name: None,
+        };
+        assert_eq!(read(&control, args()).await.unwrap().port, 32101);
+
+        // Hold every file worker so neither unlink nor terminal settlement can
+        // make this read fail. Only the execution owner's revocation can do so.
+        let mut held = Vec::new();
+        for _ in 0..control.store.config.workers.attachment.max(1) {
+            let workers = control.attachments.workers.clone();
+            let (entered, acquired) = oneshot::channel();
+            let (release, wait) = oneshot::channel::<()>();
+            let worker = tokio::spawn(async move {
+                workers
+                    .execute_owned(move || {
+                        entered.send(()).unwrap();
+                        let _ = wait.blocking_recv();
+                        Ok(())
+                    })
+                    .await
+            });
+            watchdog("fixture holds a file worker", acquired)
+                .await
+                .unwrap()
+                .unwrap();
+            held.push((release, worker));
+        }
+        let mut completion = shell.completion.clone();
+        let registry = control.publications.clone();
+        let handle = shell.handle.clone();
+        let collecting = control.clone();
+        let exact_execution = execution.clone();
+        let collector = tokio::spawn(async move {
+            let mut shell_owner = ShellOwner::Schedule {
+                thread,
+                endpoint: Some(publication),
+            };
+            collect_shell(&collecting, &mut shell_owner, &exact_execution, shell).await
+        });
+        handle.write("go\n", "UTF-8").await.unwrap();
+        watchdog(
+            "natural service exit reaped",
+            completion.wait_for(Option::is_some),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        watchdog("execution owner revokes before unlink", async {
+            while registry.live(&execution).is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(file.is_file());
+        let shell_reader = crate::control::output::ShellOutputReader::new(
+            owner.db.clone(),
+            owner.instance_id.clone(),
+        );
+        assert_eq!(
+            shell_reader.get(&execution).await.unwrap().state,
+            crate::protocol::ShellState::Running
+        );
+        let Err(error) = watchdog("read refuses without a file worker", read(&control, args()))
+            .await
+            .unwrap()
+        else {
+            panic!("retired endpoint remained readable");
+        };
+        assert_eq!(error.details.unwrap()["reason"], "service_not_running");
+
+        for (release, worker) in held {
+            release.send(()).unwrap();
+            worker.await.unwrap().unwrap();
+        }
+        let settled = watchdog("collector saves natural completion", collector)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(settled.exit_code, Some(0));
+        assert!(!file.exists());
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
