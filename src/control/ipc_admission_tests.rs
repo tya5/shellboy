@@ -126,12 +126,33 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     .unwrap()
     .unwrap();
     assert!(mutation.ok, "{mutation:?}");
+    let stale = crate::ipc::call_selected_operation(
+        &owner.loaded.data_dir,
+        &owner.instance_id,
+        Command::RunStop(crate::protocol::RunStopTarget::Thread {
+            thread_id: "thread".into(),
+            expected_turn: Some(crate::protocol::ExpectedTurn {
+                turn_id: "missing".into(),
+                generation: 0,
+            }),
+        }),
+        None,
+    )
+    .await
+    .unwrap()
+    .error
+    .expect("obsolete Turn must refuse the stop");
+    assert_eq!(stale.code, ErrorCode::InvalidState);
+    let details = stale.details.unwrap();
+    assert_eq!(details["reason"], "expected_turn_changed");
+    assert_eq!(details["request_may_have_been_applied"], false);
     let stopped = crate::test_watchdog::watchdog(
         "src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available",
         crate::ipc::call(
             &owner.loaded.data_dir,
-            Command::RunStop(RunTarget {
-                run_id: "run".into(),
+            Command::RunStop(crate::protocol::RunStopTarget::Thread {
+                thread_id: "thread".into(),
+                expected_turn: None,
             }),
             None,
             None,
@@ -141,6 +162,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     .unwrap()
     .unwrap();
     assert!(stopped.ok, "{stopped:?}");
+    assert_eq!(stopped.result.unwrap()["run_id"], "run");
     for client in clients {
         assert!(
             crate::test_watchdog::watchdog("src/control/ipc_admission_tests.rs: real_ipc_waiters_leave_status_and_run_stop_available", client)

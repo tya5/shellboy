@@ -1890,6 +1890,7 @@ mod tests {
         );
         let empty = reader
             .read(ShellReadArgs {
+                expected_owner: None,
                 tail: false,
                 segments: false,
                 execution_id: "sa".into(),
@@ -1943,6 +1944,7 @@ mod tests {
         // from its initial inspection without needing a saved Notify permit.
         let read = reader
             .read(ShellReadArgs {
+                expected_owner: None,
                 tail: false,
                 segments: false,
                 execution_id: "sa".into(),

@@ -75,16 +75,21 @@ impl Store {
     /// `message.get` with its live hold, read on the inspection lane.
     pub(in crate::control) async fn observe_message(
         &self,
-        id: String,
+        args: crate::protocol::MessageTarget,
         holds: MessageHolds,
     ) -> Result<MutationResult> {
         let observer = self.database.clone();
         let queued_at = std::time::Instant::now();
+        let limit = self.config.limits.draft_bytes;
+        let id = args.message_id;
         let detail = inspection_work(move || {
             let mut db = open_inspection(observer.path())?;
             observer.observe_inspection(&mut db, "MessageGet", queued_at, None, |db| {
                 let tx = db.transaction().map_err(sql_error)?;
                 let mut detail = message_details(&tx, &id)?;
+                if let Some(thread) = args.source_thread_id.as_deref() {
+                    detail.source = Some(message_source(&tx, thread, &id, limit)?);
+                }
                 detail.held_by = holds.read(&tx, [&*id]).map_err(sql_error)?.pop().flatten();
                 tx.commit().map_err(sql_error)?;
                 Ok::<_, ApiError>(detail)
@@ -124,6 +129,19 @@ fn observe(
         .collect::<Vec<_>>();
     let facts = crate::history::window_facts::read_window_facts(db, &items, extra)
         .map_err(StorageError::into_api_error)?;
+    let received = db.prepare_cached(
+        "SELECT n.id,n.kind,(SELECT p.node_id FROM thread_path p JOIN node prior ON prior.id=p.node_id
+           WHERE p.thread_id=u.thread_id AND prior.turn_id=n.turn_id AND prior.rowid<n.rowid
+           ORDER BY p.ordinal DESC LIMIT 1),u.state='recovery_wait'
+         FROM node n JOIN turn u ON u.id=n.turn_id
+         WHERE u.thread_id=?1 AND n.kind IN ('incomplete_response','model_stream_observation')
+           AND n.deleted_reason IS NULL AND json_valid(n.payload_json)
+         ORDER BY n.rowid DESC LIMIT 2",
+    ).map_err(sql_error)?.query_map([&window.thread_id], |row| {
+        Ok(crate::protocol::HistoryWindowReceived {
+            node_id: row.get(0)?, kind: row.get(1)?, after_node_id: row.get(2)?, recovery_wait: row.get(3)?,
+        })
+    }).map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
     Ok(HistoryWindowObservation {
         read_sequence,
         pending: pending(db, &window.thread_id, holds).map_err(sql_error)?,
@@ -132,6 +150,13 @@ fn observe(
         tools: facts.tools,
         recovery: facts.recovery,
         usage: facts.usage,
+        received,
+        pinned_sources: crate::history::window_facts::message_sources::pinned(
+            db,
+            &window.thread_id,
+            extra,
+        )
+        .map_err(StorageError::into_api_error)?,
     })
 }
 

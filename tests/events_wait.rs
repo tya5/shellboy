@@ -8,7 +8,7 @@ use shellboy::{
     protocol::{
         ApiError, AttachmentAddArgs, AttachmentKind, AttachmentRemoveArgs, Command, Deliver,
         ErrorCode, EventCursor, EventsWaitArgs, MessageCancelArgs, MessageReplyArgs,
-        MessageSendArgs, Request, RunTarget, ThreadArchiveArgs, ThreadDeleteArgs, ThreadForkArgs,
+        MessageSendArgs, Request, ThreadArchiveArgs, ThreadDeleteArgs, ThreadForkArgs,
         ThreadPruneArgs, ThreadRewindArgs, ThreadSetArgs, ThreadTarget,
     },
 };
@@ -693,9 +693,12 @@ async fn queued_message_cancel_and_run_stop_advance_the_clock() {
     advanced(&control, &at, &t).await;
     let run = text(&control, "SELECT id FROM run WHERE thread_id=?1", &t).await;
     let at = quiet(&control).await;
-    command(&control, Command::RunStop(RunTarget { run_id: run }))
-        .await
-        .unwrap();
+    command(
+        &control,
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run }),
+    )
+    .await
+    .unwrap();
     advanced(&control, &at, &t).await;
     drop(first);
     settled(&control, &t).await;
@@ -801,9 +804,12 @@ async fn stopping_run_is_announced() {
     let first = incoming(&control, &mut receive).await;
     let run = text(&control, "SELECT id FROM run WHERE thread_id=?1", &t).await;
     let at = quiet(&control).await;
-    command(&control, Command::RunStop(RunTarget { run_id: run }))
-        .await
-        .unwrap();
+    command(
+        &control,
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run }),
+    )
+    .await
+    .unwrap();
     // The stop is announced without waiting for the reply grace period. `stopping` can be
     // brief, so either saved state counts: a client reading after the hint may see `stopped`.
     until_saved(
@@ -833,7 +839,7 @@ async fn stopped_transition_has_its_own_hint() {
         let run = text(&control, "SELECT id FROM run WHERE thread_id=?1", &t).await;
         command(
             &control,
-            Command::RunStop(RunTarget {
+            Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                 run_id: run.clone(),
             }),
         )
@@ -955,9 +961,12 @@ async fn recovery_wait_and_retry_are_announced() {
     )
     .await;
     let run = text(&control, "SELECT id FROM run WHERE thread_id=?1", &t).await;
-    command(&control, Command::RunRetry(RunTarget { run_id: run }))
-        .await
-        .unwrap();
+    command(
+        &control,
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run)),
+    )
+    .await
+    .unwrap();
     let request = incoming(&control, &mut receive).await;
     request.reply.send((200, answer("recovered"))).unwrap();
     until_saved(

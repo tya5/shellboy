@@ -807,6 +807,7 @@ async fn completed_attempt_cannot_adopt_its_tool_group_a_second_time() {
         .request(Request::new(
             format!("{}:generating-hold", owner.instance_id),
             Command::MessageGet(crate::protocol::MessageTarget {
+                source_thread_id: None,
                 message_id: accepted.message_id.clone(),
             }),
         ))
@@ -1745,7 +1746,7 @@ async fn a_reported_running_shell_can_be_backgrounded_immediately() {
         let pending = control.request(send("pending", crate::protocol::Deliver::Next)).await.result.unwrap();
         let revisit = control.request(send("revisit", crate::protocol::Deliver::Complete)).await.result.unwrap();
         let get = |value: &Value| Request::new(format!("{}:hold", owner.instance_id),
-            Command::MessageGet(crate::protocol::MessageTarget { message_id: value["message_id"].as_str().unwrap().into() }));
+            Command::MessageGet(crate::protocol::MessageTarget { source_thread_id: None, message_id: value["message_id"].as_str().unwrap().into() }));
         let message_get = get(&pending);
         let detail = control.request(message_get.clone()).await.result.unwrap();
         assert_eq!(detail["held_by"], json!({"kind":"foreground_shell","execution_id":execution}));
@@ -1884,7 +1885,7 @@ async fn stop_accepted_after_driver_exit_choice_is_settled_at_retirement() {
         ).await.unwrap();
         // The driver's outcome is already chosen, but its owned slot still exists.
         let stopped = control.store.execute(Request::new(
-            format!("{}:stop", owner.instance_id), Command::RunStop(RunTarget { run_id:run.clone() }),
+            format!("{}:stop", owner.instance_id), Command::RunStop(crate::protocol::RunStopTarget::Run { run_id:run.clone() }),
         ), None).await.unwrap();
         assert_eq!(stopped.stop_runs, vec![run.clone()]);
         assert!(matches!(next(&control, &accepted.thread_id, run).await.unwrap(), Next::Done));
@@ -1923,7 +1924,7 @@ async fn stopping_keeps_queued_input_held_with_the_recorded_reason() {
                 .execute(
                     Request::new(
                         format!("{}:stop", owner.instance_id),
-                        Command::RunStop(RunTarget { run_id: run }),
+                        Command::RunStop(crate::protocol::RunStopTarget::Run { run_id: run }),
                     ),
                     None,
                 )
@@ -1964,7 +1965,7 @@ async fn concurrent_stop_completion_does_not_start_model_work() {
         let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
         let run = accepted.run_id.as_ref().unwrap();
         control.store.execute(Request::new(format!("{}:stop",owner.instance_id),
-            Command::RunStop(RunTarget {run_id:run.clone()})), None).await.unwrap();
+            Command::RunStop(crate::protocol::RunStopTarget::Run {run_id:run.clone()})), None).await.unwrap();
         let (one,two)=tokio::join!(try_stop_without_driver(&control,run),try_stop_without_driver(&control,run));
         one.unwrap();two.unwrap();
         let target=run.clone();
@@ -2698,6 +2699,7 @@ async fn recovery_rewind_stops_exact_waiting_run_and_preserves_held_input_body_a
         .request(Request::new(
             format!("{}:recovery-hold", owner.instance_id),
             Command::MessageGet(crate::protocol::MessageTarget {
+                source_thread_id: None,
                 message_id: held_id.clone(),
             }),
         ))

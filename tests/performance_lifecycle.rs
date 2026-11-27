@@ -488,7 +488,7 @@ async fn repeated_owned_runs_release_resources_after_many_turns() {
         let stopping = Instant::now();
         command(
             &control,
-            Command::RunStop(RunTarget {
+            Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                 run_id: accepted.run_id.clone().unwrap(),
             }),
         )

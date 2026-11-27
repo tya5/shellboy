@@ -1887,8 +1887,16 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "summaryだけで指定できます。完成した要約の文字数上限です。",
             "Only for summary. Maximum length of the completed summary."
         ),
-        FieldId::IndexCoverage => local!(language, "選択範囲の索引の網羅状況を返します。", "Report index coverage for the selection."),
-        FieldId::IndexCoverageCursor => local!(language, "前回の網羅状況から続きを取得します。", "Continue from the previous coverage cursor."),
+        FieldId::IndexCoverage => local!(
+            language,
+            "選択範囲の索引の網羅状況を返します。",
+            "Report index coverage for the selection."
+        ),
+        FieldId::IndexCoverageCursor => local!(
+            language,
+            "前回の網羅状況から続きを取得します。",
+            "Continue from the previous coverage cursor."
+        ),
         FieldId::IndexScope => local!(
             language,
             "threads/allを指定します。実行時は現在のpreviewと明示対象の規則を保持します。",

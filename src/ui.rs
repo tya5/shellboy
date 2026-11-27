@@ -4901,7 +4901,7 @@ impl UiState {
                     return self.command_error(i18n::local!(self.config.ui.language, "復旧対象が未取得です。F8で状態を確認してください", "The recovery target is not loaded. F8 shows its state"));
                 };
                 vec![UiAction::Command(Command::RunRetry(
-                    crate::protocol::RunTarget { run_id },
+                    crate::protocol::RunRetryArgs::exact(run_id),
                 ))]
             }
             "/stop" => thread_id

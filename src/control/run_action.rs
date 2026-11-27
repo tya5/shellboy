@@ -21,8 +21,10 @@ impl RunAction {
             run_id: expected.run_id.clone(),
         };
         match self {
-            Self::Stop => Command::RunStop(target),
-            Self::Retry => Command::RunRetry(target),
+            Self::Stop => Command::RunStop(crate::protocol::RunStopTarget::Run {
+                run_id: target.run_id,
+            }),
+            Self::Retry => Command::RunRetry(crate::protocol::RunRetryArgs::exact(target.run_id)),
         }
     }
 }

@@ -600,9 +600,9 @@ async fn low_disk_holds_the_turn_and_explicit_retry_resumes_after_space_returns(
     let retried = control
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, id()),
-            Command::RunRetry(RunTarget {
-                run_id: accepted.run_id.clone().unwrap(),
-            }),
+            Command::RunRetry(crate::protocol::RunRetryArgs::exact(
+                accepted.run_id.clone().unwrap(),
+            )),
         ))
         .await;
     assert!(retried.ok, "{:?}", retried.error);
@@ -674,9 +674,11 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
         match case {
             "manual" | "stop" => {
                 let command = if case == "manual" {
-                    Command::RunRetry(target)
+                    Command::RunRetry(crate::protocol::RunRetryArgs::exact(target.run_id))
                 } else {
-                    Command::RunStop(target)
+                    Command::RunStop(crate::protocol::RunStopTarget::Run {
+                        run_id: target.run_id,
+                    })
                 };
                 control
                     .store

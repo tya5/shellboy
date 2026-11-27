@@ -224,6 +224,24 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
 }
 
 #[tokio::test]
+async fn run_stop_requires_exactly_one_run_or_thread_selector() {
+    use shellboy::protocol::RunStopTarget;
+    assert_eq!(
+        convert(&["run", "stop", "--thread", "t"]).await,
+        Command::RunStop(RunStopTarget::Thread {
+            thread_id: "t".into(),
+            expected_turn: None
+        }),
+    );
+    for args in [
+        &["shellboy", "run", "stop"][..],
+        &["shellboy", "run", "stop", "--run", "r", "--thread", "t"][..],
+    ] {
+        assert!(Cli::try_parse_from(args).is_err(), "{args:?}");
+    }
+}
+
+#[tokio::test]
 async fn compact_edit_modes_keep_exact_range_and_reject_ambiguous_arguments() {
     use shellboy::protocol::{ContextEditAction, ContextEditArgs};
     for (arguments, action, from, to) in [
@@ -1660,6 +1678,7 @@ async fn id_resolver_passes_empty_sentinels_to_command_validation() {
 
     let empty_message = shellboy::cli::resolve_id_arguments(
         Command::MessageGet(shellboy::protocol::MessageTarget {
+            source_thread_id: None,
             message_id: String::new(),
         }),
         |_, _| async { panic!("empty value is not a prefix query") },

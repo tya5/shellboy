@@ -1021,7 +1021,7 @@ async fn stop_cancels_a_persisted_retry_wait_without_another_request() {
         "tests/response_retries.rs: stop_cancels_a_persisted_retry_wait_without_another_request",
         request(
             &fixture.control,
-            Command::RunStop(RunTarget {
+            Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                 run_id: fixture.accepted.run_id.clone().unwrap(),
             }),
         ),
@@ -1388,9 +1388,9 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
         .control
         .request(Request::new(
             format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
-            Command::RunRetry(RunTarget {
-                run_id: f.accepted.run_id.clone().unwrap(),
-            }),
+            Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+                f.accepted.run_id.clone().unwrap(),
+            )),
         ))
         .await;
     assert!(retried.ok, "{:?}", retried.error);
@@ -2311,7 +2311,7 @@ async fn connection_cooldown_blocks_other_thread_and_stop_remains_responsive() {
         "connection cooldown stop",
         request(
             &fixture.control,
-            Command::RunStop(RunTarget {
+            Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                 run_id: accepted.run_id.unwrap(),
             }),
         ),
@@ -3514,7 +3514,7 @@ async fn untyped_terminal_sse_honors_real_retry_after_and_stop() {
                 "tests/response_retries.rs: untyped_terminal_sse_honors_real_retry_after_and_stop",
                 request(
                     &fixture.control,
-                    Command::RunStop(RunTarget {
+                    Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                         run_id: fixture.accepted.run_id.clone().unwrap(),
                     }),
                 ),

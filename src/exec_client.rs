@@ -294,6 +294,7 @@ impl Session {
                             .request(
                                 "message",
                                 Command::MessageGet(MessageTarget {
+                                    source_thread_id: None,
                                     message_id: message,
                                 }),
                             )
@@ -383,6 +384,7 @@ impl Session {
                             .request(
                                 "message",
                                 Command::MessageGet(MessageTarget {
+                                    source_thread_id: None,
                                     message_id: message,
                                 }),
                             )

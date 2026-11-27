@@ -171,6 +171,7 @@ async fn message(control: &Arc<Control>, id: &str) -> Value {
     rpc(
         control,
         Command::MessageGet(MessageTarget {
+            source_thread_id: None,
             message_id: id.into(),
         }),
     )
@@ -644,7 +645,7 @@ async fn run_stop_classifies_admitted_and_queued_input_before_restart_and_explic
     assert!(!before.on_path && before.admission == "unadmitted");
     rpc(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: first.run_id.clone().unwrap(),
         }),
     )

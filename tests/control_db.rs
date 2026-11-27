@@ -365,6 +365,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
         execute(
             &store,
             Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: first.message_id.clone(),
             }),
         )
@@ -375,7 +376,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     assert_eq!(old.turn_id, first.turn_id);
     let stop = execute(
         &store,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: first.run_id.clone().unwrap(),
         }),
     )
@@ -431,6 +432,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
         execute(
             &store,
             Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: held.message_id,
             }),
         )
@@ -592,7 +594,7 @@ async fn stopping_one_run_does_not_freeze_organizational_children() {
     let child_message: MessageAccepted = serde_json::from_value(child_result.result).unwrap();
     let stop = execute(
         &store,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: parent_message.run_id.clone().unwrap(),
         }),
     )
@@ -924,7 +926,13 @@ async fn model_request_ceiling_refuses_live_and_stopping_runs_without_assigning_
     };
     for state in ["live", "stopping"] {
         if state == "stopping" {
-            execute(&store, Command::RunStop(target())).await;
+            execute(
+                &store,
+                Command::RunStop(shellboy::protocol::RunStopTarget::Run {
+                    run_id: target().run_id,
+                }),
+            )
+            .await;
         }
         let before = execute(&store, Command::RunGet(target())).await.result;
         assert_eq!(before["state"], state);
@@ -981,7 +989,7 @@ async fn held_message_actions_agree_on_send_and_readback() {
         } else if state == "stopping" {
             execute(
                 &store,
-                Command::RunStop(RunTarget {
+                Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                     run_id: first.run_id.unwrap(),
                 }),
             )
@@ -1053,7 +1061,7 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
     let (old, _) = send(&store, &thread.thread_id, "old assigned input").await;
     execute(
         &store,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: old.run_id.clone().unwrap(),
         }),
     )
@@ -1089,6 +1097,7 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         execute(
             &store,
             Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: pending.message_id.clone(),
             }),
         )
@@ -1107,6 +1116,7 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         execute(
             &store,
             Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: old.message_id.clone(),
             }),
         )
@@ -1373,7 +1383,7 @@ async fn any_caller_may_stop_any_independent_run_without_cascade() {
     )
     .await;
     // No authority check (#256): a non-owner Run may stop an unowned Run.
-    let non_owner_stop = request(Command::RunStop(RunTarget {
+    let non_owner_stop = request(Command::RunStop(shellboy::protocol::RunStopTarget::Run {
         run_id: unowned_message.run_id.clone().unwrap(),
     }));
     let operation_id = non_owner_stop.operation_id.clone();
@@ -1419,7 +1429,7 @@ async fn any_caller_may_stop_any_independent_run_without_cascade() {
     let child: MessageAccepted = serde_json::from_value(accepted.result).unwrap();
     let stopped = store
         .execute(
-            request(Command::RunStop(RunTarget {
+            request(Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                 run_id: parent_message.run_id.clone().unwrap(),
             })),
             Some(origin),
@@ -1444,7 +1454,7 @@ async fn any_caller_may_stop_any_independent_run_without_cascade() {
         .unwrap();
     let human = execute(
         &store,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: independent_message.run_id.unwrap(),
         }),
     )
@@ -1555,7 +1565,11 @@ async fn retry_schedules_exactly_one_quiet_driver_wake() {
         })
         .await
         .unwrap();
-    let effects = execute(&store, Command::RunRetry(RunTarget { run_id: run })).await;
+    let effects = execute(
+        &store,
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run)),
+    )
+    .await;
     assert_eq!(
         effects.quiet_wake_threads.len(),
         1,
@@ -2048,10 +2062,14 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
 
     // RunStop takes the DB path, changes state and generation once, and saves
     // its result in the same transaction while the shell reservation is live.
-    let run_stop = request(Command::RunStop(RunTarget {
-        run_id: run_id.clone(),
-    }));
+    let run_stop = request(Command::RunStop(
+        shellboy::protocol::RunStopTarget::Thread {
+            thread_id: thread.thread_id.clone(),
+            expected_turn: None,
+        },
+    ));
     let stopped = store.execute(run_stop.clone(), None).await.unwrap();
+    assert_eq!(stopped.result["run_id"], run_id);
     assert_eq!(stopped.result["state"], "stopping");
     assert_eq!(stopped.stop_runs, vec![run_id.clone()]);
     let replay = store.execute(run_stop.clone(), None).await.unwrap();
@@ -2061,7 +2079,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         "saved outcomes do not repeat stop effects"
     );
     let mut run_conflict = run_stop.clone();
-    run_conflict.command = Command::RunStop(RunTarget {
+    run_conflict.command = Command::RunStop(shellboy::protocol::RunStopTarget::Run {
         run_id: "another-run".into(),
     });
     assert_eq!(
@@ -2085,7 +2103,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
     assert_eq!(
         store
             .execute(
-                request(Command::RunStop(RunTarget {
+                request(Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                     run_id: run_id.clone()
                 })),
                 None
@@ -2205,9 +2223,7 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                 Ok(())
             }).await.unwrap();
             let command = if retry {
-                Command::RunRetry(RunTarget {
-                    run_id: run.clone(),
-                })
+                Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run.clone()))
             } else {
                 Command::MessageSend(MessageSendArgs {
                     max_model_requests: None,
@@ -2332,6 +2348,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
             descendants: false,
         }),
         Command::MessageGet(MessageTarget {
+            source_thread_id: None,
             message_id: message.message_id.clone(),
         }),
         Command::OperationGet(OperationTarget {
@@ -3014,9 +3031,9 @@ async fn retry_has_no_authority_check_and_is_safe_when_raced() {
     };
     to_recovery(leaf_run.clone()).await.unwrap();
     let retry = || {
-        request(Command::RunRetry(RunTarget {
-            run_id: leaf_run.clone(),
-        }))
+        request(Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+            leaf_run.clone(),
+        )))
     };
     // A non-owner Run retries through the same path as a human: no authority check.
     // Two callers (owner and a stranger) race one retry: exactly one resumes the Turn.
@@ -3065,9 +3082,7 @@ async fn retry_has_no_authority_check_and_is_safe_when_raced() {
     to_recovery(leaf_run.clone()).await.unwrap();
     execute(
         &store,
-        Command::RunRetry(RunTarget {
-            run_id: leaf_run.clone(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(leaf_run.clone())),
     )
     .await;
     store.database.shutdown().await.unwrap();

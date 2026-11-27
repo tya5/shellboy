@@ -295,6 +295,7 @@ async fn reply_requires_applied_pending_and_is_idempotent() {
     let details = store
         .execute(
             request(Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: id.clone(),
             })),
             None,
@@ -384,6 +385,7 @@ async fn originless_thread_duty_reply_resumes_recovery_but_model_reply_does_not(
         let reply_message = store
             .execute(
                 request(Command::MessageGet(MessageTarget {
+                    source_thread_id: None,
                     message_id: result["message_id"].as_str().unwrap().to_owned(),
                 })),
                 None,
@@ -463,6 +465,7 @@ async fn delivered_cross_thread_ask_can_be_withdrawn_only_by_its_sender_or_owner
         assert_eq!(rejected.result["items"][0]["outcome"], "forbidden");
         let get = || {
             request(Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: id.clone(),
             }))
         };
@@ -595,6 +598,7 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
         let details = store
             .execute(
                 request(Command::MessageGet(MessageTarget {
+                    source_thread_id: None,
                     message_id: id.clone(),
                 })),
                 None,
@@ -850,6 +854,7 @@ async fn models_can_request_and_reply_across_threads() {
         let saved = store
             .execute(
                 request(Command::MessageGet(MessageTarget {
+                    source_thread_id: None,
                     message_id: id.into(),
                 })),
                 None,
@@ -931,9 +936,9 @@ async fn recovery_wait_keeps_pending_and_recovered_reply_wakes_completed_sender_
     }).await.unwrap();
     store
         .execute(
-            request(Command::RunRetry(RunTarget {
-                run_id: accepted["run_id"].as_str().unwrap().into(),
-            })),
+            request(Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+                accepted["run_id"].as_str().unwrap().into(),
+            ))),
             None,
         )
         .await
@@ -983,6 +988,7 @@ async fn recovery_wait_keeps_pending_and_recovered_reply_wakes_completed_sender_
     let details = store
         .execute(
             request(Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: reply_id,
             })),
             None,
@@ -1135,6 +1141,7 @@ async fn replying_after_sender_deletion_before_gc_cancels_instead_of_replying() 
     let before = store
         .execute(
             request(Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: message.clone(),
             })),
             None,
@@ -1155,6 +1162,7 @@ async fn replying_after_sender_deletion_before_gc_cancels_instead_of_replying() 
     let details = store
         .execute(
             request(Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: message.clone(),
             })),
             None,
@@ -1258,7 +1266,9 @@ async fn oversized_held_queue_progresses_through_send_and_retry_without_rejectio
     let hint: serde_json::Value =
         serde_json::from_str(status["recovery_hint"].as_str().unwrap()).unwrap();
     assert_eq!(hint["remaining_held"], 3);
-    let retry = request(Command::RunRetry(RunTarget { run_id: run }));
+    let retry = request(Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+        run,
+    )));
     let retried = store.execute(retry.clone(), None).await.unwrap().result;
     assert!(retried["recovery_hint"].is_null());
     assert_eq!(store.execute(retry, None).await.unwrap().result, retried);

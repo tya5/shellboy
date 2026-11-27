@@ -226,6 +226,7 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
                 execution_id: item.id.clone(),
             }),
             Command::ShellRead(ShellReadArgs {
+                expected_owner: None,
                 tail: false,
                 segments: false,
                 execution_id: item.id.clone(),
@@ -235,11 +236,13 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
             }),
         ],
         WorkKind::Message => vec![Command::MessageGet(MessageTarget {
+            source_thread_id: None,
             message_id: item.id.clone(),
         })],
     };
     if let Some(id) = &item.message_id {
         links.push(Command::MessageGet(MessageTarget {
+            source_thread_id: None,
             message_id: id.clone(),
         }));
     }
@@ -256,6 +259,7 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
             execution_id: id.clone(),
         }));
         links.push(Command::ShellRead(ShellReadArgs {
+            expected_owner: None,
             tail: false,
             segments: false,
             execution_id: id.clone(),

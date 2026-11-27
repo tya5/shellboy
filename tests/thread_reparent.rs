@@ -386,7 +386,7 @@ async fn moving_a_live_thread_changes_organization_without_run_ownership() {
     // child no longer has it as parent.
     let stopped = store
         .execute(
-            request(Command::RunStop(RunTarget {
+            request(Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                 run_id: old_run["run_id"].as_str().unwrap().into(),
             })),
             Some(old_origin.clone()),
@@ -458,6 +458,7 @@ async fn a_pending_reply_is_delivered_to_its_sender_after_the_recipient_moves() 
     let pending = run(
         &store,
         Command::MessageGet(MessageTarget {
+            source_thread_id: None,
             message_id: message_id.clone(),
         }),
     )
@@ -498,6 +499,7 @@ async fn a_pending_reply_is_delivered_to_its_sender_after_the_recipient_moves() 
     let answered = run(
         &store,
         Command::MessageGet(MessageTarget {
+            source_thread_id: None,
             message_id: message_id.clone(),
         }),
     )

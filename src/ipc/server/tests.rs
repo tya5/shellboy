@@ -198,7 +198,7 @@ async fn cli_wait_retries_only_definite_admission_refusals_until_deadline() {
 #[tokio::test]
 async fn parked_waits_leave_ordinary_and_stop_admission_available() {
     use crate::protocol::{
-        EventsWaitArgs, Request, RunTarget, WaitArgs, WaitCondition, read_frame, write_frame,
+        EventsWaitArgs, Request, WaitArgs, WaitCondition, read_frame, write_frame,
     };
     let mut fixture = Fixture::new();
     let mut clients = Vec::new();
@@ -261,7 +261,7 @@ async fn parked_waits_leave_ordinary_and_stop_admission_available() {
     let stop = fixture
         .connect_command(
             34,
-            Command::RunStop(RunTarget {
+            Command::RunStop(crate::protocol::RunStopTarget::Run {
                 run_id: "run".into(),
             }),
         )
@@ -348,7 +348,7 @@ async fn refused_wait_frame_survives_native_pipe_close() {
 
 #[tokio::test]
 async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded() {
-    use crate::protocol::{RunTarget, StatusArgs};
+    use crate::protocol::StatusArgs;
     let mut fixture = Fixture::new();
     let mut clients = Vec::new();
     let mut accepted = Vec::new();
@@ -360,7 +360,7 @@ async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded()
         (MAX_IPC_WORK, Command::Status(StatusArgs::default())),
         (
             MAX_IPC_WORK + 1,
-            Command::RunStop(RunTarget {
+            Command::RunStop(crate::protocol::RunStopTarget::Run {
                 run_id: "run".into(),
             }),
         ),
@@ -388,7 +388,7 @@ async fn full_work_admission_does_not_block_status_or_stop_and_remains_bounded()
 
 #[tokio::test]
 async fn each_reserved_class_is_bounded_and_releases_only_its_own_capacity() {
-    use crate::protocol::{ExecutionTarget, RunTarget, StatusArgs};
+    use crate::protocol::{ExecutionTarget, StatusArgs};
     let mut fixture = Fixture::new();
     let mut clients = Vec::new();
     let mut ordinary = Vec::new();
@@ -403,7 +403,7 @@ async fn each_reserved_class_is_bounded_and_releases_only_its_own_capacity() {
             fixture
                 .connect_command(
                     100 + number,
-                    Command::RunStop(RunTarget {
+                    Command::RunStop(crate::protocol::RunStopTarget::Run {
                         run_id: "run".into(),
                     }),
                 )
@@ -422,7 +422,7 @@ async fn each_reserved_class_is_bounded_and_releases_only_its_own_capacity() {
     for (number, command) in [
         (
             300,
-            Command::RunStop(RunTarget {
+            Command::RunStop(crate::protocol::RunStopTarget::Run {
                 run_id: "run".into(),
             }),
         ),

@@ -449,7 +449,11 @@ async fn run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_i
     let stopping = control.clone();
     let target = run.clone();
     let request = tokio::spawn(async move {
-        rpc(&stopping, Command::RunStop(RunTarget { run_id: target })).await
+        rpc(
+            &stopping,
+            Command::RunStop(crate::protocol::RunStopTarget::Run { run_id: target }),
+        )
+        .await
     });
     crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: run_stop_reply_grace_remains_in_the_request_guard_and_freeze_releases_it", async {
         loop {

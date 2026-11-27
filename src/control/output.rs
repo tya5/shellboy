@@ -379,6 +379,7 @@ impl ShellOutputReader {
         if args.tail {
             return self.db(move |db| {
                 let tx = db.transaction().map_err(sql_error)?;
+                require_shell_owner(&tx, &args.execution_id, args.expected_owner.as_ref())?;
                 let mut state = snapshot(&tx, &args.execution_id)?;
                 set_raw_start(&tx, &mut state, &args.execution_id)?;
                 if canonical.as_deref().is_some_and(|name| name != state.encoding) {
@@ -397,6 +398,7 @@ impl ShellOutputReader {
             .transpose()?;
         let mut pin = ReadPin::new(self.database.clone(), self.instance.to_string());
         let execution = args.execution_id.clone();
+        let expected_owner = args.expected_owner.clone();
         let pin_id = pin.id.clone();
         let instance = pin.instance.clone();
         let expected = old.clone();
@@ -404,6 +406,7 @@ impl ShellOutputReader {
         let wakes = self.database.wait_wakes();
         let prepared=self.db(move|db|{
             let tx=db.transaction().map_err(sql_error)?;
+            require_shell_owner(&tx, &execution, expected_owner.as_ref())?;
             let mut state=snapshot(&tx,&execution)?;
             if let Some(cursor)=&expected{validate_cursor(&tx,&state,&execution,cursor,requested.as_deref(),Some(streams))?;}
             set_raw_start(&tx,&mut state,&execution)?;
@@ -965,4 +968,24 @@ fn expired_output_for(db: &Connection, execution: &str, generation: u64) -> Resu
 }
 fn sql_error(error: rusqlite::Error) -> ApiError {
     crate::storage::save_error(format!("output database operation failed: {error}"))
+}
+
+fn require_shell_owner(
+    db: &rusqlite::Connection,
+    execution: &str,
+    expected: Option<&crate::protocol::ShellReadOwner>,
+) -> Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let matches = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1 AND r.id=?2 AND r.thread_id=?3)",
+        rusqlite::params![execution, expected.run_id, expected.thread_id],
+        |row| row.get::<_, bool>(0),
+    ).map_err(sql_error)?;
+    if !matches {
+        return Err(error(ErrorCode::TargetUnavailable, "Shell output does not belong to the expected Run and Thread")
+            .details(serde_json::json!({"reason":"shell_owner_changed", "request_may_have_been_applied":false})));
+    }
+    Ok(())
 }

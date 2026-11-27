@@ -588,9 +588,13 @@ fn follow_in(
                 display: false,
             }))
         }
-        "message_id" => Ok(Command::MessageGet(MessageTarget { message_id: id })),
+        "message_id" => Ok(Command::MessageGet(MessageTarget {
+            source_thread_id: None,
+            message_id: id,
+        })),
         "execution_id" if matches!(mode, ManagementFollow::Read) => {
             Ok(Command::ShellRead(ShellReadArgs {
+                expected_owner: None,
                 tail: false,
                 segments: false,
                 execution_id: id,
@@ -1012,6 +1016,7 @@ mod tests {
             execution_id: "shell-full-id".into(),
         });
         let raw = Command::ShellRead(ShellReadArgs {
+            expected_owner: None,
             tail: false,
             segments: false,
             execution_id: "shell-full-id".into(),
@@ -1038,8 +1043,7 @@ mod tests {
         assert!(
             matches!(follow(&value,"",crate::ui::ManagementFollow::Refresh).unwrap(),Command::Status(a) if a.cursor.is_none())
         );
-        let dangerous =
-            serde_json::json!({"targets":[Command::RunStop(RunTarget{run_id:"owner".into()})]});
+        let dangerous = serde_json::json!({"targets":[Command::RunStop(crate::protocol::RunStopTarget::Run {run_id:"owner".into()})]});
         assert!(follow(&dangerous, "", crate::ui::ManagementFollow::Inspect).is_err());
         let english = follow_in(
             &json!({"other":true}),

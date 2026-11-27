@@ -435,6 +435,7 @@ mod tests {
         .unwrap();
         let thread_id = created["thread_id"].as_str().unwrap().to_owned();
         let mut save = DraftSaveArgs {
+            expected_source: None,
             thread_id,
             draft: Box::new(crate::ui::DraftSnapshot {
                 draft_id: "draft".into(),

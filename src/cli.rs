@@ -545,7 +545,7 @@ pub enum RunCommand {
     )]
     Retry(RunOptions),
     /// Request stopping this Run and its owned work; inspect state to confirm termination.
-    Stop(RunOptions),
+    Stop(RunStopOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum TurnCommand {
@@ -1395,6 +1395,19 @@ pub struct OperationOptions {
 pub struct RunOptions {
     #[arg(long = "run")]
     pub run_id: String,
+}
+#[derive(Debug, Clone, Args)]
+pub struct RunStopOptions {
+    /// Stop the exact Run.
+    #[arg(
+        long = "run",
+        required_unless_present = "thread_id",
+        conflicts_with = "thread_id"
+    )]
+    pub run_id: Option<String>,
+    /// Atomically stop the selected Thread's current live or stopping Run.
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 pub struct TurnOptions {
@@ -2267,6 +2280,7 @@ impl Cli {
                     text: read_text(a.text, stdin).await?,
                 }),
                 MessageCommand::Get(a) => C::MessageGet(wire::MessageTarget {
+                    source_thread_id: None,
                     message_id: a.message_id,
                 }),
                 MessageCommand::Cancel(a) => C::MessageCancel(wire::MessageCancelArgs {
@@ -2280,8 +2294,18 @@ impl Cli {
             }),
             CliCommand::Run { command } => match command {
                 RunCommand::Get(a) => C::RunGet(wire::RunTarget { run_id: a.run_id }),
-                RunCommand::Retry(a) => C::RunRetry(wire::RunTarget { run_id: a.run_id }),
-                RunCommand::Stop(a) => C::RunStop(wire::RunTarget { run_id: a.run_id }),
+                RunCommand::Retry(a) => C::RunRetry(wire::RunRetryArgs {
+                    run_id: a.run_id,
+                    expected_turn: None,
+                }),
+                RunCommand::Stop(a) => C::RunStop(match (a.run_id, a.thread_id) {
+                    (Some(run_id), None) => wire::RunStopTarget::Run { run_id },
+                    (None, Some(thread_id)) => wire::RunStopTarget::Thread {
+                        thread_id,
+                        expected_turn: None,
+                    },
+                    _ => return Err(invalid("Specify exactly one of --run or --thread")),
+                }),
             },
             CliCommand::Turn {
                 command: TurnCommand::Get(a),
@@ -2428,6 +2452,7 @@ impl Cli {
                     execution_id: a.execution_id,
                 }),
                 ShellCommand::Read(a) => C::ShellRead(wire::ShellReadArgs {
+                    expected_owner: None,
                     tail: a.tail,
                     segments: a.segments,
                     execution_id: a.execution_id,

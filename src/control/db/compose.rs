@@ -21,11 +21,12 @@ pub(super) fn save(
 ) -> super::Result<()> {
     let DraftSaveArgs {
         thread_id: thread,
+        expected_source,
         draft,
         anchor,
         follow_tail,
     } = args;
-    history::selection_revision(tx, thread, ThreadScope::Live)
+    let revision = history::selection_revision(tx, thread, ThreadScope::Live)
         .optional()
         .map_err(sql_error)?
         .ok_or_else(|| {
@@ -34,6 +35,13 @@ pub(super) fn save(
                 "Draft Thread is not available",
             )
         })?;
+    if let Some(source) = expected_source {
+        if u64::try_from(revision).ok() != Some(source.selection_revision) {
+            return Err(error(ErrorCode::OperationConflict, "Selected history changed")
+                .details(serde_json::json!({"reason":"expected_source_revision_changed", "request_may_have_been_applied":false})));
+        }
+        super::message_source(tx, thread, &source.message_id, draft_bytes)?;
+    }
     if !follow_tail
         && let Some(node) = anchor.node_id.as_deref()
         && tx
