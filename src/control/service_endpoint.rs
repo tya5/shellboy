@@ -1,6 +1,6 @@
 //! Per-execution publication owned by the scheduled shell collector.
 use super::{Control, schedule::service_not_found, storage_error};
-use crate::protocol::{ApiError, ErrorCode, ServiceEndpoint};
+use crate::protocol::{ApiError, ErrorCode, ServiceEndpoint, ServiceEndpointArgs};
 use rusqlite::OptionalExtension;
 use std::{
     fs::OpenOptions,
@@ -52,27 +52,32 @@ fn unavailable(reason: &'static str) -> ApiError {
         .details(serde_json::json!({"reason":reason}))
 }
 
-async fn running(control: &Control, id: &str) -> Result<String, ApiError> {
-    let id = id.to_owned();
+async fn running(control: &Control, args: ServiceEndpointArgs) -> Result<String, ApiError> {
     let row = control.store.database.call(move |db| {
-        Ok(db.query_row(
-            "SELECT CASE WHEN q.enabled AND s.state='running' THEN s.id END
+        let selector = if args.service_id.is_some() { "q.id=?1" } else { "q.thread_id=?1 AND q.name=?2" };
+        let sql = format!("SELECT CASE WHEN q.enabled AND s.state='running' THEN s.id END
              FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL
              LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY rowid DESC LIMIT 1)
-             WHERE q.id=?1 AND q.kind='service'", [&id], |row| row.get::<_,Option<String>>(0),
-        ).optional()?)
+             WHERE {selector} AND q.kind='service'");
+        let key = args.service_id.as_deref().or(args.thread_id.as_deref());
+        let parameters = [key, args.name.as_deref()];
+        let count = if args.service_id.is_some() { 1 } else { 2 };
+        Ok(db.query_row(&sql, rusqlite::params_from_iter(&parameters[..count]), |row| row.get::<_, Option<String>>(0)).optional()?)
     }).await.map_err(storage_error)?;
     row.ok_or_else(service_not_found)?
         .ok_or_else(|| unavailable("service_not_running"))
 }
 
-pub(super) async fn read(control: &Control, id: &str) -> Result<ServiceEndpoint, ApiError> {
-    let execution = running(control, id).await?;
+pub(super) async fn read(
+    control: &Control,
+    args: ServiceEndpointArgs,
+) -> Result<ServiceEndpoint, ApiError> {
+    let execution = running(control, args.clone()).await?;
     let file = path(&control.data_dir, &control.store.instance_id, &execution);
     let value = tokio::task::spawn_blocking(move || read_file(&file))
         .await
         .map_err(|_| unavailable("service_endpoint_unavailable"))?;
-    if running(control, id).await? != execution {
+    if running(control, args).await? != execution {
         return Err(unavailable("service_not_running"));
     }
     value

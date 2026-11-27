@@ -1793,7 +1793,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::Inspect,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Service],
+        fields: &[FieldId::Service, FieldId::Thread, FieldId::ServiceName],
     },
     OperationSpec {
         id: OperationId::ServiceStart,

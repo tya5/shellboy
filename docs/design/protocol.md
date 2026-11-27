@@ -179,8 +179,9 @@ return the owning `thread_id` with each artifact. See [Thread artifacts](thread-
 
 ## Named service endpoints
 
-Authenticated local clients resolve a service name using `service.list` for one
-Thread, then call `service.endpoint` with the exact `service_id`. This read
+Authenticated local clients call `service.endpoint` by exact `service_id` or
+by explicit `thread_id` and `name`. The caller’s own Thread does not restrict
+local reads; Studio AppHost separately limits pages to their owning Thread. This read
 returns `{port, token}` only for the current running execution; do not persist or
 log it. The endpoint is not included in `service.list` or `service.get` and does
 not create an operation receipt. See [#462](protocol-versions/next-462.md) for

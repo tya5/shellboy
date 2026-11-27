@@ -1020,6 +1020,11 @@ args!(ThreadTagArgs {
 });
 // Distinct tag names in byte order, paged; no member counts.
 args!(ServiceTarget { service_id: String });
+args!(ServiceEndpointArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")] service_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] name: Option<String>,
+});
 args!(ServiceSetArgs {
     service_id: String,
     name: String
@@ -1868,7 +1873,7 @@ pub enum Command {
     #[serde(rename = "service.set")]
     ServiceSet(ServiceSetArgs),
     #[serde(rename = "service.endpoint")]
-    ServiceEndpoint(ServiceTarget),
+    ServiceEndpoint(ServiceEndpointArgs),
     #[serde(rename = "service.start")]
     ServiceStart(ServiceTarget),
     #[serde(rename = "service.stop")]

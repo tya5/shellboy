@@ -105,7 +105,11 @@ const MEANINGS: &[Meaning] = &[
     (
         OperationId::ServiceEndpoint,
         &["service", "endpoint"],
-        &[("service_id", FieldId::Service)],
+        &[
+            ("service_id", FieldId::Service),
+            ("thread_id", FieldId::Thread),
+            ("name", FieldId::ServiceName),
+        ],
         None,
     ),
     (

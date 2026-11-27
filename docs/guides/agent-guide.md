@@ -454,9 +454,13 @@ To make a service callable by name, add it with `--name NAME`. Names are
 unique within its Thread. Bind the service to loopback and write its port and a
 fresh secret token as JSON to the existing owner-only file at
 `SHELLBOY_SERVICE_ENDPOINT_FILE`. Do not print or save the token elsewhere.
-Clients use `service list --thread THREAD` to resolve the exact name in the
-app's owning Thread, then use the exact service ID for `service endpoint`.
-A lookup never starts a stopped service.
+For a service hub, register `tracker` in one Thread and let shells in other
+Threads call it directly: `shellboy service endpoint --thread HUB_THREAD --name
+tracker` returns the live loopback port and token. Consume the JSON privately
+in the calling program, then call the service; do not relay it through a model
+turn, log it, or save it. A lookup never starts a stopped service. This applies
+to authenticated local shells, not app pages: Studio AppHost limits an app
+page's name lookup to the app's owning Thread.
 
 To observe a particular service execution, take its latest `execution_id` from
 `service list --thread THREAD` (not the service ID). Use `shell get --execution

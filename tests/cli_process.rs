@@ -1809,7 +1809,8 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     use shellboy::{
         ipc,
         protocol::{
-            Command, ErrorCode, ServiceAddArgs, ServiceSetArgs, ServiceTarget, ThreadTarget,
+            Command, ErrorCode, ServiceAddArgs, ServiceEndpointArgs, ServiceSetArgs, ServiceTarget,
+            ThreadTarget,
         },
     };
     use std::{os::unix::fs::MetadataExt, path::PathBuf};
@@ -1860,6 +1861,20 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     let target = |id: &str| ServiceTarget {
         service_id: id.into(),
     };
+    let exact = |id: &str| {
+        Command::ServiceEndpoint(ServiceEndpointArgs {
+            service_id: Some(id.into()),
+            thread_id: None,
+            name: None,
+        })
+    };
+    let named = |thread: &str| {
+        Command::ServiceEndpoint(ServiceEndpointArgs {
+            service_id: None,
+            thread_id: Some(thread.into()),
+            name: Some("tracker".into()),
+        })
+    };
     let conflict = rpc(add(&first, "tracker", 32104)).await.error.unwrap();
     assert_eq!(conflict.details.unwrap()["reason"], "service_name_conflict");
     let set = |id: &str, name: &str| {
@@ -1894,7 +1909,7 @@ async fn named_service_endpoints_follow_the_exact_execution() {
                 let tail = matches[0]["latest"]["output_tail"]
                     .as_str()
                     .unwrap_or_default();
-                let result = rpc(Command::ServiceEndpoint(target(id))).await;
+                let result = rpc(exact(id)).await;
                 if let Some(endpoint) = result.result.filter(|_| tail.ends_with('\n')) {
                     let file = PathBuf::from(tail.trim());
                     let metadata = std::fs::metadata(&file).unwrap();
@@ -1921,18 +1936,37 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     let (first_file, first_token) = observe(&first, &a, 32101).await;
     let (second_file, _) = observe(&second, &b, 32102).await;
     assert_ne!(first_file, second_file);
+    assert_eq!(ok(named(&first)).await["port"], 32101);
+    assert_eq!(ok(named(&second)).await["port"], 32102);
+    let binary = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\"'\"'");
+    let probe = id(ok(Command::ServiceAdd(ServiceAddArgs {
+        thread_id: Some(second.clone()), name: None, cwd: None, description: None,
+        command: format!(r#"test "$SHELLBOY_THREAD_ID" = '{second}' || exit 2; result=$('{binary}' service endpoint --thread '{first}' --name tracker) || exit 3; case "$result" in *32101*) echo hub-ok;; *) exit 4;; esac"#),
+    })).await);
+    crate::test_watchdog::watchdog("Thread B reads Thread A's named endpoint", async {
+        loop {
+            let service = ok(Command::ServiceGet(target(&probe))).await;
+            if let Some("exited" | "failed" | "stopped") = service["latest"]["state"].as_str() {
+                assert_eq!(service["latest"]["exit_code"], 0);
+                assert!(
+                    service["latest"]["output_tail"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains("hub-ok")
+                );
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     ok(Command::ServiceStop(target(&a))).await;
     assert!(!first_file.exists());
-    let stopped = rpc(Command::ServiceEndpoint(target(&a)))
-        .await
-        .error
-        .unwrap();
+    let stopped = rpc(exact(&a)).await.error.unwrap();
     assert_eq!(stopped.code, ErrorCode::InvalidState);
     assert_eq!(stopped.details.unwrap()["reason"], "service_not_running");
-    assert_eq!(
-        ok(Command::ServiceEndpoint(target(&b))).await["port"],
-        32102
-    );
+    assert_eq!(ok(exact(&b)).await["port"], 32102);
     ok(Command::ServiceStart(target(&a))).await;
     let (restarted, restarted_token) = observe(&first, &a, 32101).await;
     assert_ne!(first_file, restarted);
@@ -1940,11 +1974,7 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     ok(Command::ServiceRemove(target(&a))).await;
     assert!(!restarted.exists());
     assert_eq!(
-        rpc(Command::ServiceEndpoint(target(&a)))
-            .await
-            .error
-            .unwrap()
-            .code,
+        rpc(exact(&a)).await.error.unwrap().code,
         ErrorCode::TargetUnavailable
     );
     ok(Command::ServiceStop(target(&b))).await;
