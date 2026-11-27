@@ -1907,7 +1907,7 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     let b = id(ok(add(&second, "tracker", 32102)).await);
     let second_file = publication(&pipe).await;
     let other = id(ok(add(&first, "other", 32103)).await);
-    let _other_file = publication(&pipe).await;
+    let other_file = publication(&pipe).await;
     let target = |id: &str| ServiceTarget {
         service_id: id.into(),
     };
@@ -2000,9 +2000,9 @@ async fn named_service_endpoints_follow_the_exact_execution() {
         thread_id: Some(second.clone()), name: None, cwd: None, description: None,
         command: format!(r#"printf '%s\n' "$SHELLBOY_SERVICE_ENDPOINT_FILE" > '{fifo}'; test "$SHELLBOY_THREAD_ID" = '{second}' || exit 2; result=$('{binary}' service endpoint --thread '{first}' --name tracker) || exit 3; case "$result" in *32101*) echo hub-ok;; *) exit 4;; esac"#),
     })).await);
-    let probe_file = publication(&pipe).await;
-    let probe_base = probe_file.file_name().unwrap().to_str().unwrap();
-    let execution = &probe_base["service-endpoint-".len() + 37..probe_base.len() - ".json".len()];
+    let _probe_signal = publication(&pipe).await;
+    let service = ok(Command::ServiceGet(target(&probe))).await;
+    let execution = service["latest"]["execution_id"].as_str().unwrap();
     let wait = serde_json::from_value(serde_json::json!({"command":"wait", "args":{"conditions":[{"type":"shell_ended","execution_id":execution}],"timeout_ms":30000}})).unwrap();
     let settled = crate::test_watchdog::watchdog("Thread B's exact shell settles", ok(wait))
         .await
@@ -2036,6 +2036,23 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     );
     ok(Command::ServiceStop(target(&b))).await;
     assert!(!second_file.exists());
+    // A directory at the publication path forces unlink to fail without using real secrets.
+    std::fs::remove_file(&other_file).unwrap();
+    std::fs::create_dir(&other_file).unwrap();
+    let refused = crate::test_watchdog::watchdog(
+        "service stop surfaces retirement failure",
+        rpc(Command::ServiceStop(target(&other))),
+    )
+    .await
+    .unwrap()
+    .error
+    .unwrap();
+    assert_eq!(refused.code, ErrorCode::IoFailed);
+    assert_eq!(
+        refused.details.unwrap()["reason"],
+        "service_endpoint_retirement_failed"
+    );
+    std::fs::remove_dir(&other_file).unwrap();
     local.shutdown().await.unwrap();
     serving.abort();
     let _ = serving.await;

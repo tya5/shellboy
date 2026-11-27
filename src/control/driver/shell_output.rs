@@ -165,13 +165,6 @@ pub(in crate::control) async fn install_shell(
     execution: &str,
     spawned: crate::shell::ShellExecution,
 ) -> Result<(Option<CompletionReceiver>, Option<ForegroundReceiver>), ApiError> {
-    if let ShellOwner::Schedule {
-        endpoint: Some(publication),
-        ..
-    } = &owner
-    {
-        control.publications.register(execution, publication);
-    }
     let handle = spawned.handle.clone();
     control
         .live
@@ -197,9 +190,35 @@ pub(in crate::control) async fn install_shell(
     } else {
         (None, None)
     };
+    let registered = if let ShellOwner::Schedule {
+        endpoint: Some(publication),
+        ..
+    } = &current
+    {
+        let registry = control.publications.clone();
+        let publication = publication.clone();
+        let id = execution.to_owned();
+        control
+            .store
+            .database
+            .call(move |db| {
+                let live = db.query_row(
+                    "SELECT state IN ('starting','running') FROM shell_execution WHERE id=?1",
+                    [&id],
+                    |r| r.get::<_, bool>(0),
+                )?;
+                if live {
+                    registry.register(id, &publication);
+                }
+                Ok(())
+            })
+            .await
+            .map_err(super::super::storage_error)
+    } else {
+        Ok(())
+    };
     tokio::spawn(async move {
         let result = collect_shell(&collector, &mut current, &execution_copy, spawned).await;
-        collector.publications.revoke(&execution_copy);
         collector.live.remove_shell(&execution_copy).await;
         if let Err(error) = &result {
             if error.is_storage_failure() {
@@ -235,6 +254,16 @@ pub(in crate::control) async fn install_shell(
         .filter(|(_, _, background)| !background)
         .map(|(slot, _, _)| &slot.foreground);
     let release = foreground.map(|slot| slot.register(execution));
+    if let Err(error) = registered {
+        if let Some(slot) = foreground {
+            slot.clear();
+        }
+        handle.stop();
+        if error.is_storage_failure() {
+            control.fail_storage().await;
+        }
+        return Err(error);
+    }
     if let Err(error) = control.reapply_shell_intent(execution, &handle).await {
         if let Some(slot) = foreground {
             slot.clear();
@@ -365,9 +394,30 @@ pub(in crate::control) async fn collect_shell(
             .await
             .map_err(|_| invalid("Shell completion unavailable"))?;
     };
-    if let ShellOwner::Schedule { endpoint, .. } = owner {
-        control.publications.revoke(execution);
-        drop(endpoint.take());
+    if let ShellOwner::Schedule { endpoint, .. } = owner
+        && let Some(publication) = endpoint.take()
+    {
+        let registry = control.publications.clone();
+        let id = execution.to_owned();
+        control
+            .store
+            .database
+            .call(move |_| {
+                registry.revoke(&id);
+                Ok(())
+            })
+            .await
+            .map_err(super::super::storage_error)?;
+        if let Err(error) = publication.retire() {
+            let registry = control.publications.clone();
+            let id = execution.to_owned();
+            control.store.database.call(move |db| {
+                    db.execute("UPDATE shell_execution SET state='stopping' WHERE id=?1 AND state IN ('starting','running')", [&id])?;
+                    registry.retirement_failed(id);
+                    Ok(())
+                }).await.map_err(super::super::storage_error)?;
+            return Err(error);
+        }
     }
     // Even after a save failure, retain the shell until its supervisor has
     // terminated and reaped the process and drained its output pumps.

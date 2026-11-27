@@ -277,7 +277,23 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
             .await?;
         }
         Err(error) => {
-            drop(endpoint);
+            if let Some(publication) = endpoint
+                && let Err(error) = publication.retire()
+            {
+                let registry = control.publications.clone();
+                let id = shell.id.clone();
+                control
+                    .store
+                    .database
+                    .call(move |_| {
+                        registry.retirement_failed(id);
+                        Ok(())
+                    })
+                    .await
+                    .map_err(super::storage_error)?;
+                control.changed(&shell.thread);
+                return Err(error);
+            }
             let shutdown = error
                 .details
                 .as_ref()
@@ -1040,12 +1056,16 @@ async fn drain(control: &Control, executions: &[String]) -> Result<(), ApiError>
         }
     }
     let targets = Arc::new(serde_json::json!(executions).to_string());
+    let executions = Arc::new(executions.to_vec());
     loop {
         let changed = control.changed.notified();
         tokio::pin!(changed);
         changed.as_mut().enable();
         let targets = targets.clone();
+        let registry = control.publications.clone();
+        let executions = executions.clone();
         let active = control.store.database.call(move |db| {
+            registry.check_retired(executions.iter().map(String::as_str))?;
             Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM json_each(?1) j CROSS JOIN shell_execution s ON s.id=j.value WHERE s.state IN ('starting','running','stopping'))",[targets.as_str()],|r|r.get::<_,bool>(0))?)
         }).await.map_err(super::storage_error)?;
         if !active {
