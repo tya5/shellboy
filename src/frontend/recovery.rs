@@ -79,7 +79,7 @@ ORDER BY r.position";
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub(super) struct Evidence {
+pub(crate) struct Evidence {
     index: usize,
     count: i64,
     attempt: String,
@@ -93,7 +93,7 @@ impl Evidence {
         serde_json::from_value(body.get("error")?.clone()).ok()
     }
 
-    pub(super) fn into_window(
+    pub(crate) fn into_window(
         self,
         items: &[(String, String)],
     ) -> crate::protocol::HistoryWindowRecovery {
@@ -117,7 +117,7 @@ impl Evidence {
     }
 }
 
-pub(super) fn read_tx(
+pub(crate) fn read_tx(
     db: &rusqlite::Connection,
     requests: &[(usize, String)],
 ) -> Result<Vec<Evidence>, crate::storage::StorageError> {

@@ -37,13 +37,13 @@ pub(super) struct Source {
     pub(super) input_bytes: Option<crate::model::wire_bytes::InputBytes>,
 }
 
-pub(super) struct Observation {
+pub(crate) struct Observation {
     index: usize,
     sources: Vec<Source>,
 }
 
 impl Observation {
-    pub(super) fn into_window(
+    pub(crate) fn into_window(
         self,
         items: &[(String, String)],
     ) -> crate::protocol::HistoryWindowUsage {
@@ -73,7 +73,7 @@ impl Observation {
     }
 }
 
-pub(super) fn read_tx(
+pub(crate) fn read_tx(
     db: &rusqlite::Connection,
     requests: &[(usize, String)],
 ) -> Result<Vec<Observation>, crate::storage::StorageError> {

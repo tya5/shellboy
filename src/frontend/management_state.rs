@@ -51,10 +51,24 @@ pub(super) struct Management {
     /// The command dispatched under `generation`, shown once its result is accepted.
     pending_shown: Option<(u64, Shown)>,
     shown: Option<Shown>,
+    /// A saved change reached `shown` while every command slot was taken.
+    refresh_pending: bool,
 }
 impl Management {
     pub(super) fn dispatched(&mut self, generation: u64, shown: Option<Shown>) {
         self.pending_shown = shown.map(|shown| (generation, shown));
+    }
+    pub(super) fn defer_refresh(&mut self) {
+        self.refresh_pending = true;
+    }
+    pub(super) fn refresh_pending(&self) -> bool {
+        self.refresh_pending
+    }
+    /// The shown result to read again, consuming its one pending refresh.
+    pub(super) fn take_refresh(&mut self) -> Option<Shown> {
+        std::mem::take(&mut self.refresh_pending)
+            .then(|| self.shown.clone())
+            .flatten()
     }
     pub(super) fn shown(&self) -> Option<&Shown> {
         self.shown.as_ref()
@@ -74,6 +88,7 @@ impl Management {
     pub(super) fn begin_result(&mut self) -> u64 {
         self.request_id = self.request_id.wrapping_add(1);
         self.detail = None;
+        self.refresh_pending = false;
         self.shown = match self.pending_shown.take() {
             Some((generation, shown)) if generation == self.generation => Some(shown),
             _ => None,

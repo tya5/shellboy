@@ -417,7 +417,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let old = crate::frontend::read_window_facts(&tx, &items(&window), &[]).unwrap();
+        let old =
+            crate::history::window_facts::read_window_facts(&tx, &items(&window), &[]).unwrap();
         assert!(
             old.tools
                 .calls
@@ -430,7 +431,8 @@ mod tests {
         tx.commit().unwrap();
         let later = observed_window(&read).unwrap();
         assert_eq!(later.revision, window.revision);
-        let fresh = crate::frontend::read_window_facts(&read, &items(&later), &[]).unwrap();
+        let fresh =
+            crate::history::window_facts::read_window_facts(&read, &items(&later), &[]).unwrap();
         assert!(
             fresh
                 .tools

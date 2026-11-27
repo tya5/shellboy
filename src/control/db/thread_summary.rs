@@ -64,9 +64,7 @@ pub(crate) fn prepare_activity(raw: &RawActivity) -> crate::activity::ActivityPh
     let retrying = raw
         .retry
         .as_deref()
-        .and_then(|body| {
-            serde_json::from_str::<crate::ui::activity::AutomaticRetrySnapshot>(body).ok()
-        })
+        .and_then(|body| serde_json::from_str::<crate::activity::AutomaticRetrySnapshot>(body).ok())
         .is_some_and(|retry| retry.number > 0 && retry.number <= retry.limit);
     crate::activity::classify(
         raw.run.as_deref(),

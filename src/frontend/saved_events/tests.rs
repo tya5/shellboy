@@ -9,6 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) enum Observed {
     Baseline,
+    /// A stale shown result found every command slot taken.
+    RefreshDeferred,
     Page {
         generation: u64,
         stop: CancellationToken,
@@ -132,20 +134,25 @@ async fn native_gap_retires_the_old_browser_page_and_reloads_one_bounded_page() 
 
 #[tokio::test]
 async fn shown_config_result_is_read_again_when_a_saved_credential_change_wakes_the_wait() {
-    use crate::protocol::{Command, ConfigGetArgs, CredentialsSetArgs, Request};
+    use crate::protocol::{
+        Command, ConfigGetArgs, CredentialsClearArgs, CredentialsSetArgs, Request,
+    };
     let (root, owner, control, server) = control_tests::fixture().await;
     let (send, receive) = actions::channel(32);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let slots = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
     let (observe_send, mut observed) = mpsc::channel(4);
     let bridge = tokio::spawn(OBSERVE.scope(
         observe_send,
-        run(
+        crate::frontend::run_with_clipboard_slots(
             control.clone(),
             receive,
             updates,
             root.path().into(),
             owner,
             server,
+            std::sync::Arc::new(crate::frontend::ClipboardAdapter::new().unwrap()),
+            slots.clone(),
         ),
     ));
     crate::test_watchdog::watchdog("F8 refresh on a saved change", async {
@@ -174,6 +181,45 @@ async fn shown_config_result_is_read_again_when_a_saved_credential_change_wakes_
                 assert!(response.ok);
             }
             if shown == 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // With the only command slot taken, the next change is kept as one
+        // pending refresh and read when the slot frees.
+        let held = slots.clone().acquire_owned().await.unwrap();
+        let response = control
+            .request(Request::new(
+                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                Command::CredentialsClear(CredentialsClearArgs {
+                    connection: "fixture".into(),
+                }),
+            ))
+            .await;
+        assert!(response.ok);
+        assert!(matches!(
+            observed.recv().await,
+            Some(Observed::RefreshDeferred)
+        ));
+        drop(held);
+        // Any other command worker finishing frees the slot for the refresh.
+        send.try_send(UiAction::CancelMessages {
+            message_ids: vec!["unknown".into()],
+            target: crate::ui::DraftRecoveryTarget {
+                draft_id: "draft".into(),
+                revision: 0,
+                generation: 0,
+                thread_id: None,
+            },
+        })
+        .unwrap();
+        loop {
+            while let Ok(update) = incoming.try_recv() {
+                if matches!(update, UiUpdate::StructuredManagement { .. }) {
+                    shown += 1;
+                }
+            }
+            if shown == 3 {
                 break;
             }
             tokio::task::yield_now().await;

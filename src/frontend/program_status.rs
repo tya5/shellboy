@@ -99,7 +99,7 @@ pub(super) fn project(
         let retrying = diagnostic
             .as_deref()
             .and_then(|value| {
-                serde_json::from_str::<crate::ui::activity::AutomaticRetrySnapshot>(value).ok()
+                serde_json::from_str::<crate::activity::AutomaticRetrySnapshot>(value).ok()
             })
             .is_some_and(|retry| retry.number > 0 && retry.number <= retry.limit);
         let phase = crate::activity::classify(
