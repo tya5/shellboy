@@ -48,36 +48,62 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::mem::size_of;
 
-/// Owner text carries the Unicode truncation mark and deep-structure placeholder; draw them
-/// with this terminal's glyph policy.
-pub(crate) fn client_glyphs(text: String) -> String {
-    use crate::display_outline::{DEEP_STRUCTURE, TRUNCATED};
-    if text == DEEP_STRUCTURE {
-        return crate::ui::text_width::glyphs::select(
-            DEEP_STRUCTURE,
+fn render_outline_text(mut text: String, truncated: bool) -> String {
+    if truncated {
+        text.push_str(crate::ui::text_width::glyphs::select("…", "..."));
+    }
+    text
+}
+
+fn outline_text(value: &crate::protocol::HistoryDisplayText) -> String {
+    render_outline_text(value.text.clone(), value.truncated)
+}
+
+fn outline_value(
+    value: String,
+    truncated: bool,
+    omitted: Option<crate::protocol::HistoryDisplayOmission>,
+    language: crate::config::UiLanguage,
+) -> String {
+    use crate::protocol::HistoryDisplayOmission::DeepStructure;
+    match omitted {
+        Some(DeepStructure) => crate::ui::text_width::glyphs::localized!(
+            language,
+            "[深い構造 · 詳細は原文参照]",
             "[深い構造 | 詳細は原文参照]",
+            "[Deep structure · see original]",
+            "[Deep structure | see original]"
         )
-        .into();
-    }
-    match text.strip_suffix(TRUNCATED) {
-        Some(head) => format!(
-            "{head}{}",
-            crate::ui::text_width::glyphs::select(TRUNCATED, "...")
-        ),
-        None => text,
+        .into(),
+        None => render_outline_text(value, truncated),
     }
 }
+
 fn short(text: &str, limit: usize) -> String {
-    client_glyphs(crate::display_outline::short(text, limit))
+    let bounded = crate::display_outline::short(text, limit);
+    render_outline_text(bounded.text, bounded.truncated)
 }
-/// Saved-field walk with this terminal's glyphs.
+
 pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
-    let mut fields = crate::display_outline::fields_of_value(value);
-    for field in &mut fields {
-        field.label = client_glyphs(std::mem::take(&mut field.label));
-        field.value = client_glyphs(std::mem::take(&mut field.value));
-    }
-    fields
+    crate::display_outline::fields_of_value(value)
+        .into_iter()
+        .map(|field| PresentationField {
+            label: if field.count {
+                format!("{} 件数", field.path)
+            } else {
+                short(&field.path, 256)
+            },
+            key: field.path,
+            value: outline_value(
+                field.value.text,
+                field.value.truncated,
+                field.omitted,
+                crate::config::UiLanguage::Ja,
+            ),
+            value_omitted: field.value.truncated || field.omitted.is_some(),
+            display: None,
+        })
+        .collect()
 }
 
 /// Human-readable recorded Revisit facts shared by existing displays.

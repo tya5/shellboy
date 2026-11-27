@@ -42,6 +42,7 @@ pub(crate) fn project_display(
     text: &str,
     base: usize,
     outline: &crate::protocol::HistoryDisplayOutline,
+    language: crate::config::UiLanguage,
 ) -> NodePresentation {
     use crate::protocol::{HistoryDisplayNode as Node, HistoryDisplayRole as Role};
     let (mut p, fallback) = initial(kind, &Value::Null);
@@ -49,7 +50,7 @@ pub(crate) fn project_display(
     match &outline.node {
         Node::HiddenAdmission | Node::Received => return p,
         Node::Trim { .. } => set_trim_title(&mut p),
-        Node::Reclaimed { reason } => set_reclaimed_title(&mut p, reason),
+        Node::Reclaimed { reason } => set_reclaimed_title(&mut p, &outline_text(reason)),
         Node::Summary {
             source_node_ids,
             structured: parts,
@@ -70,8 +71,8 @@ pub(crate) fn project_display(
         } else {
             short(&f.path, 256)
         },
-        value: client_glyphs(f.value.clone()),
-        value_omitted: f.omitted,
+        value: outline_value(f.value.clone(), f.truncated, f.omitted, language),
+        value_omitted: f.truncated || f.omitted.is_some(),
         ..Default::default()
     };
     p.fields = outline.fields.iter().map(field).collect();
@@ -116,11 +117,11 @@ pub(crate) fn project_display(
                 group_id: saved.group_id.clone(),
                 ordinal: saved.ordinal,
                 execution_id: saved.execution_id.clone(),
-                command: client_glyphs(saved.command.clone().unwrap_or_default()),
+                command: saved.command.as_ref().map(outline_text).unwrap_or_default(),
                 description: crate::tool_description::label(
-                    saved.description.clone().map(client_glyphs).as_deref(),
+                    saved.description.as_ref().map(outline_text).as_deref(),
                 ),
-                status: saved.status.clone().map(client_glyphs).unwrap_or_else(|| {
+                status: saved.status.as_ref().map(outline_text).unwrap_or_else(|| {
                     if is_call {
                         "requested".into()
                     } else {

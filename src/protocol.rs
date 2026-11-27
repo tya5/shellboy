@@ -2911,7 +2911,7 @@ pub enum HistoryDisplayRole {
 pub enum HistoryDisplayNode {
     Ordinary,
     Reclaimed {
-        reason: String,
+        reason: HistoryDisplayText,
     },
     HiddenAdmission,
     Received,
@@ -2920,7 +2920,7 @@ pub enum HistoryDisplayNode {
     },
     Trim {
         omitted_nodes: Option<u64>,
-        reason: Option<String>,
+        reason: Option<HistoryDisplayText>,
         first_node_id: Option<String>,
         last_node_id: Option<String>,
     },
@@ -2930,14 +2930,19 @@ pub enum HistoryDisplayNode {
     },
     Interruption,
 }
+record!(HistoryDisplayText {
+    text: String,
+    truncated: bool
+});
+states!(HistoryDisplayOmission { DeepStructure });
 record!(HistoryDisplayTool {
     call_id: Option<String>,
     ordinal: Option<u32>,
     group_id: Option<String>,
     execution_id: Option<String>,
-    command: Option<String>,
-    description: Option<String>,
-    status: Option<String>,
+    command: Option<HistoryDisplayText>,
+    description: Option<HistoryDisplayText>,
+    status: Option<HistoryDisplayText>,
     exit_code: Option<i64>
 });
 /// One step of a field path through the saved payload. `count` follows a
@@ -2952,7 +2957,8 @@ pub enum HistoryDisplayPathSegment {
 record!(HistoryDisplayField {
     path: String,
     value: String,
-    omitted: bool,
+    truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")] omitted: Option<HistoryDisplayOmission>,
     shape: Vec<HistoryDisplayPathSegment>
 });
 record!(HistoryDisplayLink {
@@ -2964,7 +2970,7 @@ record!(HistoryDisplayBlock {
     range: HistoryDisplayRange,
     role: HistoryDisplayRole,
     #[serde(default, skip_serializing_if = "Option::is_none")] tool: Option<HistoryDisplayTool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] event_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] event_kind: Option<HistoryDisplayText>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")] fields: Vec<HistoryDisplayField>
 });
 record!(HistoryDisplayOutline {

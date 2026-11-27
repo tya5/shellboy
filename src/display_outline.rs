@@ -9,10 +9,6 @@ pub(crate) mod summary;
 
 pub(crate) const MAX_FIELDS: usize = 128;
 pub(crate) const MAX_BLOCKS: usize = 128;
-/// The owner always emits the Unicode forms; clients that cannot draw them substitute on render.
-pub(crate) const TRUNCATED: &str = "…";
-pub(crate) const DEEP_STRUCTURE: &str = "[深い構造 · 詳細は原文参照]";
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresentationField {
     #[serde(default)]
@@ -28,13 +24,21 @@ impl PresentationField {
         self.display.as_deref().unwrap_or(&self.value)
     }
 }
-pub(crate) fn short(text: &str, limit: usize) -> String {
-    let mut out: String = text.chars().take(limit).collect();
-    if out.len() < text.len() {
-        out.push_str(TRUNCATED);
+pub(crate) fn short(text: &str, limit: usize) -> Text {
+    let prefix: String = text.chars().take(limit).collect();
+    Text {
+        truncated: prefix.len() < text.len(),
+        text: prefix,
     }
-    out
 }
+
+pub(crate) struct FieldFact {
+    pub path: String,
+    pub value: Text,
+    pub omitted: Option<Omission>,
+    pub count: bool,
+}
+
 pub(crate) fn secret(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     [
@@ -103,24 +107,17 @@ pub(crate) fn path_shape(
     shape
 }
 
-pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
-    fn walk(
-        value: &Value,
-        path: &str,
-        out: &mut Vec<PresentationField>,
-        used: &mut usize,
-        depth: usize,
-    ) {
+pub(crate) fn fields_of_value(value: &Value) -> Vec<FieldFact> {
+    fn walk(value: &Value, path: &str, out: &mut Vec<FieldFact>, used: &mut usize, depth: usize) {
         if out.len() >= MAX_FIELDS || *used >= MAX_METADATA_BYTES {
             return;
         }
         if depth > 8 {
-            out.push(PresentationField {
-                value_omitted: true,
-                display: None,
-                key: path.into(),
-                label: short(path, 256),
-                value: DEEP_STRUCTURE.into(),
+            out.push(FieldFact {
+                path: path.into(),
+                value: short("", 0),
+                omitted: Some(Omission::DeepStructure),
+                count: false,
             });
             return;
         }
@@ -139,12 +136,14 @@ pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
                 }
             }
             Value::Array(items) => {
-                out.push(PresentationField {
-                    value_omitted: false,
-                    display: None,
-                    key: path.to_owned(),
-                    label: format!("{path} 件数"),
-                    value: items.len().to_string(),
+                out.push(FieldFact {
+                    path: path.into(),
+                    value: Text {
+                        text: items.len().to_string(),
+                        truncated: false,
+                    },
+                    omitted: None,
+                    count: true,
                 });
                 for (i, value) in items.iter().take(MAX_FIELDS).enumerate() {
                     walk(value, &format!("{path}/{i}"), out, used, depth + 1);
@@ -157,22 +156,23 @@ pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
                     walk(&parsed, path, out, used, depth + 1);
                     return;
                 }
-                let text = match value {
-                    Value::String(s) => sanitize_plain(&short(s, 1024), 0).0,
-                    _ => value.to_string(),
+                let value = match value {
+                    Value::String(s) => bounded_plain(s, 1024),
+                    _ => Text {
+                        text: value.to_string(),
+                        truncated: false,
+                    },
                 };
-                let label = short(path, 256);
-                let key = path.to_owned();
-                *used += key.len() + label.len() + text.len() + size_of::<PresentationField>();
+                *used += path.len()
+                    + short(path, 256).text.len()
+                    + value.text.len()
+                    + size_of::<FieldFact>();
                 if *used <= MAX_METADATA_BYTES {
-                    out.push(PresentationField {
-                        value_omitted: value
-                            .as_str()
-                            .is_some_and(|text| text.chars().count() > 1024),
-                        display: None,
-                        key,
-                        label,
-                        value: text,
+                    out.push(FieldFact {
+                        path: path.into(),
+                        value,
+                        omitted: None,
+                        count: false,
                     });
                 }
             }
@@ -186,8 +186,9 @@ pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
 use crate::history::payload::{LeafKind, visit};
 use crate::protocol::{
     HistoryDisplayBlock as Block, HistoryDisplayField as Field, HistoryDisplayLink as Link,
-    HistoryDisplayNode as Node, HistoryDisplayOutline as Outline, HistoryDisplayRange as Range,
-    HistoryDisplayRole as Role, HistoryDisplayTool as Tool,
+    HistoryDisplayNode as Node, HistoryDisplayOmission as Omission,
+    HistoryDisplayOutline as Outline, HistoryDisplayRange as Range, HistoryDisplayRole as Role,
+    HistoryDisplayText as Text, HistoryDisplayTool as Tool,
 };
 
 pub(crate) fn display_outline(
@@ -380,30 +381,35 @@ impl Budget {
         candidates
             .into_iter()
             .filter_map(|field| {
-                self.limited |= field.value_omitted;
+                self.limited |= field.value.truncated || field.omitted.is_some();
                 if self.fields == MAX_FIELDS {
                     self.limited = true;
                     return None;
                 }
-                if !self.admit(field.key.len() + field.value.len() + size_of::<Field>()) {
+                if !self.admit(field.path.len() + field.value.text.len() + size_of::<Field>()) {
                     return None;
                 }
                 self.fields += 1;
                 Some(Field {
-                    shape: path_shape(&field.key, root),
-                    path: field.key,
-                    value: field.value,
-                    omitted: field.value_omitted,
+                    shape: path_shape(&field.path, root),
+                    path: field.path,
+                    value: field.value.text,
+                    truncated: field.value.truncated,
+                    omitted: field.omitted,
                 })
             })
             .collect()
     }
 }
 
-fn detail_text(value: Option<&Value>, max: usize) -> Option<String> {
-    value?
-        .as_str()
-        .map(|value| sanitize_plain(&short(value, max), 0).0)
+fn bounded_plain(value: &str, max: usize) -> Text {
+    let mut bounded = short(value, max);
+    bounded.text = sanitize_plain(&bounded.text, 0).0;
+    bounded
+}
+
+fn detail_text(value: Option<&Value>, max: usize) -> Option<Text> {
+    value?.as_str().map(|value| bounded_plain(value, max))
 }
 
 fn exact(value: Option<&Value>, budget: &mut Budget) -> Option<String> {
@@ -440,7 +446,8 @@ fn tool(
 ) -> Tool {
     let get = |key| envelope.and_then(|value| value.get(key));
     let mut text = |key, size| {
-        detail_text(get(key), size).filter(|value| budget.admit(value.len() + size_of::<String>()))
+        detail_text(get(key), size)
+            .filter(|value| budget.admit(value.text.len() + size_of::<Text>()))
     };
     let command = text("command", 512);
     let description = text("description", 256);
@@ -466,14 +473,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn owner_text_uses_the_unicode_forms_whatever_the_terminal_policy() {
-        assert_eq!(short("abcdef", 3), "abc…");
-        assert_eq!(short("abc", 3), "abc");
-        let mut deep = serde_json::json!("end");
+    fn tui_outline_renders_typed_facts_without_rewriting_literal_ellipsis() {
+        use crate::config::UiLanguage;
+        use crate::ui::text_width::{clear_terminal_width, set_terminal_width};
+        let mut deep = serde_json::json!("hidden");
+        for _ in 0..10 {
+            deep = serde_json::json!({"k": deep});
+        }
+        let payload = serde_json::json!({"deep": deep, "long": "x".repeat(1025), "literal": "x…"});
+        let outline = display_outline("fixture", "user", &payload, "", &Range { start: 0, end: 0 });
+        set_terminal_width(Some(2));
+        let en = crate::presentation::project_display("user", "", 0, &outline, UiLanguage::En);
+        let ja = crate::presentation::project_display("user", "", 0, &outline, UiLanguage::Ja);
+        clear_terminal_width();
+        assert!(
+            en.fields
+                .iter()
+                .any(|f| f.key == "/long" && f.value.ends_with("..."))
+        );
+        assert!(
+            en.fields
+                .iter()
+                .any(|f| f.key == "/literal" && f.value == "x…")
+        );
+        assert!(
+            en.fields
+                .iter()
+                .any(|f| f.value == "[Deep structure | see original]")
+        );
+        assert!(
+            ja.fields
+                .iter()
+                .any(|f| f.value == "[深い構造 | 詳細は原文参照]")
+        );
+    }
+
+    #[test]
+    fn owner_outline_reports_truncation_and_deep_omission_without_rendered_text() {
+        let mut deep = serde_json::json!("hidden");
         for _ in 0..10 {
             deep = serde_json::json!({ "k": deep });
         }
-        let fields = fields_of_value(&deep);
-        assert!(fields.iter().any(|field| field.value == DEEP_STRUCTURE));
+        let payload = serde_json::json!({"deep": deep, "long": "x".repeat(1025), "literal": "x…"});
+        let range = Range { start: 0, end: 0 };
+        let outline = display_outline("fixture", "user", &payload, "", &range);
+        let long = outline.fields.iter().find(|f| f.path == "/long").unwrap();
+        assert_eq!(long.value, "x".repeat(1024));
+        assert!(long.truncated);
+        let deep = outline.fields.iter().find(|f| f.omitted.is_some()).unwrap();
+        assert_eq!(deep.omitted, Some(Omission::DeepStructure));
+        assert!(deep.value.is_empty());
+        let literal = outline
+            .fields
+            .iter()
+            .find(|f| f.path == "/literal")
+            .unwrap();
+        assert_eq!(literal.value, "x…");
+        assert!(!literal.truncated);
     }
 }

@@ -219,12 +219,16 @@ pub(super) struct DisplayExtent {
 }
 
 impl DisplayExtent {
-    pub(super) fn project(&self) -> crate::presentation::NodePresentation {
+    pub(super) fn project(
+        &self,
+        language: crate::config::UiLanguage,
+    ) -> crate::presentation::NodePresentation {
         let mut projection = crate::presentation::project_display(
             &self.kind,
             &self.text,
             self.range.start as usize,
             &self.outline,
+            language,
         );
         projection.output_limited = self.output_limited;
         projection
@@ -269,7 +273,7 @@ impl DisplayExtent {
                 language,
             );
         }
-        let mut presentation = self.project();
+        let mut presentation = self.project(language);
         crate::presentation::render_markdown(&mut presentation, width.max(1));
         crate::ui::UiNode {
             presentation,
@@ -518,7 +522,7 @@ mod tests {
         };
         let extent = &window.nodes[0].display;
         assert_eq!(extent.text, text);
-        let projection = extent.project();
+        let projection = extent.project(crate::config::UiLanguage::En);
         assert_eq!(projection.blocks.len(), 1);
         assert_eq!(
             projection.blocks[0].kind,
