@@ -257,8 +257,9 @@ while other platforms retain stopped without claiming an observed OS outcome.
 
 ## Descriptor headroom at shell start (#450)
 
-The Unix owner sets its soft `RLIMIT_NOFILE` to 1,024 at startup (within the hard
-limit, lowering a larger inherited value), so the number of concurrent shells is
+`ShellSupervisor` construction sets the process's soft `RLIMIT_NOFILE` to 1,024 once
+(`std::sync::Once`; within the hard limit, lowering a larger inherited value), so the
+owner and every in-process supervisor share the floor by construction, so the number of concurrent shells is
 bounded by descriptors rather than by the per-user process limit shared with every
 other application. Shells inherit that soft value.
 

@@ -344,40 +344,6 @@ pub struct DataOwner {
     pub(crate) ipc_refusals: Arc<crate::ipc::AdmissionRefusals>,
     _lock: Arc<OwnerLock>,
 }
-#[cfg(unix)]
-const OWNER_FD_FLOOR: libc::rlim_t = 1024;
-
-// The owner's soft limit is set to this value (within the hard limit), lower or
-// higher than inherited: shells inherit it, and the shell descriptor headroom
-// check (#450) bounds concurrent shells by it rather than by a huge inherited value.
-#[cfg(unix)]
-fn owner_fd_soft_target(hard: libc::rlim_t) -> libc::rlim_t {
-    hard.min(OWNER_FD_FLOOR)
-}
-
-/// The owner's startup limit step; tests that start a supervisor in-process
-/// call it too, so they run under the same limit as the owner.
-#[cfg(unix)]
-#[doc(hidden)]
-pub fn set_owner_fd_limit() -> Option<libc::rlimit> {
-    let mut limits = libc::rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    // SAFETY: limits is initialized, writable, and valid for both calls.
-    unsafe {
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) != 0 {
-            return None;
-        }
-        let target = owner_fd_soft_target(limits.rlim_max);
-        if target != limits.rlim_cur {
-            limits.rlim_cur = target;
-            let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &limits);
-        }
-        (libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) == 0).then_some(limits)
-    }
-}
-
 impl DataOwner {
     /// Keep owner exclusion alive during a background width-cache update.
     pub fn width_cache_guard(&self) -> Arc<OwnerLock> {
@@ -460,11 +426,6 @@ impl DataOwner {
             loaded.data_dir.join("logs"),
             loaded.config.logging.clone(),
         );
-        #[cfg(unix)]
-        match set_owner_fd_limit() {
-            Some(limits) if limits.rlim_cur == OWNER_FD_FLOOR => {}
-            limits => diagnostics.record_owner_fd_limit(limits),
-        }
         diagnostics.record_startup_stage(StartupStage::Configuration, configuration_elapsed, None);
         diagnostics.record_startup_stage(StartupStage::OwnerLock, lock_started.elapsed(), None);
         progress(StartupStage::Database, language, motion);
@@ -657,16 +618,6 @@ const STARTUP_WAIT_DELETE: &str =
 
 #[cfg(test)]
 mod startup_range_tests {
-    #[cfg(unix)]
-    #[test]
-    fn owner_fd_limit_is_the_floor_within_the_hard_limit() {
-        assert_eq!(
-            super::owner_fd_soft_target(libc::RLIM_INFINITY),
-            super::OWNER_FD_FLOOR
-        );
-        assert_eq!(super::owner_fd_soft_target(512), 512);
-    }
-
     use super::*;
 
     const OLD_SELECT: &str = "SELECT key FROM app_meta WHERE key LIKE 'compact.pending.%' OR key LIKE 'compact.inflight.%' ORDER BY key";

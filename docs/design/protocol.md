@@ -254,9 +254,9 @@ frameの8MiB上限を先に検証し、payloadはTokioの長さ制限付きreade
 
 69接続の受信payload合計は最大552 MiB（69 × 8 MiB）。Vec容量・JSON展開・返信・結果・cache/queueを
 含むプロセス総メモリの上限ではない。prefixだけの接続にはこの全量を確保しない。
-Unix ownerは起動時、soft `RLIMIT_NOFILE` をhard limitの範囲で1,024に設定する（#450）。
+Unix ownerは `ShellSupervisor` 構築時に1回（`std::sync::Once`）、soft `RLIMIT_NOFILE` をhard limitの範囲で1,024に設定する（#450）。
 継承値が大きい場合も1,024へ下げ、hard limitは変更しない。shellはこのsoft値を継承し、必要なら
-自分でhard limitまで上げられる。再読込で1,024にならない場合は診断を記録する。
+自分でhard limitまで上げられる。hardが1,024未満なら、その値が開始受付の上限になる。
 接続69とlistener 1、SQLite（writerと2 inspection）に最大9、owner lockとlogに各1を見込み、
 ほかにshellごとに定常時最大5 fdと起動時の付加分が必要なため、soft 256を前提にしない。
 Unix shellの起動受付は、生存中の開放fd数・起動1回の追加分・この69接続分の予約がsoft値に

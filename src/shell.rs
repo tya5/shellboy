@@ -313,6 +313,8 @@ pub struct ShellSupervisor {
 }
 impl ShellSupervisor {
     pub fn new(config: &Config) -> Self {
+        #[cfg(unix)]
+        descriptor_budget::ensure_floor();
         Self {
             config: config.clone(),
             starts_closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),

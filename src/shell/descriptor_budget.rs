@@ -24,6 +24,37 @@ pub(crate) struct DescriptorUse {
     pub limit: usize,
 }
 
+/// Soft `RLIMIT_NOFILE` every shell-starting process runs under. Shells inherit it.
+const FD_FLOOR: libc::rlim_t = 1024;
+
+fn soft_target(hard: libc::rlim_t) -> libc::rlim_t {
+    hard.min(FD_FLOOR)
+}
+
+/// Set the soft limit to the floor (within the hard limit, lowering a larger
+/// inherited value) once per process. The supervisor that enforces the budget
+/// calls it on construction, so every path that can spawn a shell has the floor.
+pub(crate) fn ensure_floor() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let mut limits = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: limits is initialized, writable, and valid for both calls.
+        unsafe {
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits) != 0 {
+                return;
+            }
+            let target = soft_target(limits.rlim_max);
+            if target != limits.rlim_cur {
+                limits.rlim_cur = target;
+                let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &limits);
+            }
+        }
+    });
+}
+
 pub(crate) fn admit(observed: Result<DescriptorUse, std::io::Error>) -> Result<(), ApiError> {
     match observed {
         Ok(used) if used.open + SPAWN_ADD + IPC_RESERVE <= used.limit => Ok(()),
@@ -157,6 +188,19 @@ fn open_descriptors() -> Result<usize, std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn soft_target_is_the_floor_within_the_hard_limit() {
+        assert_eq!(soft_target(libc::RLIM_INFINITY), FD_FLOOR);
+        assert_eq!(soft_target(512), 512);
+    }
+
+    #[test]
+    fn supervisor_construction_applies_the_floor() {
+        crate::shell::ShellSupervisor::new(&crate::config::Config::default());
+        let used = observe().unwrap();
+        assert!(used.limit <= FD_FLOOR as usize);
+    }
 
     #[test]
     fn admission_holds_exactly_up_to_the_reserved_headroom() {
