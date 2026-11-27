@@ -18,6 +18,7 @@ pub mod credential_store;
 pub mod deletion;
 pub mod diagnostics;
 mod digest;
+mod display_outline;
 pub mod docs;
 pub mod draft;
 pub mod exec_client;

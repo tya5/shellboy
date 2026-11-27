@@ -1,5 +1,5 @@
 //! Shared human labels; exact JSON pointers and values remain authoritative.
-use super::{MAX_FIELDS, MAX_METADATA_BYTES, PresentationField, sanitize_plain, secret, short};
+use super::{MAX_FIELDS, MAX_METADATA_BYTES, PresentationField, fields_of_value, short};
 use serde_json::Value;
 use std::mem::size_of;
 
@@ -405,38 +405,6 @@ pub(crate) fn human_label_for(
     label
 }
 
-/// The saved payload's shape along one field pointer, as `human_label_for`
-/// navigates it: object keys, array positions, and `Count` after a collection.
-pub(crate) fn path_shape(
-    pointer: &str,
-    root: &Value,
-) -> Vec<crate::protocol::HistoryDisplayPathSegment> {
-    use crate::protocol::HistoryDisplayPathSegment as Segment;
-    let mut shape = Vec::new();
-    let mut value = root;
-    for key in pointer
-        .trim_start_matches('/')
-        .split('/')
-        .map(crate::json_pointer::unescape_segment)
-    {
-        if let Value::Array(items) = value
-            && let Ok(position) = key.parse::<usize>()
-        {
-            value = items.get(position).unwrap_or(&Value::Null);
-            shape.push(Segment::Index {
-                index: position as u64,
-            });
-        } else {
-            value = value.get(key.as_str()).unwrap_or(&Value::Null);
-            shape.push(Segment::Key { key });
-        }
-        if value.is_array() {
-            shape.push(Segment::Count);
-        }
-    }
-    shape
-}
-
 /// Render a field label from its path shape, as `human_label_for` renders it
 /// from the payload. Item names use the collection, not the item's contents.
 pub(crate) fn shape_label(
@@ -833,90 +801,6 @@ pub(crate) fn decorate(fields: &mut Vec<super::PresentationField>, root: &Value)
 }
 
 /// Safe bounded field tree. Dot/index paths identify fields, not invented body offsets.
-pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
-    fn walk(
-        value: &Value,
-        path: &str,
-        out: &mut Vec<PresentationField>,
-        used: &mut usize,
-        depth: usize,
-    ) {
-        if out.len() >= MAX_FIELDS || *used >= MAX_METADATA_BYTES {
-            return;
-        }
-        if depth > 8 {
-            out.push(PresentationField {
-                value_omitted: true,
-                display: None,
-                key: path.into(),
-                label: short(path, 256),
-                value: crate::ui::text_width::glyphs::select(
-                    "[深い構造 · 詳細は原文参照]",
-                    "[深い構造 | 詳細は原文参照]",
-                )
-                .into(),
-            });
-            return;
-        }
-        match value {
-            Value::Object(map) => {
-                for (key, value) in map {
-                    if secret(key) {
-                        continue;
-                    }
-                    let path = if path.is_empty() {
-                        format!("/{}", crate::json_pointer::escape_segment(key))
-                    } else {
-                        format!("{path}/{}", crate::json_pointer::escape_segment(key))
-                    };
-                    walk(value, &path, out, used, depth + 1);
-                }
-            }
-            Value::Array(items) => {
-                out.push(PresentationField {
-                    value_omitted: false,
-                    display: None,
-                    key: path.to_owned(),
-                    label: format!("{path} 件数"),
-                    value: items.len().to_string(),
-                });
-                for (i, value) in items.iter().take(MAX_FIELDS).enumerate() {
-                    walk(value, &format!("{path}/{i}"), out, used, depth + 1);
-                }
-            }
-            _ => {
-                if let Value::String(s) = value
-                    && let Some(parsed) = super::parse_container_detail(s)
-                {
-                    walk(&parsed, path, out, used, depth + 1);
-                    return;
-                }
-                let text = match value {
-                    Value::String(s) => sanitize_plain(&short(s, 1024), 0).0,
-                    _ => value.to_string(),
-                };
-                let label = short(path, 256);
-                let key = path.to_owned();
-                *used += key.len() + label.len() + text.len() + size_of::<PresentationField>();
-                if *used <= MAX_METADATA_BYTES {
-                    out.push(PresentationField {
-                        value_omitted: value
-                            .as_str()
-                            .is_some_and(|text| text.chars().count() > 1024),
-                        display: None,
-                        key,
-                        label,
-                        value: text,
-                    });
-                }
-            }
-        }
-    }
-    let mut fields = vec![];
-    walk(value, "", &mut fields, &mut 0, 0);
-    fields
-}
-
 /// Reserve common metadata roots or exact pointers before a large list consumes the bounded field
 /// window. Reuses the existing collector without cloning/reordering source JSON.
 pub(crate) fn prioritized_fields(value: &Value, roots: &[&str]) -> Vec<PresentationField> {

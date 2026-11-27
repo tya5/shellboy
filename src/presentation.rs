@@ -32,10 +32,9 @@ pub mod messages;
 mod projection;
 pub mod rows;
 pub use projection::project;
-pub(crate) use projection::{display_outline, project_display};
+pub(crate) use projection::project_display;
 pub mod branch_marker;
 pub mod compaction_marker;
-mod summary;
 use crate::terminal_links::valid_link_target as http;
 use events::{attention, event_description};
 
@@ -61,11 +60,14 @@ pub fn revisit_label(summary: &crate::protocol::RevisitSummary) -> Option<String
     ))
 }
 
+pub(crate) use crate::display_outline::MAX_FIELDS;
+use crate::display_outline::{
+    MAX_BLOCKS, parse_container_detail, parse_envelope, secret, short, summary,
+};
+pub use crate::display_outline::{PresentationField, fields_of_value};
 use crate::plain_text::{MAX_LINKS, add_link};
 pub use crate::plain_text::{MAX_METADATA_BYTES, PresentationLink, sanitize_plain};
-pub(crate) const MAX_FIELDS: usize = 128;
 pub(crate) const CONTEXT_TRIM_TITLE: &str = "Input scope reduced (original retained)";
-const MAX_BLOCKS: usize = 128;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PresentationKind {
@@ -411,13 +413,6 @@ fn tool_failed(state: &str, code: Option<i64>) -> bool {
 fn tool_state_text(state: &str, code: Option<i64>) -> String {
     let (_, label) = tool_state_heading(state, code);
     code.map_or_else(|| label.into(), |code| format!("{label} {code}"))
-}
-fn short(text: &str, limit: usize) -> String {
-    let mut out: String = text.chars().take(limit).collect();
-    if out.len() < text.len() {
-        out.push_str(crate::ui::text_width::glyphs::select("…", "..."));
-    }
-    out
 }
 fn tool_reason(value: &str) -> String {
     match ToolReasonKind::from_saved(value) {
@@ -815,21 +810,6 @@ pub fn render_markdown(presentation: &mut NodePresentation, width: u16) {
     }
     presentation.bound_metadata();
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PresentationField {
-    #[serde(default)]
-    pub value_omitted: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display: Option<String>,
-    pub key: String,
-    pub label: String,
-    pub value: String,
-}
-impl PresentationField {
-    pub fn displayed(&self) -> &str {
-        self.display.as_deref().unwrap_or(&self.value)
-    }
-}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventClass {
     #[default]
@@ -1040,41 +1020,6 @@ impl NodePresentation {
                 .sum::<usize>()
     }
 }
-fn secret(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    [
-        "encrypted_content",
-        "encryptedcontent",
-        "origin_token",
-        "authorization",
-        "api_key",
-        "api-key",
-        "apikey",
-        "secret",
-        "password",
-        "access_token",
-        "refresh_token",
-    ]
-    .iter()
-    .any(|s| key.contains(s))
-        || key == "token"
-}
-// Persisted envelope values may be scalar JSON. Detail decoding intentionally
-// accepts only containers and trims before checking their shape.
-fn parse_envelope(text: &str) -> Option<Value> {
-    serde_json::from_str(text.strip_prefix("Shellboy event v1: ").unwrap_or(text)).ok()
-}
-fn parse_container_detail(text: &str) -> Option<Value> {
-    let body = text
-        .strip_prefix("Shellboy event v1: ")
-        .unwrap_or(text)
-        .trim();
-    if body.starts_with('{') || body.starts_with('[') {
-        serde_json::from_str(body).ok()
-    } else {
-        None
-    }
-}
 
 /// Remove opaque/credential fields for explicit diagnostic pages as well as summaries.
 pub fn safe_detail_value(value: Value) -> Value {
@@ -1119,7 +1064,6 @@ pub fn safe_detail_value_for_language(value: Value, language: crate::config::UiL
     }
     safe(value, 0, language)
 }
-pub use fields::fields_of_value;
 fn markdown_options() -> Options {
     // Keep in lockstep with tui-markdown 0.3.12 renderer/mod.rs.
     Options::ENABLE_TABLES

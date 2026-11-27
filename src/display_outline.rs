@@ -1,5 +1,189 @@
-//! Bounded, width-independent source facts for positioned history reads.
-use super::*;
+//! Owner-side display outline: bounded, width-independent source facts for positioned history
+//! reads, with the field, envelope and summary decoding it needs. Presentation imports these rules.
+use crate::plain_text::{MAX_LINKS, MAX_METADATA_BYTES, sanitize_plain};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::mem::size_of;
+
+pub(crate) mod summary;
+
+pub(crate) const MAX_FIELDS: usize = 128;
+pub(crate) const MAX_BLOCKS: usize = 128;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PresentationField {
+    #[serde(default)]
+    pub value_omitted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+    pub key: String,
+    pub label: String,
+    pub value: String,
+}
+impl PresentationField {
+    pub fn displayed(&self) -> &str {
+        self.display.as_deref().unwrap_or(&self.value)
+    }
+}
+pub(crate) fn short(text: &str, limit: usize) -> String {
+    let mut out: String = text.chars().take(limit).collect();
+    if out.len() < text.len() {
+        out.push_str(crate::ui::text_width::glyphs::select("…", "..."));
+    }
+    out
+}
+pub(crate) fn secret(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    [
+        "encrypted_content",
+        "encryptedcontent",
+        "origin_token",
+        "authorization",
+        "api_key",
+        "api-key",
+        "apikey",
+        "secret",
+        "password",
+        "access_token",
+        "refresh_token",
+    ]
+    .iter()
+    .any(|s| key.contains(s))
+        || key == "token"
+}
+// Persisted envelope values may be scalar JSON. Detail decoding intentionally
+// accepts only containers and trims before checking their shape.
+pub(crate) fn parse_envelope(text: &str) -> Option<Value> {
+    serde_json::from_str(text.strip_prefix("Shellboy event v1: ").unwrap_or(text)).ok()
+}
+pub(crate) fn parse_container_detail(text: &str) -> Option<Value> {
+    let body = text
+        .strip_prefix("Shellboy event v1: ")
+        .unwrap_or(text)
+        .trim();
+    if body.starts_with('{') || body.starts_with('[') {
+        serde_json::from_str(body).ok()
+    } else {
+        None
+    }
+}
+
+/// The saved payload's shape along one field pointer, as `human_label_for`
+/// navigates it: object keys, array positions, and `Count` after a collection.
+pub(crate) fn path_shape(
+    pointer: &str,
+    root: &Value,
+) -> Vec<crate::protocol::HistoryDisplayPathSegment> {
+    use crate::protocol::HistoryDisplayPathSegment as Segment;
+    let mut shape = Vec::new();
+    let mut value = root;
+    for key in pointer
+        .trim_start_matches('/')
+        .split('/')
+        .map(crate::json_pointer::unescape_segment)
+    {
+        if let Value::Array(items) = value
+            && let Ok(position) = key.parse::<usize>()
+        {
+            value = items.get(position).unwrap_or(&Value::Null);
+            shape.push(Segment::Index {
+                index: position as u64,
+            });
+        } else {
+            value = value.get(key.as_str()).unwrap_or(&Value::Null);
+            shape.push(Segment::Key { key });
+        }
+        if value.is_array() {
+            shape.push(Segment::Count);
+        }
+    }
+    shape
+}
+
+pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
+    fn walk(
+        value: &Value,
+        path: &str,
+        out: &mut Vec<PresentationField>,
+        used: &mut usize,
+        depth: usize,
+    ) {
+        if out.len() >= MAX_FIELDS || *used >= MAX_METADATA_BYTES {
+            return;
+        }
+        if depth > 8 {
+            out.push(PresentationField {
+                value_omitted: true,
+                display: None,
+                key: path.into(),
+                label: short(path, 256),
+                value: crate::ui::text_width::glyphs::select(
+                    "[深い構造 · 詳細は原文参照]",
+                    "[深い構造 | 詳細は原文参照]",
+                )
+                .into(),
+            });
+            return;
+        }
+        match value {
+            Value::Object(map) => {
+                for (key, value) in map {
+                    if secret(key) {
+                        continue;
+                    }
+                    let path = if path.is_empty() {
+                        format!("/{}", crate::json_pointer::escape_segment(key))
+                    } else {
+                        format!("{path}/{}", crate::json_pointer::escape_segment(key))
+                    };
+                    walk(value, &path, out, used, depth + 1);
+                }
+            }
+            Value::Array(items) => {
+                out.push(PresentationField {
+                    value_omitted: false,
+                    display: None,
+                    key: path.to_owned(),
+                    label: format!("{path} 件数"),
+                    value: items.len().to_string(),
+                });
+                for (i, value) in items.iter().take(MAX_FIELDS).enumerate() {
+                    walk(value, &format!("{path}/{i}"), out, used, depth + 1);
+                }
+            }
+            _ => {
+                if let Value::String(s) = value
+                    && let Some(parsed) = parse_container_detail(s)
+                {
+                    walk(&parsed, path, out, used, depth + 1);
+                    return;
+                }
+                let text = match value {
+                    Value::String(s) => sanitize_plain(&short(s, 1024), 0).0,
+                    _ => value.to_string(),
+                };
+                let label = short(path, 256);
+                let key = path.to_owned();
+                *used += key.len() + label.len() + text.len() + size_of::<PresentationField>();
+                if *used <= MAX_METADATA_BYTES {
+                    out.push(PresentationField {
+                        value_omitted: value
+                            .as_str()
+                            .is_some_and(|text| text.chars().count() > 1024),
+                        display: None,
+                        key,
+                        label,
+                        value: text,
+                    });
+                }
+            }
+        }
+    }
+    let mut fields = vec![];
+    walk(value, "", &mut fields, &mut 0, 0);
+    fields
+}
+
 use crate::history::payload::{LeafKind, visit};
 use crate::protocol::{
     HistoryDisplayBlock as Block, HistoryDisplayField as Field, HistoryDisplayLink as Link,
@@ -16,7 +200,7 @@ pub(crate) fn display_outline(
 ) -> Outline {
     let mut budget = Budget::default();
     let summary = matches!(kind, "summary" | "compact_summary")
-        .then(|| super::summary::decode(payload))
+        .then(|| summary::decode(payload))
         .flatten();
     let node = if crate::history::is_legacy_admission_node(id, kind) {
         Node::HiddenAdmission
@@ -207,7 +391,7 @@ impl Budget {
                 }
                 self.fields += 1;
                 Some(Field {
-                    shape: crate::presentation::fields::path_shape(&field.key, root),
+                    shape: path_shape(&field.key, root),
                     path: field.key,
                     value: field.value,
                     omitted: field.value_omitted,
