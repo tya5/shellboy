@@ -493,6 +493,13 @@
     "AttachmentListArgs": {
       "additionalProperties": false,
       "properties": {
+        "attachment_id": {
+          "description": "Read one saved attachment selection in the specified Thread; incompatible with cursor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "cursor": {
           "default": null,
           "type": [
