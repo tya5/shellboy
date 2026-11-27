@@ -1,6 +1,6 @@
 //! Body-free submission correlations survive disposal of completed frozen copies.
 use super::db::DraftSubmission;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 pub(crate) const MARKER_BYTES: usize = 64 * 1024;
@@ -30,40 +30,31 @@ pub(crate) fn fence(source: &str, revision: &str, thread: &str) -> String {
     )
 }
 
+// A completed frozen copy is disposable only if the original receipt still
+// proves the exact operation, source revision, selected Thread and message.
+const COLLECTIBLE: &str = "d.state='submitted'
+    AND d.thread_id=r.target_thread_id
+    AND r.path_admission<>'unknown'
+    AND (r.path_admission='admitted' OR r.state='cancelled')
+    AND json_extract(d.body_json,'$._submission.operation_id')=r.client_operation_id
+    AND json_type(d.body_json,'$._submission.source_revision')='integer'
+    AND json_extract(d.body_json,'$._submission.source_revision')=d.revision
+    AND json_extract(d.body_json,'$.draft_id')=json_extract(d.body_json,'$._submission.source_draft_id')
+    AND json_type(r.result_json,'$.draft_submission')='object'
+    AND json_extract(r.result_json,'$.draft_submission.operation_id')=r.client_operation_id
+    AND json_extract(r.result_json,'$.draft_submission.message_id')=r.message_node_id
+    AND json_extract(r.result_json,'$.draft_submission.source_draft_id')=json_extract(d.body_json,'$.draft_id')
+    AND json_type(r.result_json,'$.draft_submission.source_revision')='integer'
+    AND json_extract(r.result_json,'$.draft_submission.source_revision')=d.revision";
+
 /// The caller owns the admission/cancellation/GC transaction. Uncertain facts retain the copy.
 pub(crate) fn collect_operation(db: &Connection, operation: &str) -> rusqlite::Result<usize> {
     let id = DraftSubmission::id_for_operation(operation);
-    let row: Option<(String, String, String)> = db.query_row(
-        "SELECT json_extract(d.body_json,'$._submission'),r.message_node_id,r.target_thread_id FROM draft d JOIN receipt r ON r.client_operation_id=?2 WHERE d.id=?1 AND d.state='submitted' AND (r.result_json IS NULL OR json_type(r.result_json)='object') AND json_type(d.body_json,'$._submission.source_revision')='integer' AND json_extract(d.body_json,'$._submission.source_revision')=d.revision AND json_extract(d.body_json,'$.draft_id')=json_extract(d.body_json,'$._submission.source_draft_id') AND d.thread_id=r.target_thread_id AND r.path_admission<>'unknown' AND (r.path_admission='admitted' OR r.state='cancelled') AND octet_length(json_extract(d.body_json,'$._submission'))<=?3",
-        params![id,operation,MARKER_BYTES as i64],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
-    ).optional()?;
-    let Some((metadata, message, thread)) = row else {
-        return Ok(0);
-    };
-    let Ok(metadata) = serde_json::from_str::<Value>(&metadata) else {
-        return Ok(0);
-    };
-    if metadata["operation_id"].as_str() != Some(operation)
-        || metadata["message_id"].as_str() != Some(&message)
-        || metadata["accepted_thread_id"].as_str() != Some(&thread)
-    {
-        return Ok(0);
-    }
-    let Some(source) = metadata["source_draft_id"].as_str() else {
-        return Ok(0);
-    };
-    let Some(revision) = metadata["source_revision"].as_u64() else {
-        return Ok(0);
-    };
-    let Some(value) = marker(operation, source, revision, &message) else {
-        return Ok(0);
-    };
-    save_marker(db, operation, &value)?;
-    db.execute("DELETE FROM draft WHERE id=?1 AND state='submitted'", [id])
+    db.execute(&format!("DELETE FROM draft AS d WHERE id=?1 AND EXISTS(SELECT 1 FROM receipt r WHERE r.client_operation_id=?2 AND {COLLECTIBLE})"), params![id, operation])
 }
 
 pub(crate) fn collect_batch(db: &Connection) -> rusqlite::Result<usize> {
-    let operations = db.prepare("SELECT r.client_operation_id FROM draft d JOIN receipt r ON r.client_operation_id=json_extract(d.body_json,'$._submission.operation_id') WHERE d.state='submitted' AND (r.result_json IS NULL OR json_type(r.result_json)='object') AND json_type(d.body_json,'$._submission.source_revision')='integer' AND json_extract(d.body_json,'$._submission.source_revision')=d.revision AND json_extract(d.body_json,'$.draft_id')=json_extract(d.body_json,'$._submission.source_draft_id') AND d.thread_id=r.target_thread_id AND json_extract(d.body_json,'$._submission.accepted_thread_id')=r.target_thread_id AND json_extract(d.body_json,'$._submission.message_id')=r.message_node_id AND r.path_admission<>'unknown' AND (r.path_admission='admitted' OR r.state='cancelled') ORDER BY d.updated_at,d.id LIMIT 128")?
+    let operations = db.prepare(&format!("SELECT r.client_operation_id FROM draft d JOIN receipt r ON r.client_operation_id=json_extract(d.body_json,'$._submission.operation_id') WHERE {COLLECTIBLE} ORDER BY d.updated_at,d.id LIMIT 128"))?
         .query_map([], |r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let mut removed = 0;
     for operation in operations {
@@ -89,7 +80,8 @@ mod tests {
         )
         .unwrap();
         db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES(?1,?1,'null','t',?1,?2,?3,'0','{}')",params![op,state,admission]).unwrap();
-        let body = json!({"draft_id":"composer","revision":7,"text":"PRIVATE_FROZEN_TEXT","attachments":[{"path":"PRIVATE_PATH"}],"_submission":{"operation_id":op,"source_draft_id":"composer","source_revision":7,"message_id":op,"accepted_thread_id":"t"}});
+        save_marker(db, op, &marker(op, "composer", 7, op).unwrap()).unwrap();
+        let body = json!({"draft_id":"composer","revision":7,"text":"PRIVATE_FROZEN_TEXT","attachments":[{"path":"PRIVATE_PATH"}],"_submission":{"operation_id":op,"source_draft_id":"composer","source_revision":7}});
         db.execute(
             "INSERT INTO draft VALUES(?1,'t',7,?2,?3,'0')",
             params![id, body.to_string(), draft_state],
@@ -160,7 +152,7 @@ mod tests {
         );
     }
     #[test]
-    fn legacy_gc_is_batched_correlated_and_keeps_unknown_and_cancelled_archives() {
+    fn gc_is_batched_and_retains_unknown_or_unproved_copies() {
         let mut db = fixture();
         for n in 0..130 {
             copy(
@@ -173,13 +165,17 @@ mod tests {
         }
         let unknown = copy(&db, "unknown", "unknown", "cancelled", "submitted");
         let mismatched = copy(&db, "mismatch", "admitted", "applied", "submitted");
-        db.execute("UPDATE draft SET body_json=json_set(body_json,'$._submission.message_id','not-the-receipt') WHERE id=?1",[&mismatched]).unwrap();
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.draft_submission.message_id','not-the-receipt') WHERE id='mismatch'",[]).unwrap();
+        let missing = copy(&db, "missing", "admitted", "applied", "submitted");
+        db.execute("UPDATE receipt SET result_json='{}' WHERE id='missing'", [])
+            .unwrap();
+        db.execute_batch("CREATE TRIGGER no_rebinding BEFORE UPDATE OF result_json ON receipt BEGIN SELECT RAISE(ABORT,'binding must not be rewritten'); END;").unwrap();
         for expected in [128, 2, 0] {
             let tx = db.transaction().unwrap();
             assert_eq!(collect_batch(&tx).unwrap(), expected);
             tx.commit().unwrap();
         }
-        for id in [unknown, mismatched] {
+        for id in [unknown, mismatched, missing] {
             assert!(
                 db.query_row(
                     "SELECT EXISTS(SELECT 1 FROM draft WHERE id=?1)",
@@ -189,7 +185,6 @@ mod tests {
                 .unwrap()
             );
         }
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_type(result_json,'$.draft_submission')='object'",[],|r|r.get::<_,i64>(0)).unwrap(),130);
     }
     #[test]
     fn admission_and_retirement_rollback_together_if_deletion_fails() {

@@ -243,7 +243,7 @@ pub(super) fn prepare_submission(
     if let Some((saved, state)) = existing {
         let mut saved: Value = serde_json::from_str(&saved)
             .map_err(|_| StorageError::Schema("Frozen draft snapshot is malformed".into()))?;
-        // Submitted metadata adds factual acceptance IDs; the frozen source must match.
+        // Ignore legacy copies of acceptance IDs when comparing the frozen source.
         if let Some(metadata) = saved.get_mut("_submission").and_then(Value::as_object_mut) {
             metadata.remove("message_id");
             metadata.remove("accepted_thread_id");
@@ -293,7 +293,6 @@ pub(super) fn submit_draft_tx(
     submission: &super::db::DraftSubmission,
     accepted: &Value,
     at: &str,
-    config: &Config,
 ) -> Result<(), StorageError> {
     let message = accepted
         .get("message_id")
@@ -313,7 +312,7 @@ pub(super) fn submit_draft_tx(
     let Some(saved) = saved else {
         return Err(invalid("Frozen draft submission is missing"));
     };
-    let mut saved: Value = serde_json::from_str(&saved)
+    let saved: Value = serde_json::from_str(&saved)
         .map_err(|_| StorageError::Schema("Frozen draft snapshot is malformed".into()))?;
     let mut source = saved.clone();
     source
@@ -344,17 +343,7 @@ pub(super) fn submit_draft_tx(
         message,
     )
     .ok_or_else(|| invalid("Submission binding exceeds its bounded metadata allowance"))?;
-    saved["_submission"]["message_id"] = json!(message);
-    saved["_submission"]["accepted_thread_id"] = json!(thread);
-    let saved = saved.to_string();
-    if saved.len() as u64 > frozen_serialized_budget(config) {
-        return Err(crate::protocol::ApiError::new(
-            crate::protocol::ErrorCode::InputLimit,
-            "Accepted frozen draft serialized metadata exceeds its bounded storage allowance",
-        )
-        .into());
-    }
-    let changed=tx.execute("UPDATE draft SET state='submitted',thread_id=?2,updated_at=?3,body_json=?4 WHERE id=?1 AND state='submitting' AND revision=?5 AND json_extract(body_json,'$._submission.operation_id')=?6 AND json_extract(body_json,'$._submission.source_draft_id')=?7 AND json_extract(body_json,'$._submission.source_revision')=?5",params![submission.draft_id,thread,at,saved,submission.revision as i64,operation,submission.source_draft_id])?;
+    let changed=tx.execute("UPDATE draft SET state='submitted',thread_id=?2,updated_at=?3 WHERE id=?1 AND state='submitting' AND revision=?4 AND json_extract(body_json,'$._submission.operation_id')=?5 AND json_extract(body_json,'$._submission.source_draft_id')=?6 AND json_extract(body_json,'$._submission.source_revision')=?4",params![submission.draft_id,thread,at,submission.revision as i64,operation,submission.source_draft_id])?;
     if changed != 1 {
         return Err(crate::protocol::ApiError::new(
             crate::protocol::ErrorCode::OperationConflict,

@@ -1634,7 +1634,7 @@ async fn submitting_and_unknown_copies_survive_collection_and_database_reopen() 
 }
 
 #[tokio::test]
-async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batches() {
+async fn ordinary_history_gc_collects_bound_copies_in_batches() {
     let (root, store) = store().await;
     store.database.call(|db| {
         let tx=db.transaction()?;
@@ -1642,6 +1642,7 @@ async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batche
             let op=format!("old-op-{n:03}");let source=format!("old-source-{n:03}");
             input(&tx,&op,None)?;
             tx.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE id=?1",[&op])?;
+            crate::control::submission_retention::save_marker(&tx,&op,&crate::control::submission_retention::marker(&op,&source,7,&op).unwrap())?;
             let body=json!({"draft_id":source,"revision":7,"text":"old redundant text","attachments":[],"_submission":{"operation_id":op,"source_draft_id":source,"source_revision":7,"message_id":op,"accepted_thread_id":"t"}}).to_string();
             tx.execute("INSERT INTO draft VALUES(?1,'t',7,?2,'submitted','0')",params![DraftSubmission::id_for_operation(&op),body])?;
         }

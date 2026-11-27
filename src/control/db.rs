@@ -789,7 +789,6 @@ impl Store {
                             submission,
                             &result.result,
                             now,
-                            &store.config,
                         )
                         .map_err(StorageError::into_api_error)?;
                     }
@@ -1053,7 +1052,7 @@ impl Store {
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
                 if let Some(submission)=&options.submission {
-                    super::pending_messages::submit_draft_tx(&tx,&operation_id,submission,&result.result,&now,&store.config).map_err(StorageError::into_api_error)?;
+                    super::pending_messages::submit_draft_tx(&tx,&operation_id,submission,&result.result,&now).map_err(StorageError::into_api_error)?;
                 }
                 Ok(result)
             })();
