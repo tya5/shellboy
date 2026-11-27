@@ -638,7 +638,9 @@ async fn draft_references_and_first_message_commit_together_and_changed_missing_
     send(&control, &thread, "read again").await;
     let second = incoming(&control, &mut receive).await;
     let text = second.body.to_string();
-    assert!(text.contains("c2Vjb25kLWNvbnRlbnQtbG9uZ2Vy"));
+    assert!(text.contains("attachment_changed"));
+    assert!(!text.contains("input_file"));
+    assert!(!text.contains("c2Vjb25kLWNvbnRlbnQtbG9uZ2Vy"));
     assert!(!text.contains("Zmlyc3QtY29udGVudA=="));
     second.reply.send((200, answer("changed"))).unwrap();
     settled(&control, &thread).await;
