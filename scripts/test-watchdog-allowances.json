@@ -610,22 +610,6 @@
   {
     "file": "tests/index.rs",
     "rule": "raw-timeout",
-    "fingerprint": "47555a07e6c5f7b029692f4dfc9d94d78d664a3a0ec2c5895725d8f81a943187",
-    "function": "auto_history_off_holds_bootstrap_until_explicit_backfill",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing auto_history_off_holds_bootstrap_until_explicit_backfill test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "4269618267483505a76269d3618defbcfb7a208c629c6c16421ba980c2458e6d",
-    "function": "auto_history_status_separates_held_admissions_bootstrap_and_jobs",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing auto_history_status_separates_held_admissions_bootstrap_and_jobs test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
     "fingerprint": "6d72cab3b2eb64b2ba4f671c89b969853260cb6149ed31d5cc51cdd9e853d1e1",
     "function": "expire_embedding",
     "count": 1,
@@ -646,14 +630,6 @@
     "function": "paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_space_retry",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_space_retry test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "c013b9c0b43c038c9fa74a86261e14a4b28df0a5beb99ffc93c78e66bd1d30dd",
-    "function": "automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_rag",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_rag test occurrence only; migrate on #41 integration, no file-wide exemption. Fingerprint updated for the search cursor argument; timeout unchanged."
   },
   {
     "file": "tests/message_recovery.rs",

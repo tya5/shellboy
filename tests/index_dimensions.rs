@@ -212,7 +212,7 @@ impl Fixture {
         f.nodes(&[("alpha", "alpha"), ("beta", "beta"), ("gamma", "gamma")])
             .await;
         f.drain().await;
-        let status = f.service.status(IndexArgs::default()).await.unwrap();
+        let status = f.service.status(Default::default()).await.unwrap();
         assert_eq!(status.done, 3);
         assert_eq!(status.spaces.len(), 1);
         assert_eq!(status.spaces[0].dimension, 2);
@@ -280,7 +280,7 @@ async fn explicit_candidate_serializes_first_request_keeps_active_search_and_reu
     let mut f = Fixture::new().await;
     let old = f
         .service
-        .status(IndexArgs::default())
+        .status(Default::default())
         .await
         .unwrap()
         .space_id
@@ -317,7 +317,7 @@ async fn explicit_candidate_serializes_first_request_keeps_active_search_and_reu
     );
     assert_eq!(
         f.service
-            .status(IndexArgs::default())
+            .status(Default::default())
             .await
             .unwrap()
             .space_id
@@ -344,7 +344,7 @@ async fn explicit_candidate_serializes_first_request_keeps_active_search_and_reu
             .unwrap()
             .unwrap()
     );
-    let interim = f.service.status(IndexArgs::default()).await.unwrap();
+    let interim = f.service.status(Default::default()).await.unwrap();
     assert_eq!(interim.space_id.as_deref(), Some(old.as_str()));
     let candidate = interim
         .spaces
@@ -361,7 +361,7 @@ async fn explicit_candidate_serializes_first_request_keeps_active_search_and_reu
         (3, Some(3), 1, 12)
     );
     f.drain().await;
-    let current = f.service.status(IndexArgs::default()).await.unwrap();
+    let current = f.service.status(Default::default()).await.unwrap();
     assert_ne!(current.space_id.as_deref(), Some(old.as_str()));
     let active = current.spaces.iter().find(|s| s.selected).unwrap();
     assert_eq!(
@@ -429,7 +429,7 @@ async fn first_dimension_refusal_or_mismatch_stops_candidate_without_touching_ac
         let f = Fixture::new().await;
         let old = f
             .service
-            .status(IndexArgs::default())
+            .status(Default::default())
             .await
             .unwrap()
             .space_id
@@ -470,7 +470,7 @@ async fn first_dimension_refusal_or_mismatch_stops_candidate_without_touching_ac
                 .unwrap()
         );
         f.drain().await;
-        let status = f.service.status(IndexArgs::default()).await.unwrap();
+        let status = f.service.status(Default::default()).await.unwrap();
         assert_eq!(status.space_id.as_deref(), Some(old.as_str()));
         assert_eq!(
             status.spaces.len(),
@@ -518,7 +518,7 @@ async fn first_dimension_refusal_or_mismatch_stops_candidate_without_touching_ac
         }
         f.service.retry(IndexArgs::default()).await.unwrap();
         f.drain().await;
-        let status = f.service.status(IndexArgs::default()).await.unwrap();
+        let status = f.service.status(Default::default()).await.unwrap();
         assert_ne!(status.space_id.as_deref(), Some(old.as_str()));
         assert_eq!(
             status
@@ -537,7 +537,7 @@ async fn first_dimension_refusal_or_mismatch_stops_candidate_without_touching_ac
 async fn probe_records_one_request_per_call_replaces_its_tuple_and_keeps_only_newest_observations()
 {
     let f = Fixture::new().await;
-    let initial = f.service.status(IndexArgs::default()).await.unwrap();
+    let initial = f.service.status(Default::default()).await.unwrap();
     let before = f.proxy.requests().len();
     for _ in 0..2 {
         let result = f
@@ -550,7 +550,7 @@ async fn probe_records_one_request_per_call_replaces_its_tuple_and_keeps_only_ne
         assert!(result.success);
         assert_eq!(result.dimension, Some(3));
         assert_eq!(result.requested_dimensions, Some(3));
-        let status = f.service.status(IndexArgs::default()).await.unwrap();
+        let status = f.service.status(Default::default()).await.unwrap();
         assert_eq!(status.probes.len(), 1);
     }
     assert_eq!(f.proxy.requests().len(), before + 2);
@@ -579,7 +579,7 @@ async fn probe_records_one_request_per_call_replaces_its_tuple_and_keeps_only_ne
         );
         assert_eq!(request["dimensions"], n);
         if n == 7 {
-            let status = f.service.status(IndexArgs::default()).await.unwrap();
+            let status = f.service.status(Default::default()).await.unwrap();
             let failed = status
                 .probes
                 .iter()
@@ -589,7 +589,7 @@ async fn probe_records_one_request_per_call_replaces_its_tuple_and_keeps_only_ne
             assert_eq!(failed.error.as_ref().unwrap()["status"], 400);
         }
     }
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     assert_eq!(status.probes.len(), 32);
     assert_eq!(status.space_id, initial.space_id);
     assert_eq!(status.done, initial.done);
@@ -658,7 +658,7 @@ async fn first_transient_dimension_failure_preserves_retry_and_requested_mode() 
     let f = Fixture::new().await;
     let old = f
         .service
-        .status(IndexArgs::default())
+        .status(Default::default())
         .await
         .unwrap()
         .space_id
@@ -682,7 +682,7 @@ async fn first_transient_dimension_failure_preserves_retry_and_requested_mode() 
         requests.last().unwrap()["input"].as_array().unwrap().len(),
         1
     );
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     assert_eq!(status.space_id.as_deref(), Some(old.as_str()));
     assert!(!status.paused);
     f.db.call(|db| {
@@ -699,7 +699,7 @@ async fn first_transient_dimension_failure_preserves_retry_and_requested_mode() 
         Ok(())
     }).await.unwrap();
     f.drain().await;
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     assert_ne!(status.space_id.as_deref(), Some(old.as_str()));
     let active = status.spaces.iter().find(|s| s.selected).unwrap();
     assert_eq!(
@@ -748,7 +748,7 @@ async fn omitted_dimensions_for_changed_model_start_in_native_mode() {
             .iter()
             .all(|r| r["model"] == "synthetic-other-model")
     );
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     let active = status.spaces.iter().find(|s| s.selected).unwrap();
     assert_eq!(
         (
@@ -767,7 +767,7 @@ async fn superseded_dimension_failure_cannot_stop_or_pause_new_candidate() {
     let f = Fixture::new().await;
     let old = f
         .service
-        .status(IndexArgs::default())
+        .status(Default::default())
         .await
         .unwrap()
         .space_id
@@ -799,7 +799,7 @@ async fn superseded_dimension_failure_cannot_stop_or_pause_new_candidate() {
             .unwrap()
             .unwrap()
     );
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     assert_eq!(status.space_id.as_deref(), Some(old.as_str()));
     assert!(
         !status.paused,
@@ -820,7 +820,7 @@ async fn superseded_dimension_failure_cannot_stop_or_pause_new_candidate() {
     .await
     .unwrap();
     f.drain().await;
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     let active = status.spaces.iter().find(|s| s.selected).unwrap();
     assert_eq!(
         (

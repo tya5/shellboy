@@ -178,9 +178,6 @@ impl UiState {
                 .map(|action| scope(action, &context))
                 .collect();
         }
-        for action in &mut actions {
-            self.stamp_inspection_action(action);
-        }
         actions
     }
     fn event_inner(&mut self, event: Event) -> Vec<UiAction> {

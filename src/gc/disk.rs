@@ -211,17 +211,6 @@ pub(crate) mod tests {
         assert_eq!(details["disk_free_state"], "held");
         assert_eq!(details["disk_free_min_bytes"], 1000);
         assert_eq!(details["limit_reached"], false);
-        let sample = gc
-            .sample_observation_physical(
-                tokio::time::Instant::from_std(
-                    crate::test_watchdog::Deadline::new("disk guard observation").at(),
-                ),
-                tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(sample.filesystem_free.bytes, Some(999));
-        assert_eq!(sample.disk_guard.unwrap().state, DiskState::Held);
         gc.collect(StorageCategory::Raw, chrono::Utc::now())
             .await
             .unwrap();
@@ -237,18 +226,6 @@ pub(crate) mod tests {
         let unknown = serde_json::to_value(gc.details().await.unwrap()).unwrap();
         assert_eq!(unknown["disk_free_state"], "unknown");
         assert!(unknown.get("filesystem_free_bytes").is_none());
-        let sample = gc
-            .sample_observation_physical(
-                tokio::time::Instant::from_std(
-                    crate::test_watchdog::Deadline::new("disk guard observation").at(),
-                ),
-                tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(sample.filesystem_free.bytes, None);
-        assert!(sample.filesystem_free.error.is_some());
-        assert_eq!(sample.disk_guard.unwrap().state, DiskState::Unknown);
         db.shutdown().await.unwrap();
     }
 }

@@ -1,8 +1,7 @@
 //! Finite saved observations. Callers own transaction/admission; these never run HTTP.
 use super::*;
-use std::collections::BTreeMap;
+use crate::protocol::{IndexCoverageWindow, IndexUnverifiedReason, IndexUnverifiedSource};
 const SCALAR_CELL_BYTES: usize = 512;
-const SCALAR_CHANNEL_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SavedReadLimits {
@@ -50,56 +49,9 @@ impl SavedReadLimits {
 }
 #[derive(Debug)]
 struct MetaRow {
-    key: String,
     body: Option<String>,
     present: bool,
     scalar_limited: bool,
-}
-#[derive(Debug)]
-struct SpaceRow {
-    id: String,
-    profile: Option<String>,
-    model: Option<String>,
-    dimension: i64,
-    state: String,
-    requested: Option<String>,
-    requested_present: bool,
-    scalar_limited: bool,
-    int8_scale: Option<f64>,
-    partial: bool,
-}
-#[derive(Debug)]
-struct JobRow {
-    state: String,
-    automatic: Option<bool>,
-    source: String,
-    error: Option<String>,
-    error_limited: bool,
-    scalar_limited: bool,
-}
-#[derive(Debug)]
-pub(crate) struct RawIndexSaved {
-    args: IndexArgs,
-    configured: bool,
-    auto_history: bool,
-    auto_kinds: Vec<String>,
-    active: Option<String>,
-    selected: Option<String>,
-    spaces: Vec<SpaceRow>,
-    spaces_more: bool,
-    jobs: Vec<JobRow>,
-    jobs_more: bool,
-    chunks: Vec<String>,
-    chunks_more: bool,
-    meta: Vec<MetaRow>,
-    work: Vec<MetaRow>,
-    work_more: bool,
-    probes: Vec<MetaRow>,
-    probes_more: bool,
-    profile: Option<String>,
-    family: Option<String>,
-    diagnostic: Option<String>,
-    read_at: String,
 }
 fn validate_args(args: &IndexArgs) -> Result<(), ApiError> {
     if args.source_ids.len() > 128
@@ -127,7 +79,6 @@ fn read_meta(db: &Connection, key: String, remaining: &mut usize) -> Result<Meta
     *remaining = remaining.saturating_sub(body.as_ref().map_or(0, String::len));
     Ok(MetaRow {
         scalar_limited: key.len() > SCALAR_CELL_BYTES,
-        key,
         body,
         present,
     })
@@ -147,7 +98,6 @@ fn read_prefix(
             params![prefix, end, (cap + 1) as i64, *remaining as i64, cap as i64],
             |r| {
                 Ok(MetaRow {
-                    key: r.get(0)?,
                     body: r.get(1)?,
                     present: true,
                     scalar_limited: r.get(2)?,
@@ -165,428 +115,14 @@ fn read_prefix(
     );
     Ok((rows, more))
 }
-fn read_space(db: &Connection, id: &str) -> Result<Option<SpaceRow>, StorageError> {
-    db.query_row("SELECT CASE WHEN octet_length(s.id)<=512 THEN s.id ELSE '' END,CASE WHEN octet_length(s.profile_id)<=512 THEN s.profile_id END,CASE WHEN octet_length(s.model_id)<=512 THEN s.model_id END,s.dimension,CASE WHEN octet_length(s.state)<=64 THEN s.state ELSE '' END,CASE WHEN octet_length(d.value)<=64 THEN d.value END,d.key IS NOT NULL,octet_length(s.id)>512 OR octet_length(s.state)>64,s.int8_scale,EXISTS(SELECT 1 FROM app_meta p WHERE p.key='index.partial.'||s.id) FROM index_space s LEFT JOIN app_meta d ON d.key='index.space_dimensions.'||s.id WHERE s.id=?1 AND octet_length(s.id)<=512",[id],space_row).optional().map_err(StorageError::from)
+fn space_exists(db: &Connection, id: &str) -> Result<bool, StorageError> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM index_space WHERE id=?1 AND octet_length(id)<=512)",
+        [id],
+        |r| r.get(0),
+    )
+    .map_err(StorageError::from)
 }
-fn space_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SpaceRow> {
-    Ok(SpaceRow {
-        id: r.get(0)?,
-        profile: r.get(1)?,
-        model: r.get(2)?,
-        dimension: r.get(3)?,
-        state: r.get(4)?,
-        requested: r.get(5)?,
-        requested_present: r.get(6)?,
-        scalar_limited: r.get(7)?,
-        int8_scale: r.get(8)?,
-        partial: r.get(9)?,
-    })
-}
-impl IndexService {
-    pub(crate) fn read_saved_tx(
-        &self,
-        db: &Connection,
-        args: &IndexArgs,
-        limits: SavedReadLimits,
-    ) -> Result<RawIndexSaved, ApiError> {
-        let limits = limits.checked()?;
-        validate_args(args)?;
-        self.read_saved_inner(db, args, limits).map_err(db_error)
-    }
-    fn read_saved_inner(
-        &self,
-        db: &Connection,
-        args: &IndexArgs,
-        limits: SavedReadLimits,
-    ) -> Result<RawIndexSaved, StorageError> {
-        let mut budget = limits.metadata_bytes;
-        let active_row = read_meta(db, IndexKeys::ACTIVE_SPACE.into(), &mut budget)?;
-        let active = active_row.body.clone();
-        let selected = args.space_id.clone().or_else(|| active.clone());
-        let mut meta_rows = vec![active_row];
-        let mut current_spaces = selected.iter().cloned().collect::<Vec<_>>();
-        if let Some(profile) = &self.profile_key {
-            let keys = IndexKeys::new(profile);
-            for key in [
-                keys.pause(),
-                keys.recovery_required(),
-                dimensions::candidate_key(keys),
-            ] {
-                meta_rows.push(read_meta(db, key, &mut budget)?);
-            }
-            let rebuild = read_meta(db, keys.rebuild(), &mut budget)?;
-            if let Some(group) = &rebuild.body {
-                let candidate = read_meta(db, keys.group(group), &mut budget)?;
-                if args.space_id.is_none() {
-                    current_spaces.extend(candidate.body.iter().cloned());
-                }
-                meta_rows.push(candidate);
-                meta_rows.push(read_meta(db, keys.enqueueing(group), &mut budget)?);
-                meta_rows.push(read_meta(db, keys.enqueue_failed(group), &mut budget)?);
-            }
-            meta_rows.push(rebuild);
-            let group = read_meta(db, keys.group("active"), &mut budget)?;
-            if args.space_id.is_none() {
-                current_spaces.extend(group.body.iter().cloned());
-            }
-            meta_rows.push(group);
-        }
-        if let Some(family) = &self.endpoint_family_key {
-            meta_rows.push(read_meta(db, IndexKeys::new(family).pause(), &mut budget)?);
-        }
-        current_spaces.sort();
-        current_spaces.dedup();
-        let mut spaces = Vec::new();
-        if let Some(id) = &selected {
-            if let Some(space) = read_space(db, id)? {
-                spaces.push(space);
-            } else {
-                return Err(StorageError::from(err(
-                    ErrorCode::InvalidArgument,
-                    "Selected index space does not exist or exceeds saved-view identity bounds",
-                )));
-            }
-        }
-        let capacity = limits.spaces.saturating_sub(spaces.len());
-        let mut q=db.prepare("SELECT CASE WHEN octet_length(s.id)<=512 THEN s.id ELSE '' END,CASE WHEN octet_length(s.profile_id)<=512 THEN s.profile_id END,CASE WHEN octet_length(s.model_id)<=512 THEN s.model_id END,s.dimension,CASE WHEN octet_length(s.state)<=64 THEN s.state ELSE '' END,CASE WHEN octet_length(d.value)<=64 THEN d.value END,d.key IS NOT NULL,octet_length(s.id)>512 OR octet_length(s.state)>64,s.int8_scale,EXISTS(SELECT 1 FROM app_meta p WHERE p.key='index.partial.'||s.id) FROM index_space s LEFT JOIN app_meta d ON d.key='index.space_dimensions.'||s.id WHERE (?1 IS NULL OR s.id<>?1) ORDER BY s.rowid DESC LIMIT ?2")?;
-        let mut others = q
-            .query_map(params![selected, (capacity + 1) as i64], space_row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        let spaces_more = others.len() > capacity;
-        others.truncate(capacity);
-        spaces.extend(others);
-        let mut q=db.prepare("WITH wanted AS (SELECT value AS id FROM json_each(?1)), picked AS MATERIALIZED (SELECT j.space_id,CASE WHEN octet_length(j.state)<=64 THEN j.state ELSE '' END AS state,octet_length(j.state)>64 AS state_limited,CASE WHEN octet_length(j.source_node_id)<=512 THEN j.source_node_id ELSE '' END AS source,j.rowid AS row_key,octet_length(j.error_json) AS size,octet_length(j.authorized_watermark) AS authorization_size FROM wanted w CROSS JOIN embedding_job j INDEXED BY jobs_ready WHERE j.space_id=w.id LIMIT ?2), budgeted AS (SELECT *,SUM(CASE WHEN size<=16384 THEN size ELSE 0 END) OVER(ORDER BY row_key) AS used,SUM(CASE WHEN authorization_size<=16384 THEN authorization_size ELSE 0 END) OVER(ORDER BY row_key) AS authorization_used,ROW_NUMBER()OVER(ORDER BY row_key) AS ordinal FROM picked) SELECT b.space_id,b.state,b.source,CASE WHEN b.ordinal<=?4 AND b.size<=16384 AND b.used<=?3 THEN j.error_json END,COALESCE(b.size>16384 OR b.used>?3,0),b.state_limited OR octet_length(j.source_node_id)>512,CASE WHEN ?5 OR b.state<>'pending' THEN 0 WHEN b.authorization_size>16384 OR b.authorization_used>131072 THEN NULL WHEN json_valid(j.authorized_watermark) THEN COALESCE(json_extract(j.authorized_watermark,'$.authorization'),'') LIKE 'new-finalized%' ELSE NULL END FROM budgeted b JOIN embedding_job j ON j.rowid=b.row_key ORDER BY b.row_key")?;
-        let mut jobs = q
-            .query_map(
-                params![
-                    serde_json::to_string(&current_spaces).map_err(|_| serde_error())?,
-                    (limits.rows + 1) as i64,
-                    budget as i64,
-                    limits.rows as i64,
-                    self.config.indexing.auto_history
-                ],
-                |r| {
-                    Ok(JobRow {
-                        state: r.get(1)?,
-                        automatic: r.get(6)?,
-                        source: r.get(2)?,
-                        error: r.get(3)?,
-                        error_limited: r.get(4)?,
-                        scalar_limited: r.get(5)?,
-                    })
-                },
-            )?
-            .collect::<Result<Vec<_>, _>>()?;
-        let jobs_more = jobs.len() > limits.rows;
-        jobs.truncate(limits.rows);
-        budget = budget.saturating_sub(
-            jobs.iter()
-                .filter_map(|r| r.error.as_ref())
-                .map(String::len)
-                .sum(),
-        );
-        let space_ids = spaces.iter().map(|s| &s.id).collect::<Vec<_>>();
-        let mut q=db.prepare("SELECT CASE WHEN octet_length(c.space_id)<=512 THEN c.space_id ELSE '' END FROM json_each(?1) w CROSS JOIN embedding_chunk c WHERE c.space_id=w.value LIMIT ?2")?;
-        let mut chunks = q
-            .query_map(
-                params![
-                    serde_json::to_string(&space_ids).map_err(|_| serde_error())?,
-                    (limits.rows + 1) as i64
-                ],
-                |r| r.get::<_, String>(0),
-            )?
-            .collect::<Result<Vec<_>, _>>()?;
-        let chunks_more = chunks.len() > limits.rows;
-        chunks.truncate(limits.rows);
-        let mut work = Vec::new();
-        let mut work_more = false;
-        if args.space_id.is_none()
-            && let Some(profile) = &self.profile_key
-        {
-            for prefix in [
-                format!("index.auto.{profile}."),
-                format!("index.bootstrap.{profile}."),
-            ] {
-                let (rows, more) = read_prefix(
-                    db,
-                    &prefix,
-                    limits.rows.saturating_sub(work.len()),
-                    &mut budget,
-                )?;
-                work.extend(rows);
-                work_more |= more;
-            }
-        }
-        let (probes, probes_more) = read_prefix(db, "index.probe.", 32, &mut budget)?;
-        Ok(RawIndexSaved {
-            args: args.clone(),
-            configured: self.profile_key.is_some(),
-            auto_history: self.config.indexing.auto_history,
-            auto_kinds: self.config.indexing.auto_kinds.clone(),
-            active,
-            selected,
-            spaces,
-            spaces_more,
-            jobs,
-            jobs_more,
-            chunks,
-            chunks_more,
-            meta: meta_rows,
-            work,
-            work_more,
-            probes,
-            probes_more,
-            profile: self.profile_key.clone(),
-            family: self.endpoint_family_key.clone(),
-            diagnostic: self.storage_stop_reason(),
-            read_at: now(),
-        })
-    }
-}
-fn count(value: u64, complete: bool) -> Value {
-    json!({"value":value,"complete":complete,"relation":if complete{"exact"}else{"lower_bound"}})
-}
-fn vector_bytes(segments: u64, dimension: i64, element_bytes: u64, complete: bool) -> Value {
-    if !(1..=8192).contains(&dimension) {
-        return json!({"value":null,"complete":false,"relation":"unknown","reason":"saved dimension is invalid"});
-    }
-    match u64::try_from(dimension)
-        .ok()
-        .and_then(|n| segments.checked_mul(n))
-        .and_then(|n| n.checked_mul(element_bytes))
-    {
-        Some(value) => count(value, complete),
-        None => {
-            json!({"value":null,"complete":false,"relation":"unknown","reason":"saved vector size is outside the representable range"})
-        }
-    }
-}
-pub(crate) fn prepare_saved(raw: RawIndexSaved) -> Value {
-    let mut counts = BTreeMap::from([
-        ("pending", 0u64),
-        ("held_auto_history", 0),
-        ("running", 0),
-        ("done", 0),
-        ("failed", 0),
-    ]);
-    let mut unknown = 0u64;
-    for row in &raw.jobs {
-        let state = if !raw.auto_history && row.state == "pending" {
-            match row.automatic {
-                Some(true) => "held_auto_history",
-                Some(false) => "pending",
-                None => {
-                    unknown += 1;
-                    continue;
-                }
-            }
-        } else {
-            row.state.as_str()
-        };
-        if let Some(n) = counts.get_mut(state) {
-            *n += 1;
-        }
-    }
-    let mut reason = None;
-    let mut pause_at = None;
-    let mut pause_id = None;
-    let mut paused = false;
-    let by_key = raw
-        .meta
-        .iter()
-        .filter_map(|r| r.body.as_ref().map(|b| (r.key.as_str(), b.as_str())))
-        .collect::<BTreeMap<_, _>>();
-    let rebuild_key = raw.profile.as_ref().map(|p| IndexKeys::new(p).rebuild());
-    let current_group = rebuild_key
-        .as_ref()
-        .and_then(|key| by_key.get(key.as_str()).copied());
-    let preparation=current_group.map(|group|{
-        let key=IndexKeys::new(raw.profile.as_deref().unwrap()).enqueueing(group);
-        let fence=by_key.get(key.as_str());
-        let failed=by_key.contains_key(IndexKeys::new(raw.profile.as_deref().unwrap()).enqueue_failed(group).as_str());
-        json!({"group":group,"enqueue_failed":failed,"enqueue_fence_present":fence.is_some(),"enqueue_fence_count":fence.and_then(|v|v.parse::<u64>().ok()),"note":"Admission fence is saved progress, never authorization for an automatic full-history restart; interrupted preparation requires explicit rebuild."})
-    });
-    let candidate_key = raw
-        .profile
-        .as_ref()
-        .map(|p| dimensions::candidate_key(IndexKeys::new(p)));
-    let candidate_record = candidate_key
-        .as_ref()
-        .and_then(|key| raw.meta.iter().find(|row| &row.key == key));
-    let parsed_candidate = candidate_record
-        .and_then(|row| row.body.as_ref())
-        .and_then(|body| serde_json::from_str::<dimensions::CandidateMode>(body).ok())
-        .filter(|mode| (1..=8192).contains(&mode.dimensions));
-    let candidate_known =
-        candidate_record.is_none_or(|row| !row.present) || parsed_candidate.is_some();
-    let candidate=parsed_candidate.map(|mode|json!(mode)).or_else(||if !candidate_known{Some(json!({"available":false,"complete":false,"reason":"saved candidate type, dimensions or byte budget is unverified","full_cli":"shellboy index status"}))}else{None});
-    for row in &raw.work {
-        if row.scalar_limited {
-            unknown += 1;
-            continue;
-        }
-        let Some(body) = &row.body else {
-            unknown += 1;
-            continue;
-        };
-        let state = if row.key.starts_with("index.auto.") {
-            decode_json::<AutoAdmission>(body).map(|w| {
-                (
-                    if !raw.auto_history
-                        && w.state == "pending"
-                        && w.recovery_authorization
-                            .as_deref()
-                            .is_none_or(|auth| auth.starts_with("new-finalized"))
-                    {
-                        "held_auto_history".into()
-                    } else {
-                        w.state
-                    },
-                    w.error.map(|e| format!("Source {}: {e}", w.node_id)),
-                )
-            })
-        } else {
-            decode_json::<Work>(body).map(|w| {
-                if w.group == "active" || Some(w.group.as_str()) == current_group {
-                    (
-                        if !raw.auto_history
-                            && w.state == "pending"
-                            && w.authorization.starts_with("new-finalized")
-                        {
-                            "held_auto_history".into()
-                        } else {
-                            w.state
-                        },
-                        w.error
-                            .map(|e| format!("Source {}: {e}", w.witness.node_id)),
-                    )
-                } else {
-                    (String::new(), None)
-                }
-            })
-        };
-        match state {
-            Ok((state, error)) => {
-                if let Some(n) = counts.get_mut(state.as_str()) {
-                    *n += 1;
-                }
-                if reason.is_none() {
-                    reason = error;
-                }
-            }
-            Err(_) => unknown += 1,
-        }
-    }
-    let pause_keys = raw
-        .family
-        .iter()
-        .chain(raw.profile.iter())
-        .map(|p| IndexKeys::new(p).pause())
-        .collect::<Vec<_>>();
-    for key in pause_keys {
-        if let Some(body) = by_key.get(key.as_str()) {
-            paused = true;
-            reason = Some((*body).to_owned());
-            (pause_at, pause_id) = {
-                let (at, id) = pause::facts(&key, body);
-                (at, Some(id))
-            };
-            break;
-        }
-    }
-    if raw.args.space_id.is_none()
-        && !paused
-        && preparation
-            .as_ref()
-            .is_some_and(|p| p["enqueue_fence_present"] == true || p["enqueue_failed"] == true)
-    {
-        reason=Some("Rebuild source admission is in progress or was interrupted; explicitly rebuild after interrupted preparation".into());
-    }
-    if raw.profile.as_ref().is_some_and(|profile| {
-        by_key.contains_key(IndexKeys::new(profile).recovery_required().as_str())
-    }) {
-        let message = queue::RECOVERY_REQUIRED_MESSAGE;
-        reason = Some(match reason {
-            Some(prior) => format!("{prior}; {message}"),
-            None => message.into(),
-        });
-    }
-    if reason.is_none() {
-        reason = raw.jobs.iter().find_map(|j| {
-            j.error
-                .as_ref()
-                .map(|e| format!("Source {}: {e}", j.source))
-        });
-    }
-    if let Some(candidate) = &candidate
-        && let Some(error) = candidate.get("error").filter(|v| !v.is_null())
-    {
-        let saved = reason.take();
-        reason = Some(format!(
-            "Candidate rebuild stopped at requested dimension {} ({}): {}; {}{}",
-            candidate.get("dimensions").unwrap_or(&Value::Null),
-            candidate
-                .get("paused_at")
-                .and_then(Value::as_str)
-                .unwrap_or("time unknown"),
-            error,
-            if raw.selected.is_some() {
-                "existing active index is unchanged"
-            } else {
-                "no active index is selected"
-            },
-            saved.map(|s| format!("; {s}")).unwrap_or_default()
-        ));
-    }
-    if !raw.configured {
-        reason = Some("Embedding connection/model is not configured".into());
-    }
-    if let Some(diagnostic) = raw.diagnostic {
-        paused = true;
-        reason = Some(reason.map_or(diagnostic.clone(), |s| format!("{s}; {diagnostic}")));
-    }
-    let metadata_limited = raw
-        .meta
-        .iter()
-        .any(|r| r.scalar_limited || (r.present && r.body.is_none()))
-        || raw.jobs.iter().any(|r| r.error_limited || r.scalar_limited)
-        || raw.chunks.iter().any(String::is_empty)
-        || raw.spaces.iter().any(|s| {
-            s.scalar_limited
-                || !(1..=8192).contains(&s.dimension)
-                || s.profile.is_none()
-                || s.model.is_none()
-                || (s.requested_present
-                    && s.requested.as_ref().is_none_or(|v| {
-                        !serde_json::from_str::<usize>(v).is_ok_and(|n| (1..=8192).contains(&n))
-                    }))
-        })
-        || !candidate_known;
-    let complete = !raw.jobs_more && !raw.work_more && unknown == 0 && !metadata_limited;
-    let counts = counts
-        .into_iter()
-        .map(|(k, v)| (k, count(v, complete)))
-        .collect::<BTreeMap<_, _>>();
-    let spaces=raw.spaces.iter().map(|s|{let segments=raw.chunks.iter().filter(|id|*id==&s.id).count()as u64;json!({"id":if s.scalar_limited{None}else{Some(&s.id)},"identity_known":!s.scalar_limited,"profile":s.profile,"model":s.model,"dimension":if (1..=8192).contains(&s.dimension){Some(s.dimension)}else{None},"saved_dimension":s.dimension,"dimension_known":(1..=8192).contains(&s.dimension),"state":s.state,"requested_dimensions":s.requested.as_ref().and_then(|v|serde_json::from_str::<usize>(v).ok().filter(|n|(1..=8192).contains(n))),"selected":Some(&s.id)==raw.selected.as_ref(),"segments":count(segments,!raw.chunks_more&&!s.scalar_limited),"int8_scale":s.int8_scale,"retained":s.state=="inactive"&&segments>0,"partial":s.partial,"vector_payload_bytes":vector_bytes(segments,s.dimension,if s.int8_scale.is_some(){1}else{4},!raw.chunks_more&&!s.scalar_limited),"requested_known":!s.requested_present||s.requested.as_ref().is_some_and(|v|serde_json::from_str::<usize>(v).is_ok_and(|n|(1..=8192).contains(&n))),"metadata_limited":s.scalar_limited||!(1..=8192).contains(&s.dimension)||s.profile.is_none()||s.model.is_none()||(s.requested_present&&s.requested.as_ref().is_none_or(|v|!serde_json::from_str::<usize>(v).is_ok_and(|n|(1..=8192).contains(&n))))})}).collect::<Vec<_>>();
-    let mut probe_rows=raw.probes.iter().map(|row|{
-        let probe=if row.scalar_limited{None}else{row.body.as_ref().and_then(|body|serde_json::from_str::<crate::protocol::IndexProbeObservation>(body).ok())};
-        (&row.key,probe.map(|probe|json!(probe)).unwrap_or_else(||json!({"unavailable":"saved probe type or copy budget is unverified","complete":false,"record_key":if row.scalar_limited{None}else{Some(&row.key)},"full_cli":"shellboy index status"})))
-    }).collect::<Vec<_>>();
-    probe_rows.sort_by(|a, b| {
-        (b.1.get("checked_at").and_then(Value::as_str), b.0)
-            .cmp(&(a.1.get("checked_at").and_then(Value::as_str), a.0))
-    });
-    let probes = probe_rows.into_iter().map(|r| r.1).collect::<Vec<_>>();
-    let probes_complete = !raw.probes_more
-        && raw.probes.iter().all(|r| {
-            !r.scalar_limited
-                && r.body.as_ref().is_some_and(|v| {
-                    serde_json::from_str::<crate::protocol::IndexProbeObservation>(v).is_ok()
-                })
-        });
-    json!({"kind":"saved_index_observation","limits":{"saved_value_body_max_bytes":131072,"scalar_cell_bytes":SCALAR_CELL_BYTES,"scalar_channel_max_bytes":SCALAR_CHANNEL_BYTES},"read_at":raw.read_at,"scope":raw.args,"active_space":raw.active,"selected_space":raw.selected,"auto_history":raw.auto_history,"auto_kinds":raw.auto_kinds,"automatic_history_reason":if raw.auto_history{None}else{Some("Automatic history indexing is disabled; existing vectors and explicitly authorized index work remain available")},"status":{"counts":counts,"paused":if !metadata_limited||paused{Some(paused)}else{None},"pause_known":!metadata_limited,"reason":reason,"paused_at":pause_at,"pause_id":pause_id},"spaces":spaces,"preparation":preparation,"candidate":candidate,"candidate_known":candidate_known,"spaces_count":count(raw.spaces.len()as u64,!raw.spaces_more),"probes":probes,"probes_complete":probes_complete,"unknown_work_records":unknown,"metadata_limited":metadata_limited,"complete":complete&&!raw.spaces_more&&!raw.chunks_more&&probes_complete,"coverage":{"state":"requires_current_source_window","current":false},"continuation":{"full_cli":"shellboy index status","notice":"Counts marked lower_bound are not exact totals. Read the current source coverage window; full CLI inspection preserves the complete result."}})
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CoverageCursor {
@@ -774,7 +310,7 @@ impl IndexService {
             None
         };
         if let Some(space) = &selected
-            && read_space(db, space)?.is_none()
+            && !space_exists(db, space)?
         {
             return Err(StorageError::from(err(
                 ErrorCode::InvalidArgument,
@@ -1090,12 +626,35 @@ impl IndexService {
         })
     }
 }
-pub(crate) fn prepare_coverage_window(mut raw: RawCoverageWindow) -> Result<Value, ApiError> {
+impl IndexService {
+    /// One bounded coverage window for `index.status --coverage`.
+    pub(super) async fn coverage_window(
+        self: &Arc<Self>,
+        request: PreparedCoverageRequest,
+    ) -> Result<IndexCoverageWindow, ApiError> {
+        let service = Arc::clone(self);
+        let raw = self
+            .database
+            .call(move |db| {
+                service
+                    .read_prepared_coverage_tx(db, &request)
+                    .map_err(StorageError::from)
+            })
+            .await
+            .map_err(db_error)?;
+        tokio::task::spawn_blocking(move || prepare_coverage_window(raw))
+            .await
+            .map_err(|_| err(ErrorCode::InvalidState, "Coverage preparation stopped"))?
+    }
+}
+pub(crate) fn prepare_coverage_window(
+    mut raw: RawCoverageWindow,
+) -> Result<IndexCoverageWindow, ApiError> {
     let next = raw.next.as_ref().map(|position| {
         let cursor = encode_json(position).map_err(db_error)?;
         if cursor.len() > 4096 {
             return Err(err(ErrorCode::InputLimit,
-                "Coverage continuation exceeds4096 bytes; use the full CLI for this saved identity"));
+                "Coverage continuation exceeds 4096 bytes; narrow the selection"));
         }
         Ok(cursor)
     }).transpose()?;
@@ -1194,13 +753,13 @@ pub(crate) fn prepare_coverage_window(mut raw: RawCoverageWindow) -> Result<Valu
             || invalid_jobs.contains(&source.id)
             || raw.paths.iter().any(|p| p.0 == source.id && p.3.is_none());
         let Some(body) = source.body else {
-            unknown.push(json!({"source_id":source.id,"reason":"source body exceeds the finite copy budget","full_cli":"shellboy index status"}));
+            unknown.push(unverified(source.id, IndexUnverifiedReason::BodyOverBudget));
             continue;
         };
         let payload = match serde_json::from_str::<Value>(&body) {
             Ok(value) => value,
             Err(_) => {
-                unknown.push(json!({"source_id":source.id,"reason":"malformed source JSON"}));
+                unknown.push(unverified(source.id, IndexUnverifiedReason::MalformedSource));
                 continue;
             }
         };
@@ -1210,7 +769,7 @@ pub(crate) fn prepare_coverage_window(mut raw: RawCoverageWindow) -> Result<Valu
             .filter(|r| r.node == source.id && !r.tombstoned && r.execution.is_some())
             .collect::<Vec<_>>();
         if limited || relations.len() > 1 {
-            unknown.push(json!({"source_id":source.id,"reason":"source hash or saved relation/job/path facts exceed budget or are unprovable"}));
+            unknown.push(unverified(source.id, IndexUnverifiedReason::Unprovable));
             continue;
         }
         let raw_expected = !relations.is_empty();
@@ -1247,14 +806,26 @@ pub(crate) fn prepare_coverage_window(mut raw: RawCoverageWindow) -> Result<Valu
         );
         evaluated += 1;
     }
-    Ok(
-        json!({"kind":"index_coverage_window","limits":{"source_body_max_bytes":524288,"saved_value_body_max_bytes":131072,"scalar_cell_bytes":SCALAR_CELL_BYTES,"scalar_channel_max_bytes":SCALAR_CHANNEL_BYTES},"read_at":raw.read_at,"scope":&*raw.args,"selected_space":raw.selected,"coverage":counts,"evaluated_sources":evaluated,"inspected_memberships":raw.inspected,"unverified_sources":unknown,"window_complete":!scalar_limited&&!raw.jobs_more&&!raw.paths_more&&!raw.raw_more&&unknown.is_empty(),"scope_exhausted":raw.next.is_none(),"next_cursor":next,"consistency":"Current finite per-source observations in this window only. Different windows are not one snapshot and must not be summed as an exact current global total. IDs are deduplicated within the window; overlapping scope memberships may recur in later windows.","continuation":{"full_cli":"shellboy index status","notice":"Continue with next_cursor for unevaluated memberships. Limited source/job/path evidence remains unverified; no hidden raw decoding or provider request."}}),
-    )
+    let window_complete = !scalar_limited
+        && !raw.jobs_more
+        && !raw.paths_more
+        && !raw.raw_more
+        && unknown.is_empty();
+    Ok(IndexCoverageWindow {
+        read_at: raw.read_at,
+        selection: (*raw.args).clone(),
+        selected_space: raw.selected,
+        coverage: counts,
+        evaluated_sources: evaluated as u64,
+        inspected_memberships: raw.inspected as u64,
+        unverified_sources: unknown,
+        window_complete,
+        scope_exhausted: raw.next.is_none(),
+        next_cursor: next,
+    })
 }
-
-/// Shared canonical classification definitions; no duplicate UI policy.
-pub(crate) fn coverage_definitions() -> Value {
-    coverage::definitions()
+fn unverified(source_id: String, reason: IndexUnverifiedReason) -> IndexUnverifiedSource {
+    IndexUnverifiedSource { source_id, reason }
 }
 
 #[cfg(test)]
@@ -1276,51 +847,6 @@ mod tests {
         config.indexing.auto_history = true;
         let service = IndexService::new(db.clone(), Arc::new(config));
         (root, db, service)
-    }
-    #[tokio::test]
-    async fn saved_observation_preserves_disabled_automatic_history_policy() {
-        let (_root, db, original) = fixture().await;
-        let mut config = (*original.config).clone();
-        config.indexing.auto_history = false;
-        let service = IndexService::new(db.clone(), Arc::new(config));
-        let observed = saved(&db, service, SavedReadLimits::default()).await;
-        assert_eq!(observed["auto_history"], false);
-        assert!(
-            observed["automatic_history_reason"]
-                .as_str()
-                .unwrap()
-                .contains("explicitly authorized")
-        );
-        assert_eq!(
-            observed["status"]["paused"], false,
-            "disabled automatic work is not a failure pause"
-        );
-        db.shutdown().await.unwrap();
-    }
-    #[tokio::test]
-    async fn held_automatic_jobs_are_not_executable_pending_and_unknown_is_not_exact() {
-        let (_root, db, original) = fixture().await;
-        seed(&db, 4).await;
-        let mut config = (*original.config).clone();
-        config.indexing.auto_history = false;
-        let service = IndexService::new(db.clone(), Arc::new(config));
-        db.call(|db| {
-            db.execute("UPDATE embedding_job SET state='pending'", [])?;
-            db.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.authorization','new-finalized-user') WHERE id='job-0'", [])?;
-            db.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.authorization','explicit-retry') WHERE id='job-1'", [])?;
-            db.execute("UPDATE embedding_job SET authorized_watermark='not-json' WHERE id='job-2'", [])?;
-            db.execute("UPDATE embedding_job SET authorized_watermark=?1 WHERE id='job-3'", [json!({"authorization":"new-finalized-user","padding":"x".repeat(16384)}).to_string()])?;
-            Ok(())
-        }).await.unwrap();
-        let observed = saved(&db, service, SavedReadLimits::default()).await;
-        assert_eq!(observed["status"]["counts"]["pending"]["value"], 1);
-        assert_eq!(
-            observed["status"]["counts"]["held_auto_history"]["value"],
-            1
-        );
-        assert_eq!(observed["unknown_work_records"], 2);
-        assert_eq!(observed["status"]["counts"]["pending"]["complete"], false);
-        db.shutdown().await.unwrap();
     }
     #[tokio::test]
     async fn oversized_unidentifiable_work_is_deleted_and_visible_in_saved_status() {
@@ -1347,17 +873,10 @@ mod tests {
         })
         .await
         .unwrap();
-        let cli = service.status(IndexArgs::default()).await.unwrap();
+        let cli = service.status(Default::default()).await.unwrap();
         assert!(
             cli.reason
                 .as_deref()
-                .unwrap()
-                .contains(queue::RECOVERY_REQUIRED_MESSAGE)
-        );
-        let observed = saved(&db, service, SavedReadLimits::default()).await;
-        assert!(
-            observed["status"]["reason"]
-                .as_str()
                 .unwrap()
                 .contains(queue::RECOVERY_REQUIRED_MESSAGE)
         );
@@ -1426,9 +945,11 @@ mod tests {
             Ok(())
         }).await.unwrap();
         assert!(!held.drain_authorization(&profile).await.unwrap());
-        let observed = saved(&db, held.clone(), SavedReadLimits::default()).await;
         assert_eq!(
-            observed["status"]["counts"]["held_auto_history"]["value"],
+            held.status(Default::default())
+                .await
+                .unwrap()
+                .held_auto_history,
             1
         );
         config.indexing.auto_history = true;
@@ -1551,16 +1072,8 @@ mod tests {
             }tx.commit()?;Ok(())
         }).await.unwrap();
     }
-    async fn saved(db: &DbWorker, service: Arc<IndexService>, limits: SavedReadLimits) -> Value {
-        let raw = db
-            .call(move |db| Ok(service.read_saved_tx(db, &IndexArgs::default(), limits)))
-            .await
-            .unwrap()
-            .unwrap();
-        prepare_saved(raw)
-    }
     fn coverage(raw: RawCoverageWindow) -> Value {
-        prepare_coverage_window(raw).unwrap()
+        serde_json::to_value(prepare_coverage_window(raw).unwrap()).unwrap()
     }
     fn continuation(raw: &RawCoverageWindow) -> Option<String> {
         raw.next.as_ref().map(|cursor| encode_json(cursor).unwrap())
@@ -1588,12 +1101,6 @@ mod tests {
             .management_status(IndexArgs::default())
             .await
             .unwrap();
-        let now = saved(&db, service.clone(), SavedReadLimits::default()).await;
-        assert_eq!(
-            now["status"]["counts"]["done"]["value"],
-            old["status"]["done"]
-        );
-        assert_eq!(now["status"]["counts"]["done"]["complete"], true);
         let raw = window(
             &db,
             service.clone(),
@@ -1634,12 +1141,6 @@ mod tests {
             rows: 1,
             ..Default::default()
         };
-        let current = saved(&db, service.clone(), limits).await;
-        assert_eq!(current["status"]["counts"]["done"]["value"], 1);
-        assert_eq!(
-            current["status"]["counts"]["done"]["relation"],
-            "lower_bound"
-        );
         let raw = window(&db, service.clone(), IndexArgs::default(), None, limits).await;
         let current = coverage(raw);
         assert_eq!(current["coverage"]["fully_indexed_sources"], 0);
@@ -1690,28 +1191,6 @@ mod tests {
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
-    async fn saved_pause_and_probe_oversize_is_explicit_and_simple_reads_authorize_nothing() {
-        let (_root, db, service) = fixture().await;
-        seed(&db, 1).await;
-        let pause = IndexKeys::new(service.profile_key.as_deref().unwrap()).pause();
-        db.call(move |db| {
-            db.execute(
-                "INSERT INTO app_meta(key,value)VALUES(?1,?2),('index.probe.large',?2)",
-                params![pause, "x".repeat(20000)],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-        let value = saved(&db, service.clone(), SavedReadLimits::default()).await;
-        assert_eq!(value["metadata_limited"], true);
-        assert_eq!(value["status"]["pause_known"], false);
-        assert_eq!(value["probes_complete"], false);
-        db.call(|db|{assert_eq!(db.query_row("SELECT COUNT(*) FROM app_meta WHERE key LIKE 'index.auto.%' OR key LIKE 'index.bootstrap.%'",[],|r|r.get::<_,i64>(0))?,0);Ok(())}).await.unwrap();
-        assert!(!service.started.load(Ordering::Acquire));
-        db.shutdown().await.unwrap();
-    }
-    #[tokio::test]
     async fn oversized_nonnull_source_hash_cannot_become_null_witness_proof() {
         let (_root, db, service) = fixture().await;
         seed(&db, 1).await;
@@ -1730,23 +1209,6 @@ mod tests {
         assert_eq!(current["coverage"]["fully_indexed_sources"], 0);
         assert_eq!(current["unverified_sources"].as_array().unwrap().len(), 1);
         assert_eq!(current["window_complete"], false);
-        db.shutdown().await.unwrap();
-    }
-    #[tokio::test]
-    async fn typed_invalid_candidate_probe_and_requested_dimension_are_explicitly_unknown() {
-        let (_root, db, service) = fixture().await;
-        seed(&db, 1).await;
-        let candidate =
-            dimensions::candidate_key(IndexKeys::new(service.profile_key.as_deref().unwrap()));
-        db.call(move|db|{db.execute("INSERT INTO app_meta(key,value)VALUES(?1,'{\"group\":\"g\",\"dimensions\":0}'),('index.probe.invalid','{\"checked_at\":\"now\"}'),('index.space_dimensions.space','0')",[candidate])?;Ok(())}).await.unwrap();
-        let value = saved(&db, service, SavedReadLimits::default()).await;
-        assert_eq!(value["candidate_known"], false);
-        assert_eq!(value["candidate"]["complete"], false);
-        assert_eq!(value["probes_complete"], false);
-        assert_eq!(value["probes"][0]["complete"], false);
-        assert_eq!(value["spaces"][0]["requested_known"], false);
-        assert!(value["spaces"][0]["requested_dimensions"].is_null());
-        assert_eq!(value["complete"], false);
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
@@ -1912,8 +1374,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(raw.sources[0].id, "source-0000");
-        let value = prepare_coverage_window(raw).unwrap();
-        let args: IndexArgs = serde_json::from_value(value["scope"].clone()).unwrap();
+        let value = coverage(raw);
+        let args: IndexArgs = serde_json::from_value(value["selection"].clone()).unwrap();
         let cursor = value["next_cursor"].as_str().unwrap().to_owned();
         let request = service
             .prepare_coverage_request(&args, Some(&cursor), limits)
@@ -1927,7 +1389,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(raw.sources[0].id, "source-0002");
-        assert!(prepare_coverage_window(raw).unwrap()["next_cursor"].is_null());
+        assert!(prepare_coverage_window(raw).unwrap().next_cursor.is_none());
         db.shutdown().await.unwrap();
     }
 
@@ -1941,9 +1403,9 @@ mod tests {
         };
         let first = window(&db, service.clone(), IndexArgs::default(), None, limits).await;
         let value = prepare_coverage_window(first).unwrap();
-        let cursor = value["next_cursor"].as_str().unwrap();
+        let cursor = value.next_cursor.unwrap();
         let request = service
-            .prepare_coverage_request(&IndexArgs::default(), Some(cursor), limits)
+            .prepare_coverage_request(&IndexArgs::default(), Some(&cursor), limits)
             .unwrap();
         db.call(|db|{
             db.execute("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name)VALUES('other','fixture','synthetic',2,'fixture','active','shellboy_vec_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')",[])?;
@@ -1963,4 +1425,58 @@ mod tests {
         assert_eq!(fresh.selected.as_deref(), Some("other"));
         db.shutdown().await.unwrap();
     }
+    #[tokio::test]
+    async fn index_status_reports_a_coverage_window_only_on_request_and_continues_by_cursor() {
+        let (_root, db, service) = fixture().await;
+        seed(&db, 40).await;
+        let plain = service
+            .status(IndexStatusArgs {
+                scope: Some(IndexScope::All),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(plain.coverage_window.is_none());
+        let selection = IndexStatusArgs {
+            source_ids: (0..40).rev().map(|i| format!("source-{i:04}")).collect(),
+            coverage: true,
+            ..Default::default()
+        };
+        let first = service
+            .status(selection.clone())
+            .await
+            .unwrap()
+            .coverage_window
+            .unwrap();
+        assert!(!first.scope_exhausted);
+        assert_eq!(first.coverage.fully_indexed_sources, first.evaluated_sources);
+        let next = IndexStatusArgs {
+            coverage: true,
+            coverage_cursor: first.next_cursor.clone(),
+            ..first.selection.clone().into()
+        };
+        let second = service.status(next).await.unwrap().coverage_window.unwrap();
+        assert!(second.scope_exhausted && second.next_cursor.is_none());
+        assert_eq!(first.evaluated_sources + second.evaluated_sources, 40);
+        let changed = service
+            .status(IndexStatusArgs {
+                source_ids: vec!["source-0000".into()],
+                coverage: true,
+                coverage_cursor: first.next_cursor,
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(changed.code, ErrorCode::InvalidArgument);
+        let cursor_only = crate::protocol::Command::IndexStatus(IndexStatusArgs {
+            coverage_cursor: Some("{}".into()),
+            ..Default::default()
+        });
+        assert_eq!(
+            cursor_only.validate().unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+        db.shutdown().await.unwrap();
+    }
+
 }

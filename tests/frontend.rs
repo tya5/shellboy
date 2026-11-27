@@ -1324,18 +1324,14 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await;
     assert!(
-        field(&shown, "/logical/bytes")
+        field(&shown, "/logical_live_bytes")
             .parse::<u64>()
             .is_ok_and(|bytes| bytes > 0)
     );
-    assert_eq!(field(&shown, "/logical/complete"), "true");
-    send.send(UiAction::Manage(Command::IndexStatus(IndexArgs {
-        kinds: Vec::new(),
-        dimensions: None,
+    send.send(UiAction::Manage(Command::IndexStatus(IndexStatusArgs {
         scope: Some(IndexScope::All),
-        space_id: None,
-        thread_ids: vec![],
-        source_ids: vec![],
+        coverage: true,
+        ..Default::default()
     })))
     .await
     .unwrap();
@@ -1346,19 +1342,17 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         _ => None,
     })
     .await;
-    assert!(!field(&managed, "/management/spaces").is_empty());
     assert!(
         managed
             .iter()
             .all(|field| field.key != "/request_operation_id"),
-        "index management retains its supplemental projection without a receipt link"
+        "index status is a read without a receipt link"
     );
     assert!(
-        field(&managed, "/management/coverage/not_indexed_sources")
+        field(&managed, "/coverage_window/coverage/not_indexed_sources")
             .parse::<u64>()
             .is_ok()
     );
-    assert!(!field(&managed, "/management/definitions/not_indexed_sources").is_empty());
     send.send(UiAction::Command(Command::ThreadGet(
         shellboy::protocol::ThreadGetArgs {
             thread_id: Some(fork),

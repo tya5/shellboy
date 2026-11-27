@@ -11,20 +11,7 @@ pub(super) struct CoverageJob {
     pub(super) witness: Option<Witness>,
     pub(super) chunk: bool,
 }
-#[derive(Default, Serialize)]
-pub(super) struct CoverageCounts {
-    pub(super) eligible_sources: u64,
-    pub(super) unavailable_sources: u64,
-    pub(super) not_indexable_sources: u64,
-    pub(super) not_indexed_sources: u64,
-    pub(super) partially_indexed_sources: u64,
-    pub(super) fully_indexed_sources: u64,
-    pub(super) coverage_unverified_sources: u64,
-    pub(super) done_segments: u64,
-    pub(super) pending_segments: u64,
-    pub(super) failed_segments: u64,
-    pub(super) stale_segments: u64,
-}
+pub(super) use crate::protocol::IndexCoverageCounts as CoverageCounts;
 impl IndexService {
     pub(super) async fn coverage_jobs(
         &self,
@@ -277,7 +264,7 @@ pub(super) fn classify_bodies(
 impl IndexService {
     /// Read-only management supplement; never authorizes historical sources or
     /// performs an embedding request. Empty selection means all only in this view.
-    pub async fn management_status(&self, mut args: IndexArgs) -> Result<Value, ApiError> {
+    pub async fn management_status(self: &Arc<Self>, mut args: IndexArgs) -> Result<Value, ApiError> {
         if args.scope.is_none() && args.thread_ids.is_empty() && args.source_ids.is_empty() {
             args.scope = Some(IndexScope::All);
         }
@@ -317,7 +304,7 @@ impl IndexService {
                 &mut coverage,
             );
         }
-        let status = self.status(args.clone()).await?;
+        let status = self.status(args.clone().into()).await?;
         Ok(json!({
             "status":status,
             "paused_at":status.paused_at,"pause_id":status.pause_id,

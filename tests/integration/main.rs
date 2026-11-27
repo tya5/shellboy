@@ -85,8 +85,6 @@ mod index_batch;
 mod index_dimensions;
 #[path = "../input_history_backend.rs"]
 mod input_history_backend;
-#[path = "../inspection_lists.rs"]
-mod inspection_lists;
 #[path = "../instructions.rs"]
 mod instructions;
 #[path = "../live_connections.rs"]
@@ -137,8 +135,6 @@ mod request_inspect;
 mod response_retries;
 #[path = "../response_upload_recovery.rs"]
 mod response_upload_recovery;
-#[path = "../retained_sources.rs"]
-mod retained_sources;
 #[path = "../revisit.rs"]
 mod revisit;
 #[path = "../runtime.rs"]

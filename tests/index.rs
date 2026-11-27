@@ -289,7 +289,7 @@ async fn newly_finalized_only_no_implicit_backfill_and_real_vec_search() {
     assert_eq!(preview.sources, 1);
     assert_eq!(f.proxy.count(), 0);
     f.drain().await;
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert_eq!(status.done, 1);
     assert!(status.space_id.is_some());
     let matches = f.service.search("cat", 10).await.unwrap();
@@ -309,7 +309,7 @@ async fn newly_finalized_only_no_implicit_backfill_and_real_vec_search() {
         .unwrap();
     assert_eq!(preview.sources, 2);
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 2);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 2);
     assert_eq!(f.proxy.count(), 3);
     f.close().await;
 }
@@ -374,7 +374,7 @@ async fn stale_embedding_result_cannot_resurrect_deleted_source() {
     f.db.call(|db|{let tx=db.transaction()?;retire_index_source_tx(&tx,"source",false).unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1,deleted_reason='expired' WHERE id='source'",[])?;tx.commit()?;Ok(())}).await.unwrap();
     release.send(()).unwrap();
     assert!(task.await.unwrap());
-    assert_eq!(f.service.status(args()).await.unwrap().done, 0);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 0);
     let count =
         f.db.call(|db| {
             Ok(db.query_row("SELECT COUNT(*) FROM index_space", [], |r| {
@@ -398,7 +398,7 @@ async fn auth_pauses_immediately_and_manual_retry_resumes_without_auto_replay() 
             .await
             .unwrap()
     );
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert!(status.paused);
     assert_eq!(status.failed, 1);
     f.drain().await;
@@ -408,7 +408,7 @@ async fn auth_pauses_immediately_and_manual_retry_resumes_without_auto_replay() 
     selected.source_ids.push("source".into());
     f.service.backfill(selected).await.unwrap();
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 1);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 1);
     assert_eq!(f.proxy.count(), 2);
     f.close().await;
 }
@@ -450,7 +450,7 @@ async fn transient_retry_uses_configured_delay_and_unknown_errors_do_not_split()
     f.service.enqueue_new(&["unknown".into()]).await.unwrap();
     f.proxy.push(Reply::Error(400, "unknown_request"));
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().failed, 1);
+    assert_eq!(f.service.status(args().into()).await.unwrap().failed, 1);
     assert_eq!(f.proxy.count(), 3);
     f.close().await;
 }
@@ -461,9 +461,9 @@ async fn explicit_length_error_splits_finitely_and_rebuild_failure_preserves_old
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.proxy.push(Reply::Error(400, "input_too_long"));
     f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     assert_eq!(f.proxy.count(), 3);
-    assert_eq!(f.service.status(args()).await.unwrap().done, 2);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 2);
     f.proxy.push(Reply::Error(400, "unknown_provider_failure"));
     f.service
         .rebuild(IndexArgs {
@@ -476,7 +476,7 @@ async fn explicit_length_error_splits_finitely_and_rebuild_failure_preserves_old
         .unwrap();
     f.drain().await;
     assert_eq!(
-        f.service.status(args()).await.unwrap().space_id.as_deref(),
+        f.service.status(args().into()).await.unwrap().space_id.as_deref(),
         Some(old.as_str())
     );
     assert_eq!(f.service.search("cat", 10).await.unwrap().len(), 1);
@@ -488,7 +488,7 @@ async fn rebuild_switches_and_source_retirement_hides_paid_vectors() {
     f.node("source", "cat").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
             kinds: Vec::new(),
@@ -499,7 +499,7 @@ async fn rebuild_switches_and_source_retirement_hides_paid_vectors() {
         .await
         .unwrap();
     f.drain().await;
-    let new = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let new = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     assert_ne!(old, new);
     let counts=f.db.call(|db|{let tx=db.transaction()?;retire_index_source_tx(&tx,"source",false).unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1 WHERE id='source'",[])?;tx.rollback()?;let chunks=db.query_row("SELECT COUNT(*) FROM embedding_chunk WHERE source_node_id='source'",[],|r|r.get::<_,i64>(0))?;let mut statement=db.prepare("SELECT state FROM index_space ORDER BY state")?;let states=statement.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;Ok((chunks,states))}).await.unwrap();
     assert_eq!(counts.0, 2);
@@ -526,9 +526,9 @@ async fn durable_new_authorization_is_cheap_transactional_and_survives_service_r
     .await
     .unwrap();
     assert_eq!(f.proxy.count(), 0);
-    assert_eq!(f.service.status(args()).await.unwrap().pending, 1);
+    assert_eq!(f.service.status(args().into()).await.unwrap().pending, 1);
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 1);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 1);
     assert_eq!(f.proxy.count(), 1);
     let sources =
         f.db.call(|db| {
@@ -561,15 +561,15 @@ async fn three_exhausted_common_failures_pause_other_jobs_and_unknown_errors_do_
                 .unwrap()
         );
     }
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert!(status.paused);
     assert_eq!(status.failed, 3);
     assert_eq!(status.pending, 1);
     f.drain().await;
     assert_eq!(
         (
-            f.service.status(args()).await.unwrap().failed,
-            f.service.status(args()).await.unwrap().pending
+            f.service.status(args().into()).await.unwrap().failed,
+            f.service.status(args().into()).await.unwrap().pending
         ),
         (0, 0)
     );
@@ -586,7 +586,7 @@ async fn vector_chunk_and_job_adoption_roll_back_together_on_db_failure() {
     f.service.enqueue_new(&["broken".into()]).await.unwrap();
     f.db.call(|db|{db.execute_batch("CREATE TRIGGER inject_index_failure BEFORE INSERT ON embedding_chunk WHEN NEW.source_node_id='broken' BEGIN SELECT RAISE(ABORT,'synthetic adoption failure');END;")?;Ok(())}).await.unwrap();
     f.drain().await;
-    let state = f.service.status(args()).await.unwrap();
+    let state = f.service.status(args().into()).await.unwrap();
     assert_eq!(state.done, 1);
     assert_eq!(state.failed, 1);
     let counts =
@@ -613,7 +613,7 @@ async fn vector_chunk_and_job_adoption_roll_back_together_on_db_failure() {
     .unwrap();
     f.service.retry(args()).await.unwrap();
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 2);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 2);
     f.close().await;
 }
 async fn raw_source(f: &Fixture, bytes: Vec<u8>) {
@@ -642,8 +642,8 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     }).await.unwrap();
     f.service.enqueue_tool_raw("raw-node").await.unwrap();
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 3);
-    let old_space = f.service.status(args()).await.unwrap().space_id;
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 3);
+    let old_space = f.service.status(args().into()).await.unwrap().space_id;
     f.service
         .rebuild(IndexArgs {
             kinds: Vec::new(),
@@ -654,7 +654,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
         .await
         .unwrap();
     f.drain().await;
-    assert_ne!(f.service.status(args()).await.unwrap().space_id, old_space);
+    assert_ne!(f.service.status(args().into()).await.unwrap().space_id, old_space);
     // Old visible jobs carried the same raw witness as tool_raw jobs. Their
     // already-paid canonical chunks must remain usable without re-embedding.
     f.db.call(|db| {
@@ -833,7 +833,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     .await
     .unwrap();
     assert_eq!(
-        f.service.status(args()).await.unwrap().done,
+        f.service.status(args().into()).await.unwrap().done,
         3,
         "source retirement retains all three paid jobs in the selected space"
     );
@@ -928,7 +928,7 @@ async fn full_raw_middle_is_indexed_in_bounded_segments_and_gc_marker_blocks_new
     let preview = f.service.enqueue_tool_raw("raw-node").await.unwrap();
     assert_eq!(preview.unavailable, 0);
     assert_eq!(preview.segments, 0);
-    assert!(f.service.status(args()).await.unwrap().done > 0);
+    assert!(f.service.status(args().into()).await.unwrap().done > 0);
     f.close().await;
 }
 #[tokio::test]
@@ -950,7 +950,7 @@ async fn raw_retention_during_inflight_embedding_does_not_resurrect_vectors() {
         .unwrap();
     release.send(()).unwrap();
     task.await.unwrap();
-    assert_eq!(f.service.status(args()).await.unwrap().done, 0);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 0);
     assert_eq!(
         f.service
             .enqueue_tool_raw("raw-node")
@@ -984,7 +984,7 @@ async fn partially_failed_candidate_is_visible_and_retry_completes_before_switch
         .await
         .unwrap();
     f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     f.proxy.push(Reply::Embed(3));
     f.proxy.push(Reply::Error(400, "unknown_failure"));
     f.service
@@ -997,12 +997,12 @@ async fn partially_failed_candidate_is_visible_and_retry_completes_before_switch
         .await
         .unwrap();
     f.drain().await;
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert_eq!(status.space_id.as_deref(), Some(old.as_str()));
     assert_eq!(status.failed, 1);
     f.service.retry(args()).await.unwrap();
     f.drain().await;
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert_ne!(status.space_id.as_deref(), Some(old.as_str()));
     assert_eq!(status.failed, 0);
     assert_eq!(status.done, 2);
@@ -1021,7 +1021,7 @@ async fn logical_quota_pauses_index_work_but_preserves_semantic_reads_and_pause_
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.drain().await;
     assert_eq!(f.proxy.count(), 0);
-    assert!(f.service.status(args()).await.unwrap().paused);
+    assert!(f.service.status(args().into()).await.unwrap().paused);
     f.db.call(move|db|{db.execute("UPDATE node SET payload_json=NULL,payload_bytes=0,deleted_reason='test cleanup' WHERE id='filler'",[])?;assert!(shellboy::gc::require_capacity_tx(db,&policy).is_ok());Ok(())}).await.unwrap();
     f.drain().await;
     assert_eq!(f.proxy.count(), 0);
@@ -1030,7 +1030,7 @@ async fn logical_quota_pauses_index_work_but_preserves_semantic_reads_and_pause_
     selected.source_ids.push("source".into());
     f.service.backfill(selected).await.unwrap();
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 1);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 1);
     assert_eq!(f.proxy.count(), 1);
     f.node("query-filler", &"filler ".repeat(1000)).await;
     let before =
@@ -1067,7 +1067,7 @@ async fn logical_quota_pauses_index_work_but_preserves_semantic_reads_and_pause_
         before, after,
         "search must not pause the index or create derived records"
     );
-    assert!(!f.service.status(args()).await.unwrap().paused);
+    assert!(!f.service.status(args().into()).await.unwrap().paused);
     f.node("pending-source", "dog").await;
     f.service
         .enqueue_new(&["pending-source".into()])
@@ -1079,7 +1079,7 @@ async fn logical_quota_pauses_index_work_but_preserves_semantic_reads_and_pause_
             .await
             .unwrap()
     );
-    assert!(f.service.status(args()).await.unwrap().paused);
+    assert!(f.service.status(args().into()).await.unwrap().paused);
     let paused =
         f.db.call(|db| {
             Ok(db
@@ -1113,7 +1113,7 @@ async fn logical_quota_pauses_index_work_but_preserves_semantic_reads_and_pause_
         after, paused,
         "a query must not resume or replace the saved pause"
     );
-    assert_eq!(f.service.status(args()).await.unwrap().pending, 1);
+    assert_eq!(f.service.status(args().into()).await.unwrap().pending, 1);
     f.close().await;
 }
 
@@ -1123,7 +1123,7 @@ async fn new_finalized_sources_during_rebuild_are_caught_up_before_switch() {
     f.node("old", "cat old").await;
     f.service.enqueue_new(&["old".into()]).await.unwrap();
     f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
             kinds: Vec::new(),
@@ -1144,7 +1144,7 @@ async fn new_finalized_sources_during_rebuild_are_caught_up_before_switch() {
     .await
     .unwrap();
     f.drain().await;
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert_ne!(status.space_id.as_deref(), Some(old.as_str()));
     assert_eq!(status.done, 2);
     assert!(
@@ -1267,7 +1267,7 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
     raw_source(&f, b"cat retained output".to_vec()).await;
     f.service.enqueue_tool_raw("raw-node").await.unwrap();
     f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     let before = f.db.call(|db| Ok(db.total_changes())).await.unwrap();
     let calls = f.proxy.count();
     let status = f.service.management_status(args()).await.unwrap();
@@ -1355,7 +1355,7 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
     f.node("source", "cat").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.drain().await;
-    let active = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let active = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
             kinds: Vec::new(),
@@ -1368,7 +1368,7 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
     f.db.call(|db|{db.execute("INSERT INTO app_meta(key,value) SELECT replace(key,'index.rebuild.','index.enqueueing.')||'.'||value,'1' FROM app_meta WHERE key LIKE 'index.rebuild.%'",[])?;Ok(())}).await.unwrap();
     f.drain().await;
     assert_eq!(
-        f.service.status(args()).await.unwrap().space_id.as_deref(),
+        f.service.status(args().into()).await.unwrap().space_id.as_deref(),
         Some(active.as_str())
     );
     let view = f.service.management_status(args()).await.unwrap();
@@ -1376,7 +1376,7 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
     assert_eq!(view["preparation"]["enqueue_fence_count"], 1);
     assert!(
         f.service
-            .status(args())
+            .status(args().into())
             .await
             .unwrap()
             .reason
@@ -1403,7 +1403,7 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
         true
     );
     assert_eq!(
-        restarted.status(args()).await.unwrap().space_id.as_deref(),
+        restarted.status(args().into()).await.unwrap().space_id.as_deref(),
         Some(active.as_str())
     );
     workers.shutdown().await;
@@ -1922,7 +1922,7 @@ async fn billing_failure_pauses_before_next_input_and_explicit_retry_keeps_autho
             .await
             .unwrap()
     );
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert!(status.paused, "HTTP 402 is a shared billing failure");
     assert_eq!((status.failed, status.pending), (1, 1));
     f.drain().await;
@@ -1933,7 +1933,7 @@ async fn billing_failure_pauses_before_next_input_and_explicit_retry_keeps_autho
     f.service.backfill(selected).await.unwrap();
     f.drain().await;
     assert_eq!(f.proxy.count(), 3);
-    assert_eq!(f.service.status(args()).await.unwrap().done, 2);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 2);
     let count =
         f.db.call(|db| {
             Ok(db.query_row(
@@ -1970,13 +1970,13 @@ async fn repeated_identical_unknown_provider_or_protocol_failures_pause_without_
                     .unwrap()
             );
             assert_eq!(
-                f.service.status(args()).await.unwrap().paused,
+                f.service.status(args().into()).await.unwrap().paused,
                 i == 2,
                 "protocol={protocol}, terminal failure={i}"
             );
         }
         f.drain().await;
-        let status = f.service.status(args()).await.unwrap();
+        let status = f.service.status(args().into()).await.unwrap();
         assert_eq!((status.failed, status.pending), (0, 0));
         assert_eq!(
             f.proxy.count(),
@@ -1988,7 +1988,7 @@ async fn repeated_identical_unknown_provider_or_protocol_failures_pause_without_
         all.scope = Some(IndexScope::All);
         f.service.backfill(all).await.unwrap();
         f.drain().await;
-        assert_eq!(f.service.status(args()).await.unwrap().done, 4);
+        assert_eq!(f.service.status(args().into()).await.unwrap().done, 4);
         assert_eq!(f.proxy.count(), 7);
         f.close().await;
     }
@@ -2029,11 +2029,11 @@ async fn intervening_unknown_failure_and_success_break_exhausted_transient_strea
         }
         assert_eq!(f.proxy.count(), before + 1);
         assert!(
-            !f.service.status(args()).await.unwrap().paused,
+            !f.service.status(args().into()).await.unwrap().paused,
             "only consecutive exhausted jobs count"
         );
     }
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert_eq!((status.failed, status.done, status.pending), (6, 1, 1));
     assert_eq!(f.proxy.count(), 7);
     f.close().await;
@@ -2061,7 +2061,7 @@ async fn a_different_unknown_cause_breaks_the_same_cause_streak() {
                 .await
                 .unwrap()
         );
-        assert!(!f.service.status(args()).await.unwrap().paused);
+        assert!(!f.service.status(args().into()).await.unwrap().paused);
     }
     f.proxy.push(Reply::Error(400, "unknown_a"));
     assert!(
@@ -2070,7 +2070,7 @@ async fn a_different_unknown_cause_breaks_the_same_cause_streak() {
             .await
             .unwrap()
     );
-    assert!(f.service.status(args()).await.unwrap().paused);
+    assert!(f.service.status(args().into()).await.unwrap().paused);
     assert_eq!(f.proxy.count(), 6);
     f.close().await;
 }
@@ -2099,7 +2099,7 @@ async fn explicit_length_split_breaks_the_exhausted_transient_streak() {
                 .await
                 .unwrap()
         );
-        assert!(!f.service.status(args()).await.unwrap().paused);
+        assert!(!f.service.status(args().into()).await.unwrap().paused);
     }
     assert_eq!(f.proxy.count(), 4);
     f.close().await;
@@ -2140,7 +2140,7 @@ async fn changing_split_chars_changes_space_and_fee_preview_without_implicit_bac
     f.node("not-approved", "another historical body").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     assert_eq!(f.proxy.count(), 3);
     let changed = configured_service(&f, 12);
     assert!(!changed.process_one(CancellationToken::new()).await.unwrap());
@@ -2165,7 +2165,7 @@ async fn changing_split_chars_changes_space_and_fee_preview_without_implicit_bac
     let queued = changed.backfill(selected.clone()).await.unwrap();
     assert_eq!((queued.segments, queued.already_indexed), (2, 0));
     drain_service(&changed).await;
-    let current = changed.status(args()).await.unwrap().space_id.unwrap();
+    let current = changed.status(args().into()).await.unwrap().space_id.unwrap();
     assert_ne!(old, current);
     assert_eq!(f.proxy.count(), 5);
     let old_copy = old.clone();
@@ -2209,7 +2209,7 @@ async fn changing_split_chars_changes_space_and_fee_preview_without_implicit_bac
     let original = configured_service(&f, 8);
     original.select_space(&old).await.unwrap();
     assert_eq!(
-        original.status(args()).await.unwrap().space_id.as_deref(),
+        original.status(args().into()).await.unwrap().space_id.as_deref(),
         Some(old.as_str())
     );
     f.close().await;
@@ -2224,7 +2224,7 @@ async fn model_switch_selects_only_successful_new_work_and_keeps_old_space_resto
         .await
         .unwrap();
     f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     f.node(
         "not-approved",
         "historical input not approved for the new model",
@@ -2255,7 +2255,7 @@ async fn model_switch_selects_only_successful_new_work_and_keeps_old_space_resto
         .unwrap();
     drain_service(&changed).await;
     assert_eq!(
-        changed.status(args()).await.unwrap().space_id.as_deref(),
+        changed.status(args().into()).await.unwrap().space_id.as_deref(),
         Some(old.as_str())
     );
     f.db.call(|db| {
@@ -2273,7 +2273,7 @@ async fn model_switch_selects_only_successful_new_work_and_keeps_old_space_resto
     assert_eq!(old_hits[0].node_id, "old-model-source");
     changed.retry(args()).await.unwrap();
     drain_service(&changed).await;
-    let current = changed.status(args()).await.unwrap().space_id.unwrap();
+    let current = changed.status(args().into()).await.unwrap().space_id.unwrap();
     assert_ne!(current, old);
     let hits = changed.search("new", 10).await.unwrap();
     assert_eq!(hits.len(), 1);
@@ -2606,7 +2606,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         f.node("seed", "cat seed").await;
         f.service.enqueue_new(&["seed".into()]).await.unwrap();
         f.drain().await;
-        let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+        let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
         let alternate = if inactive {
             f.service
                 .rebuild(IndexArgs {
@@ -2618,7 +2618,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
                 .await
                 .unwrap();
             f.drain().await;
-            let newer = f.service.status(args()).await.unwrap().space_id.unwrap();
+            let newer = f.service.status(args().into()).await.unwrap().space_id.unwrap();
             f.service.select_space(&old).await.unwrap();
             Some(newer)
         } else {
@@ -2691,7 +2691,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         f.drain().await;
         assert_eq!(f.proxy.count(), before + 2);
         assert_eq!(
-            f.service.status(args()).await.unwrap().space_id.as_deref(),
+            f.service.status(args().into()).await.unwrap().space_id.as_deref(),
             Some(old.as_str())
         );
         f.db.call(|db| {
@@ -2719,7 +2719,7 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     f.node("seed", "cat").await;
     f.service.enqueue_new(&["seed".into()]).await.unwrap();
     f.drain().await;
-    let old = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     f.node("rebuild", "abcdefghijklmnop").await;
     f.service
         .rebuild(IndexArgs {
@@ -2788,7 +2788,7 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     f.drain().await;
     assert_eq!(f.proxy.count(), before + 2);
     assert_eq!(
-        f.service.status(args()).await.unwrap().space_id.as_deref(),
+        f.service.status(args().into()).await.unwrap().space_id.as_deref(),
         Some(candidate.as_str())
     );
     f.db.call(|db| {
@@ -2828,7 +2828,7 @@ async fn changing_uncoded_400_details_do_not_bypass_the_terminal_failure_breaker
                 .await
                 .unwrap()
         );
-        assert_eq!(f.service.status(args()).await.unwrap().paused, i == 2);
+        assert_eq!(f.service.status(args().into()).await.unwrap().paused, i == 2);
     }
     f.drain().await;
     assert_eq!(
@@ -2850,7 +2850,7 @@ async fn query_identity_survives_split_changes_and_never_silently_rebinds_endpoi
         .await
         .unwrap();
     f.drain().await;
-    let space = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let space = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     let marker_key = format!("index.query_profile.{space}");
     let marker_copy = marker_key.clone();
     let marker =
@@ -2932,7 +2932,7 @@ async fn missing_query_marker_is_rejected_without_http_or_read_repair() {
         .await
         .unwrap();
     f.drain().await;
-    let space = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let space = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     f.db.call(|db| {
         db.execute(
             "DELETE FROM app_meta WHERE key LIKE 'index.query_profile.%'",
@@ -2997,7 +2997,7 @@ async fn stalled_embeddings_retry_then_pause_and_manual_retry_restores_pending_w
     f.node("stalled", "cat timeout fixture").await;
     f.service.enqueue_new(&["stalled".into()]).await.unwrap();
     expire_embedding(&f).await;
-    let first = f.service.status(args()).await.unwrap();
+    let first = f.service.status(args().into()).await.unwrap();
     assert!(!first.paused);
     assert_eq!(
         first.failed, 0,
@@ -3012,7 +3012,7 @@ async fn stalled_embeddings_retry_then_pause_and_manual_retry_restores_pending_w
     expire_embedding(&f).await;
     f.node("later", "cat later fixture").await;
     f.service.enqueue_new(&["later".into()]).await.unwrap();
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert!(status.paused);
     assert_eq!(status.failed, 1);
     assert_eq!(status.pending, 1);
@@ -3027,14 +3027,14 @@ async fn stalled_embeddings_retry_then_pause_and_manual_retry_restores_pending_w
     stalled.source_ids.push("stalled".into());
     f.service.backfill(stalled).await.unwrap();
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 1);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 1);
     assert_eq!(f.proxy.count(), 3);
     // The source skipped while paused is recovered by explicit backfill.
     let mut later = args();
     later.source_ids = vec!["later".into()];
     f.service.backfill(later).await.unwrap();
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 2);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 2);
     assert_eq!(f.proxy.count(), 4);
     f.close().await;
 }
@@ -3045,7 +3045,7 @@ async fn query_embedding_caller_disconnect_releases_stalled_http_and_allows_next
     f.node("source", "cat search fixture").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.drain().await;
-    let before = f.service.status(args()).await.unwrap();
+    let before = f.service.status(args().into()).await.unwrap();
     {
         let (entered, started) = oneshot::channel();
         let (release, held) = oneshot::channel();
@@ -3076,7 +3076,7 @@ async fn query_embedding_caller_disconnect_releases_stalled_http_and_allows_next
             .unwrap_err();
         assert_eq!(error.code, shellboy::protocol::ErrorCode::InvalidState);
         let _ = release.send(());
-        let after = f.service.status(args()).await.unwrap();
+        let after = f.service.status(args().into()).await.unwrap();
         assert_eq!(after.done, before.done);
         assert_eq!(after.failed, before.failed);
         assert_eq!(after.paused, before.paused);
@@ -3141,7 +3141,7 @@ async fn old_integer_reset_migrates_before_real_workers_and_exhausted_failures_t
     let workers = f.service.start().await.unwrap();
     crate::test_watchdog::watchdog("paused cleanup status", async {
         loop {
-            let status = f.service.status(args()).await.unwrap();
+            let status = f.service.status(args().into()).await.unwrap();
             // All pending and failed work is discarded while paused.
             if status.paused && status.failed == 0 && status.pending == 0 {
                 assert_eq!((status.done, status.failed, status.pending), (1, 0, 0));
@@ -3200,7 +3200,7 @@ async fn malformed_current_counter_preserves_provider_failure_and_pauses_real_wo
     let workers = f.service.start().await.unwrap();
     crate::test_watchdog::watchdog("paused cleanup status", async {
         loop {
-            let status = f.service.status(args()).await.unwrap();
+            let status = f.service.status(args().into()).await.unwrap();
             // Failed records are also discarded while the pause is active.
             if status.paused && status.failed == 0 && status.pending == 0 {
                 assert_eq!((status.done, status.failed, status.pending), (1, 0, 0));
@@ -3244,14 +3244,14 @@ async fn malformed_current_counter_preserves_provider_failure_and_pauses_real_wo
     .unwrap();
     f.service.retry(args()).await.unwrap();
     f.drain().await;
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert!(!status.paused);
     assert_eq!((status.done, status.failed, status.pending), (1, 0, 0));
     let mut gap = args();
     gap.source_ids = vec!["pending-0".into(), "pending-1".into()];
     f.service.backfill(gap).await.unwrap();
     f.drain().await;
-    let status = f.service.status(args()).await.unwrap();
+    let status = f.service.status(args().into()).await.unwrap();
     assert_eq!((status.done, status.failed, status.pending), (3, 0, 0));
     f.close().await;
 }
@@ -3262,7 +3262,7 @@ mod pause_regressions;
 #[tokio::test]
 async fn automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_rag() {
     use shellboy::rag::{IndexMode, RagCommand, RagOptions, SearchMode, SourceCommand};
-    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("automatic history policy", async {
         let f = Fixture::new(Config::default()).await;
         f.node("old", "cat historical evidence").await;
         f.service.enqueue_new(&["old".into()]).await.unwrap();
@@ -3285,7 +3285,7 @@ async fn automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_ra
         assert_eq!(off.enqueue_tool_raw("new").await.unwrap().sources, 0);
         assert!(!off.process_one(CancellationToken::new()).await.unwrap());
         assert_eq!(f.proxy.count(), 1, "off must not embed new or previously pending automatic inputs");
-        let status = off.status(args()).await.unwrap();
+        let status = off.status(args().into()).await.unwrap();
         assert!(!status.auto_history);
         assert_eq!(status.done, 1);
         assert_eq!(status.pending, 0);
@@ -3299,7 +3299,7 @@ async fn automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_ra
         let mut selected = args(); selected.source_ids=vec!["held".into(),"new".into()];
         off.backfill(selected).await.unwrap();
         while off.process_one(CancellationToken::new()).await.unwrap() {}
-        assert_eq!(off.status(args()).await.unwrap().done, 3);
+        assert_eq!(off.status(args().into()).await.unwrap().done, 3);
         assert_eq!(f.proxy.count(), 4, "explicit backfill reauthorizes held work and indexes selected new nodes");
         off.probe(shellboy::protocol::IndexProbeArgs::default()).await.unwrap();
         assert_eq!(f.proxy.count(), 5);
@@ -3322,11 +3322,11 @@ async fn automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_ra
         assert_eq!(history["result"]["degraded"], true);
         assert_eq!(history["result"]["scope_status"][0]["reason"], "auto_history_disabled");
         assert_eq!(f.proxy.count(), 8, "standalone indexing, standalone search and history search each send one explicit request");
-        let old_space = off.status(args()).await.unwrap().space_id;
+        let old_space = off.status(args().into()).await.unwrap().space_id;
         let mut rebuild = args(); rebuild.scope=Some(IndexScope::All);
         off.rebuild(rebuild).await.unwrap();
         while off.process_one(CancellationToken::new()).await.unwrap() {}
-        let rebuilt = off.status(args()).await.unwrap();
+        let rebuilt = off.status(args().into()).await.unwrap();
         assert_ne!(rebuilt.space_id, old_space);
         assert!(rebuilt.spaces_total >= 2, "rebuild must preserve old vectors");
         f.close().await;
@@ -3335,7 +3335,7 @@ async fn automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_ra
 
 #[tokio::test]
 async fn auto_history_off_holds_bootstrap_until_explicit_backfill() {
-    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("held bootstrap", async {
         let f = Fixture::new(Config::default()).await;
         f.node("held", "cat bootstrap").await;
         f.service.enqueue_new(&["held".into()]).await.unwrap();
@@ -3344,7 +3344,7 @@ async fn auto_history_off_holds_bootstrap_until_explicit_backfill() {
         let off = IndexService::new(f.db.clone(), Arc::new(config));
         assert!(!off.process_one(CancellationToken::new()).await.unwrap());
         assert_eq!(f.proxy.count(), 0);
-        let held = off.status(args()).await.unwrap();
+        let held = off.status(args().into()).await.unwrap();
         assert_eq!(held.pending, 0);
         assert_eq!(held.held_auto_history, 1);
         let empty = off
@@ -3365,7 +3365,7 @@ async fn auto_history_off_holds_bootstrap_until_explicit_backfill() {
         off.backfill(selected).await.unwrap();
         while off.process_one(CancellationToken::new()).await.unwrap() {}
         assert_eq!(f.proxy.count(), 1);
-        assert_eq!(off.status(args()).await.unwrap().done, 1);
+        assert_eq!(off.status(args().into()).await.unwrap().done, 1);
         f.close().await;
     })
     .await
@@ -3374,7 +3374,7 @@ async fn auto_history_off_holds_bootstrap_until_explicit_backfill() {
 
 #[tokio::test]
 async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
-    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    crate::test_watchdog::watchdog("held status", async {
         let f = Fixture::new(Config::default()).await;
         f.node("bootstrap", "cat bootstrap").await;
         f.service.enqueue_new(&["bootstrap".into()]).await.unwrap();
@@ -3391,9 +3391,9 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
         let mut config = (*f.config).clone();
         config.indexing.auto_history = false;
         let off = IndexService::new(f.db.clone(), Arc::new(config));
-        let on = f.service.status(args()).await.unwrap();
+        let on = f.service.status(args().into()).await.unwrap();
         assert_eq!((on.pending, on.held_auto_history), (2, 0));
-        let held = off.status(args()).await.unwrap();
+        let held = off.status(args().into()).await.unwrap();
         assert_eq!((held.pending, held.held_auto_history), (0, 2));
         assert!(!off.process_one(CancellationToken::new()).await.unwrap());
         assert_eq!(f.proxy.count(), 0);
@@ -3401,7 +3401,7 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
         let mut selected = args();
         selected.source_ids = vec!["bootstrap".into()];
         off.backfill(selected).await.unwrap();
-        let explicit_bootstrap = off.status(args()).await.unwrap();
+        let explicit_bootstrap = off.status(args().into()).await.unwrap();
         assert_eq!(
             (
                 explicit_bootstrap.pending,
@@ -3417,7 +3417,7 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
         let mut selected = args();
         selected.source_ids = vec!["explicit".into()];
         off.backfill(selected).await.unwrap();
-        let mixed = off.status(args()).await.unwrap();
+        let mixed = off.status(args().into()).await.unwrap();
         assert_eq!(
             (mixed.pending, mixed.held_auto_history, mixed.done),
             (1, 2, 1)
@@ -3432,7 +3432,7 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
             })
             .await
             .unwrap();
-            let projected = off.status(args()).await.unwrap();
+            let projected = off.status(args().into()).await.unwrap();
             assert_eq!(
                 (
                     projected.pending,
@@ -3452,14 +3452,14 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
         })
         .await
         .unwrap();
-        let on = f.service.status(args()).await.unwrap();
+        let on = f.service.status(args().into()).await.unwrap();
         assert_eq!((on.pending, on.held_auto_history), (3, 0));
         let selected_space = off
             .status(IndexArgs {
                 kinds: Vec::new(),
                 space_id: mixed.space_id,
                 ..args()
-            })
+            }.into())
             .await
             .unwrap();
         assert_eq!(
@@ -3472,7 +3472,7 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
             "status observation must not send embeddings"
         );
         while off.process_one(CancellationToken::new()).await.unwrap() {}
-        let settled = off.status(args()).await.unwrap();
+        let settled = off.status(args().into()).await.unwrap();
         assert_eq!(
             (settled.pending, settled.held_auto_history, settled.done),
             (0, 2, 2)
@@ -3481,13 +3481,13 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
         let mut selected = args();
         selected.source_ids = vec!["admission".into(), "job".into()];
         off.backfill(selected).await.unwrap();
-        let reauthorized = off.status(args()).await.unwrap();
+        let reauthorized = off.status(args().into()).await.unwrap();
         assert_eq!(
             (reauthorized.pending, reauthorized.held_auto_history),
             (2, 0)
         );
         while off.process_one(CancellationToken::new()).await.unwrap() {}
-        let finished = off.status(args()).await.unwrap();
+        let finished = off.status(args().into()).await.unwrap();
         assert_eq!(
             (finished.pending, finished.held_auto_history, finished.done),
             (0, 0, 4)
@@ -3570,7 +3570,7 @@ async fn paused_discard_is_recovered_by_scope_all_backfill() {
     let enqueued = f.service.backfill(all).await.unwrap();
     assert_eq!((enqueued.segments, enqueued.already_indexed), (3, 1));
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 4);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 4);
 
     f.node("thread-only", "thread only").await;
     f.service
@@ -3594,7 +3594,7 @@ async fn paused_discard_is_recovered_by_scope_all_backfill() {
     let enqueued = f.service.backfill(thread).await.unwrap();
     assert_eq!((enqueued.segments, enqueued.already_indexed), (1, 4));
     f.drain().await;
-    assert_eq!(f.service.status(args()).await.unwrap().done, 5);
+    assert_eq!(f.service.status(args().into()).await.unwrap().done, 5);
     f.close().await;
 }
 
@@ -3868,7 +3868,7 @@ async fn queued_authorization_of_a_now_excluded_kind_is_consumed_without_blockin
         .await
         .unwrap();
     f.drain().await;
-    let before = f.service.status(args()).await.unwrap().space_id.unwrap();
+    let before = f.service.status(args().into()).await.unwrap().space_id.unwrap();
     assert_eq!(authorize(&f, &["t"]).await, ["t"]);
     let mut restart = (*f.config).clone();
     restart.indexing.auto_kinds = vec!["user".into(), "summary".into()];
@@ -3900,7 +3900,7 @@ async fn queued_authorization_of_a_now_excluded_kind_is_consumed_without_blockin
         0
     );
     assert!(!requested_inputs(&f).join("\n").contains("zebra"));
-    let after = restarted.status(args()).await.unwrap();
+    let after = restarted.status(args().into()).await.unwrap();
     assert_ne!(after.space_id.unwrap(), before);
     assert_eq!((after.pending, after.running, after.failed), (0, 0, 0));
     f.close().await;
@@ -4019,7 +4019,7 @@ async fn scope_status_names_kinds_that_are_not_indexed_automatically() {
 async fn index_status_reports_auto_kinds() {
     let f = Fixture::new_exact(Config::default()).await;
     assert_eq!(
-        f.service.status(args()).await.unwrap().auto_kinds,
+        f.service.status(args().into()).await.unwrap().auto_kinds,
         ["user", "summary", "assistant_response"]
     );
     f.close().await;

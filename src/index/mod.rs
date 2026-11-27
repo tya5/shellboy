@@ -7,8 +7,8 @@ use crate::{
     history,
     model::ModelError,
     protocol::{
-        ApiError, ErrorCode, HistorySearchArgs, IndexArgs, IndexScope, IndexStatus, NodeProvenance,
-        SearchMatch,
+        ApiError, ErrorCode, HistorySearchArgs, IndexArgs, IndexScope, IndexStatus, IndexStatusArgs,
+        NodeProvenance, SearchMatch,
     },
     storage::{DbWorker, StorageError},
 };
@@ -1489,7 +1489,7 @@ mod idle_tests {
         })
         .await
         .unwrap();
-        let status = service.status(IndexArgs::default()).await.unwrap();
+        let status = service.status(Default::default()).await.unwrap();
         assert!(status.paused);
         let reason = status.reason.unwrap();
         assert!(

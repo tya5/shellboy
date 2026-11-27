@@ -87,7 +87,6 @@ pub(crate) const USAGE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration
 #[serde(rename_all = "snake_case")]
 pub(crate) enum UsageTrigger {
     Open,
-    Changed,
     #[default]
     Cli,
 }
@@ -1530,10 +1529,10 @@ mod usage_slow_tests {
             std::time::Duration::from_micros(99_999),
         ] {
             assert!(
-                slow_usage_trace(UsageTrigger::Changed, UsageScope::Thread, duration).is_none()
+                slow_usage_trace(UsageTrigger::Open, UsageScope::Thread, duration).is_none()
             );
             diagnostics.record_usage_aggregation(
-                UsageTrigger::Changed,
+                UsageTrigger::Open,
                 UsageScope::Thread,
                 duration,
             );

@@ -1974,7 +1974,7 @@ impl Form {
                 )
             }
             OpKind::IndexStatus => (index_fields(operation), |form, _cwd| {
-                Ok(Command::IndexStatus(form.index_args()?))
+                Ok(Command::IndexStatus(form.index_args()?.into()))
             }),
             OpKind::IndexPreview => (index_fields(operation), |form, _| {
                 Ok(Command::IndexPreview(form.index_args()?))

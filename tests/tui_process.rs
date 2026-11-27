@@ -303,7 +303,7 @@ async fn embedding_fixture() -> (String, tokio::task::JoinHandle<()>) {
 }
 async fn seed_paused_history(data: &std::path::Path, source: &str) -> (String, String) {
     use sha2::{Digest, Sha256};
-    use shellboy::{config::Config, index::IndexService, protocol::IndexArgs, storage::DbWorker};
+    use shellboy::{config::Config, index::IndexService, storage::DbWorker};
     use std::sync::Arc;
     std::fs::create_dir_all(data).unwrap();
     let db = DbWorker::open(data.join("shellboy.db")).await.unwrap();
@@ -325,7 +325,7 @@ async fn seed_paused_history(data: &std::path::Path, source: &str) -> (String, S
         .process_one(tokio_util::sync::CancellationToken::new())
         .await
         .unwrap();
-    let status = service.status(IndexArgs::default()).await.unwrap();
+    let status = service.status(Default::default()).await.unwrap();
     assert!(status.paused);
     let paused_at = status.paused_at.unwrap();
     while service
@@ -334,7 +334,7 @@ async fn seed_paused_history(data: &std::path::Path, source: &str) -> (String, S
         .unwrap()
     {}
     assert_eq!(
-        service.status(IndexArgs::default()).await.unwrap().failed,
+        service.status(Default::default()).await.unwrap().failed,
         0
     );
     let thread = uuid::Uuid::new_v4().to_string();

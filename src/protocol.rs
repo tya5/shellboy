@@ -1625,6 +1625,32 @@ args!(ShellWriteArgs {
 args!(AttachmentAddArgs { #[serde(default)] thread_id: Option<String>, path: String, kind: AttachmentKind });
 args!(AttachmentRemoveArgs { #[serde(default)] thread_id: Option<String>, attachment_id: String });
 args!(#[derive(Default)] IndexArgs { #[serde(default, skip_serializing_if = "Option::is_none")] dimensions: Option<usize>, #[serde(default)] scope: Option<IndexScope>, #[serde(default)] space_id: Option<String>, #[serde(default)] thread_ids: Vec<String>, #[serde(default)] source_ids: Vec<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] kinds: Vec<String> });
+args!(#[derive(Default)] IndexStatusArgs { #[serde(default)] scope: Option<IndexScope>, #[serde(default)] space_id: Option<String>, #[serde(default)] thread_ids: Vec<String>, #[serde(default)] source_ids: Vec<String>, #[serde(default, skip_serializing_if = "is_false")] #[schemars(description = "Also report `coverage_window`: one bounded window of per-source coverage for the selected scope.")] coverage: bool, #[serde(default, skip_serializing_if = "Option::is_none")] #[schemars(description = "`coverage_window.next_cursor` of the previous window; requires `coverage` and the same selection.")] coverage_cursor: Option<String> });
+impl IndexStatusArgs {
+    /// The index selection the coverage window is scoped to.
+    pub fn selection(&self) -> IndexArgs {
+        IndexArgs {
+            dimensions: None,
+            scope: self.scope,
+            space_id: self.space_id.clone(),
+            thread_ids: self.thread_ids.clone(),
+            source_ids: self.source_ids.clone(),
+            kinds: Vec::new(),
+        }
+    }
+}
+impl From<IndexArgs> for IndexStatusArgs {
+    fn from(value: IndexArgs) -> Self {
+        Self {
+            scope: value.scope,
+            space_id: value.space_id,
+            thread_ids: value.thread_ids,
+            source_ids: value.source_ids,
+            coverage: false,
+            coverage_cursor: None,
+        }
+    }
+}
 args!(StorageArgs { #[serde(default)] category: Option<StorageCategory> });
 args!(StatusArgs { #[serde(default)] memory: bool, #[serde(default)] thread_id: Option<String>, #[serde(default)] run_id: Option<String>, #[serde(default)] since: Option<String>, #[serde(default)] state: Vec<String>, #[serde(default)] all: bool, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 impl Default for StatusArgs {
@@ -2123,7 +2149,7 @@ pub enum Command {
     #[serde(rename = "context.edit")]
     ContextEdit(ContextEditArgs),
     #[serde(rename = "index.status")]
-    IndexStatus(IndexArgs),
+    IndexStatus(IndexStatusArgs),
     #[serde(rename = "index.preview")]
     IndexPreview(IndexArgs),
     #[serde(rename = "index.backfill")]
@@ -2973,7 +2999,19 @@ states!(ManagedFileState {
     Failed
 });
 args!(#[derive(Default)] IndexProbeArgs { #[serde(default, skip_serializing_if = "Option::is_none")] dimensions: Option<usize> });
-record!(IndexStatus { #[serde(default)] auto_history: bool, auto_kinds: Vec<String>, #[serde(default)] held_auto_history: u64, #[serde(default, skip_serializing_if = "Option::is_none")] space_id: Option<String>, pending: u64, running: u64, done: u64, failed: u64, paused: bool, #[serde(default, skip_serializing_if = "Option::is_none")] #[schemars(description = "Owner classification of the saved index pause; absent when no pause is saved.")] pause_kind: Option<crate::index::PauseReason>, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, paused_at: Option<String>, pause_id: Option<String>, spaces: Vec<IndexSpaceStatus>, spaces_total: u64, spaces_truncated: bool, probes: Vec<IndexProbeObservation>, #[serde(default, skip_serializing_if = "Option::is_none")] shrink: Option<IndexShrinkStatus>, #[serde(default, skip_serializing_if = "Option::is_none")] retained_vector_payload_bytes: Option<u64> });
+record!(IndexStatus { #[serde(default)] auto_history: bool, auto_kinds: Vec<String>, #[serde(default)] held_auto_history: u64, #[serde(default, skip_serializing_if = "Option::is_none")] space_id: Option<String>, pending: u64, running: u64, done: u64, failed: u64, paused: bool, #[serde(default, skip_serializing_if = "Option::is_none")] #[schemars(description = "Owner classification of the saved index pause; absent when no pause is saved.")] pause_kind: Option<crate::index::PauseReason>, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, paused_at: Option<String>, pause_id: Option<String>, spaces: Vec<IndexSpaceStatus>, spaces_total: u64, spaces_truncated: bool, probes: Vec<IndexProbeObservation>, #[serde(default, skip_serializing_if = "Option::is_none")] shrink: Option<IndexShrinkStatus>, #[serde(default, skip_serializing_if = "Option::is_none")] retained_vector_payload_bytes: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] coverage_window: Option<IndexCoverageWindow> });
+record!(
+    /// Current per-source coverage for one bounded window of the selected scope.
+    /// Windows are separate reads, not one snapshot: never sum them into a
+    /// global total. Counts are lower bounds unless `window_complete`.
+    IndexCoverageWindow { read_at: String, #[schemars(description = "The normalized selection this window covers; repeat it with `next_cursor`.")] selection: IndexArgs, #[serde(default, skip_serializing_if = "Option::is_none")] selected_space: Option<String>, coverage: IndexCoverageCounts, evaluated_sources: u64, inspected_memberships: u64, #[serde(default, skip_serializing_if = "Vec::is_empty")] unverified_sources: Vec<IndexUnverifiedSource>, window_complete: bool, scope_exhausted: bool, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String> });
+record!(#[derive(Default)] IndexCoverageCounts { eligible_sources: u64, unavailable_sources: u64, not_indexable_sources: u64, not_indexed_sources: u64, partially_indexed_sources: u64, fully_indexed_sources: u64, coverage_unverified_sources: u64, done_segments: u64, pending_segments: u64, failed_segments: u64, stale_segments: u64 });
+record!(IndexUnverifiedSource { source_id: String, reason: IndexUnverifiedReason });
+states!(IndexUnverifiedReason {
+    BodyOverBudget,
+    MalformedSource,
+    Unprovable
+});
 record!(IndexSpaceStatus { space_id: String, connection: String, model: String, dimension: usize, requested_dimensions: Option<usize>, segments: u64, vector_payload_bytes: u64, state: String, selected: bool, #[serde(default, skip_serializing_if = "Option::is_none")] int8_scale: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] retained_remove_with: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] partial: Option<bool> });
 args!(IndexRemoveArgs {
     space_id: String,
