@@ -1599,6 +1599,7 @@ impl Form {
                 vec![f("message", "message ID", c.message.clone(), Text)],
                 |form, _cwd| {
                     Ok(Command::MessageGet(MessageTarget {
+                        source_thread_id: None,
                         message_id: form.owned("message")?,
                     }))
                 },
@@ -1633,11 +1634,19 @@ impl Form {
             }),
             OpKind::RunRetry => (
                 { vec![f("run", "現在の作業ID", c.current_run.clone(), Text)] },
-                |form, _cwd| Ok(Command::RunRetry(form.run_target()?)),
+                |form, _cwd| {
+                    Ok(Command::RunRetry(crate::protocol::RunRetryArgs::exact(
+                        form.run_target()?.run_id,
+                    )))
+                },
             ),
             OpKind::RunStop => (
                 { vec![f("run", "現在の作業ID", c.current_run.clone(), Text)] },
-                |form, _cwd| Ok(Command::RunStop(form.run_target()?)),
+                |form, _cwd| {
+                    Ok(Command::RunStop(crate::protocol::RunStopTarget::Run {
+                        run_id: form.run_target()?.run_id,
+                    }))
+                },
             ),
             OpKind::TurnGet => (
                 vec![f("turn", "応答処理ID", c.turn.clone(), Text)],
@@ -1835,6 +1844,8 @@ impl Form {
                 |form, _cwd| {
                     Ok(Command::ShellRead(ShellReadArgs {
                         // Tail and stream ranges are CLI/wire opt-ins.
+                        expected_owner: None,
+
                         tail: false,
                         segments: false,
                         execution_id: form.owned("execution")?,
@@ -3081,7 +3092,7 @@ mod tests {
         );
         for kind in [OpKind::RunRetry, OpKind::RunStop] {
             assert!(
-                matches!(Form::new(kind,&context).command(&context.cwd).unwrap(), Command::RunRetry(target) | Command::RunStop(target) if target.run_id == "current-recovery")
+                matches!(Form::new(kind,&context).command(&context.cwd).unwrap(), Command::RunRetry(crate::protocol::RunRetryArgs { run_id, .. }) | Command::RunStop(crate::protocol::RunStopTarget::Run { run_id }) if run_id == "current-recovery")
             );
         }
     }

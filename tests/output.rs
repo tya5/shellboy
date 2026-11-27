@@ -22,6 +22,7 @@ async fn finish(db: &DbWorker) {
 }
 fn args(cursor: Option<String>, encoding: &str, limit: u32) -> ShellReadArgs {
     ShellReadArgs {
+        expected_owner: None,
         tail: false,
         segments: true,
         execution_id: "x".into(),
@@ -77,6 +78,7 @@ async fn tail_of_long_output_is_bounded_and_preserves_stream_order() {
     finish(&db).await;
     let tail = reader
         .read(ShellReadArgs {
+            expected_owner: None,
             tail: true,
             ..args(None, "UTF-8", 65536)
         })
@@ -100,6 +102,7 @@ async fn live_tail_cursor_waits_and_continues_exactly_after_incomplete_character
     append(&db, "stdout", b"old text\xe3\x81").await;
     let tail = reader
         .read(ShellReadArgs {
+            expected_owner: None,
             tail: true,
             ..args(None, "UTF-8", 6)
         })
@@ -136,6 +139,7 @@ async fn tail_refuses_encoding_changes_and_accepts_saved_encoding_aliases() {
     append(&db, "stdout", "あ".as_bytes()).await;
     let error = reader
         .read(ShellReadArgs {
+            expected_owner: None,
             tail: true,
             ..args(None, "CP932", 64)
         })
@@ -145,6 +149,7 @@ async fn tail_refuses_encoding_changes_and_accepts_saved_encoding_aliases() {
     assert!(error.hint.as_deref().unwrap().contains("without --tail"));
     let tail = reader
         .read(ShellReadArgs {
+            expected_owner: None,
             tail: true,
             ..args(None, "utf8", 64)
         })
@@ -161,6 +166,7 @@ async fn stateful_tail_reports_uncertainty_but_cursor_continues_canonically() {
     reader.read(args(None, "ISO-2022-JP", 1)).await.unwrap();
     let tail = reader
         .read(ShellReadArgs {
+            expected_owner: None,
             tail: true,
             ..args(None, "ISO-2022-JP", 1)
         })
@@ -318,6 +324,7 @@ async fn cp932_redecode_keeps_raw_unchanged_and_decoders_are_independent_per_str
     assert!(!first.decode_errors);
     let inherited = reader
         .read(ShellReadArgs {
+            expected_owner: None,
             tail: false,
             segments: false,
             execution_id: "x".into(),
@@ -514,6 +521,7 @@ async fn streaming_reader_uses_fixed_watermark_and_missing_middle_raw_is_explici
     assert!(stream.next_page(64).await.unwrap().is_none());
     let all = reader
         .read(ShellReadArgs {
+            expected_owner: None,
             tail: false,
             segments: false,
             execution_id: "x".into(),

@@ -802,6 +802,10 @@ impl ShellReadArgs {
             ));
         }
         nonempty(&self.execution_id, "execution_id")?;
+        if let Some(owner) = &self.expected_owner {
+            nonempty(&owner.thread_id, "thread_id")?;
+            nonempty(&owner.run_id, "run_id")?;
+        }
         optional_nonempty(self.encoding.as_deref(), "encoding")?;
         limit(self.limit_bytes, MAX_BODY_BYTES)?;
         optional_nonempty(self.cursor.as_deref(), "cursor")
@@ -976,6 +980,9 @@ impl Command {
             }
             Self::DraftSave(a) => {
                 nonempty(&a.thread_id, "thread_id")?;
+                if let Some(source) = &a.expected_source {
+                    nonempty(&source.message_id, "expected_source.message_id")?;
+                }
                 nonempty(&a.draft.draft_id, "draft_id")
             }
             Self::ModelList(a) => a.validate(),
@@ -1138,7 +1145,10 @@ impl Command {
                 }
                 Ok(())
             }
-            Self::MessageGet(a) => nonempty(&a.message_id, "message_id"),
+            Self::MessageGet(a) => {
+                nonempty(&a.message_id, "message_id")?;
+                optional_nonempty(a.source_thread_id.as_deref(), "source_thread_id")
+            }
             Self::MessageCancel(a) => {
                 if a.message_ids.is_empty() || a.message_ids.len() > 128 {
                     return Err(invalid(
@@ -1157,7 +1167,19 @@ impl Command {
                 Ok(())
             }
             Self::OperationGet(a) => nonempty(&a.operation_id, "operation_id"),
-            Self::RunGet(a) | Self::RunRetry(a) | Self::RunStop(a) => nonempty(&a.run_id, "run_id"),
+            Self::RunGet(a) => nonempty(&a.run_id, "run_id"),
+            Self::RunRetry(a) => {
+                nonempty(&a.run_id, "run_id")?;
+                validate_expected_turn(a.expected_turn.as_ref())
+            }
+            Self::RunStop(super::RunStopTarget::Run { run_id }) => nonempty(run_id, "run_id"),
+            Self::RunStop(super::RunStopTarget::Thread {
+                thread_id,
+                expected_turn,
+            }) => {
+                nonempty(thread_id, "thread_id")?;
+                validate_expected_turn(expected_turn.as_ref())
+            }
             Self::TurnGet(a) | Self::TurnInterrupt(a) => nonempty(&a.turn_id, "turn_id"),
             Self::Wait(a) => a.validate(),
             Self::HistoryList(a) => a.validate(),
@@ -1339,4 +1361,18 @@ mod thread_list_id_tests {
                 .is_none()
         );
     }
+}
+
+fn validate_expected_turn(value: Option<&super::ExpectedTurn>) -> Result<(), ApiError> {
+    if value.is_some_and(|turn| {
+        turn.turn_id.is_empty()
+            || turn.turn_id.len() > 256
+            || i64::try_from(turn.generation).is_err()
+    }) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "Invalid expected Turn identity",
+        ));
+    }
+    Ok(())
 }

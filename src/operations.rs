@@ -2069,7 +2069,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::RuntimeControl,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Run],
+        fields: &[FieldId::Run, FieldId::Thread],
     },
     OperationSpec {
         id: OperationId::TurnInterrupt,

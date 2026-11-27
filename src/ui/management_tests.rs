@@ -228,7 +228,9 @@ fn operation_defaults_follow_fresh_activity_without_retargeting_an_open_form() {
     ui.event(Event::Paste("/stop".into()));
     ui.event(key(KeyCode::Enter));
     let actions = ui.event(key(KeyCode::Enter));
-    assert!(matches!(command(&actions[0]), Command::RunStop(args) if args.run_id == new));
+    assert!(
+        matches!(command(&actions[0]), Command::RunStop(crate::protocol::RunStopTarget::Run { run_id }) if run_id == new)
+    );
     ui.event(key(KeyCode::F(8)));
     ui.select_thread("b".into());
     assert!(

@@ -146,6 +146,7 @@ pub(super) async fn receipts(
     for id in ids {
         let message: MessageDetails = match owner
             .call(Command::MessageGet(MessageTarget {
+                source_thread_id: None,
                 message_id: id.clone(),
             }))
             .await

@@ -5,7 +5,7 @@ use crate::test_watchdog::watchdog;
 use serde_json::{Value, json};
 use shellboy::{
     control::Control,
-    protocol::{Command, EventsWaitArgs, HistoryListArgs, Request, RunTarget, ThreadSetArgs},
+    protocol::{Command, EventsWaitArgs, HistoryListArgs, Request, ThreadSetArgs},
 };
 use std::{sync::Arc, time::Duration};
 use tokio::{
@@ -709,7 +709,7 @@ async fn the_entry_is_freed_when_the_attempt_is_stopped_or_interrupted() {
                         .unwrap()
                 };
                 if stop {
-                    let request = wait_request(&control, Command::RunStop(RunTarget { run_id: run }));
+                    let request = wait_request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run }));
                     assert!(control.request(request).await.ok);
                 } else {
                     control.interrupt_turn(turn).await.unwrap();

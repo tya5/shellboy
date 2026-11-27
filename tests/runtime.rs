@@ -472,6 +472,7 @@ async fn background_read_keeps_target_raw_separate_from_message_send_and_observe
     let observer_read = command(
         &control,
         Command::ShellRead(ShellReadArgs {
+            expected_owner: None,
             tail: false,
             segments: false,
             execution_id: observer.into(),
@@ -698,6 +699,7 @@ async fn ordinary_input_does_not_wake_foreground_and_stop_reaps_background_shell
     let held = command(
         &control,
         Command::MessageGet(MessageTarget {
+            source_thread_id: None,
             message_id: message_id.into(),
         }),
     )
@@ -742,7 +744,7 @@ async fn ordinary_input_does_not_wake_foreground_and_stop_reaps_background_shell
     let run_id = accepted.run_id.unwrap();
     command(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: run_id.clone(),
         }),
     )
@@ -923,9 +925,9 @@ async fn retry_executes_both_foreground_calls_without_a_spurious_interrupt() {
     .await;
     command(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: accepted.run_id.clone().unwrap(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+            accepted.run_id.clone().unwrap(),
+        )),
     )
     .await;
     incoming(&mut requests)
@@ -995,9 +997,9 @@ async fn incomplete_attempt_is_preserved_retry_reuses_turn_instruction_snapshot_
     .unwrap();
     command(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: accepted.run_id.clone().unwrap(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+            accepted.run_id.clone().unwrap(),
+        )),
     )
     .await;
     let retry = incoming(&mut requests).await;
@@ -1123,7 +1125,7 @@ async fn recovery_wait_without_live_driver_can_be_stopped() {
     }
     command(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: accepted.run_id.clone().unwrap(),
         }),
     )
@@ -1535,6 +1537,7 @@ async fn shell_output_wait_wakes_after_commit_while_shell_and_model_remain_block
     );
     let empty = reader
         .read(ShellReadArgs {
+            expected_owner: None,
             tail: false,
             segments: false,
             execution_id: execution.clone(),
@@ -1954,7 +1957,7 @@ async fn real_shell_cli_may_write_and_stop_an_independent_runs_shell_and_run() {
     .await;
     command(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: victim_run.clone(),
         }),
     )
@@ -2118,6 +2121,7 @@ async fn real_shell_cli_backgrounds_only_the_execution_named_by_the_message_hold
         command(
             control,
             Command::MessageGet(shellboy::protocol::MessageTarget {
+                source_thread_id: None,
                 message_id: id.to_owned(),
             }),
         )
@@ -3106,7 +3110,7 @@ async fn explicit_foreground_wait_is_durable_and_human_backgrounding_releases_on
             state(&control, "turn", turn, "completed").await;
             command(
                 &control,
-                Command::RunStop(RunTarget {
+                Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                     run_id: accepted.run_id.clone().unwrap(),
                 }),
             )
@@ -3369,7 +3373,7 @@ async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_r
             "stopped" => {
                 command(
                     &control,
-                    Command::RunStop(RunTarget {
+                    Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                         run_id: run.clone(),
                     }),
                 )
@@ -3417,7 +3421,11 @@ async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_r
             .unwrap();
         state(&control, "run", &resumed_run, "completed").await;
         if outcome == "cancelled" {
-            command(&control, Command::RunStop(RunTarget { run_id: run })).await;
+            command(
+                &control,
+                Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run }),
+            )
+            .await;
         }
         drop(recipient);
         local.shutdown().await.unwrap();
@@ -3556,6 +3564,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
                 let read = command(
                     &control,
                     Command::ShellRead(ShellReadArgs {
+                        expected_owner: None,
                         tail: false,
                         segments: false,
                         execution_id: execution.clone(),
@@ -3625,6 +3634,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
     let read = command(
         &control,
         Command::ShellRead(ShellReadArgs {
+            expected_owner: None,
             tail: false,
             segments: false,
             execution_id: execution.clone(),
@@ -3646,6 +3656,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
                 uuid::Uuid::new_v4()
             ),
             Command::ShellRead(ShellReadArgs {
+                expected_owner: None,
                 tail: false,
                 segments: false,
                 execution_id: execution,

@@ -549,9 +549,7 @@ async fn preparation_failure_preserves_accepted_message_and_retry_reuses_its_tur
     std::fs::write(root.path().join("AGENTS.md"), "valid repaired instructions").unwrap();
     request(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: run.clone(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run.clone())),
     )
     .await;
     let retry = incoming(&control, &mut receive).await;
@@ -1073,7 +1071,7 @@ async fn stopping_recovery_cancels_an_inflight_manual_summary_without_adopting_i
     .await;
     request(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: details["run_id"].as_str().unwrap().into(),
         }),
     )
@@ -1330,7 +1328,11 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
     let target = thread.clone();
     let (run,pending):(String,i64) = control.store.database.call(move|db|Ok((db.query_row("SELECT run_id FROM turn WHERE thread_id=?1 AND state='recovery_wait'",[&target],|r|r.get(0))?,db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.target_thread_id=?1 AND e.kind='context_changed' AND d.state='pending'",[target],|r|r.get(0))?))).await.unwrap();
     assert!(pending >= 2);
-    request(&control, Command::RunRetry(RunTarget { run_id: run })).await;
+    request(
+        &control,
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run)),
+    )
+    .await;
     let retry = incoming(&control, &mut receive).await;
     let text = retry.body.to_string();
     for kind in [
@@ -1621,9 +1623,9 @@ async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_
     );
     request(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: accepted.run_id.unwrap(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+            accepted.run_id.unwrap(),
+        )),
     )
     .await;
     let retry = incoming(&control, &mut receive).await;
@@ -1809,9 +1811,7 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
         .unwrap();
     request(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: run.clone(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run.clone())),
     )
     .await;
     let resumed = incoming(&control, &mut receive).await;
@@ -2605,9 +2605,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     std::fs::remove_file(root.path().join("old.md")).unwrap();
     request(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: run.clone(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run.clone())),
     )
     .await;
     let retried = incoming(&control, &mut receive).await;
@@ -2669,9 +2667,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         .to_owned();
     request(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: run.clone(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run.clone())),
     )
     .await;
     let notification_retry = incoming(&control, &mut receive).await;
@@ -4648,7 +4644,7 @@ if let Some(active) = cancel_active {
             }
             let trigger_run_id = boundary.trigger.run_id.clone();
             *entered_phase.borrow_mut()=format!("sending explicit RunStop for trigger Run {}, report attempt {}",trigger_run_id,boundary.report.attempt_id);
-            request(&control, Command::RunStop(RunTarget { run_id: trigger_run_id.clone() })).await;
+            request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: trigger_run_id.clone() })).await;
             // Admission is persisted before HTTP dispatch: src/control/driver/request.rs:116-135 awaits
             // attempt admission (model_attempt INSERT at line 408), and src/control/driver.rs:390-399
             // invokes stream_response only after prepare_attempt returns. The RunStop ACK
@@ -7736,7 +7732,7 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         assert_eq!(changed.2, adopted.2);
         assert_eq!(changed.1, adopted.1 + 1, "model change advances the reasoning epoch once");
         let run = request(&control, Command::ThreadGet(shellboy::protocol::ThreadGetArgs { thread_id: Some(target.clone()), display: false, })).await["run_id"].as_str().unwrap().to_owned();
-        request(&control, Command::RunStop(RunTarget { run_id: run.clone() })).await;
+        request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run.clone() })).await;
         settled(&control, &target).await;
         assert_eq!(request(&control,Command::RunGet(RunTarget{run_id:run})).await["state"],"stopped");
         let id = target.clone();
@@ -7960,7 +7956,7 @@ async fn proactive_provider_500_retries_for_a_new_active_range() {
             report_owners.push(report.owner);
             finished_tokens.push(terminal[0].token.clone());
             let run = accepted.run_id.expect("same saved report Run for cleanup");
-            request(&control, Command::RunStop(RunTarget { run_id: run.clone() })).await;
+            request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run.clone() })).await;
             assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: run })).await["state"], "stopped");
         }
 

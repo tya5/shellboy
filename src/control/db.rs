@@ -1063,40 +1063,6 @@ impl Store {
             .map_err(StorageError::into_api_error)?
     }
 
-    /// Trusted human UI control: resolve and stop in one transaction, without
-    /// consuming a generic operation receipt needed by external CLI replay.
-    pub(crate) async fn stop_current_thread(&self, thread: String) -> Result<MutationResult> {
-        self.database
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let exists: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
-                    [&thread],
-                    |row| row.get(0),
-                )?;
-                if !exists {
-                    return Ok(Err(error(ErrorCode::ThreadNotFound, "Thread not found")));
-                }
-                let run: Option<String> = tx
-                    .query_row(
-                        "SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
-                        [&thread],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let Some(run) = run else {
-                    return Ok(Err(error(ErrorCode::InvalidState, "No live Run to stop")));
-                };
-                let effects = stop_run(&tx, &run, &chrono::Utc::now().to_rfc3339());
-                if effects.is_ok() {
-                    tx.commit()?;
-                }
-                Ok(effects)
-            })
-            .await
-            .map_err(StorageError::into_api_error)?
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub async fn accept_edit(
         &self,
@@ -1142,13 +1108,13 @@ impl Store {
                     let current = history::selection_revision(&tx, &thread, history::ThreadScope::Live)
                         .optional().map_err(sql_error)?;
                     if current != Some(expected) {
-                        return Err(error(ErrorCode::OperationConflict, "Selected history changed"));
+                        return Err(error(ErrorCode::OperationConflict, "Selected history changed").details(json!({"reason":"expected_source_revision_changed", "request_may_have_been_applied":false})));
                     }
                 }
                 let live:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[&thread],|r|r.get(0)).optional().map_err(sql_error)?;
                 if let Some(run)=live{return Err(error(ErrorCode::InvalidState,"A Run is active; stop it or wait until it finishes before editing").details(json!({"run_id":run})));}
                 let user:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN thread_path p ON p.node_id=n.id WHERE p.thread_id=?1 AND n.id=?2 AND n.deleted_reason IS NULL AND json_extract(n.payload_json,'$.role')='user')",params![thread,node],|r|r.get(0)).map_err(sql_error)?;
-                if !user{return Err(error(ErrorCode::InvalidArgument,"Edit target must be an original user request on this Thread's selected path"));}
+                if !user{return Err(error(ErrorCode::InvalidArgument,"Edit target must be an original user request on this Thread's selected path").details(json!({"reason":"expected_source_unavailable", "request_may_have_been_applied":false})));}
                 let fork=uuid::Uuid::new_v4().to_string();let now=chrono::Utc::now().to_rfc3339();
                 history::fork_thread(&tx,&ThreadForkArgs{ agents: None,thread_id:thread.clone(),node_id:node.clone(),cwd:args.cwd.clone()},&fork,&now)?;
                 let mut path:Vec<String>=tx.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal").map_err(sql_error)?.query_map([&fork],|r|r.get(0)).map_err(sql_error)?.collect::<rusqlite::Result<_>>().map_err(sql_error)?;
@@ -1678,7 +1644,16 @@ impl Store {
                 MutationResult::value(super::reply::list_pending(tx, args)?)
             }
             Command::MessageGet(args) => {
-                MutationResult::value(message_details(tx, &args.message_id)?)
+                let mut detail = message_details(tx, &args.message_id)?;
+                if let Some(thread) = args.source_thread_id.as_deref() {
+                    detail.source = Some(message_source(
+                        tx,
+                        thread,
+                        &args.message_id,
+                        self.config.limits.draft_bytes,
+                    )?);
+                }
+                MutationResult::value(detail)
             }
             Command::MessageCancel(args) => {
                 let mut keys = Vec::new();
@@ -1718,8 +1693,17 @@ impl Store {
                 )?);
                 MutationResult::value(details)
             }
-            Command::RunStop(args) => stop_run(tx, &args.run_id, now),
-            Command::RunRetry(args) => retry_run(tx, &args.run_id, caller, now),
+            Command::RunStop(target) => match target {
+                crate::protocol::RunStopTarget::Run { run_id } => stop_run(tx, run_id, now),
+                crate::protocol::RunStopTarget::Thread {
+                    thread_id,
+                    expected_turn,
+                } => stop_thread_run(tx, thread_id, expected_turn.as_ref(), now),
+            },
+            Command::RunRetry(args) => {
+                check_expected_turn(tx, &args.run_id, args.expected_turn.as_ref())?;
+                retry_run(tx, &args.run_id, caller, now)
+            }
             Command::CompactPreview(_) => Err(error(
                 ErrorCode::InvalidState,
                 "Compact preview uses its dedicated read-only projection",
@@ -2962,6 +2946,81 @@ pub(crate) fn thread_display_title(
     Ok(if user_exists { "Untitled" } else { "Unsent" }.into())
 }
 
+fn message_source(
+    db: &Connection,
+    thread: &str,
+    message: &str,
+    limit: u64,
+) -> Result<crate::protocol::MessageSource> {
+    let selection_revision = history::selection_revision(db, thread, history::ThreadScope::Live)
+        .map_err(sql_error)
+        .and_then(|revision| {
+            u64::try_from(revision)
+                .map_err(|_| error(ErrorCode::InvalidState, "Invalid selected history revision"))
+        })?;
+    let saved: Option<(i64, Option<String>)> = db.query_row(
+        "SELECT length(CAST(n.payload_json AS BLOB)), CASE WHEN length(CAST(n.payload_json AS BLOB)) <= ?3 THEN n.payload_json END
+         FROM node n JOIN thread_path p ON p.node_id=n.id
+         WHERE p.thread_id=?1 AND n.id=?2 AND n.deleted_reason IS NULL
+           AND n.kind IN ('user','user_message','message') AND n.payload_json IS NOT NULL",
+        params![thread, message, (crate::protocol::MAX_FRAME_BYTES / 2) as i64],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(sql_error)?;
+    let Some((_, payload)) = saved else {
+        return Err(error(
+            ErrorCode::TargetUnavailable,
+            "Original user request is unavailable on the selected path",
+        )
+        .details(
+            json!({"reason":"expected_source_unavailable", "request_may_have_been_applied":false}),
+        ));
+    };
+    let payload = payload.ok_or_else(|| {
+        error(
+            ErrorCode::InputLimit,
+            "Original request exceeds the source read budget",
+        )
+    })?;
+    let payload: Value = serde_json::from_str(&payload)
+        .map_err(|_| error(ErrorCode::InvalidState, "Saved user request is malformed"))?;
+    if payload["role"] != "user" {
+        return Err(error(
+            ErrorCode::InvalidArgument,
+            "Only a saved user request is a draft source",
+        ));
+    }
+    let mut rows = db.prepare_cached("SELECT a.id,a.absolute_path,a.input_kind,s.state FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?1 WHERE a.source_node_id=?2 ORDER BY s.selected_order,a.id")
+        .map_err(sql_error)?;
+    let attachments = rows
+        .query_map(params![thread, message], |r| {
+            Ok(crate::draft::UiAttachment {
+                id: r.get(0)?,
+                path: PathBuf::from(r.get::<_, String>(1)?),
+                kind: r.get(2)?,
+                state: r
+                    .get::<_, Option<String>>(3)?
+                    .unwrap_or_else(|| "excluded".into()),
+                position: None,
+            })
+        })
+        .map_err(sql_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(sql_error)?;
+    let (text, attachments) = crate::draft::restore(&payload, attachments, true)?;
+    if text.len() as u64 > limit {
+        return Err(error(
+            ErrorCode::InputLimit,
+            "Original request exceeds the current draft byte limit",
+        ));
+    }
+    Ok(crate::protocol::MessageSource {
+        thread_id: thread.into(),
+        selection_revision,
+        text,
+        attachments,
+    })
+}
+
 pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetails> {
     let row=connection.query_row("SELECT r.target_thread_id,r.state,r.run_id,r.turn_id,r.result_json,NULL,r.sender_json FROM receipt r LEFT JOIN turn t ON t.id=r.turn_id WHERE message_node_id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,String>(6)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"message not found"))?;
     let status = match row.1.as_str() {
@@ -3000,6 +3059,7 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
     let hint = (status == DeliveryStatus::Held)
         .then(|| super::message_delivery::held_hint(context.hold_reason.as_deref()).to_owned());
     Ok(MessageDetails {
+        source: None,
         held_by: None,
         to_human: metadata["to_human"] == true,
         sender: MessageSender::from_saved(Some(&row.6)),
@@ -3175,6 +3235,61 @@ fn recovery_status(
 
 pub fn turn_details(connection: &Connection, id: &str) -> Result<TurnDetails> {
     connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{usage_totals:None,context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,end_message_node_id:row.3,recovery_hint:super::usage_limit_retry::public_reason(row.4)}))
+}
+
+fn stop_thread_run(
+    tx: &Transaction<'_>,
+    thread: &str,
+    expected_turn: Option<&crate::protocol::ExpectedTurn>,
+    now: &str,
+) -> Result<MutationResult> {
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+            [thread],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)?;
+    if !exists {
+        return Err(error(ErrorCode::ThreadNotFound, "Thread not found"));
+    }
+    let run: Option<String> = tx
+        .query_row(
+            "SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
+            [thread],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sql_error)?;
+    let run = run.ok_or_else(|| error(ErrorCode::InvalidState, "No live Run to stop"))?;
+    check_expected_turn(tx, &run, expected_turn)?;
+    stop_run(tx, &run, now)
+}
+
+fn check_expected_turn(
+    tx: &Transaction<'_>,
+    run: &str,
+    expected: Option<&crate::protocol::ExpectedTurn>,
+) -> Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let current: Option<(String, i64)> = tx.query_row(
+        "SELECT id,generation FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
+        [run], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(sql_error)?;
+    if !current.is_some_and(|(id, generation)| {
+        id == expected.turn_id && u64::try_from(generation).ok() == Some(expected.generation)
+    }) {
+        return Err(error(
+            ErrorCode::InvalidState,
+            "The selected Run's Turn changed; read it again before acting",
+        )
+        .details(
+            json!({"reason":"expected_turn_changed", "request_may_have_been_applied":false}),
+        ));
+    }
+    Ok(())
 }
 
 fn stop_run(tx: &Transaction<'_>, id: &str, now: &str) -> Result<MutationResult> {
@@ -4306,6 +4421,7 @@ mod receipt_wait_tests {
             .unwrap();
         let thread_id = thread.result["thread_id"].as_str().unwrap().to_owned();
         let mut args = crate::protocol::DraftSaveArgs {
+            expected_source: None,
             thread_id,
             draft: Box::new(crate::draft::DraftSnapshot {
                 revision: 2,
@@ -4356,6 +4472,24 @@ mod receipt_wait_tests {
             )
             .await
             .unwrap();
+        let mut old_source = args.clone();
+        old_source.expected_source = Some(crate::protocol::DraftSourceFence {
+            message_id: "reading".into(),
+            selection_revision: u64::MAX,
+        });
+        old_source.draft.revision = 3;
+        old_source.draft.text = "must not restore".into();
+        let refused = store
+            .execute(
+                Request::new("current:stale-source", Command::DraftSave(old_source)),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::OperationConflict);
+        let details = refused.details.unwrap();
+        assert_eq!(details["reason"], "expected_source_revision_changed");
+        assert_eq!(details["request_may_have_been_applied"], false);
         let mut displaced = args.clone();
         displaced.anchor.node_id = Some("not-selected".into());
         displaced.draft.revision = 3;
@@ -5487,6 +5621,7 @@ mod agents_reference_tests {
             let result = store
                 .execute(
                     req(Command::MessageGet(MessageTarget {
+                        source_thread_id: None,
                         message_id: id.clone(),
                     })),
                     None,
@@ -5545,6 +5680,7 @@ mod agents_reference_tests {
         let result = store
             .execute(
                 req(Command::MessageGet(MessageTarget {
+                    source_thread_id: None,
                     message_id: model_id.clone(),
                 })),
                 None,
@@ -5637,6 +5773,7 @@ mod agents_reference_tests {
         let detail = store
             .execute(
                 req(Command::MessageGet(MessageTarget {
+                    source_thread_id: None,
                     message_id: id.clone(),
                 })),
                 None,
@@ -5965,6 +6102,7 @@ mod message_acknowledgement_state_tests {
                 Request::new(
                     "fixture.0:get-ack",
                     Command::MessageGet(MessageTarget {
+                        source_thread_id: None,
                         message_id: accepted.message_id.clone(),
                     }),
                 ),
@@ -6840,7 +6978,7 @@ mod driverless_child_stop_notification_tests {
             let response = control
                 .request(Request::new(
                     format!("{}:stop-hidden-child", owner.operation_epoch.current()),
-                    Command::RunStop(RunTarget {
+                    Command::RunStop(crate::protocol::RunStopTarget::Run {
                         run_id: "run-3".into(),
                     }),
                 ))
@@ -6927,7 +7065,7 @@ mod driverless_child_stop_notification_tests {
                 let retry = control
                     .request(Request::new(
                         format!("{}:settle-hidden-child", owner.operation_epoch.current()),
-                        Command::RunStop(RunTarget {
+                        Command::RunStop(crate::protocol::RunStopTarget::Run {
                             run_id: "run-3".into(),
                         }),
                     ))
@@ -7414,7 +7552,7 @@ mod retry_tracking_diagnosis_287 {
             root.path().into(),
             "fixture".into(),
         );
-        let command = Command::RunRetry(RunTarget { run_id: "r".into() });
+        let command = Command::RunRetry(crate::protocol::RunRetryArgs::exact("r".into()));
         let request = Request::new("fixture.0:retry", command.clone());
         let accepted = store.execute(request.clone(), None).await.unwrap().result;
         let hint: Value = serde_json::from_str(

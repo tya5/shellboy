@@ -1617,6 +1617,7 @@ async fn index_context_is_transactional_deduplicated_and_never_copies_provider_s
 
 fn encoding_read(encoding: &str) -> shellboy::protocol::ShellReadArgs {
     shellboy::protocol::ShellReadArgs {
+        expected_owner: None,
         tail: false,
         segments: false,
         execution_id: "execution".into(),

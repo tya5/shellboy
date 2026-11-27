@@ -496,7 +496,7 @@ async fn stop_releases_waiting_messages_as_ordinary_held_input() {
     let waiting = send(&f.control, &f.thread, "RELEASED_AT_STOP", Deliver::Complete).await;
     request(
         &f.control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: run.clone(),
         }),
     )
@@ -643,9 +643,7 @@ async fn recovery_wait_hands_waiting_messages_to_the_ordinary_recovery_rules() {
     );
     request(
         &f.control,
-        Command::RunRetry(RunTarget {
-            run_id: run.clone(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run.clone())),
     )
     .await;
     let retried = incoming(&mut f.receive).await;

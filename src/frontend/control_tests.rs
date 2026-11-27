@@ -705,7 +705,7 @@ async fn reserved_shutdown_choices_keep_the_existing_grace_wait_and_force_bounda
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_receipt() {
+async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes() {
     use crate::protocol::{Command, ErrorCode, WaitArgs, WaitCondition};
     let (root, owner, control, server) = fixture().await;
     let (sender, receiver) = actions::channel(4);
@@ -801,11 +801,16 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
         "full-budget observation allocates neither a receipt nor a reservation"
     );
     assert_eq!(
-        control
-            .cancel_thread("missing".into())
-            .await
-            .unwrap_err()
-            .code,
+        super::request(
+            &control,
+            Command::RunStop(crate::protocol::RunStopTarget::Thread {
+                thread_id: "missing".into(),
+                expected_turn: None,
+            })
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::ThreadNotFound
     );
     sender
@@ -859,8 +864,8 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
             assert_eq!(
                 db.query_row("SELECT COUNT(*) FROM operation_receipt", [], |row| row
                     .get::<_, i64>(0))?,
-                3,
-                "only the two waits and the synthetic full record exist"
+                5,
+                "the missing and successful stops each add one receipt despite full ordinary admission"
             );
             db.execute(
                 "INSERT INTO app_meta(key,value)VALUES('source-still-writable','yes')",
@@ -1330,7 +1335,7 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     let response = control
         .request(super::operation(
             &control,
-            Command::RunStop(crate::protocol::RunTarget {
+            Command::RunStop(crate::protocol::RunStopTarget::Run {
                 run_id: "target-run".into(),
             }),
         ))
@@ -1456,7 +1461,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
             false,
         ),
         (
-            Command::RunStop(RunTarget {
+            Command::RunStop(crate::protocol::RunStopTarget::Run {
                 run_id: "target-run".into(),
             }),
             true,

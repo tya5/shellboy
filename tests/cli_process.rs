@@ -496,6 +496,7 @@ async fn cross_data_directory_sender_label(verb: &str) {
             Request::new(
                 "observe-cross-owner",
                 Command::MessageGet(MessageTarget {
+                    source_thread_id: None,
                     message_id: accepted["message_id"].as_str().unwrap().into(),
                 }),
             ),

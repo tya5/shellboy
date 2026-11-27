@@ -28,6 +28,7 @@ pub(super) async fn execute(
         return request(
             control,
             Command::ShellRead(ShellReadArgs {
+                expected_owner: None,
                 tail: false,
                 segments: false,
                 execution_id: execution,
@@ -44,12 +45,10 @@ pub(super) async fn execute(
         WatchActionKind::Output => unreachable!(),
     };
     let command = match target.kind {
-        WatchActionKind::Stop => Command::RunStop(RunTarget {
+        WatchActionKind::Stop => Command::RunStop(crate::protocol::RunStopTarget::Run {
             run_id: target.run_id.clone(),
         }),
-        _ => Command::RunRetry(RunTarget {
-            run_id: target.run_id.clone(),
-        }),
+        _ => Command::RunRetry(crate::protocol::RunRetryArgs::exact(target.run_id.clone())),
     };
     let expected = crate::control::run_action::ExpectedRun {
         thread_id: target.thread_id,

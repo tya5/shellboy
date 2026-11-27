@@ -353,7 +353,7 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
         .unwrap();
     command(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: parent.run_id.clone().unwrap(),
         }),
     )
@@ -370,7 +370,7 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
     for run in [&child_run, &grand_run] {
         command(
             &control,
-            Command::RunStop(RunTarget {
+            Command::RunStop(shellboy::protocol::RunStopTarget::Run {
                 run_id: run.clone(),
             }),
         )
@@ -391,7 +391,7 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
     assert_eq!(adopted, 0);
     command(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: independent.run_id.unwrap(),
         }),
     )
@@ -676,7 +676,11 @@ async fn model_cli_may_write_to_and_stop_an_independent_live_run() {
         "completed",
     )
     .await;
-    command(&control, Command::RunStop(RunTarget { run_id: target_run })).await;
+    command(
+        &control,
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: target_run }),
+    )
+    .await;
     crate::test_watchdog::watchdog(
         "tests/runtime_hierarchy.rs: model_cli_may_write_to_and_stop_an_independent_live_run",
         async {
@@ -783,7 +787,7 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
     state(&control, "turn", "recovery-child-turn", "completed").await;
     command(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: parent.run_id.unwrap(),
         }),
     )
@@ -791,7 +795,7 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
     state(&control, "run", "recovery-grandchild", "live").await;
     command(
         &control,
-        Command::RunStop(RunTarget {
+        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
             run_id: "recovery-grandchild".into(),
         }),
     )

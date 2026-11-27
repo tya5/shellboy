@@ -3,6 +3,7 @@ use crate::protocol::{HistoryWindowRecovery, HistoryWindowTools, HistoryWindowUs
 use crate::storage::StorageError;
 use rusqlite::Connection;
 
+pub(crate) mod message_sources;
 pub(crate) mod notices;
 pub(crate) mod recovery;
 pub(crate) mod tools;

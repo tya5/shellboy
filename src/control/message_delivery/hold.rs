@@ -16,12 +16,10 @@ impl Control {
 
     pub(in crate::control) async fn message_with_hold(
         self: &Arc<Self>,
-        id: &str,
+        args: crate::protocol::MessageTarget,
     ) -> Result<MutationResult, ApiError> {
         // A pure read: the owner's read-only inspection lane, never the writer.
-        self.store
-            .observe_message(id.to_owned(), self.message_holds())
-            .await
+        self.store.observe_message(args, self.message_holds()).await
     }
 }
 

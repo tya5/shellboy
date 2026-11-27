@@ -1245,11 +1245,51 @@ args!(IdResolveArgs {
     include_pending_duties: bool
 });
 record!(IdResolveResult { id: String });
-args!(MessageTarget { message_id: String });
+args!(MessageTarget {
+    message_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_thread_id: Option<String>,
+});
+record!(MessageSource {
+    thread_id: String,
+    selection_revision: u64,
+    text: String,
+    attachments: Vec<crate::draft::UiAttachment>,
+});
 args!(OperationTarget {
     operation_id: String
 });
 args!(RunTarget { run_id: String });
+args!(ExpectedTurn {
+    turn_id: String,
+    generation: u64
+});
+args!(RunRetryArgs {
+    run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_turn: Option<ExpectedTurn>,
+});
+impl RunRetryArgs {
+    pub fn exact(run_id: String) -> Self {
+        Self {
+            run_id,
+            expected_turn: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum RunStopTarget {
+    Run {
+        run_id: String,
+    },
+    Thread {
+        thread_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_turn: Option<ExpectedTurn>,
+    },
+}
 args!(TurnTarget { turn_id: String });
 args!(ExecutionTarget {
     execution_id: String
@@ -1409,7 +1449,25 @@ record!(HistoryWindowObservation {
     activity: HistoryWindowActivity,
     tools: HistoryWindowTools,
     recovery: Vec<HistoryWindowRecovery>,
-    usage: Vec<HistoryWindowUsage>
+    usage: Vec<HistoryWindowUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pinned_sources: Vec<HistoryWindowSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    received: Vec<HistoryWindowReceived>
+});
+record!(HistoryWindowReceived {
+    node_id: String,
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")] after_node_id: Option<String>,
+    recovery_wait: bool
+});
+record!(HistoryWindowSource {
+    node_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")] created_at: Option<String>,
+    revisit: bool,
+    sender: MessageSender,
+    #[serde(skip_serializing_if = "Option::is_none")] reply_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] reply_excerpt: Option<String>
 });
 record!(HistoryWindowTools {
     calls: Vec<HistoryWindowToolCall>,
@@ -1640,7 +1698,11 @@ record!(NodeProvenance {
     #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String>
 });
 record!(RelationItem { node_id: String, provenance: NodeProvenance, #[serde(default, skip_serializing_if = "Option::is_none")] replacement_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] source_revision: Option<i64>, #[serde(default, skip_serializing_if = "Option::is_none")] source_hash: Option<String> });
-args!(ShellReadArgs { execution_id: String, #[serde(default, skip_serializing_if="is_false")] tail: bool, #[serde(default, skip_serializing_if="is_false")] segments: bool, #[serde(default)] cursor: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] encoding: Option<String>, #[serde(default = "body_limit")] limit_bytes: u32 });
+args!(ShellReadOwner {
+    thread_id: String,
+    run_id: String
+});
+args!(ShellReadArgs { execution_id: String, #[serde(default, skip_serializing_if="Option::is_none")] expected_owner: Option<ShellReadOwner>, #[serde(default, skip_serializing_if="is_false")] tail: bool, #[serde(default, skip_serializing_if="is_false")] segments: bool, #[serde(default)] cursor: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] encoding: Option<String>, #[serde(default = "body_limit")] limit_bytes: u32 });
 args!(ShellWriteArgs {
     execution_id: String,
     text: String,
@@ -1992,8 +2054,14 @@ record!(DraftView {
     anchor: crate::draft::ViewAnchor,
     follow_tail: bool
 });
+args!(DraftSourceFence {
+    message_id: String,
+    selection_revision: u64,
+});
 args!(DraftSaveArgs {
     thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_source: Option<DraftSourceFence>,
     draft: Box<crate::draft::DraftSnapshot>,
     anchor: crate::draft::ViewAnchor,
     follow_tail: bool,
@@ -2126,9 +2194,9 @@ pub enum Command {
     #[serde(rename = "run.get")]
     RunGet(RunTarget),
     #[serde(rename = "run.retry")]
-    RunRetry(RunTarget),
+    RunRetry(RunRetryArgs),
     #[serde(rename = "run.stop")]
-    RunStop(RunTarget),
+    RunStop(RunStopTarget),
     #[serde(rename = "turn.get")]
     TurnGet(TurnTarget),
     #[serde(rename = "turn.interrupt")]
@@ -2623,7 +2691,7 @@ pub enum MessageHeldBy {
     Unknown,
 }
 
-record!(MessageDetails { #[serde(default, skip_serializing_if = "Option::is_none")] held_by: Option<MessageHeldBy>, #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
+record!(MessageDetails { #[serde(default, skip_serializing_if = "Option::is_none")] source: Option<MessageSource>, #[serde(default, skip_serializing_if = "Option::is_none")] held_by: Option<MessageHeldBy>, #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
 args!(
     #[derive(Eq)]
     RunWaitReason {

@@ -426,7 +426,10 @@ impl UiState {
             scroll: 0,
         });
         vec![UiAction::Manage(Command::MessageGet(
-            crate::protocol::MessageTarget { message_id: id },
+            crate::protocol::MessageTarget {
+                source_thread_id: None,
+                message_id: id,
+            },
         ))]
     }
     pub(super) fn open_pending_source(&mut self, id: String) -> Vec<UiAction> {

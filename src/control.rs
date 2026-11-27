@@ -1291,7 +1291,7 @@ impl Control {
                         })?;
                         self.recovery_rewind(request, origin, thread).await
                     }
-                    Command::MessageGet(args) => self.message_with_hold(&args.message_id).await,
+                    Command::MessageGet(args) => self.message_with_hold(args.clone()).await,
                     Command::ShellList(_) => {
                         let mut result = self.store.execute(request, origin).await?;
                         if let Some(items) = result.result["items"].as_array_mut() {
@@ -1391,26 +1391,6 @@ impl Control {
             }
         }
     }
-    /// UI actions have no public operation ID. Keep human stop available when
-    /// ordinary receipt admission is full; the canonical reducer still owns
-    /// state, generation, held delivery, and descendant-stop semantics.
-    pub(crate) async fn cancel_thread(self: &Arc<Self>, thread: String) -> Result<(), ApiError> {
-        let _guard = self.admit(true)?;
-        self.start().await?;
-        match self.store.stop_current_thread(thread).await {
-            Ok(effects) => {
-                self.apply_effects(Some(effects)).await;
-                Ok(())
-            }
-            Err(error) => {
-                if error.is_storage_failure() {
-                    self.fail_storage().await;
-                }
-                Err(error)
-            }
-        }
-    }
-
     async fn apply_effects(self: &Arc<Self>, effects: Option<MutationResult>) {
         let Some(effects) = effects else {
             return;
@@ -2276,6 +2256,7 @@ mod failure_tests {
             .request(Request::new(
                 "sender-observe",
                 Command::MessageGet(MessageTarget {
+                    source_thread_id: None,
                     message_id: accepted["message_id"].as_str().unwrap().into(),
                 }),
             ))

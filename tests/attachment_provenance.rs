@@ -430,9 +430,9 @@ async fn ordered_draft(
     .unwrap();
     request(
         control,
-        Command::RunRetry(RunTarget {
-            run_id: accepted["run_id"].as_str().unwrap().into(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+            accepted["run_id"].as_str().unwrap().into(),
+        )),
     )
     .await;
     (thread, accepted)
@@ -737,9 +737,9 @@ async fn changed_file_retry_keeps_update_identity_and_adoption_freezes_only_that
     settled(&control, &thread).await;
     request(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: accepted["run_id"].as_str().unwrap().into(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+            accepted["run_id"].as_str().unwrap().into(),
+        )),
     )
     .await;
     let retry = incoming(&control, &thread, &mut receive).await;
@@ -1351,9 +1351,9 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
     settled(&control, &thread).await;
     request(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: resumed["run_id"].as_str().unwrap().into(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+            resumed["run_id"].as_str().unwrap().into(),
+        )),
     )
     .await;
     let retry = incoming(&control, &thread, &mut receive).await;
@@ -1678,9 +1678,9 @@ async fn unavailable_new_attachment_is_consumed_by_success_without_a_fabricated_
         .unwrap();
     request(
         &control,
-        Command::RunRetry(RunTarget {
-            run_id: accepted["run_id"].as_str().unwrap().into(),
-        }),
+        Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+            accepted["run_id"].as_str().unwrap().into(),
+        )),
     )
     .await;
     let retry = incoming(&control, &thread, &mut receive).await;
@@ -1862,7 +1862,11 @@ async fn issue_158_recovery_can_remove_or_move_rejected_attachment_before_retry(
         } else {
             std::fs::rename(&path, root.path().join("moved.pdf")).unwrap();
         }
-        request(&control, Command::RunRetry(RunTarget { run_id: run })).await;
+        request(
+            &control,
+            Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(run)),
+        )
+        .await;
         let retry = incoming(&control, &thread, &mut receive).await;
         let body = retry.body.to_string();
         assert!(!body.contains("data:application/pdf;base64,"));
@@ -2289,9 +2293,9 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
         );
         request(
             &control,
-            Command::RunRetry(RunTarget {
-                run_id: retry_acceptance["run_id"].as_str().unwrap().into(),
-            }),
+            Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
+                retry_acceptance["run_id"].as_str().unwrap().into(),
+            )),
         )
         .await;
         let retry = incoming(&control, &thread, &mut receive).await;

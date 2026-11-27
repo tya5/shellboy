@@ -478,7 +478,7 @@ const MEANINGS: &[Meaning] = &[
     (
         OperationId::RunStop,
         &["run", "stop"],
-        &[("run_id", FieldId::Run)],
+        &[("run_id", FieldId::Run), ("thread_id", FieldId::Thread)],
         None,
     ),
     (

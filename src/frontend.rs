@@ -2962,7 +2962,9 @@ async fn run_client(
                         };
                         let control = control.clone();
                         control_tasks.spawn(async move {
-                            let result = control.cancel_thread(thread_id.clone()).await;
+                            let result = request(&control, Command::RunStop(crate::protocol::RunStopTarget::Thread {
+                                thread_id: thread_id.clone(), expected_turn: None,
+                            })).await.map(|_| ());
                             (thread_id, result)
                         });
                     }
@@ -3979,6 +3981,7 @@ async fn save_draft(
     compose_call::<crate::protocol::Accepted>(
         control,
         Command::DraftSave(crate::protocol::DraftSaveArgs {
+            expected_source: None,
             thread_id,
             draft: Box::new(draft),
             anchor,

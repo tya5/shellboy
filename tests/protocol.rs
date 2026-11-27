@@ -126,6 +126,7 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
         ("run.get", json!({"run_id":"r"})),
         ("run.retry", json!({"run_id":"r"})),
         ("run.stop", json!({"run_id":"r"})),
+        ("run.stop", json!({"thread_id":"t"})),
         ("turn.get", json!({"turn_id":"u"})),
         (
             "wait",
@@ -188,6 +189,9 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{"secret":"do not echo"}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.list","args":{},"unknown":"do not echo"}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"run.stop","args":{"run_id":""}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"run.stop","args":{"thread_id":""}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"run.stop","args":{"run_id":"r","thread_id":"t"}}),
+        json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"run.stop","args":{}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"wait","args":{"conditions":[]}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"index.backfill","args":{}}),
         json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.set","args":{}}),

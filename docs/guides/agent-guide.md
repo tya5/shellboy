@@ -1300,7 +1300,7 @@ own Thread if it appears among the targets. Each destination starts an independe
 Run, so send a few at a time when many targets could exceed provider rate limits.
 
 Only shells have an owning Run. When a destination runs work, that work is its own independent Run, including for a child whose
-`parent_thread_id` is your Thread, and stopping your Run does not stop it. You may stop or retry any Run, but only act on ones you started or were asked to handle, and check the ID first: stopping or retrying another Run can interrupt the user's conversation.
+`parent_thread_id` is your Thread, and stopping your Run does not stop it. You may stop or retry any Run, but only act on ones you started or were asked to handle, and check the ID first: stopping or retrying another Run can interrupt the user's conversation. Use `run stop --run RUN_ID` for an exact target; `run stop --thread THREAD_ID` instead asks the owner to choose the Thread's current Run atomically. Inspect the returned Run ID and its saved state to confirm the stop.
 
 The saved
 `result_uncertain: true` describes uncertain effects of the interrupted work.

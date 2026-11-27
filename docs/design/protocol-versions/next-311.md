@@ -212,3 +212,35 @@ not one snapshot, and are never summed. CLI: `index status --coverage
   selection in the requested Thread. It cannot be combined with a cursor,
   does not probe the file, and returns no continuation. This lets F8 follow
   a saved attachment reference without searching unrelated pages.
+
+## Stop the current Run of a Thread
+
+`run.stop` accepts exactly one selector: `run_id` or `thread_id`. For a Thread
+selector the owner chooses the live or stopping Run in the same transaction as
+stop admission. The reply describes that exact Run; replay of the same operation
+ID does not choose a newer Run. The existing stop-priority lanes still apply.
+
+`run.stop` with a `thread_id` and `run.retry` also accept an optional
+`expected_turn` (`turn_id`, `generation`), verified in the mutation transaction.
+A stale fence returns `invalid_state` (`expected_turn_changed`,
+`request_may_have_been_applied: false`) without applying the operation.
+
+An observed `history.window` can return `pinned_sources` for explicitly
+requested nodes still on the selected path, and `received` references for
+up to two saved incomplete responses or stream observations. These facts
+share that observation's transaction and `read_sequence`. Read the exact
+received node through `history.read` for its bounded display body.
+
+`shell.read` can take `expected_owner` (`thread_id`, `run_id`). The read
+checks the execution's saved ownership in the snapshot before exposing
+output or changing decoding. A mismatch returns `target_unavailable`.
+
+`message.get` with `source_thread_id` includes the selected original user
+request, its eligible attachments, and the selected path revision. Editing
+with `draft.submit` retains its existing source-node and revision checks in
+the same transaction as the fork and reports a typed not-applied refusal
+when either witness does not match.
+
+`draft.save` optionally checks `expected_source` (message ID and selection
+revision) inside the save transaction before changing the draft or its view.
+Use this witness when saving a draft reconstructed from a selected message.
