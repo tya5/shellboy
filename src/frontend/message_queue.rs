@@ -248,18 +248,23 @@ pub(super) async fn cancel(
         Command::MessageCancel(MessageCancelArgs { message_ids: ids }),
     );
     let notification_id = operation.operation_id.clone();
-    let response = control.request(operation).await;
-    let result = if response.ok {
-        serde_json::from_value::<MessageCancelResult>(response.result.unwrap_or(Value::Null))
-            .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Invalid cancellation reply"))
-    } else {
-        Err(response.error.unwrap_or_else(|| {
-            ApiError::new(
-                ErrorCode::InvalidState,
-                "Cancellation failed without details",
-            )
-        }))
-    };
+    let result = super::dispatch_native(control, operation)
+        .await
+        .and_then(|response| {
+            if response.ok {
+                serde_json::from_value::<MessageCancelResult>(
+                    response.result.unwrap_or(Value::Null),
+                )
+                .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Invalid cancellation reply"))
+            } else {
+                Err(response.error.unwrap_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::InvalidState,
+                        "Cancellation failed without details",
+                    )
+                }))
+            }
+        });
     let mut result = match result {
         Ok(result) => result,
         Err(error) => {

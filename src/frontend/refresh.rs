@@ -81,7 +81,7 @@ async fn read_current(
         owner,
         render_width,
         known,
-        history_reader::Metadata::Snapshot(stop.clone()),
+        history_reader::Metadata::Window,
         history_reader::window_args(thread, Anchor::Tail, 49, 0, pinned),
         None,
         |items| 0..items.len(),
@@ -90,43 +90,13 @@ async fn read_current(
     .await?;
     let before_cursor = history_reader::before_cursor(thread, page.info.first, page.info.revision)?;
     let read_revision = page.info.read_revision;
-    let target = thread.to_owned();
-    let selection_revision = page.info.revision;
-    let pinned_ids = tool_scope
-        .as_ref()
-        .map(|scope| {
-            scope
-                .nodes
-                .iter()
-                .map(|node| node.node_id.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    // Read-only snapshot reads: they never wait behind the owner's writer.
-    let raw = snapshot::read(
-        control.store.database.path().to_path_buf(),
-        stop.clone(),
-        move |db| {
-            let sources = message_metadata::read_tx(db, Some(&target), &pinned_ids)?;
-            let received = received::query_tx(
-                db,
-                &target,
-                received::Scope {
-                    selection_revision,
-                    view_revision: None,
-                },
-            )?;
-            Ok((sources, received))
-        },
-    )
-    .await;
-    let (sources, received) = checked_storage(control, raw).await?;
     let context_usage = reported_context_usage(details.context_usage());
     if let Some(scope) = &mut tool_scope {
         let tools = page.observation.tools.clone();
+        let sources = page.observation.pinned_sources.clone();
         let mut nodes = std::mem::take(&mut scope.nodes);
         nodes = presentation_work(move || {
-            message_metadata::apply(&mut nodes, &sources);
+            message_metadata::apply_pinned(&mut nodes, &sources);
             tools::reset_observations(&mut nodes);
             tools::apply_window(&mut nodes, &tools);
             for node in &mut nodes {
@@ -137,19 +107,7 @@ async fn read_current(
         .await?;
         scope.nodes = nodes;
     }
-    let received = match received {
-        Some(snapshot) => Some(
-            presentation_work(move || {
-                let mut prepared = received::prepare(snapshot, render_width, language);
-                for (_, node) in &mut prepared.nodes {
-                    node.presentation.read_revision = read_revision;
-                }
-                prepared
-            })
-            .await?,
-        ),
-        None => None,
-    };
+    let received = Some(received::read_native(owner, &page, render_width, language).await?);
     let activity =
         activity::project_native(control, owner, thread, details.activity().cloned(), stop).await?;
     Ok(Current {

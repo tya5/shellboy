@@ -225,6 +225,15 @@ ID does not choose a newer Run. The existing stop-priority lanes still apply.
 A stale fence returns `operation_conflict` (`expected_turn_changed`,
 `request_may_have_been_applied: false`) without applying the operation.
 
+The exact `run_id` selector of `run.stop` and `run.retry` can carry
+`expected_selection`. It names the Thread and the displayed Turn ID and
+generation, or an explicitly absent Turn. The owner checks that this is
+still the Thread's latest Run and Turn in the mutation transaction. The
+same stale-fence error applies; repeating the operation ID reads its saved
+outcome instead of running the guard again. `run.retry` accepts either
+`expected_turn` or `expected_selection`, not both. The CLI selectors are
+unchanged.
+
 An observed `history.window` can return `pinned_sources` for explicitly
 requested nodes still on the selected path, and `received` references for
 up to two saved incomplete responses or stream observations. These facts

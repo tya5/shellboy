@@ -2368,12 +2368,9 @@ impl Cli {
             }),
             CliCommand::Run { command } => match command {
                 RunCommand::Get(a) => C::RunGet(wire::RunTarget { run_id: a.run_id }),
-                RunCommand::Retry(a) => C::RunRetry(wire::RunRetryArgs {
-                    run_id: a.run_id,
-                    expected_turn: None,
-                }),
+                RunCommand::Retry(a) => C::RunRetry(wire::RunRetryArgs::exact(a.run_id)),
                 RunCommand::Stop(a) => C::RunStop(match (a.run_id, a.thread_id) {
-                    (Some(run_id), None) => wire::RunStopTarget::Run { run_id },
+                    (Some(run_id), None) => wire::RunStopTarget::exact(run_id),
                     (None, Some(thread_id)) => wire::RunStopTarget::Thread {
                         thread_id,
                         expected_turn: None,

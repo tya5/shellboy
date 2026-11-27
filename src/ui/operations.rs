@@ -1643,9 +1643,9 @@ impl Form {
             OpKind::RunStop => (
                 { vec![f("run", "現在の作業ID", c.current_run.clone(), Text)] },
                 |form, _cwd| {
-                    Ok(Command::RunStop(crate::protocol::RunStopTarget::Run {
-                        run_id: form.run_target()?.run_id,
-                    }))
+                    Ok(Command::RunStop(crate::protocol::RunStopTarget::exact(
+                        form.run_target()?.run_id,
+                    )))
                 },
             ),
             OpKind::TurnGet => (
@@ -3092,7 +3092,7 @@ mod tests {
         );
         for kind in [OpKind::RunRetry, OpKind::RunStop] {
             assert!(
-                matches!(Form::new(kind,&context).command(&context.cwd).unwrap(), Command::RunRetry(crate::protocol::RunRetryArgs { run_id, .. }) | Command::RunStop(crate::protocol::RunStopTarget::Run { run_id }) if run_id == "current-recovery")
+                matches!(Form::new(kind,&context).command(&context.cwd).unwrap(), Command::RunRetry(crate::protocol::RunRetryArgs { run_id, .. }) | Command::RunStop(crate::protocol::RunStopTarget::Run { run_id, .. }) if run_id == "current-recovery")
             );
         }
     }

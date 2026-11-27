@@ -106,7 +106,7 @@ fn operation_result_schemas(
     result!("message.ask", MessageAccepted);
     result!("message.reply", MessageReplied);
     result!("message.send", MessageAccepted);
-    result!("message.get", MessageDetails);
+    result!("message.get", MessageGetResult);
     result!("message.list", MessageListPage);
     result!("message.cancel", MessageCancelResult);
     result!("operation.get", OperationReceiptDetails);
@@ -1268,6 +1268,7 @@ args!(MessageTarget {
     source_thread_id: Option<String>,
 });
 record!(MessageSource {
+    message_id: String,
     thread_id: String,
     selection_revision: u64,
     text: String,
@@ -1281,16 +1282,23 @@ args!(ExpectedTurn {
     turn_id: String,
     generation: u64
 });
+args!(ExpectedRunSelection {
+    thread_id: String,
+    turn: Option<ExpectedTurn>,
+});
 args!(RunRetryArgs {
     run_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     expected_turn: Option<ExpectedTurn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_selection: Option<ExpectedRunSelection>,
 });
 impl RunRetryArgs {
     pub fn exact(run_id: String) -> Self {
         Self {
             run_id,
             expected_turn: None,
+            expected_selection: None,
         }
     }
 }
@@ -1300,12 +1308,22 @@ impl RunRetryArgs {
 pub enum RunStopTarget {
     Run {
         run_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_selection: Option<ExpectedRunSelection>,
     },
     Thread {
         thread_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expected_turn: Option<ExpectedTurn>,
     },
+}
+impl RunStopTarget {
+    pub fn exact(run_id: String) -> Self {
+        Self::Run {
+            run_id,
+            expected_selection: None,
+        }
+    }
 }
 args!(TurnTarget { turn_id: String });
 args!(ExecutionTarget {
@@ -1470,9 +1488,23 @@ record!(HistoryWindowObservation {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pinned_sources: Vec<HistoryWindowSource>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    received: Vec<HistoryWindowReceived>
+    received: Vec<HistoryWindowReceived>,
+    received_root_revision: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    branches: Vec<HistoryWindowBranch>,
+});
+record!(HistoryWindowBranch {
+    anchor_node_id: String,
+    current: usize,
+    alternatives: Vec<HistoryWindowBranchAlternative>,
+});
+record!(HistoryWindowBranchAlternative {
+    thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    excerpt: Option<String>,
 });
 record!(HistoryWindowReceived {
+    source_revision: i64,
     node_id: String,
     kind: String,
     #[serde(skip_serializing_if = "Option::is_none")] after_node_id: Option<String>,
@@ -1481,7 +1513,7 @@ record!(HistoryWindowReceived {
 record!(HistoryWindowSource {
     node_id: String,
     #[serde(skip_serializing_if = "Option::is_none")] created_at: Option<String>,
-    revisit: bool,
+    relationship: crate::presentation::InputSource,
     sender: MessageSender,
     #[serde(skip_serializing_if = "Option::is_none")] reply_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] reply_excerpt: Option<String>
@@ -2713,7 +2745,13 @@ pub enum MessageHeldBy {
     Unknown,
 }
 
-record!(MessageDetails { #[serde(default, skip_serializing_if = "Option::is_none")] source: Option<MessageSource>, #[serde(default, skip_serializing_if = "Option::is_none")] held_by: Option<MessageHeldBy>, #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MessageGetResult {
+    Details(Box<MessageDetails>),
+    Source(MessageSource),
+}
+record!(MessageDetails { #[serde(default, skip_serializing_if = "Option::is_none")] held_by: Option<MessageHeldBy>, #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
 args!(
     #[derive(Eq)]
     RunWaitReason {

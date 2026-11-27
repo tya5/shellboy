@@ -1071,9 +1071,9 @@ async fn stopping_recovery_cancels_an_inflight_manual_summary_without_adopting_i
     .await;
     request(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: details["run_id"].as_str().unwrap().into(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            details["run_id"].as_str().unwrap().into(),
+        )),
     )
     .await;
     let _ = summary
@@ -4644,7 +4644,7 @@ if let Some(active) = cancel_active {
             }
             let trigger_run_id = boundary.trigger.run_id.clone();
             *entered_phase.borrow_mut()=format!("sending explicit RunStop for trigger Run {}, report attempt {}",trigger_run_id,boundary.report.attempt_id);
-            request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: trigger_run_id.clone() })).await;
+            request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::exact(trigger_run_id.clone()))).await;
             // Admission is persisted before HTTP dispatch: src/control/driver/request.rs:116-135 awaits
             // attempt admission (model_attempt INSERT at line 408), and src/control/driver.rs:390-399
             // invokes stream_response only after prepare_attempt returns. The RunStop ACK
@@ -7732,7 +7732,7 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         assert_eq!(changed.2, adopted.2);
         assert_eq!(changed.1, adopted.1 + 1, "model change advances the reasoning epoch once");
         let run = request(&control, Command::ThreadGet(shellboy::protocol::ThreadGetArgs { thread_id: Some(target.clone()), display: false, })).await["run_id"].as_str().unwrap().to_owned();
-        request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run.clone() })).await;
+        request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::exact(run.clone()))).await;
         settled(&control, &target).await;
         assert_eq!(request(&control,Command::RunGet(RunTarget{run_id:run})).await["state"],"stopped");
         let id = target.clone();
@@ -7956,7 +7956,7 @@ async fn proactive_provider_500_retries_for_a_new_active_range() {
             report_owners.push(report.owner);
             finished_tokens.push(terminal[0].token.clone());
             let run = accepted.run_id.expect("same saved report Run for cleanup");
-            request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run.clone() })).await;
+            request(&control, Command::RunStop(shellboy::protocol::RunStopTarget::exact(run.clone()))).await;
             assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: run })).await["state"], "stopped");
         }
 

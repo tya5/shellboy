@@ -1654,16 +1654,16 @@ impl Store {
                 MutationResult::value(super::reply::list_pending(tx, args)?)
             }
             Command::MessageGet(args) => {
-                let mut detail = message_details(tx, &args.message_id)?;
                 if let Some(thread) = args.source_thread_id.as_deref() {
-                    detail.source = Some(message_source(
+                    MutationResult::value(message_source(
                         tx,
                         thread,
                         &args.message_id,
                         self.config.limits.draft_bytes,
-                    )?);
+                    )?)
+                } else {
+                    MutationResult::value(message_details(tx, &args.message_id)?)
                 }
-                MutationResult::value(detail)
             }
             Command::MessageCancel(args) => {
                 let mut keys = Vec::new();
@@ -1704,13 +1704,20 @@ impl Store {
                 MutationResult::value(details)
             }
             Command::RunStop(target) => match target {
-                crate::protocol::RunStopTarget::Run { run_id } => stop_run(tx, run_id, now),
+                crate::protocol::RunStopTarget::Run {
+                    run_id,
+                    expected_selection,
+                } => {
+                    run_action::check_selection(tx, run_id, expected_selection.as_ref())?;
+                    stop_run(tx, run_id, now)
+                }
                 crate::protocol::RunStopTarget::Thread {
                     thread_id,
                     expected_turn,
                 } => stop_thread_run(tx, thread_id, expected_turn.as_ref(), now),
             },
             Command::RunRetry(args) => {
+                run_action::check_selection(tx, &args.run_id, args.expected_selection.as_ref())?;
                 check_expected_turn(tx, &args.run_id, args.expected_turn.as_ref())?;
                 retry_run(tx, &args.run_id, caller, now)
             }
@@ -3021,6 +3028,7 @@ fn message_source(
         ));
     }
     Ok(crate::protocol::MessageSource {
+        message_id: message.into(),
         thread_id: thread.into(),
         selection_revision,
         text,
@@ -3066,7 +3074,6 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
     let hint = (status == DeliveryStatus::Held)
         .then(|| super::message_delivery::held_hint(context.hold_reason.as_deref()).to_owned());
     Ok(MessageDetails {
-        source: None,
         held_by: None,
         to_human: metadata["to_human"] == true,
         sender: MessageSender::from_saved(Some(&row.6)),
@@ -6996,9 +7003,7 @@ mod driverless_child_stop_notification_tests {
             let response = control
                 .request(Request::new(
                     format!("{}:stop-hidden-child", owner.operation_epoch.current()),
-                    Command::RunStop(crate::protocol::RunStopTarget::Run {
-                        run_id: "run-3".into(),
-                    }),
+                    Command::RunStop(crate::protocol::RunStopTarget::exact("run-3".into())),
                 ))
                 .await;
             assert!(
@@ -7083,9 +7088,7 @@ mod driverless_child_stop_notification_tests {
                 let retry = control
                     .request(Request::new(
                         format!("{}:settle-hidden-child", owner.operation_epoch.current()),
-                        Command::RunStop(crate::protocol::RunStopTarget::Run {
-                            run_id: "run-3".into(),
-                        }),
+                        Command::RunStop(crate::protocol::RunStopTarget::exact("run-3".into())),
                     ))
                     .await;
                 assert!(retry.ok);

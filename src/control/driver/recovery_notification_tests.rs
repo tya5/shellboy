@@ -676,9 +676,7 @@ async fn usage_limit_retry_admission_uses_one_saved_reset() {
                 let command = if case == "manual" {
                     Command::RunRetry(crate::protocol::RunRetryArgs::exact(target.run_id))
                 } else {
-                    Command::RunStop(crate::protocol::RunStopTarget::Run {
-                        run_id: target.run_id,
-                    })
+                    Command::RunStop(crate::protocol::RunStopTarget::exact(target.run_id))
                 };
                 control
                     .store

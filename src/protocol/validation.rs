@@ -1178,9 +1178,22 @@ impl Command {
             Self::RunGet(a) => nonempty(&a.run_id, "run_id"),
             Self::RunRetry(a) => {
                 nonempty(&a.run_id, "run_id")?;
+                if a.expected_turn.is_some() && a.expected_selection.is_some() {
+                    return Err(ApiError::new(
+                        ErrorCode::InvalidArgument,
+                        "Specify only one Run fence",
+                    ));
+                }
+                validate_run_selection(a.expected_selection.as_ref())?;
                 validate_expected_turn(a.expected_turn.as_ref())
             }
-            Self::RunStop(super::RunStopTarget::Run { run_id }) => nonempty(run_id, "run_id"),
+            Self::RunStop(super::RunStopTarget::Run {
+                run_id,
+                expected_selection,
+            }) => {
+                nonempty(run_id, "run_id")?;
+                validate_run_selection(expected_selection.as_ref())
+            }
             Self::RunStop(super::RunStopTarget::Thread {
                 thread_id,
                 expected_turn,
@@ -1381,6 +1394,20 @@ fn validate_expected_turn(value: Option<&super::ExpectedTurn>) -> Result<(), Api
             ErrorCode::InvalidArgument,
             "Invalid expected Turn identity",
         ));
+    }
+    Ok(())
+}
+
+fn validate_run_selection(value: Option<&super::ExpectedRunSelection>) -> Result<(), ApiError> {
+    if let Some(value) = value {
+        nonempty(&value.thread_id, "expected_selection.thread_id")?;
+        if value.thread_id.len() > 256 {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "Invalid expected Thread identity",
+            ));
+        }
+        validate_expected_turn(value.turn.as_ref())?;
     }
     Ok(())
 }

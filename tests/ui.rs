@@ -625,6 +625,7 @@ fn edit_request_stages_separate_draft_and_requires_specific_run_stop_consent() {
         node_id: "original-user".into(),
         generation,
         draft_revision: old.revision,
+        selection_revision: 17,
         text: "original request 日本語".into(),
         attachments: vec![],
         run_id: Some("old-run".into()),
@@ -641,11 +642,13 @@ fn edit_request_stages_separate_draft_and_requires_specific_run_stop_consent() {
         UiAction::SendEdited {
             draft_id,
             revision,
+            selection_revision,
             source_thread_id,
             source_node_id,
             text,
             ..
         } => {
+            assert_eq!(*selection_revision, 17);
             assert_eq!(source_thread_id, "old-thread");
             assert_eq!(source_node_id, "original-user");
             assert_eq!(text, "original request 日本語 edited");
@@ -677,6 +680,7 @@ fn stale_original_load_and_new_run_confirmation_preserve_revision_boundaries() {
         node_id: "user".into(),
         generation,
         draft_revision: revision,
+        selection_revision: 17,
         text: "stale".into(),
         attachments: vec![],
         run_id: None,
@@ -688,6 +692,7 @@ fn stale_original_load_and_new_run_confirmation_preserve_revision_boundaries() {
         node_id: "user".into(),
         generation,
         draft_revision: revision,
+        selection_revision: 17,
         text: "saved original".into(),
         attachments: vec![],
         run_id: None,
@@ -877,6 +882,7 @@ fn quit_leaves_selection_mode_and_remains_available_during_edit_send() {
         node_id: "user".into(),
         generation: ui.view().generation,
         draft_revision: ui.view().draft.revision,
+        selection_revision: 17,
         text: "request".into(),
         attachments: vec![],
         run_id: Some("run".into()),

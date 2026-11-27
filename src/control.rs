@@ -52,7 +52,6 @@ pub use receipt::{OperationEpoch, mint_operation_id};
 pub mod replay;
 pub(crate) mod reply;
 pub(crate) mod revisit;
-pub(crate) mod run_action;
 pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod test_support;

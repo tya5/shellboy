@@ -356,6 +356,16 @@ pub(super) fn apply_observation(
     super::tools::apply_window(nodes, &observation.tools);
     super::recovery::apply_window(nodes, &observation.recovery, language);
     super::usage::apply_window(nodes, &observation.usage);
+    for marker in &observation.branches {
+        if marker.current < marker.alternatives.len()
+            && let Some(node) = nodes
+                .iter_mut()
+                .find(|node| node.node_id == marker.anchor_node_id)
+        {
+            node.presentation.branch_marker =
+                Some(crate::presentation::branch_marker::BranchMarker::from_facts(marker));
+        }
+    }
 }
 
 fn validate_outline(

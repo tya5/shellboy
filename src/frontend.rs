@@ -3,7 +3,6 @@ pub mod activity;
 mod admission;
 mod program_status;
 use admission::{spawn_read, spawn_work};
-mod branch_markers;
 pub(crate) mod browser;
 mod browser_read;
 mod client_operations;
@@ -191,8 +190,17 @@ async fn update(sender: &(impl UpdateTarget + ?Sized), mut value: UiUpdate) {
 fn operation(control: &Control, command: Command) -> Request {
     Request::new(control.store.operation_epoch.mint(), command)
 }
+async fn dispatch_native(control: &Control, request: Request) -> Result<Response<Value>, ApiError> {
+    crate::ipc::call_selected_operation(
+        compose_data_dir(control),
+        &control.store.instance_id,
+        request.command,
+        Some(request.operation_id),
+    )
+    .await
+}
 async fn request(control: &Arc<Control>, command: Command) -> Result<Value, ApiError> {
-    let response = control.request(operation(control, command)).await;
+    let response = dispatch_native(control, operation(control, command)).await?;
     if response.ok {
         Ok(response.result.unwrap_or(Value::Null))
     } else {
@@ -220,38 +228,15 @@ async fn management_request(
     cancel: CancellationToken,
 ) -> Result<Value, ApiError> {
     let is_read_projection = !command.requires_receipt();
-    let response = if matches!(command, Command::ScheduleList(_) | Command::ServiceList(_)) {
-        match tokio::select! { biased;
-            _ = cancel.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
-            response = crate::ipc::call_selected_operation(data_dir, &control.store.instance_id, command, None) => response,
-        } {
-            Ok(response) => response,
-            Err(error) => return Ok(serde_json::json!({"error":error})),
-        }
-    } else if matches!(
-        command,
-        Command::ThreadArchive(_)
-            | Command::ThreadUnarchive(_)
-            | Command::ScheduleAdd(_)
-            | Command::ScheduleSet(_)
-            | Command::ScheduleEnable(_)
-            | Command::ScheduleDisable(_)
-            | Command::ScheduleRemove(_)
-            | Command::ServiceAdd(_)
-            | Command::ServiceStart(_)
-            | Command::ServiceStop(_)
-            | Command::ServiceRemove(_)
-    ) {
-        match crate::ipc::call_selected(data_dir, command).await {
+    let request = operation(control, command);
+    let response = tokio::select! { biased;
+        _ = cancel.cancelled(), if is_read_projection => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
+        response = crate::ipc::call_selected_operation(
+            data_dir, &control.store.instance_id, request.command, Some(request.operation_id),
+        ) => match response {
             Ok(response) => response,
             Err(error) => return Ok(management::native_failure(error)),
-        }
-    } else {
-        crate::usage_totals::with_trigger(
-            crate::usage_totals::UsageTrigger::Open,
-            control.request_cancellable(operation(control, command), cancel),
-        )
-        .await
+        },
     };
     let operation_id = response.operation_id;
     let mut result = if response.ok {
@@ -462,6 +447,7 @@ enum BackgroundResult {
     },
 }
 struct EditableRequest {
+    selection_revision: u64,
     text: String,
     attachments: Vec<UiAttachment>,
     run_id: Option<String>,
@@ -574,62 +560,65 @@ async fn prepare_management(
     .await
 }
 
-/// One page of the branch tree for the panel (#237); the DB worker does the reads.
+/// One bounded page of the selected Thread's branch tree.
 async fn load_branches(
     control: &Control,
     thread_id: &str,
     cursor: Option<String>,
 ) -> Result<Value, ApiError> {
-    let thread = thread_id.to_owned();
-    let result = async {
-        control
-            .store
-            .database
-            .call(move |db| {
-                let snapshot = db.transaction()?;
-                Ok(crate::history::branches::branches(
-                    &snapshot,
-                    &thread,
-                    &crate::protocol::ThreadBranchesArgs {
-                        thread_id: Some(thread.clone()),
-                        limit: crate::protocol::MAX_LIST_LIMIT,
-                        cursor,
-                    },
-                ))
-            })
-            .await
-            .map_err(storage_error)?
+    native_history::Owner {
+        data_dir: compose_data_dir(control),
+        instance: &control.store.instance_id,
     }
-    .await;
-    checked_storage(control, result).await
+    .call(Command::ThreadBranches(ThreadBranchesArgs {
+        thread_id: Some(thread_id.to_owned()),
+        limit: crate::protocol::MAX_LIST_LIMIT,
+        cursor,
+    }))
+    .await
 }
 async fn load_edit_request(
     control: &Control,
     thread_id: &str,
     node_id: &str,
 ) -> Result<EditableRequest, ApiError> {
-    let result = async {
-    let (thread, node) = (thread_id.to_owned(), node_id.to_owned());
-    let limit = control.store.config.limits.draft_bytes;
-    let value=control.store.database.call(move|db|{
-        use rusqlite::OptionalExtension;
-        let tx=db.transaction()?;
-        let record:Option<(String,Option<String>)>=tx.query_row("SELECT n.kind,n.payload_json FROM node n JOIN thread_path p ON p.node_id=n.id JOIN thread t ON t.id=p.thread_id WHERE p.thread_id=?1 AND n.id=?2 AND t.deleted_at IS NULL",rusqlite::params![thread,node],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        let Some((kind,body))=record else{return Ok(Err(ApiError::new(ErrorCode::TargetUnavailable,"Select a saved user request on this Thread path")));};
-        if !matches!(kind.as_str(),"user"|"user_message"|"message"){return Ok(Err(ApiError::new(ErrorCode::InvalidArgument,"Only a saved user request can be edited into a new branch")));}
-        let Some(body)=body else{return Ok(Err(ApiError::new(ErrorCode::TargetUnavailable,"Original request payload was collected")));};
-        let payload:Value=serde_json::from_str(&body).map_err(|_|crate::storage::StorageError::Schema("Stored user request is malformed".into()))?;
-        if payload.get("role").and_then(Value::as_str)!=Some("user"){return Ok(Err(ApiError::new(ErrorCode::InvalidArgument,"Only a saved user request can be edited")));}
-        let attachments=tx.prepare("SELECT a.id,a.absolute_path,a.input_kind,s.state FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?1 WHERE a.source_node_id=?2 ORDER BY s.selected_order,a.id")?.query_map(rusqlite::params![thread,node],|r|Ok(UiAttachment{id:r.get(0)?,path:PathBuf::from(r.get::<_,String>(1)?),kind:r.get(2)?,state:r.get::<_,Option<String>>(3)?.unwrap_or_else(||"excluded".into()),position:None}))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let (text,attachments)=match crate::draft::restore(&payload,attachments,true){Ok(value)=>value,Err(error)=>return Ok(Err(error))};
-        if text.len()as u64>limit{return Ok(Err(ApiError::new(ErrorCode::InputLimit,"Original request exceeds the draft byte limit; increase limits.draft_bytes before editing")));}
-        let run_id=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[thread],|r|r.get::<_,String>(0)).optional()?;
-        tx.commit()?;Ok(Ok(EditableRequest{text,attachments,run_id}))
-    }).await.map_err(storage_error)??;
-    Ok(value)
-
-    }.await;
-    checked_storage(control, result).await
+    let owner = native_history::Owner {
+        data_dir: compose_data_dir(control),
+        instance: &control.store.instance_id,
+    };
+    let source: MessageSource = owner
+        .call(Command::MessageGet(MessageTarget {
+            message_id: node_id.into(),
+            source_thread_id: Some(thread_id.into()),
+        }))
+        .await?;
+    if source.message_id != node_id || source.thread_id != thread_id {
+        return Err(ApiError::new(
+            ErrorCode::ProtocolMismatch,
+            "Invalid selected message source",
+        ));
+    }
+    let thread: ThreadDetails = owner
+        .call(Command::ThreadGet(ThreadGetArgs {
+            thread_id: Some(thread_id.into()),
+            display: false,
+        }))
+        .await?;
+    if thread.thread_id != thread_id {
+        return Err(ApiError::new(
+            ErrorCode::ProtocolMismatch,
+            "Invalid edit activity Thread",
+        ));
+    }
+    Ok(EditableRequest {
+        selection_revision: source.selection_revision,
+        text: source.text,
+        attachments: source.attachments,
+        run_id: thread.activity.and_then(|activity| {
+            matches!(activity.run.state, RunState::Live | RunState::Stopping)
+                .then_some(activity.run.run_id)
+        }),
+    })
 }
 /// Source DB failures stop the owner even when observed through a UI read.
 fn storage_error(error: crate::storage::StorageError) -> ApiError {
@@ -1325,30 +1314,16 @@ async fn run_client(
                         let sender = updates.worker();
                         let token = read_cancel.child_token();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                            let response = control
-                                .request_cancellable(
-                                    operation(
-                                        &control,
-                                        Command::ModelList(crate::protocol::ModelListArgs {
-                                            connection: Some(connection),
-                                            thread_id: None,
-                                        }),
-                                    ),
-                                    token,
-                                )
-                                .await;
-                            let result = if response.ok {
-                                serde_json::from_value::<crate::protocol::ModelListResult>(
-                                    response.result.unwrap_or(Value::Null),
-                                )
+                            let result = tokio::select! { biased;
+                                _ = token.cancelled() => return,
+                                result = request(&control, Command::ModelList(crate::protocol::ModelListArgs {
+                                    connection: Some(connection), thread_id: None,
+                                })) => result,
+                            }
+                            .map_err(|error| error.to_string())
+                            .and_then(|value| serde_json::from_value::<crate::protocol::ModelListResult>(value)
                                 .map(|result| result.models)
-                                .map_err(|error| error.to_string())
-                            } else {
-                                Err(response
-                                    .error
-                                    .map(|error| error.to_string())
-                                    .unwrap_or_else(|| i18n::local!(language, "一覧を取得できませんでした", "Could not retrieve the list").into()))
-                            };
+                                .map_err(|error| error.to_string()));
                             update(&sender, UiUpdate::Models { request_id, completed_at: chrono::Utc::now(), result }).await;
                         }) {
                             update(
@@ -2165,13 +2140,25 @@ async fn run_client(
                         let output=target.kind==watch::WatchActionKind::Output;
                         let title=match target.kind {watch::WatchActionKind::Stop=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 停止", "Watch · Stop"), i18n::local!(language, "Watch | 停止", "Watch | Stop")),watch::WatchActionKind::Retry=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 再試行", "Watch · Retry"), i18n::local!(language, "Watch | 再試行", "Watch | Retry")),watch::WatchActionKind::Output=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 保存出力", "Watch · Saved output"), i18n::local!(language, "Watch | 保存出力", "Watch | Saved output"))}.to_owned();
                         let generation=if output {management.next_generation()}else{0};
-                        let selected=selection.active_thread.clone();let control=control.clone();let results=background_tx.clone();let outcomes=updates.worker();
+                        let selected=selection.active_thread.clone();let results=background_tx.clone();let outcomes=updates.worker();
+                        let data_dir=client_context.data_dir.clone();let instance=control.store.instance_id.clone();
+                        let body_bytes=control.store.config.cache.body_bytes;
                         spawn_work(&mut workers,permit,async move {
-                            let response=watch_action::execute(&control,target).await;
+                            let response=watch_action::execute(&native_history::Owner {data_dir:&data_dir,instance:&instance},target).await;
                             if output {
-                                let result=prepare_management(language,response,control.store.config.cache.body_bytes).await;
+                                let result=prepare_management(language,response,body_bytes).await;
                                 let _=results.send(BackgroundResult::Command { external:None,work_status:false,context:None,generation,title,result}).await;
-                            } else {match response {Ok(_)=>status(&outcomes,selected,ui_diagnostics::accepted(language, &title)).await,Err(error)=>status(&outcomes,selected,ui_diagnostics::not_applied(language, &title, error)).await,}}
+                            } else {match response {Ok(_)=>status(&outcomes,selected,ui_diagnostics::accepted(language, &title)).await,Err(error) => {
+                                let message = if let Some(operation) = unknown_compose_operation(&error) {
+                                    i18n::local!(language,
+                                        "操作結果が不明です。再操作する前に operation get で確認してください",
+                                        "Operation outcome unknown. Check operation get before trying again")
+                                        .to_owned() + ": " + operation
+                                } else {
+                                    ui_diagnostics::not_applied(language, &title, error)
+                                };
+                                status(&outcomes,selected,message).await;
+                            },}}
                         });
                     },
                     UiAction::ProgramStatusSeen { thread_id, run_id } => {
@@ -3407,6 +3394,7 @@ async fn run_client(
                                 node_id,
                                 generation,
                                 draft_revision,
+                                selection_revision: edit.selection_revision,
                                 text: edit.text,
                                 attachments: edit.attachments,
                                 run_id: edit.run_id,

@@ -1204,6 +1204,7 @@ pub enum UiUpdate {
         node_id: String,
         generation: u64,
         draft_revision: u64,
+        selection_revision: u64,
         text: String,
         attachments: Vec<UiAttachment>,
         run_id: Option<String>,
@@ -3681,6 +3682,7 @@ impl UiState {
                 node_id,
                 generation,
                 draft_revision,
+                selection_revision,
                 text,
                 attachments,
                 run_id,
@@ -3699,6 +3701,7 @@ impl UiState {
                 }
                 let previous = self.view();
                 let mut view = ThreadView::new(&self.config, previous.cwd.clone());
+                view.selection_revision = selection_revision;
                 view.palette = self.palette;
                 view.connection = previous.connection.clone();
                 view.model = previous.model.clone();

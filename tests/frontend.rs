@@ -1064,6 +1064,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
             text,
             attachments,
             run_id,
+            ..
         } => Some((
             thread_id,
             node_id,

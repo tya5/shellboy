@@ -391,9 +391,9 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     assert_eq!(old.turn_id, first.turn_id);
     let stop = execute(
         &store,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: first.run_id.clone().unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            first.run_id.clone().unwrap(),
+        )),
     )
     .await;
     assert_eq!(stop.stop_runs, vec![first.run_id.clone().unwrap()]);
@@ -609,9 +609,9 @@ async fn stopping_one_run_does_not_freeze_organizational_children() {
     let child_message: MessageAccepted = serde_json::from_value(child_result.result).unwrap();
     let stop = execute(
         &store,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: parent_message.run_id.clone().unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            parent_message.run_id.clone().unwrap(),
+        )),
     )
     .await;
     assert_eq!(stop.stop_runs, vec![parent_message.run_id.clone().unwrap()]);
@@ -943,9 +943,7 @@ async fn model_request_ceiling_refuses_live_and_stopping_runs_without_assigning_
         if state == "stopping" {
             execute(
                 &store,
-                Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                    run_id: target().run_id,
-                }),
+                Command::RunStop(shellboy::protocol::RunStopTarget::exact(target().run_id)),
             )
             .await;
         }
@@ -1004,9 +1002,9 @@ async fn held_message_actions_agree_on_send_and_readback() {
         } else if state == "stopping" {
             execute(
                 &store,
-                Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                    run_id: first.run_id.unwrap(),
-                }),
+                Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+                    first.run_id.unwrap(),
+                )),
             )
             .await;
         }
@@ -1076,9 +1074,9 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
     let (old, _) = send(&store, &thread.thread_id, "old assigned input").await;
     execute(
         &store,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: old.run_id.clone().unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            old.run_id.clone().unwrap(),
+        )),
     )
     .await;
     let (pending, _) = send(&store, &thread.thread_id, "saved while stopping").await;
@@ -1398,9 +1396,9 @@ async fn any_caller_may_stop_any_independent_run_without_cascade() {
     )
     .await;
     // No authority check (#256): a non-owner Run may stop an unowned Run.
-    let non_owner_stop = request(Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-        run_id: unowned_message.run_id.clone().unwrap(),
-    }));
+    let non_owner_stop = request(Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+        unowned_message.run_id.clone().unwrap(),
+    )));
     let operation_id = non_owner_stop.operation_id.clone();
     let stopped_unowned = store
         .execute(non_owner_stop, Some(origin.clone()))
@@ -1444,9 +1442,9 @@ async fn any_caller_may_stop_any_independent_run_without_cascade() {
     let child: MessageAccepted = serde_json::from_value(accepted.result).unwrap();
     let stopped = store
         .execute(
-            request(Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                run_id: parent_message.run_id.clone().unwrap(),
-            })),
+            request(Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+                parent_message.run_id.clone().unwrap(),
+            ))),
             Some(origin),
         )
         .await
@@ -1469,9 +1467,9 @@ async fn any_caller_may_stop_any_independent_run_without_cascade() {
         .unwrap();
     let human = execute(
         &store,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: independent_message.run_id.unwrap(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+            independent_message.run_id.unwrap(),
+        )),
     )
     .await;
     assert_eq!(human.stop_runs.len(), 1);
@@ -2135,9 +2133,9 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
         "saved outcomes do not repeat stop effects"
     );
     let mut run_conflict = run_stop.clone();
-    run_conflict.command = Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-        run_id: "another-run".into(),
-    });
+    run_conflict.command = Command::RunStop(shellboy::protocol::RunStopTarget::exact(
+        "another-run".into(),
+    ));
     assert_eq!(
         store
             .execute(run_conflict.clone(), None)

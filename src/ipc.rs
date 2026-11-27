@@ -550,19 +550,26 @@ fn environment_endpoint(data_dir: &Path) -> Result<Option<Endpoint>, ApiError> {
 }
 
 async fn read_endpoint(data_dir: &Path) -> Result<Endpoint, ApiError> {
+    read_endpoint_if_present(data_dir)
+        .await?
+        .ok_or_else(|| io_error(std::io::ErrorKind::NotFound.into()))
+}
+
+async fn read_endpoint_if_present(data_dir: &Path) -> Result<Option<Endpoint>, ApiError> {
     let path = data_dir.join("endpoint.json");
     tokio::task::spawn_blocking(move || {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
         #[cfg(unix)]
-        let file = {
+        {
             use std::os::unix::fs::OpenOptionsExt;
-            std::fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-                .open(path)
-                .map_err(io_error)?
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let file = match options.open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(endpoint_mismatch()),
         };
-        #[cfg(not(unix))]
-        let file = std::fs::File::open(path).map_err(io_error)?;
         let metadata = file.metadata().map_err(io_error)?;
         if !metadata.is_file() || metadata.len() > 64 * 1024 {
             return Err(endpoint_mismatch());
@@ -575,7 +582,9 @@ async fn read_endpoint(data_dir: &Path) -> Result<Endpoint, ApiError> {
         if bytes.len() > 64 * 1024 {
             return Err(endpoint_mismatch());
         }
-        serde_json::from_slice::<Endpoint>(&bytes).map_err(|_| endpoint_mismatch())
+        serde_json::from_slice::<Endpoint>(&bytes)
+            .map(Some)
+            .map_err(|_| endpoint_mismatch())
     })
     .await
     .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Endpoint worker failed"))?
@@ -598,27 +607,71 @@ async fn connect_with_capability(
     required_capability: Option<&str>,
     announce: Option<&mut (dyn FnMut(&str) + Send)>,
 ) -> Result<Response<Value>, ApiError> {
+    let stream = open_transport(&endpoint, true)
+        .await?
+        .ok_or_else(|| io_error(std::io::ErrorKind::NotFound.into()))?;
+    call_stream_requiring_capability(
+        stream,
+        endpoint,
+        command,
+        operation_id,
+        origin,
+        required_capability,
+        announce,
+    )
+    .await
+}
+
+pub(crate) async fn probe_selected(data_dir: &Path) -> Result<Option<Welcome>, ApiError> {
+    let Some(endpoint) = read_endpoint_if_present(data_dir).await? else {
+        return Ok(None);
+    };
+    let Some(mut stream) = open_transport(&endpoint, false).await? else {
+        return Ok(None);
+    };
+    exchange_hello(&mut stream, &endpoint).await.map(Some)
+}
+
+#[cfg(unix)]
+type NativeStream = tokio::net::UnixStream;
+#[cfg(windows)]
+type NativeStream = tokio::net::windows::named_pipe::NamedPipeClient;
+
+async fn open_transport(
+    endpoint: &Endpoint,
+    wait_pipe: bool,
+) -> Result<Option<NativeStream>, ApiError> {
     if endpoint.protocol_version != PROTOCOL_VERSION {
         let mut error = protocol_mismatch(PROTOCOL_VERSION, endpoint.protocol_version);
-        if let Some(version) = endpoint.owner_version
+        if let Some(version) = endpoint.owner_version.clone()
             && let Some(details) = error.details.as_mut()
         {
             details["owner_version"] = Value::String(version);
         }
         return Err(error);
     }
+    fn open_error(error: std::io::Error) -> Result<Option<NativeStream>, ApiError> {
+        match error.kind() {
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => Ok(None),
+            _ => Err(io_error(error)),
+        }
+    }
     #[cfg(unix)]
     {
+        let _ = wait_pipe;
         if endpoint.transport != "unix" {
             return Err(endpoint_mismatch());
         }
-        let stream = tokio::time::timeout(
+        let stream = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             tokio::net::UnixStream::connect(&endpoint.address),
         )
         .await
-        .map_err(|_| io_error(std::io::ErrorKind::TimedOut.into()))?
-        .map_err(io_error)?;
+        {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) => return open_error(error),
+            Err(_) => return Err(io_error(std::io::ErrorKind::TimedOut.into())),
+        };
         peer::verify(&stream).map_err(|_| {
             ApiError::new(
                 ErrorCode::IoFailed,
@@ -626,16 +679,7 @@ async fn connect_with_capability(
             )
             .hint("Start Shellboy and its CLI under the same OS user")
         })?;
-        call_stream_requiring_capability(
-            stream,
-            endpoint,
-            command,
-            operation_id,
-            origin,
-            required_capability,
-            announce,
-        )
-        .await
+        Ok(Some(stream))
     }
     #[cfg(windows)]
     {
@@ -643,28 +687,19 @@ async fn connect_with_capability(
             return Err(endpoint_mismatch());
         }
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-        let stream = loop {
+        loop {
             match tokio::net::windows::named_pipe::ClientOptions::new().open(&endpoint.address) {
-                Ok(client) => break client,
+                Ok(client) => return Ok(Some(client)),
                 Err(error)
-                    if error.raw_os_error() == Some(231)
+                    if wait_pipe
+                        && error.raw_os_error() == Some(231)
                         && tokio::time::Instant::now() < deadline =>
                 {
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
-                Err(error) => return Err(io_error(error)),
+                Err(error) => return open_error(error),
             }
-        };
-        call_stream_requiring_capability(
-            stream,
-            endpoint,
-            command,
-            operation_id,
-            origin,
-            required_capability,
-            announce,
-        )
-        .await
+        }
     }
 }
 fn uncertain_reply(
@@ -720,24 +755,19 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
         .await
 }
 
-async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
-    mut stream: S,
-    endpoint: Endpoint,
-    command: Command,
-    operation_id: Option<String>,
-    origin: Option<Origin>,
-    required_capability: Option<&str>,
-    announce: Option<&mut (dyn FnMut(&str) + Send)>,
-) -> Result<Response<Value>, ApiError> {
+async fn exchange_hello<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: &mut S,
+    endpoint: &Endpoint,
+) -> Result<Welcome, ApiError> {
     write_frame(
-        &mut stream,
+        stream,
         &Hello {
             protocol_version: PROTOCOL_VERSION,
         },
     )
     .await?;
     let welcome: Welcome =
-        tokio::time::timeout(std::time::Duration::from_secs(5), read_frame(&mut stream))
+        tokio::time::timeout(std::time::Duration::from_secs(5), read_frame(stream))
             .await
             .map_err(|_| handshake_timeout())??
             .ok_or_else(endpoint_mismatch)?;
@@ -750,6 +780,19 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     if welcome.instance_id != endpoint.instance_id {
         return Err(endpoint_mismatch());
     }
+    Ok(welcome)
+}
+
+async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    endpoint: Endpoint,
+    command: Command,
+    operation_id: Option<String>,
+    origin: Option<Origin>,
+    required_capability: Option<&str>,
+    announce: Option<&mut (dyn FnMut(&str) + Send)>,
+) -> Result<Response<Value>, ApiError> {
+    let welcome = exchange_hello(&mut stream, &endpoint).await?;
     if let Some(capability) = required_capability
         && !welcome
             .capabilities

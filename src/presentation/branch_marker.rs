@@ -2,7 +2,7 @@
 //! Display only, from the saved facts of `thread branches`. The row names the
 //! alternative being previewed (`2/3`); previewing never switches Threads.
 use crate::config::UiLanguage;
-use crate::history::branches::Marker;
+use crate::protocol::HistoryWindowBranch;
 use crate::ui::text_width::{UnicodeWidthStr, glyphs};
 
 /// Characters of an alternative's last request shown in the row.
@@ -51,7 +51,7 @@ pub struct BranchMarker {
     pub preview: usize,
 }
 impl BranchMarker {
-    pub fn from_facts(marker: &Marker) -> Self {
+    pub fn from_facts(marker: &HistoryWindowBranch) -> Self {
         Self {
             alternatives: marker
                 .alternatives

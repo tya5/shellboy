@@ -3,7 +3,7 @@ use super::*;
 use crate::ui::watch::WatchActionKind;
 
 pub(super) async fn execute(
-    control: &Arc<Control>,
+    owner: &native_history::Owner<'_>,
     target: WatchActionTarget,
 ) -> Result<Value, ApiError> {
     if target.kind == WatchActionKind::Output {
@@ -13,50 +13,49 @@ pub(super) async fn execute(
                 "Watch output target has no execution",
             )
         })?;
-        let expected_execution = execution.clone();
-        let expected_run = target.run_id;
-        let expected_thread = target.thread_id;
-        let owned=super::snapshot::read(control.store.database.path().to_path_buf(),CancellationToken::new(),move|db| {
-            Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1 AND r.id=?2 AND r.thread_id=?3)",rusqlite::params![expected_execution,expected_run,expected_thread],|row|row.get::<_,bool>(0))?)
-        }).await;
-        if !checked_storage(control, owned).await? {
-            return Err(ApiError::new(
-                ErrorCode::TargetUnavailable,
-                "Watch output no longer belongs to the selected saved Run",
-            ));
-        }
-        return request(
-            control,
-            Command::ShellRead(ShellReadArgs {
-                expected_owner: None,
+        return owner
+            .call(Command::ShellRead(ShellReadArgs {
+                expected_owner: Some(crate::protocol::ShellReadOwner {
+                    thread_id: target.thread_id,
+                    run_id: target.run_id,
+                }),
                 tail: false,
                 segments: false,
                 execution_id: execution,
                 cursor: None,
                 encoding: None,
                 limit_bytes: 64 * 1024,
-            }),
-        )
-        .await;
+            }))
+            .await;
     }
-    let action = match target.kind {
-        WatchActionKind::Stop => crate::control::run_action::RunAction::Stop,
-        WatchActionKind::Retry => crate::control::run_action::RunAction::Retry,
+    let turn = match (target.turn_id, target.turn_generation) {
+        (Some(turn_id), Some(generation)) => Some(ExpectedTurn {
+            turn_id,
+            generation,
+        }),
+        (None, None) if target.kind == WatchActionKind::Stop => None,
+        _ => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "Invalid Watch Turn identity",
+            ));
+        }
+    };
+    let expected_selection = Some(ExpectedRunSelection {
+        thread_id: target.thread_id,
+        turn,
+    });
+    let command = match target.kind {
+        WatchActionKind::Stop => Command::RunStop(RunStopTarget::Run {
+            run_id: target.run_id,
+            expected_selection,
+        }),
+        WatchActionKind::Retry => Command::RunRetry(RunRetryArgs {
+            run_id: target.run_id,
+            expected_turn: None,
+            expected_selection,
+        }),
         WatchActionKind::Output => unreachable!(),
     };
-    let command = match target.kind {
-        WatchActionKind::Stop => Command::RunStop(crate::protocol::RunStopTarget::Run {
-            run_id: target.run_id.clone(),
-        }),
-        _ => Command::RunRetry(crate::protocol::RunRetryArgs::exact(target.run_id.clone())),
-    };
-    let expected = crate::control::run_action::ExpectedRun {
-        thread_id: target.thread_id,
-        run_id: target.run_id,
-        turn_id: target.turn_id,
-        turn_generation: target.turn_generation,
-    };
-    control
-        .expected_run_action(operation(control, command).operation_id, expected, action)
-        .await
+    owner.call(command).await
 }

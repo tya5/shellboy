@@ -496,9 +496,7 @@ async fn stop_releases_waiting_messages_as_ordinary_held_input() {
     let waiting = send(&f.control, &f.thread, "RELEASED_AT_STOP", Deliver::Complete).await;
     request(
         &f.control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-            run_id: run.clone(),
-        }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(run.clone())),
     )
     .await;
     run_state(&f.control, &run, "stopped").await;

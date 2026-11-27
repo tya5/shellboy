@@ -639,7 +639,7 @@ async fn queued_message_cancel_and_run_stop_advance_the_clock() {
     let at = quiet(&control).await;
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(run)),
     )
     .await
     .unwrap();
@@ -750,7 +750,7 @@ async fn stopping_run_is_announced() {
     let at = quiet(&control).await;
     command(
         &control,
-        Command::RunStop(shellboy::protocol::RunStopTarget::Run { run_id: run }),
+        Command::RunStop(shellboy::protocol::RunStopTarget::exact(run)),
     )
     .await
     .unwrap();
@@ -783,9 +783,7 @@ async fn stopped_transition_has_its_own_hint() {
         let run = text(&control, "SELECT id FROM run WHERE thread_id=?1", &t).await;
         command(
             &control,
-            Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                run_id: run.clone(),
-            }),
+            Command::RunStop(shellboy::protocol::RunStopTarget::exact(run.clone())),
         )
         .await
         .unwrap();

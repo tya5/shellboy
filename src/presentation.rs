@@ -860,7 +860,9 @@ pub enum EventClass {
     Change,
     Attention,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub enum InputSource {
     Human,
     Parent,

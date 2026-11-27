@@ -330,6 +330,7 @@ fn images_in_an_edit_fork_draft_are_owned_by_the_source_thread_for_deletion() {
         node_id: "request".into(),
         generation,
         draft_revision: revision,
+        selection_revision: 17,
         text: "edited request".into(),
         attachments: vec![],
         run_id: None,
