@@ -165,6 +165,13 @@ pub(in crate::control) async fn install_shell(
     execution: &str,
     spawned: crate::shell::ShellExecution,
 ) -> Result<(Option<CompletionReceiver>, Option<ForegroundReceiver>), ApiError> {
+    if let ShellOwner::Schedule {
+        endpoint: Some(publication),
+        ..
+    } = &owner
+    {
+        control.publications.register(execution, publication);
+    }
     let handle = spawned.handle.clone();
     control
         .live
@@ -192,6 +199,7 @@ pub(in crate::control) async fn install_shell(
     };
     tokio::spawn(async move {
         let result = collect_shell(&collector, &mut current, &execution_copy, spawned).await;
+        collector.publications.revoke(&execution_copy);
         collector.live.remove_shell(&execution_copy).await;
         if let Err(error) = &result {
             if error.is_storage_failure() {
@@ -358,6 +366,7 @@ pub(in crate::control) async fn collect_shell(
             .map_err(|_| invalid("Shell completion unavailable"))?;
     };
     if let ShellOwner::Schedule { endpoint, .. } = owner {
+        control.publications.revoke(execution);
         drop(endpoint.take());
     }
     // Even after a save failure, retain the shell until its supervisor has

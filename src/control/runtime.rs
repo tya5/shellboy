@@ -815,6 +815,7 @@ impl Control {
         caller: Option<Origin>,
     ) -> Result<Value, ApiError> {
         let execution = execution_id.clone();
+        let publications = self.publications.clone();
         let target = self.store.database.call(move |db| {
             let tx = db.transaction()?;
             let changed = if is_eof {
@@ -823,9 +824,13 @@ impl Control {
                 usize::from(record_shell_stop(&tx,&execution,ShellStopIntent::Explicit)?)
             };
             let target = if changed != 0 {
-                Some(tx.query_row("SELECT COALESCE(r.thread_id,q.thread_id,s.detached_thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[execution],|r|r.get::<_,String>(0))?)
+                Some(tx.query_row("SELECT COALESCE(r.thread_id,q.thread_id,s.detached_thread_id) FROM shell_execution s LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN schedule q ON q.id=s.schedule_id WHERE s.id=?1",[&execution],|r|r.get::<_,String>(0))?)
             } else { None };
-            tx.commit()?;
+            if !is_eof && target.is_some() {
+                publications.commit_revoke(tx, [execution.as_str()])?;
+            } else {
+                tx.commit()?;
+            }
             Ok(target)
         }).await.map_err(storage_error)?;
         if let Some(thread) = target {

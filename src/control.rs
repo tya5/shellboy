@@ -15,7 +15,7 @@ pub(crate) mod pending_messages;
 mod request_admission;
 mod runtime;
 mod schedule;
-mod service_endpoint;
+pub(crate) mod service_endpoint;
 pub(crate) mod submission_retention;
 mod turn_interrupt;
 mod ui_events;
@@ -178,6 +178,7 @@ pub struct Control {
     data_dir: PathBuf,
     endpoint: Arc<std::sync::RwLock<Option<crate::app::Endpoint>>>,
     live: Arc<LiveRegistry>,
+    publications: Arc<service_endpoint::Publications>,
     ipc_refusals: Arc<crate::ipc::AdmissionRefusals>,
     origins: Mutex<HashMap<String, Origin>>,
     events: broadcast::Sender<EngineEvent>,
@@ -495,6 +496,7 @@ impl Control {
             data_dir: owner.loaded.data_dir.clone(),
             endpoint: owner.endpoint.clone(),
             live: Arc::new(LiveRegistry::default()),
+            publications: Arc::default(),
             ipc_refusals: owner.ipc_refusals.clone(),
             origins: Mutex::new(HashMap::new()),
             events,
@@ -1650,9 +1652,10 @@ impl Control {
                 // create Runs or sources after file preparation. Let them reach
                 // their saved outcome before taking the pre-cancellation view.
                 self.admission.wait_context_zero().await;
+                let publications = self.publications.clone();
                 self.store
                     .database
-                    .call(|db| {
+                    .call(move |db| {
                         let tx = db.transaction()?;
                         interruption::capture_interrupted_context(
                             &tx,
@@ -1660,8 +1663,8 @@ impl Control {
                             "app_shutdown",
                             "shutdown",
                         )?;
-                        schedule::prepare_owner_shutdown(&tx)?;
-                        tx.commit()?;
+                        let ids = schedule::prepare_owner_shutdown(&tx)?;
+                        publications.commit_revoke(tx, ids.iter().map(String::as_str))?;
                         Ok(())
                     })
                     .await

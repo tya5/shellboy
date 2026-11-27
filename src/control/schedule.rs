@@ -761,13 +761,13 @@ pub(super) fn change(
     Ok(result)
 }
 
-pub(super) fn prepare_owner_shutdown(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+pub(super) fn prepare_owner_shutdown(tx: &Transaction<'_>) -> rusqlite::Result<Vec<String>> {
     let ids = tx.prepare("SELECT s.id FROM shell_execution s JOIN schedule q ON q.id=s.schedule_id WHERE q.kind='service' AND s.state IN ('starting','running')")?
         .query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    for id in ids {
-        record_shell_stop(tx, &id, ShellStopIntent::OwnerShutdown)?;
+    for id in &ids {
+        record_shell_stop(tx, id, ShellStopIntent::OwnerShutdown)?;
     }
-    Ok(())
+    Ok(ids)
 }
 
 pub(super) fn disable_services(
@@ -914,6 +914,7 @@ pub(super) async fn delete(
     // Removing a definition or Thread drops executions whose raw markers stay.
     let removes = shell_definition_command(&command).is_none_or(|(_, _, removing)| removing);
     let prepared = async {
+        let publications = control.publications.clone();
         let (targets, executions) = control
             .store
             .database
@@ -949,7 +950,7 @@ pub(super) async fn delete(
                 for target in &targets {
                     executions.extend(disable_and_stop(&tx, target, by_thread, removing)?);
                 }
-                tx.commit()?;
+                publications.commit_revoke(tx, executions.iter().map(String::as_str))?;
                 Ok((targets, executions))
             })
             .await
