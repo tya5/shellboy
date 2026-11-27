@@ -10,6 +10,7 @@ pub(crate) mod export;
 pub(crate) mod import;
 pub mod items;
 mod list;
+pub(crate) mod window_facts;
 /// Only the generated admission namespace and its two historical node kinds.
 pub(crate) fn is_legacy_admission_node(id: &str, kind: &str) -> bool {
     matches!(kind, "event" | "message")

@@ -36,6 +36,7 @@ mod operations;
 #[cfg(unix)]
 mod os_signals;
 pub mod owner_session;
+pub mod plain_text;
 pub mod presentation;
 pub mod program_status;
 pub mod protocol;

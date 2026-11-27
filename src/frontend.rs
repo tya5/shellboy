@@ -43,7 +43,7 @@ use history_reader::{HistoryReader, Reply, WindowReply, WindowRequest};
 use update_delivery::{BufferedUpdates, UpdateTarget};
 mod management;
 mod management_state;
-mod recovery;
+pub(crate) mod recovery;
 mod refresh;
 mod selection;
 #[cfg(test)]
@@ -54,13 +54,12 @@ mod streaming;
 mod streams;
 #[cfg(test)]
 use streaming::StreamBody;
-mod notices;
-mod tools;
-mod window_facts;
-pub(crate) use window_facts::{WINDOW_FACTS_LIMIT, read_window_facts};
-mod usage;
+pub(crate) mod notices;
+pub(crate) mod tools;
+pub(crate) mod usage;
 mod watch_page;
 mod watch_read;
+mod window_facts;
 
 use crate::config::UiLanguage;
 use crate::ui::i18n;
@@ -853,6 +852,39 @@ async fn run_with_delivery(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
+fn dispatch_shown_refresh(
+    management: &mut management_state::Management,
+    workers: &mut JoinSet<()>,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    control: &Arc<Control>,
+    background_tx: &mpsc::Sender<BackgroundResult>,
+    data_dir: &std::path::Path,
+    language: UiLanguage,
+    shown: management_state::Shown,
+) {
+    let generation = management.next_generation();
+    management.dispatched(generation, Some(shown.clone()));
+    let control = control.clone();
+    let sender = background_tx.clone();
+    let data_dir = data_dir.to_owned();
+    spawn_work(workers, permit, async move {
+        let response =
+            management_request(&control, &data_dir, shown.command, CancellationToken::new()).await;
+        let result =
+            prepare_management(language, response, control.store.config.cache.body_bytes).await;
+        let _ = sender
+            .send(BackgroundResult::Command {
+                external: None,
+                work_status: shown.work_status,
+                context: shown.context,
+                generation,
+                title: shown.title,
+                result,
+            })
+            .await;
+    });
+}
 #[allow(clippy::too_many_arguments)]
 async fn run_client(
     control: Arc<Control>,
@@ -3412,21 +3444,16 @@ async fn run_client(
                         }
                         if let Some(shown) = management.shown().cloned()
                             && shown.is_stale_after(&page, resync)
-                            && let Ok(permit) = command_slots.clone().try_acquire_owned()
                         {
                             // The shown F8 result is read again with the command that made it.
-                            let generation = management.next_generation();
-                            management.dispatched(generation, Some(shown.clone()));
-                            let control = control.clone();
-                            let sender = background_tx.clone();
-                            let data_dir = client_context.data_dir.clone();
-                            spawn_work(&mut workers, permit, async move {
-                                let response = management_request(&control, &data_dir, shown.command, CancellationToken::new()).await;
-                                let result = prepare_management(language, response, control.store.config.cache.body_bytes).await;
-                                let _ = sender
-                                    .send(BackgroundResult::Command { external: None, work_status: shown.work_status, context: shown.context, generation, title: shown.title, result })
-                                    .await;
-                            });
+                            match command_slots.clone().try_acquire_owned() {
+                                Ok(permit) => dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language, shown),
+                                Err(_) => {
+                                    management.defer_refresh();
+                                    #[cfg(test)]
+                                    saved_events::tests::observe(saved_events::tests::Observed::RefreshDeferred);
+                                }
+                            }
                         }
                         if (resync || page.retention_changed)
                             && let Some(thread)=selection.active_thread.as_ref()
@@ -3559,7 +3586,15 @@ async fn run_client(
                 }
             },
             _=read_workers.join_next(),if !read_workers.is_empty()=> {},
-            _=workers.join_next(),if !workers.is_empty()=> {},
+            _=workers.join_next(),if !workers.is_empty()=> {
+                // The slot a stale shown result waited for is free again.
+                if management.refresh_pending()
+                    && let Ok(permit) = command_slots.clone().try_acquire_owned()
+                    && let Some(shown) = management.take_refresh()
+                {
+                    dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language, shown);
+                }
+            },
             _=send_workers.join_next(),if !send_workers.is_empty()=> {},
         }
     }

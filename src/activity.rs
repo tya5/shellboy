@@ -212,3 +212,12 @@ mod tests {
         );
     }
 }
+
+/// Counts recorded by the failed attempt before a finite retry wait.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct AutomaticRetrySnapshot {
+    pub number: u64,
+    pub limit: u64,
+    pub delay_ms: u64,
+    pub partial_response_discarded: bool,
+}
