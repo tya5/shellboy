@@ -146,13 +146,52 @@ impl ClipboardBackend for ClipboardAdapter {
     }
 }
 /// Only the post-commit projection is disposable; accepted sends are not.
+/// `None` means shutdown released it; a failed projection is returned, not dropped.
 async fn post_commit_projection<T>(
     stop: &CancellationToken,
     projection: impl std::future::Future<Output = Result<T, ApiError>>,
-) -> Option<T> {
+) -> Option<Result<T, ApiError>> {
     tokio::select! { biased;
         _ = stop.cancelled() => None,
-        result = projection => result.ok(),
+        result = projection => Some(result),
+    }
+}
+
+/// Install the saved projection, or fall back to the pending mark and report why.
+async fn saved_projection(
+    updates: &(impl UpdateTarget + ?Sized),
+    projection: Option<Result<Box<UiUpdate>, ApiError>>,
+    thread: Option<String>,
+    draft_id: String,
+    revision: u64,
+    generation: u64,
+) {
+    match projection {
+        Some(Ok(projection)) => update(updates, *projection).await,
+        other => {
+            if let Some(thread_id) = thread.clone() {
+                update(
+                    updates,
+                    UiUpdate::SavedMessagePending {
+                        draft_id,
+                        revision,
+                        generation,
+                        thread_id,
+                    },
+                )
+                .await;
+            }
+            if let Some(Err(error)) = other {
+                update(
+                    updates,
+                    UiUpdate::Status {
+                        thread_id: thread,
+                        text: crate::config_setup::tui_error(&error),
+                    },
+                )
+                .await;
+            }
+        }
     }
 }
 
@@ -526,7 +565,7 @@ enum BackgroundResult {
     },
     Sent {
         generation: u64,
-        projection: Option<Box<UiUpdate>>,
+        projection: Option<Result<Box<UiUpdate>, ApiError>>,
         draft_id: String,
         revision: u64,
         attachments: HashSet<String>,
@@ -1675,7 +1714,7 @@ async fn run_client(
                             };
                             let _ = sender
                                 .send(BackgroundResult::Sent {
-                                    generation, projection: projection.map(Box::new),
+                                    generation, projection: projection.map(|result| result.map(Box::new)),
                                     draft_id,
                                     revision,
                                     attachments: ids,
@@ -2289,7 +2328,7 @@ async fn run_client(
                             };
                             let _ = sender
                                 .send(BackgroundResult::Sent {
-                                    generation, projection: projection.map(Box::new),
+                                    generation, projection: projection.map(|result| result.map(Box::new)),
                                     draft_id,
                                     revision,
                                     attachments: ids,
@@ -3455,11 +3494,7 @@ async fn run_client(
                             .get("thread_id")
                             .and_then(Value::as_str)
                             .map(str::to_owned);
-                        if let Some(projection)=projection {
-                            update(&updates,*projection).await;
-                        } else {
-                            if let Some(thread_id)=thread.clone() {update(&updates,UiUpdate::SavedMessagePending {draft_id:draft_id.clone(),revision,generation,thread_id}).await;}
-                        }
+                        Box::pin(saved_projection(&updates,projection,thread.clone(),draft_id.clone(),revision,generation)).await;
                         if let Some(node_id) = value.get("message_id").and_then(Value::as_str) {
                             update(
                                 &updates,

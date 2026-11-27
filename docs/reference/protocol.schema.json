@@ -4436,18 +4436,12 @@
     "HistoryDisplaySelection": {
       "additionalProperties": false,
       "properties": {
-        "revision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
         "thread_id": {
           "type": "string"
         }
       },
       "required": [
-        "thread_id",
-        "revision"
+        "thread_id"
       ],
       "type": "object"
     },

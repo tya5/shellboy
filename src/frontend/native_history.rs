@@ -57,9 +57,9 @@ impl Owner<'_> {
         if expected_revision.is_some_and(|revision| window.revision != revision) {
             return Err(source_changed());
         }
+        let revision = window.revision;
         let selection = HistoryDisplaySelection {
             thread_id: window.thread_id,
-            revision: window.revision,
         };
         // Hydrate only the kept contiguous part; the observation is unchanged.
         let kept = keep(&window.items);
@@ -87,7 +87,7 @@ impl Owner<'_> {
             nodes.push(SelectedNode { source, display });
         }
         Ok(SelectedWindow {
-            revision: selection.revision,
+            revision,
             total: window.total,
             observation: window.observation.take().ok_or_else(invalid_response)?,
             nodes,
@@ -97,7 +97,7 @@ impl Owner<'_> {
     /// One positioned node by ID, plus the selected window's facts for it. A
     /// received response is never on a path: its observation is the selected
     /// tail's, which orders the install but has no facts for it. Any other
-    /// node must still be selected at the same source revision.
+    /// node must still be on the selected path.
     pub(super) async fn node(
         &self,
         thread_id: &str,
@@ -515,7 +515,6 @@ mod tests {
         assert_eq!(observed.total, 1);
         let selected = HistoryDisplaySelection {
             thread_id: observed.thread_id,
-            revision: observed.revision,
         };
         let extent = &window.nodes[0].display;
         assert_eq!(extent.text, text);
@@ -570,10 +569,11 @@ mod tests {
             })
             .await
             .unwrap();
-        let stale = owner
+        // An append does not displace an earlier node from the selected path.
+        owner
             .display(node, Some(selected.clone()), HistoryDisplayPosition::Tail)
-            .await;
-        assert!(matches!(stale, Err(error) if error.code == ErrorCode::CursorExpired));
+            .await
+            .unwrap();
         let wrong_owner = Owner {
             data_dir: &data_dir,
             instance: "different-instance",

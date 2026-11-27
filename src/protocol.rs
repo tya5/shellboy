@@ -1458,10 +1458,7 @@ pub enum HistoryDisplayPosition {
     Absolute { offset: u64 },
     FromEnd { offset: u64 },
 }
-args!(HistoryDisplaySelection {
-    thread_id: String,
-    revision: u64
-});
+args!(HistoryDisplaySelection { thread_id: String });
 args!(HistoryDisplayRead {
     position: HistoryDisplayPosition,
     #[serde(default, skip_serializing_if = "Option::is_none")]

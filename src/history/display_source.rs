@@ -3,7 +3,7 @@ use crate::protocol::{
     ApiError, ErrorCode, HistoryDisplayPage, HistoryDisplayPosition, HistoryDisplayRange,
     HistoryDisplayRead, HistoryReadArgs, MAX_BODY_BYTES,
 };
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde_json::Value;
 
 /// Canonical history text plus visible reasoning ranges; opaque continuations
@@ -174,16 +174,15 @@ pub(super) fn read_page(
 ) -> Result<(String, HistoryDisplayPage, usize, usize), ApiError> {
     let expired = || ApiError::new(ErrorCode::CursorExpired, "Display source selection changed");
     if let Some(selection) = &display.selection {
-        let actual: Option<i64> = db
+        let selected: bool = db
             .query_row(
-                "SELECT t.selection_revision FROM thread t JOIN thread_path p ON p.thread_id=t.id
-             WHERE t.id=?1 AND p.node_id=?2 AND t.deleted_at IS NULL",
+                "SELECT EXISTS(SELECT 1 FROM thread t JOIN thread_path p ON p.thread_id=t.id
+                 WHERE t.id=?1 AND p.node_id=?2 AND t.deleted_at IS NULL)",
                 rusqlite::params![selection.thread_id, args.node_id],
                 |row| row.get(0),
             )
-            .optional()
             .map_err(super::sql_error)?;
-        if actual.and_then(|revision| u64::try_from(revision).ok()) != Some(selection.revision) {
+        if !selected {
             return Err(expired());
         }
     }

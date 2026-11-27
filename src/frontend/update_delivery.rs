@@ -1214,13 +1214,13 @@ mod stalled_send_projection_tests {
         stop.cancel();
         assert_eq!(projection.now_or_never(), Some(None));
         let polled = std::sync::atomic::AtomicBool::new(false);
-        assert_eq!(
+        assert!(
             post_commit_projection(&stop, async {
                 polled.store(true, Ordering::SeqCst);
                 Ok::<_, ApiError>(())
             })
-            .await,
-            None
+            .await
+            .is_none()
         );
         assert!(!polled.load(Ordering::SeqCst));
     }
