@@ -188,8 +188,8 @@ raises the existing floor, so an older cursor gets `resync_required`.
 
 Owner notifications that concern one Thread are now ordinary `changes`
 entries for it. A runtime receipt's reservation and settlement are announced
-through the matching mark (`storage.collect`: retention; `config.set` and
-credentials: config; index operations: index) or through its target's Thread.
+through its target's Thread; the marks are recorded only by the writer at the
+actual change.
 No operation, field or capability is added for owner state.
 
 ## Index coverage window (unit 4d slice 4)

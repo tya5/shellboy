@@ -80,6 +80,7 @@ impl Control {
         caller: Option<&Origin>,
     ) -> Result<Value, ApiError> {
         let config = self.store.config.clone();
+        let change_clock = self.change_clock.clone();
         let connection = args.connection.clone();
         let mut result = self
             .credential_write(move |config_path| {
@@ -95,6 +96,8 @@ impl Control {
                 let path = credential_store::path_beside(config_path);
                 let outcome = credential_store::set(&path, &args.connection, &args.value)?;
                 config.stored_keys.set(&args.connection, true);
+                // Publish under the write guard even if the caller has stopped waiting.
+                change_clock.record_config_changed();
                 let source = known.key_source(env_value, true);
                 Ok(crate::protocol::CredentialsSetResult {
                     connection: args.connection,
@@ -123,12 +126,16 @@ impl Control {
         caller: Option<&Origin>,
     ) -> Result<Value, ApiError> {
         let config = self.store.config.clone();
+        let change_clock = self.change_clock.clone();
         let connection = args.connection.clone();
         let (mut result, cleared) = self
             .credential_write(move |config_path| {
                 let path = credential_store::path_beside(config_path);
                 let outcome = credential_store::clear(&path, &args.connection)?;
                 config.stored_keys.set(&args.connection, false);
+                if outcome.written {
+                    change_clock.record_config_changed();
+                }
                 // A removed or unknown connection is still cleaned up; its source is then none.
                 let source = known_connection(&config, config_path, &args.connection)
                     .map_or(KeySource::None, |known| known.key_source(env_value, false));
