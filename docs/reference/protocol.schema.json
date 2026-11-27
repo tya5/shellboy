@@ -1221,6 +1221,54 @@
               "$ref": "#/definitions/ServiceTarget"
             },
             "command": {
+              "const": "service.get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceSetArgs"
+            },
+            "command": {
+              "const": "service.set",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceEndpointArgs"
+            },
+            "command": {
+              "const": "service.endpoint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceTarget"
+            },
+            "command": {
               "const": "service.start",
               "type": "string"
             }
@@ -8277,6 +8325,93 @@
               "$ref": "#/definitions/ServiceTarget"
             },
             "command": {
+              "const": "service.get",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceSetArgs"
+            },
+            "command": {
+              "const": "service.set",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceEndpointArgs"
+            },
+            "command": {
+              "const": "service.endpoint",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ServiceTarget"
+            },
+            "command": {
               "const": "service.start",
               "type": "string"
             },
@@ -10517,6 +10652,12 @@
             "null"
           ]
         },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "thread_id": {
           "type": [
             "string",
@@ -10526,6 +10667,46 @@
       },
       "required": [
         "command"
+      ],
+      "type": "object"
+    },
+    "ServiceEndpointArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ServiceSetArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "service_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "service_id",
+        "name"
       ],
       "type": "object"
     },
@@ -16000,6 +16181,29 @@
     "schedule.list": true,
     "schedule.remove": true,
     "schedule.set": true,
+    "service.endpoint": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "port",
+        "token"
+      ],
+      "title": "ServiceEndpoint",
+      "type": "object"
+    },
+    "service.get": true,
+    "service.set": true,
     "shell.background": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
