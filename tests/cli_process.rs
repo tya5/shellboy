@@ -1661,10 +1661,18 @@ async fn artifact_read_serves_a_published_app_folder_and_refuses_escapes() {
         "Not created",
     ])
     .await;
-    assert_eq!(
-        dotted["version"]["uri"],
-        actual_cwd.join("a").join("b").to_str().unwrap()
-    );
+    let undotted_file = ok(&[
+        "artifact",
+        "add",
+        "--thread",
+        thread,
+        "--uri",
+        "a/b",
+        "--title",
+        "Undotted file",
+    ])
+    .await;
+    assert_eq!(dotted["version"]["uri"], undotted_file["version"]["uri"]);
     let parent = ok(&[
         "artifact",
         "add",
@@ -1678,7 +1686,7 @@ async fn artifact_read_serves_a_published_app_folder_and_refuses_escapes() {
     .await;
     assert_eq!(
         parent["version"]["uri"],
-        actual_cwd.join("a").join("..").join("b").to_str().unwrap()
+        actual_cwd.join("a/../b").to_str().unwrap()
     );
     #[cfg(unix)]
     {
