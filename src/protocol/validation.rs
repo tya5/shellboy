@@ -53,6 +53,20 @@ impl ModelListArgs {
     }
 }
 
+fn service_name(name: &str) -> Result<(), ApiError> {
+    if (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        Ok(())
+    } else {
+        Err(invalid(
+            "Service name must contain 1 to 64 lowercase ASCII letters, digits or hyphens",
+        ))
+    }
+}
+
 fn validate_recipient_name(name: &str) -> Result<(), ApiError> {
     nonempty(name, "recipient name")?;
     if name.len() > 256 {
@@ -978,11 +992,24 @@ impl Command {
                 }
                 Ok(())
             }
-            Self::ServiceAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
-            Self::ServiceList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
-            Self::ServiceStart(a) | Self::ServiceStop(a) | Self::ServiceRemove(a) => {
-                nonempty(&a.service_id, "service_id")
+            Self::ServiceAdd(a) => {
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                a.name.as_deref().map_or(Ok(()), service_name)
             }
+            Self::ServiceSet(a) => {
+                nonempty(&a.service_id, "service_id")?;
+                if a.name.is_empty() {
+                    Ok(())
+                } else {
+                    service_name(&a.name)
+                }
+            }
+            Self::ServiceList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::ServiceStart(a)
+            | Self::ServiceStop(a)
+            | Self::ServiceRemove(a)
+            | Self::ServiceGet(a)
+            | Self::ServiceEndpoint(a) => nonempty(&a.service_id, "service_id"),
             Self::ScheduleAdd(a) => {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
                 ScheduleNotify::saved(&a.notify).map(drop)

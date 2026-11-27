@@ -273,6 +273,7 @@ async fn recurring_management_mutations_use_selected_listener_without_fallback()
             command: "echo schedule".into(),
         }),
         Command::ServiceAdd(ServiceAddArgs {
+            name: None,
             thread_id: Some("thread".into()),
             cwd: None,
             description: None,
@@ -351,6 +352,7 @@ async fn recurring_management_reads_are_instance_fenced_without_fallback() {
         ),
         (
             Command::ServiceAdd(ServiceAddArgs {
+                name: None,
                 thread_id: target().thread_id,
                 cwd: None,
                 description: None,

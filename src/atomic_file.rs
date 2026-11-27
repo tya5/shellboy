@@ -22,6 +22,11 @@ pub(crate) fn create_new(path: &Path, private: bool) -> io::Result<File> {
 }
 
 #[cfg(windows)]
+pub(crate) fn has_private_acl(file: &File) -> io::Result<bool> {
+    windows::private_acl(file)
+}
+
+#[cfg(windows)]
 pub(crate) fn privacy_warning(path: &Path) -> Option<&'static str> {
     windows::warning(path)
 }

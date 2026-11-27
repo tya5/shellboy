@@ -84,6 +84,9 @@ fn operation_result_schemas(
     result!("artifact.get", ArtifactGetResult);
     result!("artifact.remove", Accepted);
     result!("artifact.read", ArtifactContent);
+    opaque!("service.get");
+    opaque!("service.set");
+    result!("service.endpoint", ServiceEndpoint);
     opaque!("schedule.add");
     opaque!("schedule.list");
     opaque!("schedule.set");
@@ -1017,7 +1020,18 @@ args!(ThreadTagArgs {
 });
 // Distinct tag names in byte order, paged; no member counts.
 args!(ServiceTarget { service_id: String });
-args!(ServiceAddArgs { thread_id: Option<String>, cwd: Option<String>, description: Option<String>, command: String });
+args!(ServiceSetArgs {
+    service_id: String,
+    name: String
+});
+
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceEndpoint {
+    pub port: u16,
+    pub token: String,
+}
+args!(ServiceAddArgs { thread_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] name: Option<String>, cwd: Option<String>, description: Option<String>, command: String });
 args!(ScheduleTarget {
     schedule_id: String
 });
@@ -1849,6 +1863,12 @@ pub enum Command {
     ServiceAdd(ServiceAddArgs),
     #[serde(rename = "service.list")]
     ServiceList(ThreadTarget),
+    #[serde(rename = "service.get")]
+    ServiceGet(ServiceTarget),
+    #[serde(rename = "service.set")]
+    ServiceSet(ServiceSetArgs),
+    #[serde(rename = "service.endpoint")]
+    ServiceEndpoint(ServiceTarget),
     #[serde(rename = "service.start")]
     ServiceStart(ServiceTarget),
     #[serde(rename = "service.stop")]

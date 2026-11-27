@@ -1409,6 +1409,10 @@ impl Store {
                     .mark(crate::maintenance::Work::Schedule);
                 Ok(result)
             }
+            Command::ServiceGet(args) => {
+                MutationResult::value(super::schedule::get_service(tx, &args.service_id)?)
+            }
+            Command::ServiceSet(args) => super::schedule::set_service_name(tx, args),
             Command::ServiceList(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 MutationResult::value(super::schedule::list(tx, &thread, true)?)

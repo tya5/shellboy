@@ -56,6 +56,9 @@ impl Command {
             Self::ArtifactRead(_) => ("artifact.read", CommandRoute::Runtime),
             Self::ServiceAdd(_) => ("service.add", CommandRoute::Database),
             Self::ServiceList(_) => ("service.list", CommandRoute::Database),
+            Self::ServiceGet(_) => ("service.get", CommandRoute::Database),
+            Self::ServiceSet(_) => ("service.set", CommandRoute::Database),
+            Self::ServiceEndpoint(_) => ("service.endpoint", CommandRoute::Runtime),
             Self::ServiceStart(_) => ("service.start", CommandRoute::Database),
             Self::ServiceStop(_) => ("service.stop", CommandRoute::Runtime),
             Self::ServiceRemove(_) => ("service.remove", CommandRoute::Runtime),
@@ -149,6 +152,7 @@ impl Command {
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
             | Self::ScheduleRemove(_)
+            | Self::ServiceSet(_)
             | Self::ServiceAdd(_)
             | Self::ServiceStart(_)
             | Self::ServiceStop(_)
@@ -156,6 +160,7 @@ impl Command {
             Self::Status(a) => a.memory,
             Self::ModelList(_)
             | Self::ArtifactRead(_)
+            | Self::ServiceEndpoint(_)
             | Self::IndexPreview(_)
             | Self::HistorySearch(_)
             | Self::ShellGet(_)
@@ -181,6 +186,7 @@ impl Command {
             | Self::ArtifactGet(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
+            | Self::ServiceGet(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
             | Self::CompactList(_)
@@ -249,6 +255,7 @@ impl Command {
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
             | Self::ScheduleRemove(_)
+            | Self::ServiceSet(_)
             | Self::ServiceAdd(_)
             | Self::ServiceStart(_)
             | Self::ServiceStop(_)
@@ -265,8 +272,10 @@ impl Command {
             | Self::ArtifactList(_)
             | Self::ArtifactGet(_)
             | Self::ArtifactRead(_)
+            | Self::ServiceEndpoint(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
+            | Self::ServiceGet(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
             | Self::CompactList(_)
@@ -346,6 +355,7 @@ impl Command {
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
             | Self::ScheduleRemove(_)
+            | Self::ServiceSet(_)
             | Self::ServiceAdd(_)
             | Self::ServiceStart(_)
             | Self::ServiceStop(_)
@@ -381,8 +391,10 @@ impl Command {
             | Self::ArtifactList(_)
             | Self::ArtifactGet(_)
             | Self::ArtifactRead(_)
+            | Self::ServiceEndpoint(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
+            | Self::ServiceGet(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
             | Self::CompactList(_)
@@ -445,6 +457,7 @@ impl Command {
             | Self::ScheduleEnable(_)
             | Self::ScheduleDisable(_)
             | Self::ScheduleRemove(_)
+            | Self::ServiceSet(_)
             | Self::ServiceAdd(_)
             | Self::ServiceStart(_)
             | Self::ServiceStop(_)
@@ -457,8 +470,10 @@ impl Command {
             | Self::ArtifactList(_)
             | Self::ArtifactGet(_)
             | Self::ArtifactRead(_)
+            | Self::ServiceEndpoint(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
+            | Self::ServiceGet(_)
             | Self::ThreadTags(_)
             | Self::ThreadCwds(_)
             | Self::CompactList(_)

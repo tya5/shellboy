@@ -719,7 +719,7 @@ mod tests {
                 let collector = control.clone();
                 let task = tokio::spawn(async move {
                     super::super::driver::shell_output::collect_shell(&collector,
-                        &super::super::driver::shell_output::ShellOwner::Run {
+                        &mut super::super::driver::shell_output::ShellOwner::Run {
                             thread: thread.into(), run: run.into(), turn: turn.into(),
                         }, id, shell).await.unwrap()
                 });

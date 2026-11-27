@@ -620,6 +620,9 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ArtifactRemove => local!(language, "成果物 · 削除", "Artifact · Remove"),
         OperationId::ArtifactRead => local!(language, "成果物 · 内容", "Artifact · Read"),
         OperationId::ServiceAdd => local!(language, "サービス · 追加", "Service · Add"),
+        OperationId::ServiceGet => local!(language, "サービス · 参照", "Service · Get"),
+        OperationId::ServiceSet => local!(language, "サービス · 名前変更", "Service · Set"),
+        OperationId::ServiceEndpoint => local!(language, "サービス · 接続先", "Service · Endpoint"),
         OperationId::ServiceList => local!(language, "サービス · 一覧", "Service · List"),
         OperationId::ServiceStart => local!(language, "サービス · 起動", "Service · Start"),
         OperationId::ServiceStop => local!(language, "サービス · 停止", "Service · Stop"),
@@ -874,6 +877,21 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "サービスを保存して起動します。",
             "Save and start a service."
+        ),
+        OperationId::ServiceGet => local!(
+            language,
+            "保存されたサービスを表示します。",
+            "Inspect a saved service."
+        ),
+        OperationId::ServiceSet => local!(
+            language,
+            "サービスの名前を変更します。",
+            "Change or clear the service name."
+        ),
+        OperationId::ServiceEndpoint => local!(
+            language,
+            "サービスの現在の接続先とトークンを読みます。",
+            "Read the current service endpoint and token."
         ),
         OperationId::ServiceList => local!(
             language,
@@ -1275,6 +1293,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Cron => local!(language, "cron式", "Cron expression"),
         FieldId::At => local!(language, "日時", "Run at"),
         FieldId::Delay => local!(language, "待ち時間", "Delay"),
+        FieldId::ServiceName => local!(language, "サービス名", "Service name"),
         FieldId::ScheduleDescription => local!(language, "説明文", "Description"),
         FieldId::ScheduleNotify => local!(language, "通知", "Notices"),
         FieldId::ScheduleCommand => local!(language, "コマンド", "Command"),
@@ -1689,6 +1708,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "登録からの相対時間です。",
             "Set a delay from registration."
+        ),
+        FieldId::ServiceName => local!(
+            language,
+            "Thread 内で一意の名前です。",
+            "An exact name unique within the Thread."
         ),
         FieldId::ScheduleDescription => local!(
             language,

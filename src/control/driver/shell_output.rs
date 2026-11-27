@@ -93,13 +93,14 @@ pub(in crate::control) enum ShellOwner {
     },
     Schedule {
         thread: String,
+        endpoint: Option<Arc<super::super::service_endpoint::Publication>>,
     },
 }
 
 impl ShellOwner {
     fn thread(&self) -> &str {
         match self {
-            Self::Run { thread, .. } | Self::Schedule { thread } => thread,
+            Self::Run { thread, .. } | Self::Schedule { thread, .. } => thread,
         }
     }
 
@@ -136,6 +137,7 @@ pub(in crate::control) fn cli_environment(
         ("SHELLBOY_TURN_ID".into(), String::new()),
         ("SHELLBOY_EXECUTION_ID".into(), String::new()),
         ("SHELLBOY_ORIGIN_TOKEN".into(), String::new()),
+        (super::super::service_endpoint::ENV.into(), String::new()),
     ]);
     #[cfg(unix)]
     {
@@ -176,7 +178,8 @@ pub(in crate::control) async fn install_shell(
         )
         .await;
     let collector = control.clone();
-    let current = owner.clone();
+    let thread = owner.thread().to_owned();
+    let mut current = owner;
     let execution_copy = execution.to_owned();
     let (run_done, done_receive) = if let Some((slot, token, _)) = &run_observer {
         let (send, receive) = tokio::sync::oneshot::channel();
@@ -188,7 +191,7 @@ pub(in crate::control) async fn install_shell(
         (None, None)
     };
     tokio::spawn(async move {
-        let result = collect_shell(&collector, &current, &execution_copy, spawned).await;
+        let result = collect_shell(&collector, &mut current, &execution_copy, spawned).await;
         collector.live.remove_shell(&execution_copy).await;
         if let Err(error) = &result {
             if error.is_storage_failure() {
@@ -240,13 +243,13 @@ pub(in crate::control) async fn install_shell(
             .keyed
             .publish([Key::Foreground(execution.into())]);
     }
-    control.changed(owner.thread());
+    control.changed(&thread);
     Ok((done_receive, release))
 }
 
 pub(in crate::control) async fn collect_shell(
     control: &Arc<Control>,
-    owner: &ShellOwner,
+    owner: &mut ShellOwner,
     execution: &str,
     mut shell: crate::shell::ShellExecution,
 ) -> Result<ShellCompletion, ApiError> {
@@ -354,6 +357,9 @@ pub(in crate::control) async fn collect_shell(
             .await
             .map_err(|_| invalid("Shell completion unavailable"))?;
     };
+    if let ShellOwner::Schedule { endpoint, .. } = owner {
+        drop(endpoint.take());
+    }
     // Even after a save failure, retain the shell until its supervisor has
     // terminated and reaped the process and drained its output pumps.
     if let Some(error) = save_failure {

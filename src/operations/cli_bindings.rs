@@ -74,6 +74,7 @@ const MEANINGS: &[Meaning] = &[
         &["service", "add"],
         &[
             ("thread_id", FieldId::Thread),
+            ("name", FieldId::ServiceName),
             ("cwd", FieldId::Cwd),
             ("description", FieldId::ScheduleDescription),
             ("command", FieldId::ScheduleCommand),
@@ -84,6 +85,27 @@ const MEANINGS: &[Meaning] = &[
         OperationId::ServiceList,
         &["service", "list"],
         &[("thread_id", FieldId::Thread)],
+        None,
+    ),
+    (
+        OperationId::ServiceGet,
+        &["service", "get"],
+        &[("service_id", FieldId::Service)],
+        None,
+    ),
+    (
+        OperationId::ServiceSet,
+        &["service", "set"],
+        &[
+            ("service_id", FieldId::Service),
+            ("name", FieldId::ServiceName),
+        ],
+        None,
+    ),
+    (
+        OperationId::ServiceEndpoint,
+        &["service", "endpoint"],
+        &[("service_id", FieldId::Service)],
         None,
     ),
     (

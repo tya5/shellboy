@@ -60,7 +60,7 @@ named_jobs! {
     DraftImage => draft_image, DraftSubmit => draft_submit, DraftSave => draft_save, DraftGet => draft_get, DraftRestore => draft_restore, OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     ArtifactAdd => artifact_add, ArtifactUpdate => artifact_update, ArtifactList => artifact_list, ArtifactGet => artifact_get, ArtifactRemove => artifact_remove, ArtifactRead => artifact_read,
-    ServiceAdd => service_add, ServiceList => service_list, ServiceStart => service_start, ServiceStop => service_stop, ServiceRemove => service_remove,
+    ServiceAdd => service_add, ServiceList => service_list, ServiceGet => service_get, ServiceSet => service_set, ServiceEndpoint => service_endpoint, ServiceStart => service_start, ServiceStop => service_stop, ServiceRemove => service_remove,
     ScheduleAdd => schedule_add, ScheduleSet => schedule_set, ScheduleEnable => schedule_enable, ScheduleDisable => schedule_disable, ScheduleRemove => schedule_remove,  ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadImport => thread_import, ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete, ThreadDeleteSet => thread_delete_set,
@@ -117,6 +117,7 @@ impl Kind {
             | Kind::ArtifactList
             | Kind::ArtifactGet
             | Kind::ScheduleList
+            | Kind::ServiceGet
             | Kind::ServiceList
             | Kind::ThreadTags
             | Kind::ThreadCwds
@@ -149,6 +150,7 @@ impl Kind {
             | Kind::ArtifactAdd
             | Kind::ArtifactUpdate
             | Kind::ArtifactRemove
+            | Kind::ServiceSet
             | Kind::ServiceAdd
             | Kind::ServiceStart
             | Kind::ScheduleAdd
@@ -183,6 +185,7 @@ impl Kind {
             | Kind::ScheduleRemove
             | Kind::ThreadDeleteSet
             | Kind::ModelList
+            | Kind::ServiceEndpoint
             | Kind::ArtifactRead
             | Kind::Wait
             | Kind::EventsWait
@@ -246,6 +249,9 @@ mod tests {
         let service_kinds = [
             (Kind::ServiceAdd, MutationDeclaredBound),
             (Kind::ServiceList, PureRead),
+            (Kind::ServiceGet, PureRead),
+            (Kind::ServiceSet, MutationDeclaredBound),
+            (Kind::ServiceEndpoint, Runtime),
             (Kind::ServiceStart, MutationDeclaredBound),
             (Kind::ServiceStop, Runtime),
             (Kind::ServiceRemove, Runtime),

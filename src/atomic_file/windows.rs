@@ -117,7 +117,7 @@ pub(super) fn diagnose_rename_error(target: &Path, error: io::Error) -> io::Erro
 }
 
 pub(super) fn warning(path: &Path) -> Option<&'static str> {
-    match private_acl(path) {
+    match File::open(path).and_then(|file| private_acl(&file)) {
         Ok(true) => None,
         Ok(false) => Some(
             "File permissions may grant access beyond its owner; use a private location or tighten its Windows ACL",
@@ -128,8 +128,7 @@ pub(super) fn warning(path: &Path) -> Option<&'static str> {
     }
 }
 
-fn private_acl(path: &Path) -> io::Result<bool> {
-    let file = File::open(path)?;
+pub(super) fn private_acl(file: &File) -> io::Result<bool> {
     let mut descriptor = Descriptor(null_mut());
     let (mut owner, mut dacl) = (null_mut(), null_mut());
     let status = unsafe {

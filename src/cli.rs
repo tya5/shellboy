@@ -622,6 +622,9 @@ pub enum ServiceCommand {
         cwd: Option<String>,
         #[arg(long)]
         description: Option<String>,
+        /// Optional name unique in this Thread.
+        #[arg(long)]
+        name: Option<String>,
         /// A single shell command string, interpreted by the owner's configured shell.
         #[arg(long, allow_hyphen_values = true)]
         command: String,
@@ -629,6 +632,23 @@ pub enum ServiceCommand {
     List {
         #[arg(long = "thread")]
         thread_id: Option<String>,
+    },
+    /// Inspect one saved service without reading its endpoint.
+    Get {
+        #[arg(long = "service")]
+        service_id: String,
+    },
+    /// Change the name; pass an empty string to clear it.
+    Set {
+        #[arg(long = "service")]
+        service_id: String,
+        #[arg(long)]
+        name: String,
+    },
+    /// Read one live endpoint. Output contains a secret; do not log it.
+    Endpoint {
+        #[arg(long = "service")]
+        service_id: String,
     },
     Start {
         #[arg(long = "service")]
@@ -712,15 +732,26 @@ impl From<ServiceCommand> for wire::Command {
                 thread_id,
                 cwd,
                 description,
+                name,
                 command,
             } => Self::ServiceAdd(wire::ServiceAddArgs {
                 thread_id,
                 cwd,
                 description,
+                name,
                 command,
             }),
             ServiceCommand::List { thread_id } => {
                 Self::ServiceList(wire::ThreadTarget { thread_id })
+            }
+            ServiceCommand::Get { service_id } => {
+                Self::ServiceGet(wire::ServiceTarget { service_id })
+            }
+            ServiceCommand::Set { service_id, name } => {
+                Self::ServiceSet(wire::ServiceSetArgs { service_id, name })
+            }
+            ServiceCommand::Endpoint { service_id } => {
+                Self::ServiceEndpoint(wire::ServiceTarget { service_id })
             }
             ServiceCommand::Start { service_id } => {
                 Self::ServiceStart(wire::ServiceTarget { service_id })

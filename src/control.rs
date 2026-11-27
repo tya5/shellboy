@@ -15,6 +15,7 @@ pub(crate) mod pending_messages;
 mod request_admission;
 mod runtime;
 mod schedule;
+mod service_endpoint;
 pub(crate) mod submission_retention;
 mod turn_interrupt;
 mod ui_events;

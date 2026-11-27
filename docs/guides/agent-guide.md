@@ -450,6 +450,14 @@ receive a model shell Origin.
 
 For a long-running watcher, use `shellboy service add --thread THREAD --command 'my-watcher'` instead of a schedule or a background Run shell. Use `service list --thread THREAD` to inspect it and `service start --service ID`, `service stop --service ID`, or `service remove --service ID` to manage it. A service can send input with `shellboy message send --thread "$SHELLBOY_THREAD_ID" --text TEXT`. Unexpected exit or spawn failure disables the service and sends one notice from `service:<id>`; it does not restart until explicitly started.
 
+To make a service callable by name, add it with `--name NAME`. Names are
+unique within its Thread. Bind the service to loopback and write its port and a
+fresh secret token as JSON to the existing owner-only file at
+`SHELLBOY_SERVICE_ENDPOINT_FILE`. Do not print or save the token elsewhere.
+Clients use `service list --thread THREAD` to resolve the exact name in the
+app's owning Thread, then use the exact service ID for `service endpoint`.
+A lookup never starts a stopped service.
+
 To observe a particular service execution, take its latest `execution_id` from
 `service list --thread THREAD` (not the service ID). Use `shell get --execution
 EXECUTION_ID` to verify the target, then a bounded `shell_ended` wait for exit

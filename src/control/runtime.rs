@@ -337,6 +337,11 @@ impl Control {
             }
             Command::TurnInterrupt(args) => self.interrupt_turn(args.turn_id).await,
             Command::ModelList(args) => self.runtime_models(args, caller, disconnected).await,
+            Command::ServiceEndpoint(args) => encode_result(
+                super::service_endpoint::read(self, &args.service_id).await?,
+                ErrorCode::IoFailed,
+                "Cannot encode service endpoint",
+            ),
             Command::ArtifactRead(args) => encode_result(
                 crate::artifacts::read(
                     &request.operation_id,
