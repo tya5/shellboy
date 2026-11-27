@@ -9,7 +9,7 @@ mod windows;
 pub(crate) fn create_new(path: &Path, private: bool) -> io::Result<File> {
     #[cfg(windows)]
     if private {
-        return windows::private_create(path);
+        return windows::private_create(path, true);
     }
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -19,6 +19,27 @@ pub(crate) fn create_new(path: &Path, private: bool) -> io::Result<File> {
         options.mode(0o600);
     }
     options.open(path)
+}
+
+pub(crate) fn create_private_required(path: &Path) -> io::Result<File> {
+    #[cfg(windows)]
+    {
+        let file = windows::private_create(path, false)?;
+        if matches!(windows::private_acl(&file), Ok(true)) {
+            Ok(file)
+        } else {
+            drop(file);
+            let _ = std::fs::remove_file(path);
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Cannot verify private file ACL",
+            ))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        create_new(path, true)
+    }
 }
 
 #[cfg(windows)]

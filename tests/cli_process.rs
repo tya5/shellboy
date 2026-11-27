@@ -1899,14 +1899,58 @@ async fn named_service_endpoints_follow_the_exact_execution() {
             ThreadTarget,
         },
     };
-    use std::{os::unix::fs::MetadataExt, path::PathBuf};
+    use std::{
+        io::Read,
+        os::unix::{
+            ffi::OsStrExt,
+            fs::{MetadataExt, OpenOptionsExt},
+        },
+        path::PathBuf,
+    };
+    fn publication_pipe(path: &std::path::Path) -> tokio::io::unix::AsyncFd<std::fs::File> {
+        let name = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+            .unwrap();
+        // The owned, nonblocking file keeps the same descriptor until deregistration.
+        unsafe { tokio::io::unix::AsyncFd::register(file) }.unwrap()
+    }
+    async fn publication(pipe: &tokio::io::unix::AsyncFd<std::fs::File>) -> PathBuf {
+        crate::test_watchdog::watchdog("fixture publication signal", async {
+            loop {
+                let mut ready = pipe.readable().await.unwrap();
+                let mut bytes = [0; 1024];
+                if let Ok(read) = ready.try_io(|fd| fd.get_ref().read(&mut bytes)) {
+                    let line = std::str::from_utf8(&bytes[..read.unwrap()]).unwrap();
+                    return PathBuf::from(line.strip_suffix('\n').unwrap());
+                }
+            }
+        })
+        .await
+        .unwrap()
+    }
     let root = tempfile::tempdir().unwrap();
     let data = root.path().join("data");
     let config = root.path().join("config.toml");
     std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
-    let owner = DataOwner::start(Some(config), Some(data.clone()), root.path().into())
+    std::fs::create_dir_all(&data).unwrap();
+    let retired = data.join(format!(
+        "service-endpoint-{}-{}.json",
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4()
+    ));
+    let unrelated = data.join("service-endpoint-not-a-publication.json");
+    std::fs::write(&retired, b"retired publication fixture").unwrap();
+    std::fs::write(&unrelated, b"not a publication").unwrap();
+    let owner = DataOwner::start(Some(config.clone()), Some(data.clone()), root.path().into())
         .await
         .unwrap();
+    assert!(!retired.exists());
+    assert!(unrelated.is_file());
     let control = Control::new(&owner, root.path().into());
     let (send, receive) = tokio::sync::mpsc::channel(8);
     let local = LocalServer::bind(&owner, send).await.unwrap();
@@ -1929,6 +1973,9 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     };
     let first = create().await;
     let second = create().await;
+    let fifo = root.path().join("publication");
+    let pipe = publication_pipe(&fifo);
+    let fifo = fifo.to_str().unwrap().replace('\'', "'\"'\"'");
     let add = |thread: &str, name: &str, port: u16| {
         Command::ServiceAdd(ServiceAddArgs {
             thread_id: Some(thread.into()),
@@ -1936,14 +1983,17 @@ async fn named_service_endpoints_follow_the_exact_execution() {
             cwd: None,
             description: None,
             command: format!(
-                r#"file="$SHELLBOY_SERVICE_ENDPOINT_FILE"; test -f "$file" || exit 17; token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n'); printf '{{"port":{port},"token":"%s"}}' "$token" > "$file"; printf '%s\n' "$file"; exec sleep 600"#
+                r#"file="$SHELLBOY_SERVICE_ENDPOINT_FILE"; test -f "$file" || exit 17; token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n'); printf '{{"port":{port},"token":"%s"}}' "$token" > "$file"; printf '%s\n' "$file" > '{fifo}'; exec sleep 600"#
             ),
         })
     };
     let id = |result: Value| result["service_id"].as_str().unwrap().to_owned();
     let a = id(ok(add(&first, "tracker", 32101)).await);
+    let first_file = publication(&pipe).await;
     let b = id(ok(add(&second, "tracker", 32102)).await);
+    let second_file = publication(&pipe).await;
     let other = id(ok(add(&first, "other", 32103)).await);
+    let _other_file = publication(&pipe).await;
     let target = |id: &str| ServiceTarget {
         service_id: id.into(),
     };
@@ -1977,76 +2027,82 @@ async fn named_service_endpoints_follow_the_exact_execution() {
         Value::Null
     );
     assert_eq!(ok(set(&other, "renamed")).await["name"], "renamed");
-    let observe = async |thread: &str, id: &str, expected_port| {
-        crate::test_watchdog::watchdog("service publishes its private endpoint", async {
-            loop {
-                let list = ok(Command::ServiceList(ThreadTarget {
-                    thread_id: Some(thread.into()),
-                }))
-                .await;
-                let matches: Vec<_> = list["items"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .filter(|item| item["name"] == "tracker")
-                    .collect();
-                assert_eq!(matches.len(), 1);
-                assert_eq!(matches[0]["service_id"], id);
-                let tail = matches[0]["latest"]["output_tail"]
-                    .as_str()
-                    .unwrap_or_default();
-                let result = rpc(exact(id)).await;
-                if let Some(endpoint) = result.result.filter(|_| tail.ends_with('\n')) {
-                    let file = PathBuf::from(tail.trim());
-                    let metadata = std::fs::metadata(&file).unwrap();
-                    assert_eq!(metadata.mode() & 0o777, 0o600);
-                    assert_eq!(metadata.uid(), unsafe { libc::geteuid() });
-                    assert_eq!(endpoint["port"], expected_port);
-                    assert!(
-                        serde_json::from_slice::<Value>(&std::fs::read(&file).unwrap()).unwrap()
-                            == endpoint
-                    );
-                    assert!(
-                        !list
-                            .to_string()
-                            .contains(endpoint["token"].as_str().unwrap())
-                    );
-                    break (file, endpoint["token"].as_str().unwrap().to_owned());
+    let observe = async |thread: &str, id: &str, file: &std::path::Path, expected_port| {
+        // The child can signal before the owner commits the spawned transition.
+        let mut changed = control.subscribe();
+        let list =
+            crate::test_watchdog::watchdog("owner registers the signalled execution", async {
+                loop {
+                    let list = ok(Command::ServiceList(ThreadTarget {
+                        thread_id: Some(thread.into()),
+                    }))
+                    .await;
+                    let mut selected = list["items"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|item| item["name"] == "tracker");
+                    let item = selected.next().unwrap();
+                    assert!(selected.next().is_none());
+                    assert_eq!(item["service_id"], id);
+                    match item["latest"]["state"].as_str() {
+                        Some("running") => break list,
+                        Some("starting") => {
+                            changed.recv().await.unwrap();
+                        }
+                        state => panic!("unexpected fixture state: {state:?}"),
+                    }
                 }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap()
+            })
+            .await
+            .unwrap();
+        let endpoint = ok(exact(id)).await;
+        let metadata = std::fs::metadata(file).unwrap();
+        assert_eq!(metadata.mode() & 0o777, 0o600);
+        assert_eq!(metadata.uid(), unsafe { libc::geteuid() });
+        assert_eq!(endpoint["port"], expected_port);
+        assert!(
+            serde_json::from_slice::<Value>(&std::fs::read(file).unwrap()).unwrap() == endpoint
+        );
+        let token = endpoint["token"].as_str().unwrap();
+        assert!(!list.to_string().contains(token));
+        token.to_owned()
     };
-    let (first_file, first_token) = observe(&first, &a, 32101).await;
-    let (second_file, _) = observe(&second, &b, 32102).await;
+    let first_token = observe(&first, &a, &first_file, 32101).await;
+    observe(&second, &b, &second_file, 32102).await;
     assert_ne!(first_file, second_file);
+    // A contender cannot run recovery against the active owner's publications.
+    assert!(
+        DataOwner::start(Some(config), Some(data.clone()), root.path().into())
+            .await
+            .is_err()
+    );
+    assert!(first_file.is_file());
+    assert!(second_file.is_file());
     assert_eq!(ok(named(&first)).await["port"], 32101);
     assert_eq!(ok(named(&second)).await["port"], 32102);
     let binary = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\"'\"'");
     let probe = id(ok(Command::ServiceAdd(ServiceAddArgs {
         thread_id: Some(second.clone()), name: None, cwd: None, description: None,
-        command: format!(r#"test "$SHELLBOY_THREAD_ID" = '{second}' || exit 2; result=$('{binary}' service endpoint --thread '{first}' --name tracker) || exit 3; case "$result" in *32101*) echo hub-ok;; *) exit 4;; esac"#),
+        command: format!(r#"printf '%s\n' "$SHELLBOY_SERVICE_ENDPOINT_FILE" > '{fifo}'; test "$SHELLBOY_THREAD_ID" = '{second}' || exit 2; result=$('{binary}' service endpoint --thread '{first}' --name tracker) || exit 3; case "$result" in *32101*) echo hub-ok;; *) exit 4;; esac"#),
     })).await);
-    crate::test_watchdog::watchdog("Thread B reads Thread A's named endpoint", async {
-        loop {
-            let service = ok(Command::ServiceGet(target(&probe))).await;
-            if let Some("exited" | "failed" | "stopped") = service["latest"]["state"].as_str() {
-                assert_eq!(service["latest"]["exit_code"], 0);
-                assert!(
-                    service["latest"]["output_tail"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .contains("hub-ok")
-                );
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    let probe_file = publication(&pipe).await;
+    let probe_base = probe_file.file_name().unwrap().to_str().unwrap();
+    let execution = &probe_base["service-endpoint-".len() + 37..probe_base.len() - ".json".len()];
+    let wait = serde_json::from_value(serde_json::json!({"command":"wait", "args":{"conditions":[{"type":"shell_ended","execution_id":execution}],"timeout_ms":30000}})).unwrap();
+    let settled = crate::test_watchdog::watchdog("Thread B's exact shell settles", ok(wait))
+        .await
+        .unwrap();
+    assert_eq!(settled["status"], "satisfied");
+    let service = ok(Command::ServiceGet(target(&probe))).await;
+    assert_eq!(service["latest"]["execution_id"], execution);
+    assert_eq!(service["latest"]["exit_code"], 0);
+    assert!(
+        service["latest"]["output_tail"]
+            .as_str()
+            .unwrap()
+            .contains("hub-ok")
+    );
     ok(Command::ServiceStop(target(&a))).await;
     assert!(!first_file.exists());
     let stopped = rpc(exact(&a)).await.error.unwrap();
@@ -2054,7 +2110,8 @@ async fn named_service_endpoints_follow_the_exact_execution() {
     assert_eq!(stopped.details.unwrap()["reason"], "service_not_running");
     assert_eq!(ok(exact(&b)).await["port"], 32102);
     ok(Command::ServiceStart(target(&a))).await;
-    let (restarted, restarted_token) = observe(&first, &a, 32101).await;
+    let restarted = publication(&pipe).await;
+    let restarted_token = observe(&first, &a, &restarted, 32101).await;
     assert_ne!(first_file, restarted);
     assert!(first_token != restarted_token);
     ok(Command::ServiceRemove(target(&a))).await;

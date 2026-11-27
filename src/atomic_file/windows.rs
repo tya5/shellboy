@@ -40,7 +40,7 @@ impl Drop for Descriptor {
     }
 }
 
-pub(super) fn private_create(path: &Path) -> io::Result<File> {
+pub(super) fn private_create(path: &Path, allow_no_acl: bool) -> io::Result<File> {
     // Protected DACL: the owner (including future ownership changes) and LocalSystem.
     let sddl: Vec<u16> = "D:P(A;;FA;;;OW)(A;;FA;;;SY)\0".encode_utf16().collect();
     let mut descriptor = Descriptor(null_mut());
@@ -84,9 +84,10 @@ pub(super) fn private_create(path: &Path) -> io::Result<File> {
         return Ok(unsafe { File::from_raw_handle(handle) });
     }
     let error = io::Error::last_os_error();
-    if error
-        .raw_os_error()
-        .is_some_and(|e| e == ERROR_NOT_SUPPORTED as i32 || e == ERROR_INVALID_FUNCTION as i32)
+    if allow_no_acl
+        && error
+            .raw_os_error()
+            .is_some_and(|e| e == ERROR_NOT_SUPPORTED as i32 || e == ERROR_INVALID_FUNCTION as i32)
     {
         // Filesystems without ACLs remain usable; the caller reports unverifiable privacy.
         return File::options().write(true).create_new(true).open(path);
