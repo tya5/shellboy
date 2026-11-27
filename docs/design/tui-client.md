@@ -157,7 +157,10 @@ This one wait is the client's only owner wake (4d slice 3):
 - `output` entries carry the saved `output_at` (the same time `shell.get`
   reports as `last_output_at`); the live work output age is computed from it.
 - An owner notification for one Thread arrives as an ordinary change for it.
-  The F8 management views have no wake of their own until slice 5.
+- `config_changed`, `index_changed` and `retention_changed` read the shown F8
+  `config.get`, `index.status` or `storage.status` result again with the
+  command that made it (a gap rereads whichever is shown). It takes one command
+  slot and no timer; a full slot leaves the result as shown.
 - A baseline or gap rereads everything the marks and output entries cover.
 
 No worker or queued event buffer is added; dropping the pending wait drops its
@@ -265,8 +268,9 @@ Management (slice 4, done): F8 shows the result of the command it ran, read
 once from the owner, as the CLI prints it. The in-process substitutions and
 the saved-inspection observation (its readers, refresh tickets, retained and
 list re-observations, and the Storage physical sample) are deleted; there is
-no F8 refresh on saved changes, so F8 no longer consumes the index
-saved-change or management owner-state wakes. The index coverage window is
+F8 refreshes a shown `config.get`, `index.status` or `storage.status` result
+from the events.wait marks only, so it consumes no index saved-change or
+management owner-state wake. The index coverage window is
 the owner's `index.status` `coverage` opt-in (`IndexStatus.coverage_window`,
 `selection` echo and `next_cursor`). F8 Storage shows `storage.status`; the
 UI-only history/raw/index byte split, temporary-directory bytes, per-figure

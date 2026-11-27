@@ -627,7 +627,7 @@ async fn load_edit_request(
         let payload:Value=serde_json::from_str(&body).map_err(|_|crate::storage::StorageError::Schema("Stored user request is malformed".into()))?;
         if payload.get("role").and_then(Value::as_str)!=Some("user"){return Ok(Err(ApiError::new(ErrorCode::InvalidArgument,"Only a saved user request can be edited")));}
         let attachments=tx.prepare("SELECT a.id,a.absolute_path,a.input_kind,s.state FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?1 WHERE a.source_node_id=?2 ORDER BY s.selected_order,a.id")?.query_map(rusqlite::params![thread,node],|r|Ok(UiAttachment{id:r.get(0)?,path:PathBuf::from(r.get::<_,String>(1)?),kind:r.get(2)?,state:r.get::<_,Option<String>>(3)?.unwrap_or_else(||"excluded".into()),position:None}))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let (text,attachments)=match crate::ui::draft::restore(&payload,attachments,true){Ok(value)=>value,Err(error)=>return Ok(Err(error))};
+        let (text,attachments)=match crate::draft::restore(&payload,attachments,true){Ok(value)=>value,Err(error)=>return Ok(Err(error))};
         if text.len()as u64>limit{return Ok(Err(ApiError::new(ErrorCode::InputLimit,"Original request exceeds the draft byte limit; increase limits.draft_bytes before editing")));}
         let run_id=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[thread],|r|r.get::<_,String>(0)).optional()?;
         tx.commit()?;Ok(Ok(EditableRequest{text,attachments,run_id}))
@@ -725,7 +725,7 @@ async fn restore_snapshot(
         let Some(Some(body))=body else{return Ok(Err(ApiError::new(ErrorCode::OutputExpired,"Saved request source expired; its pending snapshot cannot be reconstructed")));};
         let payload:Value=serde_json::from_str(&body).map_err(|_|crate::storage::StorageError::Schema("Saved request is malformed".into()))?;
         let attachments=db.prepare("SELECT id,absolute_path,input_kind FROM attachment_ref WHERE source_node_id=?1 ORDER BY id")?.query_map([node_id],|r|Ok(UiAttachment{id:r.get(0)?,path:PathBuf::from(r.get::<_,String>(1)?),kind:r.get(2)?,state:"saved source; revalidated on send".into(),position:None}))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let (text,attachments)=match crate::ui::draft::restore(&payload,attachments,false){Ok(value)=>value,Err(error)=>return Ok(Err(error))};
+        let (text,attachments)=match crate::draft::restore(&payload,attachments,false){Ok(value)=>value,Err(error)=>return Ok(Err(error))};
         if text.len()as u64>limit{return Ok(Err(ApiError::new(ErrorCode::InputLimit,"Saved request exceeds current draft limit; no text was truncated")));}
         Ok(Ok((text,attachments)))
     }).await.map_err(storage_error)?
@@ -1734,6 +1734,7 @@ async fn run_client(
                         let generation = management.next_generation();
                         let stop = matches!(command, Command::RunStop(_));
                         let work_status = management::work_status(&command);
+                        management.dispatched(generation, management_state::Shown::of(&command, &title, &context, work_status));
                         let control = control.clone();
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
@@ -3411,6 +3412,24 @@ async fn run_client(
                             if let Some(thread) = selection.active_thread.clone() {
                                 dirty_threads.insert(thread);
                             }
+                        }
+                        if let Some(shown) = management.shown().cloned()
+                            && shown.is_stale_after(&page, resync)
+                            && let Ok(permit) = command_slots.clone().try_acquire_owned()
+                        {
+                            // The shown F8 result is read again with the command that made it.
+                            let generation = management.next_generation();
+                            management.dispatched(generation, Some(shown.clone()));
+                            let control = control.clone();
+                            let sender = background_tx.clone();
+                            let data_dir = client_context.data_dir.clone();
+                            spawn_work(&mut workers, permit, async move {
+                                let response = management_request(&control, &data_dir, shown.command, CancellationToken::new()).await;
+                                let result = prepare_management(language, response, control.store.config.cache.body_bytes).await;
+                                let _ = sender
+                                    .send(BackgroundResult::Command { external: None, work_status: shown.work_status, context: shown.context, generation, title: shown.title, result })
+                                    .await;
+                            });
                         }
                         if (resync || page.retention_changed)
                             && let Some(thread)=selection.active_thread.as_ref()
