@@ -420,9 +420,8 @@ pub(super) async fn finish_bridge(
     mut bridge: tokio::task::JoinHandle<Result<(), crate::protocol::ApiError>>,
     incoming: &std::sync::mpsc::Receiver<crate::ui::UiUpdate>,
 ) {
-    let watchdog_seconds = if cfg!(windows) { 30 } else { 15 };
     let mut last_progress = None;
-    let completed = tokio::time::timeout(std::time::Duration::from_secs(watchdog_seconds), async {
+    let completed = crate::test_watchdog::watchdog("finish bridge", async {
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(5));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -479,27 +478,30 @@ async fn cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting() 
             })))
             .unwrap();
     }
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            drain(&incoming);
-            let count: i64 = control
-                .store
-                .database
-                .call(|db| {
-                    Ok(db.query_row(
-                        "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
-                        [],
-                        |row| row.get(0),
-                    )?)
-                })
-                .await
-                .unwrap();
-            if count == 2 && slots.available_permits() == 0 {
-                break;
+    crate::test_watchdog::watchdog(
+        "cancel stops its thread while all ordinary command slots are waiting",
+        async {
+            loop {
+                drain(&incoming);
+                let count: i64 = control
+                    .store
+                    .database
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
+                            [],
+                            |row| row.get(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if count == 2 && slots.available_permits() == 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     sender
@@ -507,27 +509,30 @@ async fn cancel_stops_its_thread_while_all_ordinary_command_slots_are_waiting() 
             thread_id: "thread".into(),
         })
         .unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            drain(&incoming);
-            let state: String = control
-                .store
-                .database
-                .call(|db| {
-                    Ok(
-                        db.query_row("SELECT state FROM run WHERE id='target-run'", [], |row| {
-                            row.get(0)
-                        })?,
-                    )
-                })
-                .await
-                .unwrap();
-            if state == "stopped" {
-                break;
+    crate::test_watchdog::watchdog(
+        "cancel stops its thread while all ordinary command slots are waiting",
+        async {
+            loop {
+                drain(&incoming);
+                let state: String = control
+                    .store
+                    .database
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT state FROM run WHERE id='target-run'",
+                            [],
+                            |row| row.get(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if state == "stopped" {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     let other: String = control
@@ -662,7 +667,7 @@ async fn reserved_shutdown_choices_keep_the_existing_grace_wait_and_force_bounda
         .await
     });
     async fn progress(incoming: &std::sync::mpsc::Receiver<UiUpdate>, wanted: bool) {
-        tokio::time::timeout(std::time::Duration::from_secs(2),async{
+        crate::test_watchdog::watchdog("progress", async{
             loop {
                 while let Ok(update)=incoming.try_recv(){if matches!(update,UiUpdate::ShutdownProgress{force_available,..} if force_available==wanted){return;}}
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -677,7 +682,7 @@ async fn reserved_shutdown_choices_keep_the_existing_grace_wait_and_force_bounda
     assert!(!shutdown.is_finished());
     progress(&incoming, true).await;
     sender.try_send(UiAction::ForceQuit).unwrap();
-    let error = tokio::time::timeout(std::time::Duration::from_secs(2), shutdown)
+    let error = crate::test_watchdog::watchdog("progress", shutdown)
         .await
         .unwrap()
         .unwrap()
@@ -713,27 +718,30 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
             })))
             .unwrap();
     }
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            drain(&incoming);
-            let count: i64 = control
-                .store
-                .database
-                .call(|db| {
-                    Ok(db.query_row(
-                        "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
-                        [],
-                        |row| row.get(0),
-                    )?)
-                })
-                .await
-                .unwrap();
-            if count == 2 && slots.available_permits() == 0 {
-                break;
+    crate::test_watchdog::watchdog(
+        "cancel remains available at full receipt budget without creating a receipt",
+        async {
+            loop {
+                drain(&incoming);
+                let count: i64 = control
+                    .store
+                    .database
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
+                            [],
+                            |row| row.get(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if count == 2 && slots.available_permits() == 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     let instance = control.store.instance_id.clone();
@@ -791,27 +799,30 @@ async fn cancel_remains_available_at_full_receipt_budget_without_creating_a_rece
             thread_id: "thread".into(),
         })
         .unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            drain(&incoming);
-            let state: String = control
-                .store
-                .database
-                .call(|db| {
-                    Ok(
-                        db.query_row("SELECT state FROM run WHERE id='target-run'", [], |row| {
-                            row.get(0)
-                        })?,
-                    )
-                })
-                .await
-                .unwrap();
-            if state == "stopped" {
-                break;
+    crate::test_watchdog::watchdog(
+        "cancel remains available at full receipt budget without creating a receipt",
+        async {
+            loop {
+                drain(&incoming);
+                let state: String = control
+                    .store
+                    .database
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT state FROM run WHERE id='target-run'",
+                            [],
+                            |row| row.get(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if state == "stopped" {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     assert_eq!(
@@ -885,17 +896,20 @@ async fn slash_queue_rejection_and_domain_error_recover_input_but_success_releas
         };
         let revision = submission.revision;
         sender.try_send(actions[0].clone()).unwrap();
-        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                while let Ok(update) = incoming.try_recv() {
-                    if let UiUpdate::CommandOutcome { submission, result } = update {
-                        assert_eq!(result.is_ok(), successful, "{command}: {result:?}");
-                        return UiUpdate::CommandOutcome { submission, result };
+        let outcome = crate::test_watchdog::watchdog(
+            "slash queue rejection and domain error recover input but success releases it",
+            async {
+                loop {
+                    while let Ok(update) = incoming.try_recv() {
+                        if let UiUpdate::CommandOutcome { submission, result } = update {
+                            assert_eq!(result.is_ok(), successful, "{command}: {result:?}");
+                            return UiUpdate::CommandOutcome { submission, result };
+                        }
                     }
+                    tokio::task::yield_now().await;
                 }
-                tokio::task::yield_now().await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         ui.apply(outcome);
@@ -914,12 +928,15 @@ async fn slash_queue_rejection_and_domain_error_recover_input_but_success_releas
         if command == "/compact" {
             drop(saturation.take());
         }
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while slots.available_permits() == 0 {
-                drain(&incoming);
-                tokio::task::yield_now().await;
-            }
-        })
+        crate::test_watchdog::watchdog(
+            "slash queue rejection and domain error recover input but success releases it",
+            async {
+                while slots.available_permits() == 0 {
+                    drain(&incoming);
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
         .await
         .unwrap();
     }
@@ -967,7 +984,7 @@ async fn send_preparation_failure_keeps_newer_input_and_the_original_snapshot() 
     ui.insert(" latest", false);
     let newer = ui.view().draft.clone();
     sender.try_send(actions[0].clone()).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    crate::test_watchdog::watchdog("send preparation failure keeps newer input and the original snapshot", async {
         loop {
             while let Ok(update) = incoming.try_recv() {
                 let failed = matches!(&update, UiUpdate::Receipt { revision: r, status: ReceiptStatus::Failed, .. } if *r == revision);
@@ -1200,33 +1217,36 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
         sender.try_send(action).unwrap();
     }
     let mut initial_history_reads = 0;
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            while let Ok(update) = incoming.try_recv() {
-                initial_history_reads += usize::from(
-                    matches!(&update,UiUpdate::History{thread_id,..} if thread_id=="thread"),
-                );
-                ui.apply(update);
-                for action in ui.take_deferred_actions() {
-                    sender.try_send(action).unwrap();
+    crate::test_watchdog::watchdog(
+        "changed refreshes a pinned tool outside the latest fifty nodes without reloading its body",
+        async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    initial_history_reads += usize::from(
+                        matches!(&update,UiUpdate::History{thread_id,..} if thread_id=="thread"),
+                    );
+                    ui.apply(update);
+                    for action in ui.take_deferred_actions() {
+                        sender.try_send(action).unwrap();
+                    }
                 }
+                if initial_history_reads > 0
+                    && ui.view().total_nodes == 61
+                    && !ui.view().navigation.is_loading()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            if initial_history_reads > 0
-                && ui.view().total_nodes == 61
-                && !ui.view().navigation.is_loading()
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     for action in request_pinned_history_navigation(&mut ui) {
         sender.try_send(action).unwrap();
     }
     let mut required_window_reads = 0;
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("changed refreshes a pinned tool outside the latest fifty nodes without reloading its body", async {
         loop {
             while let Ok(update) = incoming.try_recv() {
                 required_window_reads+=usize::from(matches!(&update,UiUpdate::HistoryWindow{nodes,..} if nodes.iter().any(|n|n.node_id=="call-node")));
@@ -1296,34 +1316,37 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
         ))
         .await;
     assert!(response.ok, "{response:?}");
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            while let Ok(update) = incoming.try_recv() {
-                ui.apply(update);
-                for action in ui.take_deferred_actions() {
-                    sender.try_send(action).unwrap();
+    crate::test_watchdog::watchdog(
+        "changed refreshes a pinned tool outside the latest fifty nodes without reloading its body",
+        async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    ui.apply(update);
+                    for action in ui.take_deferred_actions() {
+                        sender.try_send(action).unwrap();
+                    }
                 }
+                if ui
+                    .view()
+                    .nodes()
+                    .iter()
+                    .find(|node| node.node_id == "call-node")
+                    .unwrap()
+                    .presentation
+                    .blocks[0]
+                    .tool
+                    .as_ref()
+                    .unwrap()
+                    .current_state
+                    .as_deref()
+                    == Some("exited")
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            if ui
-                .view()
-                .nodes()
-                .iter()
-                .find(|node| node.node_id == "call-node")
-                .unwrap()
-                .presentation
-                .blocks[0]
-                .tool
-                .as_ref()
-                .unwrap()
-                .current_state
-                .as_deref()
-                == Some("exited")
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     let refreshed = ui
@@ -1475,7 +1498,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
             })
             .unwrap();
         sender.try_send(latest).unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("context", async {
             while slots.available_permits() != 0 {
                 tokio::task::yield_now().await;
             }
@@ -1486,7 +1509,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
         gate.await.unwrap();
         let mut notices = Vec::new();
         let mut reports = Vec::new();
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        crate::test_watchdog::watchdog("context", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     match &update {
@@ -1633,7 +1656,7 @@ async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_
                 })
                 .unwrap();
             let (mut terminal, mut result) = (Vec::new(), None);
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            crate::test_watchdog::watchdog("copy worker preserves raw scope budget and distinguishes os completion from terminal request", async {
                 while result.is_none() {
                     while let Ok(update) = incoming.try_recv() {
                         match update {

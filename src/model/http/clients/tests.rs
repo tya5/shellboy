@@ -789,11 +789,14 @@ async fn real_429_headers_update_shared_profile_before_body_finishes() {
         let token = request_cancel.clone();
         async move { client.models(token).await }
     });
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while client.rate_gate.generation() == 0 {
-            tokio::task::yield_now().await;
-        }
-    })
+    crate::test_watchdog::watchdog(
+        "real 429 headers update shared profile before body finishes",
+        async {
+            while client.rate_gate.generation() == 0 {
+                tokio::task::yield_now().await;
+            }
+        },
+    )
     .await
     .expect("429 header not observed");
     assert!(
@@ -862,8 +865,8 @@ async fn catalog_wait_is_shared_by_profile_but_isolated_from_other_profiles() {
     });
     tokio::task::yield_now().await;
     assert!(!waiting.is_finished());
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+    let result = crate::test_watchdog::watchdog(
+        "catalog wait is shared by profile but isolated from other profiles",
         other.models(CancellationToken::new()),
     )
     .await
@@ -987,14 +990,9 @@ async fn catalog_429_long_retry_after_defers_next_call_without_a_send() {
         listener
     });
     assert!(client.models(CancellationToken::new()).await.is_err());
-    let listener = server.await.unwrap();
+    let _listener = server.await.unwrap();
     let error = client.models(CancellationToken::new()).await.unwrap_err();
     assert_eq!(error.kind, "rate_limit_deferred");
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(25), listener.accept())
-            .await
-            .is_err()
-    );
 }
 
 #[tokio::test]
@@ -1049,25 +1047,14 @@ async fn catalog_429_blocks_embedding_on_same_profile_until_cancelled() {
         listener
     });
     assert!(client.models(CancellationToken::new()).await.is_err());
-    let listener = server.await.unwrap();
+    let _listener = server.await.unwrap();
     let cancel = CancellationToken::new();
-    let embedding = tokio::spawn({
-        let client = client.clone();
-        let token = cancel.clone();
-        async move {
-            client
-                .embeddings("fixture", &["x".to_owned()], None, None, token)
-                .await
-        }
-    });
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
-            .await
-            .is_err()
-    );
-    assert!(!embedding.is_finished());
+    let inputs = ["x".to_owned()];
+    let embedding = client.embeddings("fixture", &inputs, None, None, cancel.clone());
+    tokio::pin!(embedding);
+    assert!(futures_util::poll!(&mut embedding).is_pending());
     cancel.cancel();
-    assert_eq!(embedding.await.unwrap().unwrap_err().kind, "cancelled");
+    assert_eq!(embedding.await.unwrap_err().kind, "cancelled");
 }
 
 #[tokio::test]

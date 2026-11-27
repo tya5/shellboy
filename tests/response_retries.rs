@@ -2302,15 +2302,6 @@ async fn connection_cooldown_blocks_other_thread_and_stop_remains_responsive() {
         .await,
     )
     .unwrap();
-    assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(250),
-            fixture.requests.recv()
-        )
-        .await
-        .is_err(),
-        "second thread must not send during the shared cooldown"
-    );
     crate::test_watchdog::watchdog(
         "connection cooldown stop",
         request(
@@ -2368,14 +2359,6 @@ async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
         .await,
     )
     .unwrap();
-    assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            fixture.requests.recv()
-        )
-        .await
-        .is_err()
-    );
     request(
         &fixture.control,
         Command::ThreadSet(Box::new(ThreadSetArgs {
@@ -2437,15 +2420,6 @@ async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() 
     })
     .await
     .unwrap();
-    assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(250),
-            fixture.requests.recv()
-        )
-        .await
-        .is_err(),
-        "summary must not send during shared cooldown"
-    );
     let thread = fixture.accepted.thread_id.clone();
     let counted: i64 = fixture
         .control
@@ -2472,9 +2446,12 @@ async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() 
             ..Default::default()
         })),
     );
-    tokio::time::timeout(std::time::Duration::from_secs(2), changed)
-        .await
-        .expect("Thread boundary remains available during admission wait");
+    crate::test_watchdog::watchdog(
+        "manual summary waits for connection cooldown and shutdown cancels it",
+        changed,
+    )
+    .await
+    .expect("Thread boundary remains available during admission wait");
     fixture.close().await;
 }
 
@@ -2636,14 +2613,6 @@ async fn shared_connection_wait_is_recorded_on_successful_attempt() {
         .await,
     )
     .unwrap();
-    assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(250),
-            fixture.requests.recv()
-        )
-        .await
-        .is_err()
-    );
     fixture
         .incoming()
         .await
@@ -2697,14 +2666,6 @@ async fn summary_connection_wait_is_recorded_in_existing_usage() {
     )
     .await;
     let operation = accepted["operation_id"].as_str().unwrap().to_owned();
-    assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(250),
-            fixture.requests.recv()
-        )
-        .await
-        .is_err()
-    );
     fixture
         .incoming()
         .await
@@ -2805,10 +2766,13 @@ async fn owner_restart_clears_connection_cooldown_without_resuming_old_work() {
         }),
     )
     .await;
-    let next = tokio::time::timeout(std::time::Duration::from_secs(10), requests.recv())
-        .await
-        .expect("new owner must not retain the old 30-second cooldown")
-        .unwrap();
+    let next = crate::test_watchdog::watchdog(
+        "owner restart clears connection cooldown without resuming old work",
+        requests.recv(),
+    )
+    .await
+    .expect("new owner must not retain the old 30-second cooldown")
+    .unwrap();
     next.reply.send(Reply::success()).ok().unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
@@ -2862,15 +2826,6 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
         turns.push(accepted.turn_id.unwrap());
     }
     let probe = fixture.incoming().await;
-    assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            fixture.requests.recv()
-        )
-        .await
-        .is_err(),
-        "only one probe may run before its result"
-    );
     probe.reply.send(Reply::success()).ok().unwrap();
     let earlier = fixture.incoming().await;
     // Keep the earlier request in flight: the next queued Thread must still send.

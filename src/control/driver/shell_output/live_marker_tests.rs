@@ -2,13 +2,7 @@
 use super::*;
 use crate::{app::DataOwner, control::LiveShell, shell::ShellSupervisor};
 use futures_util::FutureExt;
-use std::{
-    collections::BTreeMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-const WATCHDOG: Duration = Duration::from_secs(60);
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn actual_output_commit_marks_only_its_registered_execution_before_notification() {
@@ -114,7 +108,7 @@ async fn marker_case(rollback: bool) {
     let output_started = Instant::now();
     handles[0].write("go\n", "UTF-8").await.unwrap();
     if rollback {
-        let failed = tokio::time::timeout(WATCHDOG, collectors.remove(0))
+        let failed = crate::test_watchdog::watchdog("marker case", collectors.remove(0))
             .await
             .unwrap()
             .unwrap()
@@ -129,7 +123,7 @@ async fn marker_case(rollback: bool) {
             vec![("s2".into(), hidden_marker)]
         );
     } else {
-        tokio::time::timeout(WATCHDOG, notified.as_mut())
+        crate::test_watchdog::watchdog("marker case", notified.as_mut())
             .await
             .unwrap();
         // Deliberately no DB observation before this getter: the notification
@@ -182,7 +176,7 @@ async fn marker_case(rollback: bool) {
         handle.stop();
     }
     for collector in collectors {
-        tokio::time::timeout(WATCHDOG, collector)
+        crate::test_watchdog::watchdog("marker case", collector)
             .await
             .unwrap()
             .unwrap()

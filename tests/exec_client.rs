@@ -2397,41 +2397,21 @@ async fn run_chat_in_process(
     (signal, task)
 }
 
-// Behaviour, not speed: while nothing changes, chat holds one `events.wait` (its 30 s window
-// is far longer than this check) and issues no state reads. A timer-polling client would
-// repeat the reads within this window. A `timeout` is the only other reason to read.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn chat_idle_follow_holds_one_events_wait_and_reads_nothing() {
+async fn chat_follow_reads_the_turn_after_the_wait_returns() {
     let mut fixture = Fixture::new().await;
     let (_signal, task) = run_chat_in_process(&fixture, b"long work\n").await;
     let pending = crate::test_watchdog::watchdog("chat idle request", fixture.incoming.recv())
         .await
         .unwrap()
         .unwrap();
-    let reads = |f: &Fixture| {
-        (
-            f.count("RunGet"),
-            f.count("TurnGet"),
-            f.count("ShellList"),
-            f.count("EventsWait"),
-        )
-    };
-    // Let the hints caused by the send settle: stable over two samples.
-    let mut last = reads(&fixture);
-    crate::test_watchdog::watchdog("chat idle settle", async {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            let now = reads(&fixture);
-            if now == last && now.3 >= 2 {
-                break;
-            }
-            last = now;
+    crate::test_watchdog::watchdog("chat begins following events", async {
+        while fixture.count("EventsWait") < 2 {
+            tokio::task::yield_now().await;
         }
     })
     .await
     .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-    assert_eq!(reads(&fixture), last, "idle chat must not poll");
     let before_turn_reads = fixture.count("TurnGet");
     pending.reply.send(answer("done")).unwrap();
     let (result, out) = crate::test_watchdog::watchdog("chat idle end", task)

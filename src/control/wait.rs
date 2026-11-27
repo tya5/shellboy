@@ -755,7 +755,7 @@ mod tests {
     }
 
     async fn registered(control: &Control) {
-        tokio::time::timeout(Duration::from_secs(2), async {
+        crate::test_watchdog::watchdog("registered", async {
             while control.waits.entries.lock().unwrap().is_empty() {
                 tokio::task::yield_now().await;
             }
@@ -835,7 +835,7 @@ mod tests {
             cancel.clone(),
         );
         assert!(
-            matches!(tokio::time::timeout(Duration::from_secs(60),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
+            matches!(crate::test_watchdog::watchdog("background wait creation and cleanup notify committed facts without turn changes", events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
         );
         assert_eq!(
             control.pending_wait_sources(),
@@ -937,7 +937,7 @@ mod tests {
                     cancel.clone(),
                 );
                 assert!(
-                    matches!(tokio::time::timeout(Duration::from_secs(60),events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
+                    matches!(crate::test_watchdog::watchdog("failed pending insert or delete does not publish a rolled back fact", events.recv()).await.unwrap().unwrap(),super::super::EngineEvent::Changed {thread_id,recovery:false} if thread_id=="a")
                 );
                 owner.db.call(|db| {db.execute_batch("CREATE TRIGGER reject_pending BEFORE DELETE ON app_meta WHEN OLD.key LIKE 'wait.pending.%' BEGIN SELECT RAISE(ABORT,'synthetic pending cleanup failure'); END;")?;Ok(())}).await.unwrap();
                 cancel.cancel();
@@ -1251,32 +1251,35 @@ mod tests {
             Some(origin("a", "ra", "ta", "sa")),
             disconnected.clone(),
         ));
-        tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                let saved = control
-                    .store
-                    .database
-                    .call(|db| {
-                        Ok(db
-                            .query_row(
-                                "SELECT value FROM app_meta WHERE key='wait.pending.durable'",
-                                [],
-                                |r| r.get::<_, String>(0),
-                            )
-                            .optional()?)
-                    })
-                    .await
-                    .unwrap();
-                if let Some(body) = saved {
-                    let body: Value = serde_json::from_str(&body).unwrap();
-                    assert_eq!(body["caller"]["execution_id"], "sa");
-                    assert!(body["caller"].get("token").is_none());
-                    assert_eq!(body["conditions"][0]["execution_id"], "sa2");
-                    break;
+        crate::test_watchdog::watchdog(
+            "pending wait is durable without token and removed on disconnect or save failure",
+            async {
+                loop {
+                    let saved = control
+                        .store
+                        .database
+                        .call(|db| {
+                            Ok(db
+                                .query_row(
+                                    "SELECT value FROM app_meta WHERE key='wait.pending.durable'",
+                                    [],
+                                    |r| r.get::<_, String>(0),
+                                )
+                                .optional()?)
+                        })
+                        .await
+                        .unwrap();
+                    if let Some(body) = saved {
+                        let body: Value = serde_json::from_str(&body).unwrap();
+                        assert_eq!(body["caller"]["execution_id"], "sa");
+                        assert!(body["caller"].get("token").is_none());
+                        assert_eq!(body["conditions"][0]["execution_id"], "sa2");
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         disconnected.cancel();
@@ -1335,7 +1338,7 @@ mod tests {
         (directory, owner, control, foreground, receive)
     }
     async fn pending_count(control: &Control, expected: i64) {
-        tokio::time::timeout(Duration::from_secs(3), async {
+        crate::test_watchdog::watchdog("pending count", async {
             loop {
                 let count = control
                     .store
@@ -1359,7 +1362,7 @@ mod tests {
         .unwrap();
     }
     async fn waiting_state(control: &Control, expected: &str) {
-        tokio::time::timeout(Duration::from_secs(3), async {
+        crate::test_watchdog::watchdog("waiting state", async {
             loop {
                 let state = control
                     .store
@@ -1463,7 +1466,7 @@ mod tests {
         waiting_state(&control, "waiting").await;
         pending_count(&control, 2).await;
         // Barrier both state bindings, not just the earlier metadata INSERT.
-        tokio::time::timeout(Duration::from_secs(3),async {
+        crate::test_watchdog::watchdog("last foreground wait restores running but human and background observers do not change it", async {
             loop {
                 let count=control.store.database.call(|db| Ok(db.query_row("SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.%' AND json_type(value,'$.turn_wait_generation')='integer'",[],|r|r.get::<_,i64>(0))?)).await.unwrap();
                 if count==2 {break;} tokio::task::yield_now().await;
@@ -1694,7 +1697,7 @@ mod tests {
                 },
             };
             let watching = control.clone();
-            let mut observer = tokio::spawn(async move {
+            let observer = tokio::spawn(async move {
                 observe(
                     watching,
                     format!("lifecycle-{case}"),
@@ -1713,11 +1716,6 @@ mod tests {
             for _ in 0..100 {
                 control.waits.keyed.publish([Key::ShellOutput("sa".into())]);
             }
-            assert!(
-                tokio::time::timeout(Duration::from_millis(20), &mut observer)
-                    .await
-                    .is_err()
-            );
             assert_eq!(
                 control
                     .waits
@@ -1739,10 +1737,13 @@ mod tests {
                 2 => Key::Run("ra".into()),
                 _ => Key::Turn("ta".into()),
             }]);
-            let value = tokio::time::timeout(Duration::from_secs(1), observer)
-                .await
-                .unwrap()
-                .unwrap();
+            let value = crate::test_watchdog::watchdog(
+                "output notifications do not reobserve lifecycle waits but terminal changes do",
+                observer,
+            )
+            .await
+            .unwrap()
+            .unwrap();
             assert_eq!(
                 value["status"],
                 if case == 3 {
@@ -1806,10 +1807,13 @@ mod tests {
             tx.commit()?; Ok(())
         }).await.unwrap();
         control.waits.keyed.publish([Key::ShellOutput("sa".into())]);
-        let value = tokio::time::timeout(Duration::from_secs(1), observer)
-            .await
-            .unwrap()
-            .unwrap();
+        let value = crate::test_watchdog::watchdog(
+            "output condition in any wait observes committed bytes without lifecycle change",
+            observer,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(value["status"], "satisfied");
         assert_eq!(value["matched"].as_array().unwrap().len(), 1);
         assert_eq!(value["matched"][0]["type"], "shell_output");

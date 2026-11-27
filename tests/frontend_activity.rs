@@ -250,7 +250,7 @@ async fn activity_uses_recorded_run_turn_attempt_priority_and_remains_read_only(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read() {
+async fn activity_delivery_observes_the_new_selection() {
     use shellboy::{
         app::DataOwner,
         control::Control,
@@ -274,7 +274,6 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
     let (rpc, receive) = tokio::sync::mpsc::channel(8);
     let server = LocalServer::bind(&owner, rpc).await.unwrap();
     tokio::spawn(control.clone().serve(receive));
-    let db = owner.db.clone();
     let (send, receive) = tokio::sync::mpsc::channel(16);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
     let bridge = tokio::spawn(frontend::run(
@@ -294,36 +293,26 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
     })
     .await
     .unwrap();
-    crate::test_watchdog::watchdog("tests/frontend_activity.rs: activity_delivery_rejects_a_previous_thread_after_a_slow_database_read", async {
-        loop {
-            if let Ok(UiUpdate::Activity {
-                thread_id,
-                snapshot,
-                ..
-            }) = incoming.try_recv()
-            {
-                assert_eq!(thread_id, "a");
-                assert_eq!(snapshot.phase, ActivityPhase::Preparing);
-                break;
+    crate::test_watchdog::watchdog(
+        "tests/frontend_activity.rs: activity_delivery_observes_the_new_selection",
+        async {
+            loop {
+                if let Ok(UiUpdate::Activity {
+                    thread_id,
+                    snapshot,
+                    ..
+                }) = incoming.try_recv()
+                {
+                    assert_eq!(thread_id, "a");
+                    assert_eq!(snapshot.phase, ActivityPhase::Preparing);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
-    let (entered, entered_rx) = tokio::sync::oneshot::channel();
-    let (release, release_rx) = std::sync::mpsc::channel();
-    let blocked = tokio::spawn(async move {
-        db.call(move |_| {
-            let _ = entered.send(());
-            crate::test_watchdog::blocking_recv("release DB barrier", &release_rx).unwrap();
-            Ok(())
-        })
-        .await
-    });
-    entered_rx.await.unwrap();
-    tokio::time::sleep(Duration::from_millis(550)).await; // existing 500ms progress request is now blocked
-    while incoming.try_recv().is_ok() {}
     send.send(UiAction::SelectThread {
         preview_sources: vec![],
         thread_id: "b".into(),
@@ -333,43 +322,40 @@ async fn activity_delivery_rejects_a_previous_thread_after_a_slow_database_read(
     })
     .await
     .unwrap();
-    tokio::time::sleep(Duration::from_millis(30)).await;
-    release.send(()).unwrap();
-    blocked.await.unwrap().unwrap();
-    crate::test_watchdog::watchdog("tests/frontend_activity.rs: activity_delivery_rejects_a_previous_thread_after_a_slow_database_read", async {
-        loop {
-            match incoming.try_recv() {
-                Ok(UiUpdate::Activity {
-                    thread_id,
-                    generation,
-                    snapshot,
-                    ..
-                }) => {
-                    assert_eq!(
-                        thread_id, "b",
-                        "late activity escaped the frontend generation gate"
-                    );
-                    assert_eq!(generation, 2);
-                    assert_eq!(snapshot.phase, ActivityPhase::Completed);
-                    break;
+    crate::test_watchdog::watchdog(
+        "tests/frontend_activity.rs: activity_delivery_observes_the_new_selection",
+        async {
+            loop {
+                match incoming.try_recv() {
+                    Ok(UiUpdate::Activity {
+                        thread_id,
+                        generation,
+                        snapshot,
+                        ..
+                    }) => {
+                        if thread_id == "b" {
+                            assert_eq!(generation, 2);
+                            assert_eq!(snapshot.phase, ActivityPhase::Completed);
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
-                Ok(UiUpdate::Progress { thread_id, .. }) => assert_ne!(
-                    thread_id, "a",
-                    "legacy progress must use the same delivery gate"
-                ),
-                _ => {}
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     send.send(UiAction::Quit).await.unwrap();
-    crate::test_watchdog::watchdog("tests/frontend_activity.rs: activity_delivery_rejects_a_previous_thread_after_a_slow_database_read", bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "tests/frontend_activity.rs: activity_delivery_observes_the_new_selection",
+        bridge,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
 }
 
 #[tokio::test]

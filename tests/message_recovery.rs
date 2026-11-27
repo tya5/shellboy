@@ -11,11 +11,11 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::mpsc,
-    time::{sleep, timeout},
+    time::sleep,
 };
 
-async fn bounded<T>(label: &str, future: impl std::future::Future<Output = T>) -> T {
-    timeout(Duration::from_secs(60), future)
+async fn bounded<T>(label: &'static str, future: impl std::future::Future<Output = T>) -> T {
+    crate::test_watchdog::watchdog(label, future)
         .await
         .unwrap_or_else(|_| panic!("{label}: 60-second watchdog expired"))
 }

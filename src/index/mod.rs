@@ -1584,19 +1584,17 @@ mod idle_tests {
         });
         drop(detached);
         ready.await.unwrap();
-        let waiting = service.clone();
-        let mut idle = tokio::spawn(async move { waiting.wait_idle().await });
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), &mut idle)
-                .await
-                .is_err()
-        );
+        let idle = service.wait_idle();
+        tokio::pin!(idle);
+        assert!(futures_util::poll!(&mut idle).is_pending());
         release.send(()).unwrap();
-        tokio::time::timeout(Duration::from_secs(2), idle)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        crate::test_watchdog::watchdog(
+            "wait idle retains detached blocking parser permit until actual completion",
+            idle,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         db.shutdown().await.unwrap();
     }
 }
