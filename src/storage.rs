@@ -92,6 +92,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (67, "0067_open_reply_duties"),
     (68, "0068_schedule_notify"),
     (69, "0069_instruction_snapshot_turns"),
+    (70, "next_artifact_current_scheme"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

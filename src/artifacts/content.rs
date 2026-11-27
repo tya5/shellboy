@@ -22,10 +22,13 @@ pub(crate) const APP_SCHEME: &str = "shellboy-app";
 /// RFC 3986 scheme: a letter, then letters, digits, `+`, `-` or `.`, then `:`.
 pub(crate) fn uri_scheme(uri: &str) -> Option<&str> {
     let (name, _) = uri.split_once(':')?;
+    valid_scheme(name).then_some(name)
+}
+
+pub(super) fn valid_scheme(name: &str) -> bool {
     let mut bytes = name.bytes();
-    (bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')))
-    .then_some(name)
+    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
 }
 
 #[derive(Debug, PartialEq)]

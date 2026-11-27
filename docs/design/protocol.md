@@ -173,6 +173,9 @@ Thread-owned services](protocol-versions/16.md) retain their individual cursor
 and ownership contracts.
 `artifact.read` ([#445](protocol-versions/47.md)) is the one operation
 that opens artifact content; the version URI's scheme decides what it may read.
+`artifact.list` accepts a current URI `scheme` with optional `thread_id` (or
+a Thread alone). Scheme lists include only live, non-archived Threads and
+return the owning `thread_id` with each artifact. See [Thread artifacts](thread-artifacts.md).
 
 ## Originの認証と保存境界（P3/W6）
 

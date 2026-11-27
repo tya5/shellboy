@@ -1,0 +1,14 @@
+# Protocol next (#461)
+
+## Artifact listing by current URI scheme
+
+
+`artifact.list` accepts an optional `scheme`. Without `thread_id`, a scheme is
+required; the read spans live, non-archived Threads. With both, the scheme
+filter is scoped to the given Thread. Per-Thread listing without a scheme is
+unchanged. The response echoes the supplied scope in `filters`, including the
+normalized scheme when supplied. Cursors bind the Thread and scheme and retain
+update-descending, ID-ascending order.
+
+Migration `next_artifact_current_scheme` indexes the scheme of each artifact's
+latest saved version. No new operation or capability.

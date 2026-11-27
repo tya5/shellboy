@@ -573,8 +573,10 @@ pub enum ArtifactCommand {
     },
     /// List artifact metadata.
     List {
-        #[arg(long = "thread")]
-        thread_id: String,
+        #[arg(long = "thread", required_unless_present = "scheme")]
+        thread_id: Option<String>,
+        #[arg(long)]
+        scheme: Option<String>,
         #[arg(long)]
         cursor: Option<String>,
         #[arg(long, default_value_t=wire::ARTIFACT_PAGE_LIMIT)]
@@ -2327,10 +2329,12 @@ impl Cli {
                 }),
                 ArtifactCommand::List {
                     thread_id,
+                    scheme,
                     cursor,
                     limit,
                 } => C::ArtifactList(wire::ArtifactListArgs {
                     thread_id,
+                    scheme,
                     cursor,
                     limit,
                 }),

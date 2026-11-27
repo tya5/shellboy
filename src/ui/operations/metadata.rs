@@ -1265,6 +1265,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::MaxTokens => local!(language, "出力上限", "Output limit"),
         FieldId::Artifact => local!(language, "成果物ID", "Artifact ID"),
         FieldId::ArtifactUri => local!(language, "URI", "Opaque URI"),
+        FieldId::ArtifactScheme => local!(language, "URIスキーム", "URI scheme"),
         FieldId::ArtifactTitle => local!(language, "題名", "Artifact title"),
         FieldId::ArtifactMime => local!(language, "MIME", "Optional MIME"),
         FieldId::ArtifactVersion => local!(language, "版", "Version number"),
@@ -1649,6 +1650,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Artifact => local!(language, "成果物をIDで指定します。", "Artifact ID"),
         FieldId::ArtifactUri => local!(language, "参照先のURIを指定します。", "Opaque URI"),
+        FieldId::ArtifactScheme => local!(
+            language,
+            "現在の版のURIスキームで絞り込みます。",
+            "Filter by the current version URI scheme."
+        ),
         FieldId::ArtifactTitle => local!(language, "成果物の題名を指定します。", "Artifact title"),
         FieldId::ArtifactMime => local!(language, "任意のMIMEを指定します。", "Optional MIME"),
         FieldId::ArtifactVersion => {

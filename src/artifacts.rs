@@ -3,15 +3,16 @@
 mod content;
 use crate::protocol::{
     ARTIFACT_PAGE_LIMIT, ApiError, ArtifactAddArgs, ArtifactGetArgs, ArtifactGetResult,
-    ArtifactHistory, ArtifactListArgs, ArtifactScopeFilter, ArtifactSelected, ArtifactSummary,
-    ArtifactUpdateArgs, ArtifactVersion, ArtifactVersionStamp, ErrorCode, PageCursor, RecordPage,
-    ThreadScopeFilter,
+    ArtifactHistory, ArtifactListArgs, ArtifactListFilter, ArtifactScopeFilter, ArtifactSelected,
+    ArtifactSummary, ArtifactUpdateArgs, ArtifactVersion, ArtifactVersionStamp, ErrorCode,
+    PageCursor, RecordPage,
 };
 pub(crate) use content::{APP_SCHEME, read, uri_scheme};
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
 type Result<T> = std::result::Result<T, ApiError>;
 const LIST: &str = "artifact.list.updated_at_desc.id_asc";
+const SCHEME_LIST: &str = "artifact.list.scheme.updated_at_desc.id_asc";
 const VERSIONS: &str = "artifact.versions";
 
 fn sql(error: rusqlite::Error) -> ApiError {
@@ -113,8 +114,8 @@ pub(crate) fn add(
     check_thread(tx, &a.thread_id)?;
     let id = uuid::Uuid::new_v4().to_string();
     tx.execute(
-        "INSERT INTO artifact(id,thread_id,created_at,updated_at) VALUES(?1,?2,?3,?3)",
-        params![id, a.thread_id, now],
+        "INSERT INTO artifact(id,thread_id,created_at,updated_at,current_scheme) VALUES(?1,?2,?3,?3,?4)",
+        params![id, a.thread_id, now, uri_scheme(&a.uri).map(str::to_ascii_lowercase)],
     )
     .map_err(sql)?;
     let version = ArtifactVersion {
@@ -155,8 +156,12 @@ pub(crate) fn update(
     };
     append(tx, &a.artifact_id, &item.latest)?;
     tx.execute(
-        "UPDATE artifact SET updated_at=?2 WHERE id=?1",
-        params![a.artifact_id, now],
+        "UPDATE artifact SET updated_at=?2,current_scheme=?3 WHERE id=?1",
+        params![
+            a.artifact_id,
+            now,
+            uri_scheme(&a.uri).map(str::to_ascii_lowercase)
+        ],
     )
     .map_err(sql)?;
     item.updated_at = now.into();
@@ -203,51 +208,89 @@ fn page<T, F>(
     };
     Ok(RecordPage::new(limit as u32, filters, items, next_cursor))
 }
+pub(crate) fn validate_list_scope(a: &ArtifactListArgs) -> Result<Option<String>> {
+    match a.scheme.as_deref() {
+        Some(s) if s.len() < 2048 && content::valid_scheme(s) => Ok(Some(s.to_ascii_lowercase())),
+        Some(_) => Err(invalid(
+            "artifact scheme must be a URI scheme name without a colon",
+        )),
+        None if a.thread_id.is_some() => Ok(None),
+        None => Err(invalid("artifact list requires thread_id or scheme")),
+    }
+}
 pub(crate) fn list(
     tx: &Transaction<'_>,
     a: &ArtifactListArgs,
-) -> Result<RecordPage<ArtifactSummary, ThreadScopeFilter>> {
+) -> Result<RecordPage<ArtifactSummary, ArtifactListFilter>> {
     let limit = page_limit(a.limit)?;
-    let after = seek(a.cursor.as_deref(), LIST, &a.thread_id)?
+    let scheme = validate_list_scope(a)?;
+    let thread = a.thread_id.as_deref();
+    let (scope, target, index, filter, primary) = if let Some(s) = scheme.as_deref() {
+        let target = serde_json::json!([s, thread]).to_string();
+        let filter = if thread.is_some() {
+            "a.current_scheme=?1 AND a.thread_id=?5"
+        } else {
+            "a.current_scheme=?1"
+        };
+        (SCHEME_LIST, target, "artifact_scheme_page", filter, s)
+    } else {
+        let t = thread.expect("validated artifact list scope");
+        (
+            LIST,
+            t.to_owned(),
+            "artifact_thread_page",
+            "a.thread_id=?1",
+            t,
+        )
+    };
+    let after = seek(a.cursor.as_deref(), scope, &target)?
         .map(|key| {
             serde_json::from_str::<(String, String)>(&key).map_err(|_| {
                 ApiError::new(ErrorCode::CursorExpired, "invalid artifact list cursor")
             })
         })
         .transpose()?;
-    check_thread(tx, &a.thread_id)?;
+    if let Some(t) = thread {
+        check_thread(tx, t)?;
+    }
+    let live = if scheme.is_some() {
+        "AND EXISTS (SELECT 1 FROM thread t WHERE t.id=a.thread_id AND t.deleted_at IS NULL AND t.archived_at IS NULL)"
+    } else {
+        ""
+    };
     let mut items = Vec::new();
-    let mut read = |range: &str, after: &[&dyn rusqlite::ToSql]| -> Result<()> {
+    let mut read = |range: &str, updated: Option<&str>, id: Option<&str>| -> Result<()> {
         let remaining = (limit + 1 - items.len()) as i64;
         if remaining == 0 {
             return Ok(());
         }
         let query = format!(
-            "SELECT {FIELDS} FROM artifact a {LATEST_JOIN} WHERE a.thread_id=?1 {range}
+            "SELECT {FIELDS} FROM artifact a INDEXED BY {index} {LATEST_JOIN} WHERE {filter} {live} {range}
              ORDER BY a.updated_at DESC, a.id LIMIT ?2"
         );
-        let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&a.thread_id, &remaining];
-        binds.extend_from_slice(after);
         let mut stmt = tx.prepare(&query).map_err(sql)?;
-        for row in stmt.query_map(binds.as_slice(), summary).map_err(sql)? {
+        let values: [&dyn rusqlite::ToSql; 5] = [&primary, &remaining, &updated, &id, &thread];
+        let binds = &values[..stmt.parameter_count()];
+        for row in stmt.query_map(binds, summary).map_err(sql)? {
             items.push(row.map_err(sql)?);
         }
         Ok(())
     };
     if let Some((updated, id)) = after {
         // Mixed sort directions need two index ranges: the remaining tie, then older rows.
-        read("AND a.updated_at=?3 AND a.id>?4", &[&updated, &id])?;
-        read("AND a.updated_at<?3", &[&updated])?;
+        read("AND a.updated_at=?3 AND a.id>?4", Some(&updated), Some(&id))?;
+        read("AND a.updated_at<?3", Some(&updated), None)?;
     } else {
-        read("", &[])?;
+        read("", None, None)?;
     }
     page(
         items,
         limit,
-        LIST,
-        &a.thread_id,
-        ThreadScopeFilter {
+        scope,
+        &target,
+        ArtifactListFilter {
             thread_id: a.thread_id.clone(),
+            scheme,
         },
         |a| serde_json::json!([a.updated_at, a.artifact_id]).to_string(),
     )
@@ -306,18 +349,19 @@ pub(crate) fn copy_thread(
     target: &str,
 ) -> rusqlite::Result<()> {
     let mut stmt =
-        tx.prepare("SELECT id,created_at,updated_at FROM artifact WHERE thread_id=?1 ORDER BY id")?;
+        tx.prepare("SELECT id,created_at,updated_at,current_scheme FROM artifact WHERE thread_id=?1 ORDER BY id")?;
     let mut rows = stmt.query([source])?;
     while let Some(row) = rows.next()? {
         let old: String = row.get(0)?;
         let id = uuid::Uuid::new_v4().to_string();
         tx.execute(
-            "INSERT INTO artifact(id,thread_id,created_at,updated_at) VALUES(?,?,?,?)",
+            "INSERT INTO artifact(id,thread_id,created_at,updated_at,current_scheme) VALUES(?,?,?,?,?)",
             params![
                 id,
                 target,
                 row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
             ],
         )?;
         tx.execute("INSERT INTO artifact_version(artifact_id,version,uri,title,mime,created_at) SELECT ?1,version,uri,title,mime,created_at FROM artifact_version WHERE artifact_id=?2",params![id,old])?;

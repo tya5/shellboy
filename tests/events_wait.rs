@@ -525,7 +525,8 @@ async fn thread_create_set_fork_rewind_prune_and_delete_advance_the_clock() {
         let list = command(
             &control,
             Command::ArtifactList(ArtifactListArgs {
-                thread_id: target.clone(),
+                thread_id: Some(target.clone()),
+                scheme: None,
                 cursor: None,
                 limit: 1,
             }),
@@ -1112,5 +1113,94 @@ async fn archive_unarchive_and_auto_unarchive_by_a_new_run_are_announced() {
         .send((200, answer("ok")))
         .unwrap();
     settled(&control, &t).await;
+    close(control, owner, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn artifact_scheme_list_pages_live_threads_and_follows_current_version() {
+    use shellboy::protocol::{ArtifactAddArgs, ArtifactListArgs, ArtifactUpdateArgs};
+    let (_root, owner, control, receive, server) = fixture().await;
+    let a = thread(&control).await;
+    let b = thread(&control).await;
+    let gone = thread(&control).await;
+    let add = async |id: &str| {
+        command(
+            &control,
+            Command::ArtifactAdd(ArtifactAddArgs {
+                thread_id: id.into(),
+                uri: "Shellboy-App:/app".into(),
+                title: "App".into(),
+                mime: None,
+            }),
+        )
+        .await
+        .unwrap()
+    };
+    let first = add(&a).await;
+    add(&b).await;
+    add(&gone).await;
+    command(
+        &control,
+        Command::ThreadDelete(ThreadDeleteArgs {
+            thread_id: gone,
+            descendants: false,
+            preview_marker: None,
+        }),
+    )
+    .await
+    .unwrap();
+    let list = async |scheme: &str, cursor, limit| {
+        command(
+            &control,
+            Command::ArtifactList(ArtifactListArgs {
+                thread_id: None,
+                scheme: Some(scheme.into()),
+                cursor,
+                limit,
+            }),
+        )
+        .await
+        .unwrap()
+    };
+    let page = list("SHELLBOY-APP", None, 1).await;
+    assert_eq!(page["filters"], json!({"scheme":"shellboy-app"}));
+    assert_eq!(page["items"][0]["thread_id"], b);
+    let next = list(
+        "shellboy-app",
+        Some(page["next_cursor"].as_str().unwrap().into()),
+        1,
+    )
+    .await;
+    assert_eq!(next["items"][0]["thread_id"], a);
+    assert!(next["next_cursor"].is_null());
+    command(
+        &control,
+        Command::ThreadArchive(ThreadArchiveArgs {
+            thread_ids: vec![b],
+            descendants: false,
+        }),
+    )
+    .await
+    .unwrap();
+    let page = list("shellboy-app", None, 32).await;
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["items"][0]["thread_id"], a);
+    command(
+        &control,
+        Command::ArtifactUpdate(ArtifactUpdateArgs {
+            artifact_id: first["artifact_id"].as_str().unwrap().into(),
+            uri: "file:///page".into(),
+            title: None,
+            mime: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(list("shellboy-app", None, 32).await["items"], json!([]));
+    assert_eq!(
+        list("file", None, 32).await["items"][0]["artifact_id"],
+        first["artifact_id"]
+    );
+    drop(receive);
     close(control, owner, server).await;
 }
