@@ -287,7 +287,7 @@ async fn pending_external_intent_is_uncertain_and_never_reexecuted_by_a_new_inst
     );
     assert!(matches!(
         store.reserve_runtime(req.clone(), None).await.unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     let newer = Store::new(
         store.database.clone(),
@@ -548,7 +548,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_epoch_roll_and_owner_restart
                 )
                 .await
                 .unwrap(),
-            RuntimeReservation::New
+            RuntimeReservation::New(_)
         ));
     }
     for command in [
@@ -721,7 +721,7 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
     );
     assert!(matches!(
         store.reserve_runtime(runtime.clone(), None).await.unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     store
         .finalize_runtime(runtime.operation_id.clone(), Ok(json!({"accepted":true})))
@@ -1008,7 +1008,7 @@ async fn pressure_expiry_commits_on_refusal_without_reexecuting_or_deleting_curr
     );
     assert!(matches!(
         store.reserve_runtime(stop.clone(), None).await.unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     store
         .finalize_runtime(stop.operation_id.clone(), Ok(json!({"accepted":true})))
