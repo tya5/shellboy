@@ -3995,7 +3995,9 @@ async fn save_draft(
     compose_call::<crate::protocol::Accepted>(
         owner,
         Command::DraftSave(crate::protocol::DraftSaveArgs {
-            expected_thread_revision: expected_source.as_ref().map(|source| source.selection_revision),
+            expected_thread_revision: expected_source
+                .as_ref()
+                .map(|source| source.selection_revision),
             expected_source_message: expected_source.map(|source| source.message_id),
             thread_id,
             draft: Box::new(draft),
@@ -4033,7 +4035,8 @@ async fn native_header(
 }
 #[allow(clippy::too_many_arguments)]
 async fn select_thread(
-    control: &Arc<Control>,
+    owner: native_history::Owner<'_>,
+    language: UiLanguage,
     updates: &dyn UpdateTarget,
     thread: &str,
     generation: u64,
@@ -4042,68 +4045,58 @@ async fn select_thread(
     render_width: u16,
     known: Vec<native_page::KnownSubmission>,
 ) -> Result<(), ApiError> {
-    let result = async {
-        let header = native_header(
-            compose_data_dir(control),
-            &control.store.instance_id,
-            thread,
-        )
-        .await?;
-        let state: crate::protocol::DraftState = compose_call(
-            control,
-            Command::DraftGet(crate::protocol::DraftGetArgs {
-                thread_id: Some(thread.into()),
-                operation_id: None,
-            }),
-            None,
-        )
-        .await?;
-        let draft = state.draft;
-        let view = state.view.map(|view| (view.anchor, view.follow_tail));
-        let language = control.store.config.ui.language;
-        let details = presentation_work(move || header.prepare_for_ui(language)).await?;
-        update(
-            updates,
-            UiUpdate::Thread {
-                generation,
-                details,
-                draft,
-            },
-        )
-        .await;
-        let restore = known_view.is_none();
-        if let Some((anchor, follow)) = known_view.or(view) {
-            if restore {
-                update(
-                    updates,
-                    UiUpdate::ViewState {
-                        thread_id: thread.into(),
-                        generation,
-                        view_revision,
-                        anchor: anchor.clone(),
-                        follow,
-                    },
-                )
-                .await;
-            }
-            HistoryReader::new(control, updates, render_width)
-                .with_submissions(known)
-                .page(
-                    &Reply::new(thread, generation),
-                    None,
-                    if follow { None } else { Some(anchor) },
-                )
-                .await?;
-        } else {
-            HistoryReader::new(control, updates, render_width)
-                .with_submissions(known)
-                .page(&Reply::new(thread, generation), None, None)
-                .await?;
-        }
-        Ok(())
-    }
+    let header = native_header(owner.data_dir, owner.instance, thread).await?;
+    let state: crate::protocol::DraftState = compose_call(
+        &owner,
+        Command::DraftGet(crate::protocol::DraftGetArgs {
+            thread_id: Some(thread.into()),
+            operation_id: None,
+        }),
+        None,
+    )
+    .await?;
+    let draft = state.draft;
+    let view = state.view.map(|view| (view.anchor, view.follow_tail));
+    let details = presentation_work(move || header.prepare_for_ui(language)).await?;
+    update(
+        updates,
+        UiUpdate::Thread {
+            generation,
+            details,
+            draft,
+        },
+    )
     .await;
-    checked_storage(control, result).await
+    let restore = known_view.is_none();
+    if let Some((anchor, follow)) = known_view.or(view) {
+        if restore {
+            update(
+                updates,
+                UiUpdate::ViewState {
+                    thread_id: thread.into(),
+                    generation,
+                    view_revision,
+                    anchor: anchor.clone(),
+                    follow,
+                },
+            )
+            .await;
+        }
+        HistoryReader::new(owner, language, updates, render_width)
+            .with_submissions(known)
+            .page(
+                &Reply::new(thread, generation),
+                None,
+                if follow { None } else { Some(anchor) },
+            )
+            .await?;
+    } else {
+        HistoryReader::new(owner, language, updates, render_width)
+            .with_submissions(known)
+            .page(&Reply::new(thread, generation), None, None)
+            .await?;
+    }
+    Ok(())
 }
 /// Publish saved progress facts; return whether foreground polling is needed.
 /// An answered Run with owned background work remains visible through Changed
@@ -4278,13 +4271,8 @@ pub async fn copy_source(
     checked_storage(
         control,
         copying::text(
-            control,
-            control
-                .store
-                .database
-                .path()
-                .parent()
-                .expect("owner database has a directory"),
+            control.store.config.ui.language,
+            &selected_owner(control),
             node_id,
             code_block,
             None,
@@ -4354,6 +4342,9 @@ mod stream_tests {
         let ui_thread = std::thread::current().id();
         let rows = vec![
             ThreadSummary {
+                descendants: None,
+                activity_detail: None,
+                latest_completion: None,
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
                 awaiting_named_count_exact: true,
@@ -4381,6 +4372,9 @@ mod stream_tests {
                 excerpt_complete: true,
             },
             ThreadSummary {
+                descendants: None,
+                activity_detail: None,
+                latest_completion: None,
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
                 awaiting_named_count_exact: true,

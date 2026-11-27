@@ -2435,6 +2435,10 @@ impl<T, F> RecordPage<T, F> {
 }
 
 record!(ThreadListFilters {
+    #[serde(default, skip_serializing_if = "Option::is_none")] root: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_descendant_count: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity_evidence: bool,
     #[serde(skip_serializing_if = "Option::is_none")] order: Option<ThreadListOrder>,
     #[serde(skip_serializing_if = "Option::is_none")] archived: Option<ArchivedFilter>,
     #[serde(skip_serializing_if = "Option::is_none")] state: Option<ThreadListState>,
@@ -2444,7 +2448,39 @@ record!(ThreadListFilters {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] cwd_omitted: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] query_omitted: bool,
 });
-pub type ThreadListPage = RecordPage<ThreadSummary, ThreadListFilters>;
+record!(ThreadListPage {
+    items: Vec<ThreadSummary>,
+    limit: u32,
+    filters: ThreadListFilters,
+    #[serde(skip_serializing_if = "Option::is_none")] next_cursor: Option<String>,
+    read_sequence: u64,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")] activity_evidence: std::collections::BTreeMap<String, ThreadActivityEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] root_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] root_count_exact: Option<bool>,
+});
+record!(ThreadActivityEvidence {
+    parent_title: Option<String>,
+    parent_deleted: bool,
+    shell: Option<ThreadActivityShell>,
+    pending_messages: u64,
+    recovery_error: Option<ApiError>,
+    recovery_limited: bool,
+    answer_excerpt: Option<String>,
+    answer_limited: bool,
+});
+record!(ThreadActivityShell {
+    execution_id: String,
+    turn_id: Option<String>,
+    started_at: Option<String>,
+    last_output_at: Option<String>,
+    command_excerpt: Option<String>,
+    command_limited: bool,
+    state: String,
+});
+record!(ThreadCompletion {
+    run_id: String,
+    ended_at: String,
+});
 
 record!(MessageListFilters {
     #[serde(skip_serializing_if = "Option::is_none")] owed_by_thread_id: Option<String>,
@@ -2632,7 +2668,16 @@ record!(RevisitSummary {
     pending: bool,
     consumed_count: u64
 });
-record!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, awaiting_replies: u64, awaiting_replies_count_exact: bool, awaiting_thread_count_exact: bool, awaiting_named_count_exact: bool, #[schemars(description = "Pending replies for the selected name (human by default): exact through 16; 17 with exact=false means 17 or more.")] awaiting_named_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting_named_oldest_at: Option<String>, awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_thread_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, created_at: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String, #[serde(default = "default_true", skip_serializing_if = "is_true")] #[schemars(description = "False if the excerpt scan ended before reaching older selected history.")] excerpt_complete: bool });
+record!(ThreadDescendants {
+    total: u64,
+    by_state: std::collections::BTreeMap<ThreadListState, u64>,
+    capped: bool,
+    cycle: bool,
+});
+record!(ThreadSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")] descendants: Option<ThreadDescendants>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] activity_detail: Option<ThreadActivity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] latest_completion: Option<ThreadCompletion>, #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, awaiting_replies: u64, awaiting_replies_count_exact: bool, awaiting_thread_count_exact: bool, awaiting_named_count_exact: bool, #[schemars(description = "Pending replies for the selected name (human by default): exact through 16; 17 with exact=false means 17 or more.")] awaiting_named_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting_named_oldest_at: Option<String>, awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_thread_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, created_at: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String, #[serde(default = "default_true", skip_serializing_if = "is_true")] #[schemars(description = "False if the excerpt scan ended before reaching older selected history.")] excerpt_complete: bool });
 record!(PendingReplyCount {
     count: u64,
     exact: bool
@@ -2692,6 +2737,7 @@ record!(ThreadActivityRun {
 });
 record!(ThreadActivityTurn {
     turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String>,
     generation: i64,
     state: TurnState,
     #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>,
@@ -3723,6 +3769,11 @@ record!(ThreadUnarchiveResult {
     #[serde(flatten)] additional_properties: std::collections::BTreeMap<String, Value>
 });
 record!(Accepted { accepted: bool });
+record!(ThreadDeleteResult {
+    accepted: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    deleted_thread_ids: Vec<String>,
+});
 
 #[cfg(test)]
 mod message_acknowledgement_tests {
