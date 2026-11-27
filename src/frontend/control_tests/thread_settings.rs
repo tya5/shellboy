@@ -55,26 +55,29 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
             matches!(events.try_recv(), Ok(EngineEvent::Changed {thread_id, recovery: false}) if thread_id == "thread")
         );
         let details = response.result.unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                while let Ok(update) = incoming.try_recv() {
-                    let found = matches!(&update,
+        crate::test_watchdog::watchdog(
+            "external settings notify after commit and refresh metadata without resuming recovery",
+            async {
+                loop {
+                    while let Ok(update) = incoming.try_recv() {
+                        let found = matches!(&update,
                         UiUpdate::Thread {details: observed,..}
                         | UiUpdate::CurrentView {details: observed,..}
                         if observed.title == details["title"].as_str().unwrap()
                         && observed.model == details["model"].as_str().unwrap()
                         && observed.cwd == details["cwd"].as_str().unwrap());
-                    ui.apply(update);
-                    for action in ui.take_deferred_actions() {
-                        sender.try_send(action).unwrap();
+                        ui.apply(update);
+                        for action in ui.take_deferred_actions() {
+                            sender.try_send(action).unwrap();
+                        }
+                        if found {
+                            return;
+                        }
                     }
-                    if found {
-                        return;
-                    }
+                    tokio::task::yield_now().await;
                 }
-                tokio::task::yield_now().await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         assert_eq!(ui.view().draft.text, "keep the current draft");

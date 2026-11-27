@@ -688,7 +688,7 @@ mod tests {
         let blocked = tokio::spawn(async move {
             db.call(move |_| {
                 let _ = entered.send(());
-                let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
+                let _ = crate::test_watchdog::blocking_recv("release fixture barrier", &release_rx);
                 Ok(())
             })
             .await

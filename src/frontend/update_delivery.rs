@@ -528,29 +528,34 @@ mod tests {
                 thread_id: "thread".into(),
             })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let state: String = control
-                    .store
-                    .database
-                    .call(|db| {
-                        Ok(db.query_row(
-                            "SELECT state FROM run WHERE id='target-run'",
-                            [],
-                            |row| row.get(0),
-                        )?)
-                    })
-                    .await
-                    .unwrap();
-                if state == "stopped" {
-                    break;
+        crate::test_watchdog::watchdog(
+            "real frontend cancel quit and one force survive full reserve and retained batch",
+            async {
+                loop {
+                    let state: String = control
+                        .store
+                        .database
+                        .call(|db| {
+                            Ok(db.query_row(
+                                "SELECT state FROM run WHERE id='target-run'",
+                                [],
+                                |row| row.get(0),
+                            )?)
+                        })
+                        .await
+                        .unwrap();
+                    if state == "stopped" {
+                        break;
+                    }
+                    match committed_changes.recv().await {
+                        Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(error) => {
+                            panic!("committed cancellation notifications closed: {error}")
+                        }
+                    }
                 }
-                match committed_changes.recv().await {
-                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(error) => panic!("committed cancellation notifications closed: {error}"),
-                }
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         // No UI receiver has read a single update. Cancellation is real durable
@@ -600,7 +605,7 @@ mod tests {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .unwrap();
-        tokio::time::timeout(Duration::from_secs(10), async {
+        crate::test_watchdog::watchdog("real frontend cancel quit and one force survive full reserve and retained batch", async {
             loop {
                 let attempted=observer.delivery.observed_attempt.notified();
                 tokio::pin!(attempted);
@@ -625,45 +630,51 @@ mod tests {
             let receipts = statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
             panic!("durable closing work timed out: {error}; draft_revision={draft:?}, nodes_by_kind={nodes:?}, receipts_by_state={receipts:?}, frontend_finished={}", bridge.is_finished());
         });
-        tokio::time::timeout(Duration::from_secs(15), async {
-            loop {
-                let attempted = observer.delivery.observed_attempt.notified();
-                tokio::pin!(attempted);
-                attempted.as_mut().enable();
-                if observer
-                    .delivery
-                    .pending
-                    .lock()
-                    .unwrap()
-                    .latest
-                    .values()
-                    .any(|item| {
-                        matches!(
-                            item.value,
-                            UiUpdate::ShutdownProgress {
-                                force_available: true,
-                                ..
-                            }
-                        )
-                    })
-                {
-                    break;
+        crate::test_watchdog::watchdog(
+            "real frontend cancel quit and one force survive full reserve and retained batch",
+            async {
+                loop {
+                    let attempted = observer.delivery.observed_attempt.notified();
+                    tokio::pin!(attempted);
+                    attempted.as_mut().enable();
+                    if observer
+                        .delivery
+                        .pending
+                        .lock()
+                        .unwrap()
+                        .latest
+                        .values()
+                        .any(|item| {
+                            matches!(
+                                item.value,
+                                UiUpdate::ShutdownProgress {
+                                    force_available: true,
+                                    ..
+                                }
+                            )
+                        })
+                    {
+                        break;
+                    }
+                    assert!(
+                        !bridge.is_finished(),
+                        "ordinary Quit cannot discard retained results"
+                    );
+                    attempted.await;
                 }
-                assert!(
-                    !bridge.is_finished(),
-                    "ordinary Quit cannot discard retained results"
-                );
-                attempted.await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         sender.try_send(UiAction::ForceQuit).unwrap();
-        let error = tokio::time::timeout(Duration::from_secs(2), bridge)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_err();
+        let error = crate::test_watchdog::watchdog(
+            "real frontend cancel quit and one force survive full reserve and retained batch",
+            bridge,
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
         assert_eq!(error.details.unwrap()["forced_shutdown"], true);
     }
     #[tokio::test]
@@ -687,8 +698,8 @@ mod tests {
             };
             // Owned work is already done; final presentation cannot restart its
             // grace or consume this explicit force without acting on it.
-            let error = tokio::time::timeout(
-                Duration::from_millis(250),
+            let error = crate::test_watchdog::watchdog(
+                "completed owned shutdown honors one force while terminal marker is retained",
                 wait_for_shutdown_delivery(&mut actions, &out, Duration::from_secs(60), async {
                     result
                 }),
@@ -723,30 +734,33 @@ mod tests {
         assert!(!task.is_finished());
         assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
         let mut count = 0;
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                // The first resumed transfer must be made by shutdown itself.
-                // Thereafter release the synthetic one-slot channel explicitly;
-                // FIFO assertions must not require 512 OS timer wakeups in 5s.
-                if count > 0 {
-                    out.flush();
-                }
-                while let Ok(value) = rx.try_recv() {
-                    match value {
-                        UiUpdate::ThreadDeletion { request_id, .. } => {
-                            assert_eq!(request_id, count);
-                            count += 1;
-                        }
-                        UiUpdate::Shutdown => {
-                            assert_eq!(count, CRITICAL_LIMIT as u64);
-                            return;
-                        }
-                        _ => panic!("unexpected terminal update"),
+        crate::test_watchdog::watchdog(
+            "completed shutdown terminal marker remains after all older results",
+            async {
+                loop {
+                    // The first resumed transfer must be made by shutdown itself.
+                    // Thereafter release the synthetic one-slot channel explicitly;
+                    // FIFO assertions must not require 512 OS timer wakeups in 5s.
+                    if count > 0 {
+                        out.flush();
                     }
+                    while let Ok(value) = rx.try_recv() {
+                        match value {
+                            UiUpdate::ThreadDeletion { request_id, .. } => {
+                                assert_eq!(request_id, count);
+                                count += 1;
+                            }
+                            UiUpdate::Shutdown => {
+                                assert_eq!(count, CRITICAL_LIMIT as u64);
+                                return;
+                            }
+                            _ => panic!("unexpected terminal update"),
+                        }
+                    }
+                    tokio::task::yield_now().await;
                 }
-                tokio::task::yield_now().await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         task.await.unwrap().unwrap();
@@ -787,32 +801,35 @@ mod tests {
         let mut older = 0;
         let mut revisions = Vec::new();
         let mut worker_finished = false;
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                batch.drain(&mut pending, &out);
-                out.flush();
-                while let Ok(value) = rx.try_recv() {
-                    match value {
-                        UiUpdate::ThreadDeletion {
-                            request_id: 9999, ..
-                        } => worker_finished = true,
-                        UiUpdate::ThreadDeletion { request_id, .. } => {
-                            assert_eq!(request_id, older);
-                            older += 1;
+        crate::test_watchdog::watchdog(
+            "reserved batch continuation keeps fifo and worker permit until ui resumes",
+            async {
+                loop {
+                    batch.drain(&mut pending, &out);
+                    out.flush();
+                    while let Ok(value) = rx.try_recv() {
+                        match value {
+                            UiUpdate::ThreadDeletion {
+                                request_id: 9999, ..
+                            } => worker_finished = true,
+                            UiUpdate::ThreadDeletion { request_id, .. } => {
+                                assert_eq!(request_id, older);
+                                older += 1;
+                            }
+                            UiUpdate::Receipt { revision, .. } => {
+                                assert_eq!(older, WORKER_LIMIT as u64);
+                                revisions.push(revision);
+                            }
+                            _ => panic!("unexpected result"),
                         }
-                        UiUpdate::Receipt { revision, .. } => {
-                            assert_eq!(older, WORKER_LIMIT as u64);
-                            revisions.push(revision);
-                        }
-                        _ => panic!("unexpected result"),
                     }
+                    if !batch.active() && !out.pending() && worker_finished {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
                 }
-                if !batch.active() && !out.pending() && worker_finished {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         task.await.unwrap();
@@ -922,25 +939,31 @@ mod tests {
             .await;
             update(&worker, UiUpdate::Shutdown).await;
         });
-        tokio::time::timeout(Duration::from_secs(1), task)
-            .await
-            .unwrap()
-            .unwrap();
+        crate::test_watchdog::watchdog(
+            "worker completion cannot be followed by older preparing status",
+            task,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         rx.recv().unwrap();
         let mut statuses = Vec::new();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                out.flush();
-                while let Ok(value) = rx.try_recv() {
-                    match value {
-                        UiUpdate::Status { text, .. } => statuses.push(text),
-                        UiUpdate::Shutdown => return,
-                        _ => {}
+        crate::test_watchdog::watchdog(
+            "worker completion cannot be followed by older preparing status",
+            async {
+                loop {
+                    out.flush();
+                    while let Ok(value) = rx.try_recv() {
+                        match value {
+                            UiUpdate::Status { text, .. } => statuses.push(text),
+                            UiUpdate::Shutdown => return,
+                            _ => {}
+                        }
                     }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         assert_eq!(statuses.last().map(String::as_str), Some("completed"));
@@ -974,25 +997,28 @@ mod tests {
         tokio::task::yield_now().await;
         rx.recv().unwrap();
         let mut count = 0;
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                out.flush();
-                while let Ok(value) = rx.try_recv() {
-                    match value {
-                        UiUpdate::ThreadDeletion { request_id, .. } => {
-                            assert_eq!(request_id, count);
-                            count += 1;
+        crate::test_watchdog::watchdog(
+            "full outbox retry never overtakes older critical results",
+            async {
+                loop {
+                    out.flush();
+                    while let Ok(value) = rx.try_recv() {
+                        match value {
+                            UiUpdate::ThreadDeletion { request_id, .. } => {
+                                assert_eq!(request_id, count);
+                                count += 1;
+                            }
+                            UiUpdate::Shutdown => {
+                                assert_eq!(count, CRITICAL_LIMIT as u64);
+                                return;
+                            }
+                            _ => panic!("unexpected UI update"),
                         }
-                        UiUpdate::Shutdown => {
-                            assert_eq!(count, CRITICAL_LIMIT as u64);
-                            return;
-                        }
-                        _ => panic!("unexpected UI update"),
                     }
+                    tokio::task::yield_now().await;
                 }
-                tokio::task::yield_now().await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         task.await.unwrap();
@@ -1007,9 +1033,12 @@ mod tests {
         let (actions, mut receiver) = crate::ui::actions::channel(1);
         actions.try_send(UiAction::ForceQuit).unwrap();
         assert!(
-            tokio::time::timeout(Duration::from_millis(250), out.drain(&mut receiver))
-                .await
-                .unwrap()
+            crate::test_watchdog::watchdog(
+                "final ui drain honors force without starting another grace",
+                out.drain(&mut receiver)
+            )
+            .await
+            .unwrap()
         );
         assert!(out.pending()); // An explicit forced exit may abandon undelivered UI values.
     }
@@ -1047,38 +1076,44 @@ mod tests {
         });
         // The first tick enables force. Observe it through the bounded shared
         // outbox without freeing any raw UI capacity or sending a second force.
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                if out
-                    .delivery
-                    .pending
-                    .lock()
-                    .unwrap()
-                    .latest
-                    .values()
-                    .any(|item| {
-                        matches!(
-                            item.value,
-                            UiUpdate::ShutdownProgress {
-                                force_available: true,
-                                ..
-                            }
-                        )
-                    })
-                {
-                    break;
+        crate::test_watchdog::watchdog(
+            "accepted force at full reserve never waits for ui or second force",
+            async {
+                loop {
+                    if out
+                        .delivery
+                        .pending
+                        .lock()
+                        .unwrap()
+                        .latest
+                        .values()
+                        .any(|item| {
+                            matches!(
+                                item.value,
+                                UiUpdate::ShutdownProgress {
+                                    force_available: true,
+                                    ..
+                                }
+                            )
+                        })
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         actions.try_send(UiAction::ForceQuit).unwrap();
-        let error = tokio::time::timeout(Duration::from_millis(250), task)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_err();
+        let error = crate::test_watchdog::watchdog(
+            "accepted force at full reserve never waits for ui or second force",
+            task,
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
         assert_eq!(error.details.unwrap()["forced_shutdown"], true);
         assert_eq!(
             out.delivery.pending.lock().unwrap().critical.len(),
@@ -1106,10 +1141,13 @@ mod tests {
         update(&worker, UiUpdate::Shutdown).await;
         assert!(worker.pending());
         assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
-        tokio::time::timeout(Duration::from_secs(1), bridge)
-            .await
-            .unwrap()
-            .unwrap();
+        crate::test_watchdog::watchdog(
+            "worker enqueue wakes an idle select with flush initially disabled",
+            bridge,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert!(matches!(rx.try_recv().unwrap(), UiUpdate::Shutdown));
         assert!(!worker.pending());
     }
@@ -1133,56 +1171,65 @@ mod tests {
         });
         // Start with no pending outbox so the timer branch is initially disabled.
         // Actual shutdown progress is the producer; the fixture never flushes it.
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if out
-                    .delivery
-                    .pending
-                    .lock()
-                    .unwrap()
-                    .latest
-                    .values()
-                    .any(|item| {
-                        matches!(
-                            item.value,
-                            UiUpdate::ShutdownProgress {
-                                force_available: true,
-                                ..
-                            }
-                        )
-                    })
-                {
-                    break;
+        crate::test_watchdog::watchdog(
+            "shutdown progress wakes delivery and enables one force after ui backpressure",
+            async {
+                loop {
+                    if out
+                        .delivery
+                        .pending
+                        .lock()
+                        .unwrap()
+                        .latest
+                        .values()
+                        .any(|item| {
+                            matches!(
+                                item.value,
+                                UiUpdate::ShutdownProgress {
+                                    force_available: true,
+                                    ..
+                                }
+                            )
+                        })
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         for _ in 0..128 {
             assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
         }
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                if let Ok(UiUpdate::ShutdownProgress {
-                    force_available: true,
-                    ..
-                }) = rx.try_recv()
-                {
-                    break;
+        crate::test_watchdog::watchdog(
+            "shutdown progress wakes delivery and enables one force after ui backpressure",
+            async {
+                loop {
+                    if let Ok(UiUpdate::ShutdownProgress {
+                        force_available: true,
+                        ..
+                    }) = rx.try_recv()
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         // UI has now received the real force-available state; one request suffices.
         sender.try_send(UiAction::ForceQuit).unwrap();
-        let error = tokio::time::timeout(Duration::from_secs(1), task)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_err();
+        let error = crate::test_watchdog::watchdog(
+            "shutdown progress wakes delivery and enables one force after ui backpressure",
+            task,
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
         assert_eq!(error.details.unwrap()["forced_shutdown"], true);
     }
 }

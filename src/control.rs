@@ -1801,7 +1801,7 @@ impl Control {
 mod failure_tests {
     use super::*;
     use rusqlite::params;
-    use std::{collections::BTreeMap, time::Duration};
+    use std::collections::BTreeMap;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn shutdown_closes_admission_but_finishes_file_preparation_before_capture() {
@@ -1829,16 +1829,14 @@ mod failure_tests {
                 let (started, ready) = tokio::sync::oneshot::channel();
                 let (release, held) = std::sync::mpsc::channel();
                 occupied.push(tokio::spawn(async move {
+                    let deadline =
+                        crate::test_watchdog::Deadline::new("fixture holds the file worker");
                     workers
-                        .execute(
-                            tokio::time::Instant::now() + Duration::from_secs(10),
-                            CancellationToken::new(),
-                            move || {
-                                started.send(()).unwrap();
-                                held.recv().unwrap();
-                                Ok(())
-                            },
-                        )
+                        .execute(deadline.at().into(), CancellationToken::new(), move || {
+                            started.send(()).unwrap();
+                            held.recv().unwrap();
+                            Ok(())
+                        })
                         .await
                 }));
                 ready.await.unwrap();
@@ -1863,20 +1861,26 @@ mod failure_tests {
                     )
                     .await
             });
-            tokio::time::timeout(Duration::from_secs(3), async {
-                while control.admission.context_count() != 1 {
-                    tokio::task::yield_now().await;
-                }
-            })
+            crate::test_watchdog::watchdog(
+                "shutdown closes admission but finishes file preparation before capture",
+                async {
+                    while control.admission.context_count() != 1 {
+                        tokio::task::yield_now().await;
+                    }
+                },
+            )
             .await
             .unwrap();
             let preparing = control.clone();
             let prepare = tokio::spawn(async move { preparing.prepare_shutdown().await });
-            tokio::time::timeout(Duration::from_secs(3), async {
-                while !control.admission.closed_for_test() {
-                    tokio::task::yield_now().await;
-                }
-            })
+            crate::test_watchdog::watchdog(
+                "shutdown closes admission but finishes file preparation before capture",
+                async {
+                    while !control.admission.closed_for_test() {
+                        tokio::task::yield_now().await;
+                    }
+                },
+            )
             .await
             .unwrap();
             assert!(!control.stop.is_cancelled());
@@ -1926,9 +1930,12 @@ mod failure_tests {
                     Ok(())
                 }).await.unwrap();
             }
-            let shutdown = tokio::time::timeout(Duration::from_secs(5), control.shutdown())
-                .await
-                .unwrap();
+            let shutdown = crate::test_watchdog::watchdog(
+                "shutdown closes admission but finishes file preparation before capture",
+                control.shutdown(),
+            )
+            .await
+            .unwrap();
             if save_failure {
                 assert_eq!(sent.unwrap_err().code, ErrorCode::SaveFailed);
                 assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
@@ -2051,11 +2058,14 @@ mod failure_tests {
         let guard = control.admit(true).unwrap();
         let preparing = control.clone();
         let prepare = tokio::spawn(async move { preparing.prepare_shutdown().await });
-        tokio::time::timeout(Duration::from_secs(3), async {
-            while !control.admission.closed_for_test() {
-                tokio::task::yield_now().await;
-            }
-        })
+        crate::test_watchdog::watchdog(
+            "forced shutdown can interrupt pre capture admission drain",
+            async {
+                while !control.admission.closed_for_test() {
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
         .await
         .unwrap();
         assert!(!prepare.is_finished());
@@ -2067,10 +2077,13 @@ mod failure_tests {
         assert!(control.stop.is_cancelled());
         assert_eq!(control.admission.context_count(), 1);
         drop(guard);
-        tokio::time::timeout(Duration::from_secs(3), control.shutdown())
-            .await
-            .unwrap()
-            .unwrap();
+        crate::test_watchdog::watchdog(
+            "forced shutdown can interrupt pre capture admission drain",
+            control.shutdown(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(control.admission.active_count(), 0);
         owner.shutdown().await.unwrap();
     }
@@ -2153,10 +2166,13 @@ mod failure_tests {
             assert!(response.ok, "{:?}", response.error);
             assert_eq!(response.result.unwrap()["connection"], expected);
         }
-        let requests = tokio::time::timeout(Duration::from_secs(5), server)
-            .await
-            .unwrap()
-            .unwrap();
+        let requests = crate::test_watchdog::watchdog(
+            "authenticated model catalog uses origin thread unless connection overrides it",
+            server,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert!(requests[0].starts_with("GET /second/v1/models HTTP/1.1"));
         assert!(requests[1].starts_with("GET /first/v1/models HTTP/1.1"));
         control.shutdown().await.unwrap();
@@ -2203,24 +2219,30 @@ mod failure_tests {
         let failure = tokio::spawn(async move {
             failure_control.fail_storage().await;
         });
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while !control.storage_failed.load(Ordering::Acquire) {
-                tokio::task::yield_now().await;
-            }
-        })
+        crate::test_watchdog::watchdog(
+            "cancelled failure observer still stops a shell after the map unlocks",
+            async {
+                while !control.storage_failed.load(Ordering::Acquire) {
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
         .await
         .unwrap();
         failure.abort();
         let _ = failure.await;
         drop(held);
-        let completion = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(done) = shell.completion.borrow().clone() {
-                    break done;
+        let completion = crate::test_watchdog::watchdog(
+            "cancelled failure observer still stops a shell after the map unlocks",
+            async {
+                loop {
+                    if let Some(done) = shell.completion.borrow().clone() {
+                        break done;
+                    }
+                    shell.completion.changed().await.unwrap();
                 }
-                shell.completion.changed().await.unwrap();
-            }
-        })
+            },
+        )
         .await
         .unwrap();
         assert_eq!(completion.state, ShellState::Stopped);

@@ -431,11 +431,14 @@ async fn work_overview_follows_the_saved_execution_to_get_and_raw_output() {
         );
     }
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(10), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "work overview follows the saved execution to get and raw output",
+        bridge,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
 }
 impl frontend::ClipboardBackend for FixtureClipboard {
     fn capture(
@@ -670,11 +673,14 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
         ErrorCode::InputLimit
     );
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(10), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "clipboard image is leased then sent atomically and copy uses original body",
+        bridge,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
 }
 async fn next_update<T>(
     receive: &mut std::sync::mpsc::Receiver<UiUpdate>,
@@ -1403,7 +1409,6 @@ fn reasoning_ranges_follow_original_unicode_text_and_never_include_opaque_items(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queued_database_query_does_not_delay_quit_grace_notification() {
-    use std::time::Duration;
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config, "[io]\nshutdown_grace_ms=20\n").unwrap();
@@ -1424,7 +1429,7 @@ async fn queued_database_query_does_not_delay_quit_grace_notification() {
     let blocked = tokio::spawn(async move {
         db.call(move |_| {
             let _ = entered_tx.send(());
-            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            crate::test_watchdog::blocking_recv("release fixture barrier", &release_rx).unwrap();
             Ok(())
         })
         .await
@@ -1470,11 +1475,14 @@ async fn queued_database_query_does_not_delay_quit_grace_notification() {
     );
     release_tx.send(()).unwrap();
     blocked.await.unwrap().unwrap();
-    tokio::time::timeout(Duration::from_secs(10), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "queued database query does not delay quit grace notification",
+        bridge,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
 }
 
 #[cfg(unix)]
@@ -1549,7 +1557,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
         .await
         .unwrap();
     let thread = accepted["thread_id"].as_str().unwrap().to_owned();
-    let (execution,pid)=tokio::time::timeout(Duration::from_secs(5),async {loop {
+    let (execution,pid)=crate::test_watchdog::watchdog("draft database save failure stops admission and owned shell but retains input", async {loop {
         let value=owner.db.call(|db|{use rusqlite::OptionalExtension;Ok(db.query_row("SELECT s.id,o.bytes FROM shell_execution s JOIN output_chunk o ON o.execution_id=s.id WHERE s.state='running' AND o.stream='stdout' LIMIT 1",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Vec<u8>>(1)?))).optional()?)}).await.unwrap();
         if let Some((id,bytes))=value {break(id,String::from_utf8(bytes).unwrap().parse::<i32>().unwrap());}
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -2256,26 +2264,29 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })))
     .await
     .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let count = observer
-                .store
-                .database
-                .call(|db| {
-                    Ok(db.query_row(
-                        "SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
-                        [],
-                        |row| row.get::<_, i64>(0),
-                    )?)
-                })
-                .await
-                .unwrap();
-            if count == 1 {
-                break;
+    crate::test_watchdog::watchdog(
+        "structured history pages details url copy and wait cancel keep originals",
+        async {
+            loop {
+                let count = observer
+                    .store
+                    .database
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
+                            [],
+                            |row| row.get::<_, i64>(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                if count == 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     send.send(UiAction::CancelWait).await.unwrap();
@@ -2529,11 +2540,14 @@ async fn stale_history_navigation_recovers_after_path_change(remove_anchor: bool
         "Navigation must recover without sending a message or starting model/shell work"
     );
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "stale history navigation recovers after path change",
+        bridge,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3217,11 +3231,14 @@ async fn quit_accepted_before_frontend_binding_still_drains_queued_send_and_late
         owner,
         server,
     ));
-    tokio::time::timeout(std::time::Duration::from_secs(5), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "quit accepted before frontend binding still drains queued send and latest draft",
+        bridge,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
     let reopened = DataOwner::start(Some(config), Some(data), root.path().into())
         .await
         .unwrap();
@@ -3336,11 +3353,14 @@ async fn mismatched_submission_snapshot_never_creates_receipt_attempt_or_submitt
         .await
         .unwrap();
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(60), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "mismatched submission snapshot never creates receipt attempt or submitted watermark",
+        bridge,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
 }
 
 #[tokio::test]

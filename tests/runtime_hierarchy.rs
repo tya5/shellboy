@@ -386,7 +386,6 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
             .reply
             .send(final_answer("late answer must not be adopted"));
     }
-    tokio::time::sleep(Duration::from_millis(80)).await;
     let adopted:i64=control.store.database.call(|db|Ok(db.query_row("SELECT count(*) FROM node WHERE payload_json LIKE '%late answer must not be adopted%'",[],|r|r.get(0))?)).await.unwrap();
     assert_eq!(adopted, 0);
     command(

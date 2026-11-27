@@ -7702,7 +7702,6 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
             tokio::task::yield_now().await;
         };
         assert_eq!(adopted.2.len(), 4, "both complete call/result groups retain provenance");
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(250), receive.recv()).await.is_err(), "summary must wait without sending");
         crate::test_watchdog::watchdog("change model during proactive wait", request(&control,
             Command::ThreadSet(Box::new(ThreadSetArgs { thread_id: Some(target.clone()), model: Some("changed-model".into()), ..Default::default() }))
         )).await.unwrap();

@@ -213,6 +213,20 @@ mod refresh_scope_tests {
             }],
         }
     }
+    #[test]
+    fn switching_threads_rejects_a_late_progress_result() {
+        let mut selected = Selection::default();
+        selected.select_thread("a".into(), 1);
+        let old_epoch = selected.progress_epoch;
+        let pause_epoch = selected.pause_notification_epoch;
+        assert!(selected.accepts_initial_activity("a", 1, old_epoch, pause_epoch));
+
+        selected.select_thread("b".into(), 2);
+        assert!(!selected.accepts_initial_activity("a", 1, old_epoch, pause_epoch));
+        assert!(!selected.accepts("a", 1, old_epoch));
+        assert!(selected.accepts_initial_activity("b", 2, selected.progress_epoch, pause_epoch));
+    }
+
     #[tokio::test]
     async fn nonterminal_activity_read_failure_publishes_unavailable_and_status() {
         let mut selected = Selection::default();

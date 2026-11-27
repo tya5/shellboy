@@ -210,8 +210,7 @@ async fn bounded_admission_and_shared_shutdown_drain_accepted_jobs() {
     let first = database
         .try_call(move |connection| {
             started_send.send(()).unwrap();
-            release_receive
-                .recv_timeout(Duration::from_secs(10))
+            crate::test_watchdog::blocking_recv("release fixture barrier", &release_receive)
                 .unwrap();
             connection.execute(
                 "INSERT INTO app_meta(key,value) VALUES('first','committed')",
@@ -236,14 +235,17 @@ async fn bounded_admission_and_shared_shutdown_drain_accepted_jobs() {
     ));
     let clone = database.clone();
     let shutdown = tokio::spawn(async move { clone.shutdown().await });
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if matches!(database.try_call(|_| Ok(())), Err(StorageError::Closed)) {
-                break;
+    crate::test_watchdog::watchdog(
+        "bounded admission and shared shutdown drain accepted jobs",
+        async {
+            loop {
+                if matches!(database.try_call(|_| Ok(())), Err(StorageError::Closed)) {
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     assert!(
@@ -336,8 +338,7 @@ async fn cancelling_shutdown_observer_still_closes_and_joins_writer() {
     let reply = database
         .try_call(move |connection| {
             started_send.send(()).unwrap();
-            release_receive
-                .recv_timeout(Duration::from_secs(10))
+            crate::test_watchdog::blocking_recv("release fixture barrier", &release_receive)
                 .unwrap();
             connection.execute(
                 "INSERT INTO app_meta(key,value) VALUES('shutdown_cancelled','committed')",
@@ -349,23 +350,29 @@ async fn cancelling_shutdown_observer_still_closes_and_joins_writer() {
     started_receive.await.unwrap();
     let clone = database.clone();
     let observer = tokio::spawn(async move { clone.shutdown().await });
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if matches!(database.try_call(|_| Ok(())), Err(StorageError::Closed)) {
-                break;
+    crate::test_watchdog::watchdog(
+        "cancelling shutdown observer still closes and joins writer",
+        async {
+            loop {
+                if matches!(database.try_call(|_| Ok(())), Err(StorageError::Closed)) {
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     observer.abort();
     release_send.send(()).unwrap();
     reply.receive().await.unwrap();
-    tokio::time::timeout(Duration::from_secs(2), database.shutdown())
-        .await
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "cancelling shutdown observer still closes and joins writer",
+        database.shutdown(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let reopened = DbWorker::open(directory.path().join("db")).await.unwrap();
     reopened
         .call(|connection| {
@@ -405,8 +412,7 @@ async fn owner_guard_outlives_all_callers_until_actual_writer_close() {
     let reply = database
         .try_call(move |connection| {
             started_send.send(()).unwrap();
-            release_receive
-                .recv_timeout(Duration::from_secs(10))
+            crate::test_watchdog::blocking_recv("release fixture barrier", &release_receive)
                 .unwrap();
             connection.execute(
                 "INSERT INTO app_meta(key,value) VALUES('owner_lifetime','committed')",
@@ -429,11 +435,14 @@ async fn owner_guard_outlives_all_callers_until_actual_writer_close() {
     );
     release_send.send(()).unwrap();
     reply.receive().await.unwrap();
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while fs2::FileExt::try_lock_exclusive(&competitor).is_err() {
-            tokio::time::sleep(Duration::from_millis(1)).await;
-        }
-    })
+    crate::test_watchdog::watchdog(
+        "owner guard outlives all callers until actual writer close",
+        async {
+            while fs2::FileExt::try_lock_exclusive(&competitor).is_err() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        },
+    )
     .await
     .unwrap();
     let reopened = DbWorker::open(directory.path().join("db")).await.unwrap();

@@ -520,14 +520,17 @@ mod output_batch_tests {
             }
             assert_eq!(bytes, b"abcdefghijkl");
             assert_eq!(sizes, expected_sizes);
-            let completion = tokio::time::timeout(Duration::from_secs(1), async {
-                loop {
-                    if let Some(done) = shell.completion.borrow().clone() {
-                        break done;
+            let completion = crate::test_watchdog::watchdog(
+                "batches carry original chunks without crossing the byte bound",
+                async {
+                    loop {
+                        if let Some(done) = shell.completion.borrow().clone() {
+                            break done;
+                        }
+                        shell.completion.changed().await.unwrap();
                     }
-                    shell.completion.changed().await.unwrap();
-                }
-            })
+                },
+            )
             .await
             .unwrap();
             assert!(completion.output_complete);
@@ -551,12 +554,13 @@ mod output_batch_tests {
             )
             .await
             .unwrap();
-        let ShellEvent::Output(first) =
-            tokio::time::timeout(Duration::from_secs(1), shell.events.recv())
-                .await
-                .unwrap()
-                .unwrap()
-        else {
+        let ShellEvent::Output(first) = crate::test_watchdog::watchdog(
+            "sparse live output flushes at the configured time bound",
+            shell.events.recv(),
+        )
+        .await
+        .unwrap()
+        .unwrap() else {
             panic!("raw shell emitted owner-only fact")
         };
         let mut pending = Some(first);
@@ -571,20 +575,26 @@ mod output_batch_tests {
             batch.as_mut().now_or_never().is_none(),
             "a sparse batch flushed immediately"
         );
-        let batch = tokio::time::timeout(Duration::from_secs(1), batch)
-            .await
-            .unwrap()
-            .unwrap();
+        let batch = crate::test_watchdog::watchdog(
+            "sparse live output flushes at the configured time bound",
+            batch,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(batch.len(), 1);
         assert_eq!(batch[0].bytes, b"timer");
         drop(batch);
         shell.handle.eof().await.unwrap();
-        tokio::time::timeout(Duration::from_secs(1), async {
-            while shell.events.recv().await.is_some() {}
-            while shell.completion.borrow().is_none() {
-                shell.completion.changed().await.unwrap();
-            }
-        })
+        crate::test_watchdog::watchdog(
+            "sparse live output flushes at the configured time bound",
+            async {
+                while shell.events.recv().await.is_some() {}
+                while shell.completion.borrow().is_none() {
+                    shell.completion.changed().await.unwrap();
+                }
+            },
+        )
         .await
         .unwrap();
     }

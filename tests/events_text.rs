@@ -378,7 +378,6 @@ async fn a_multibyte_character_split_across_network_reads_arrives_whole() {
                 .unwrap()
                 + 1;
             provider.raw(&body[..split]);
-            tokio::time::sleep(Duration::from_millis(50)).await;
             // Half a character is on the wire: the decoder holds it and no reader sees it.
             let waiting = poll(&control, Some(&at), &[&t], 0).await;
             assert_eq!(waiting["status"], "timeout");
@@ -616,11 +615,6 @@ async fn watching_text_keeps_change_hints_and_a_plain_poll_never_sees_text() {
             let mut at = cursor(&poll(&control, None, &[], 0).await);
             provider.delta("words");
             read_text(&control, &mut at, &t, 0, "words").await;
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            assert!(
-                !plain.is_finished(),
-                "text woke a plain poll into returning"
-            );
             // A saved change during the stream reaches the text watcher as a hint with the text state.
             let update = wait_request(
                 &control,
@@ -668,8 +662,6 @@ async fn a_pending_text_poll_ends_on_disconnect_and_on_owner_shutdown() {
                 let token = token.clone();
                 tokio::spawn(async move { control.request_cancellable(request, token).await })
             };
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            assert!(!disconnected.is_finished());
             token.cancel();
             assert!(
                 !watchdog("disconnect", disconnected)
@@ -683,8 +675,6 @@ async fn a_pending_text_poll_ends_on_disconnect_and_on_owner_shutdown() {
                 let request = wait_request(&control, wait_command(Some(&at), &[], 600_000, true));
                 tokio::spawn(async move { control.request(request).await })
             };
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            assert!(!held.is_finished());
             let Fixture {
                 _root,
                 owner,

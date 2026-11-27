@@ -16,7 +16,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::{mpsc, oneshot},
-    time::timeout,
 };
 
 struct Request {
@@ -93,7 +92,7 @@ async fn request_with_ui(
     sender: &ui::actions::ActionSender,
 ) -> Request {
     let mut recent = std::collections::VecDeque::new();
-    let result = timeout(Duration::from_secs(15), async {
+    let result = crate::test_watchdog::watchdog("request with ui", async {
         loop {
             while let Ok(update) = incoming.try_recv() {
                 if let UiUpdate::Status { text, .. } = &update {
@@ -124,7 +123,7 @@ async fn phase(
     sender: &ui::actions::ActionSender,
     wanted: ActivityPhase,
 ) -> ActivitySnapshot {
-    timeout(Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("phase", async {
         loop {
             while let Ok(update) = incoming.try_recv() {
                 let found = match &update {
@@ -206,10 +205,13 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
         ui.insert("original-recovery-request-唯一", false);
         let actions = enter(&mut ui);
         deliver(&sender, actions);
-        let first = timeout(Duration::from_secs(10), requests.recv())
-            .await
-            .unwrap()
-            .unwrap();
+        let first = crate::test_watchdog::watchdog(
+            "recovery retry new instruction and stop keep current targets and saved reasons",
+            requests.recv(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert!(
             first
                 .body
@@ -375,12 +377,15 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
             }
         }
         deliver(&sender, vec![UiAction::Quit]);
-        timeout(Duration::from_secs(10), async {
-            while !bridge.is_finished() {
-                while incoming.try_recv().is_ok() {}
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
+        crate::test_watchdog::watchdog(
+            "recovery retry new instruction and stop keep current targets and saved reasons",
+            async {
+                while !bridge.is_finished() {
+                    while incoming.try_recv().is_ok() {}
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            },
+        )
         .await
         .unwrap();
         bridge.await.unwrap().unwrap();
@@ -510,26 +515,29 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     assert!(cancelled["prerequisite"].get("exit_code").is_none());
     next.reply.send((200,json!({"id":"answer","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"tools returned"}]}]}))).unwrap();
     // Reload the same saved nodes through the frontend, including DB source correlation.
-    timeout(Duration::from_secs(15), async {
-        loop {
-            while let Ok(update) = incoming.try_recv() {
-                ui.apply(update);
-                deliver(&sender, ui.take_deferred_actions());
+    crate::test_watchdog::watchdog(
+        "multiple calls keep source order numbers commands background and cancel reasons",
+        async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    ui.apply(update);
+                    deliver(&sender, ui.take_deferred_actions());
+                }
+                if ordered_tool_group_visible(ui.view().nodes()) {
+                    break;
+                }
+                deliver(
+                    &sender,
+                    vec![UiAction::LoadHistory {
+                        thread_id: thread.clone(),
+                        generation: ui.view().generation,
+                        before_cursor: None,
+                    }],
+                );
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
-            if ordered_tool_group_visible(ui.view().nodes()) {
-                break;
-            }
-            deliver(
-                &sender,
-                vec![UiAction::LoadHistory {
-                    thread_id: thread.clone(),
-                    generation: ui.view().generation,
-                    before_cursor: None,
-                }],
-            );
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     // A held prefix of this real history page can contain both released
@@ -570,24 +578,29 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
             nodes: early_nodes,
         }],
     );
-    let early_enriched = timeout(Duration::from_secs(15), async {
-        loop {
-            match incoming.try_recv() {
-                Ok(UiUpdate::CurrentView {
-                    tool_facts: Some(scope),
-                    ..
-                }) if scope.revision == u64::MAX => break scope.nodes,
-                Ok(update) => {
-                    ui.apply(update);
-                    deliver(&sender, ui.take_deferred_actions());
+    let early_enriched = crate::test_watchdog::watchdog(
+        "multiple calls keep source order numbers commands background and cancel reasons",
+        async {
+            loop {
+                match incoming.try_recv() {
+                    Ok(UiUpdate::CurrentView {
+                        tool_facts: Some(scope),
+                        ..
+                    }) if scope.revision == u64::MAX => break scope.nodes,
+                    Ok(update) => {
+                        ui.apply(update);
+                        deliver(&sender, ui.take_deferred_actions());
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        tokio::time::sleep(Duration::from_millis(5)).await
+                    }
+                    Err(error) => {
+                        panic!("frontend closed before the controlled observation: {error}")
+                    }
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    tokio::time::sleep(Duration::from_millis(5)).await
-                }
-                Err(error) => panic!("frontend closed before the controlled observation: {error}"),
             }
-        }
-    })
+        },
+    )
     .await
     .unwrap();
     // The controlled observation is a retained scope now, not a one-shot job.
@@ -733,12 +746,15 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         .unwrap();
     assert_eq!(count, 2, "third call was never spawned");
     deliver(&sender, vec![UiAction::Quit]);
-    timeout(Duration::from_secs(15), async {
-        while !bridge.is_finished() {
-            while incoming.try_recv().is_ok() {}
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
+    crate::test_watchdog::watchdog(
+        "multiple calls keep source order numbers commands background and cancel reasons",
+        async {
+            while !bridge.is_finished() {
+                while incoming.try_recv().is_ok() {}
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        },
+    )
     .await
     .unwrap();
     bridge.await.unwrap().unwrap();

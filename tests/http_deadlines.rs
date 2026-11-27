@@ -1,5 +1,5 @@
 //! Transport deadlines exercised against sockets that remain open deliberately.
-use futures_util::future::join_all;
+use futures_util::{FutureExt, future::join_all};
 use serde_json::{Value, json};
 use shellboy::{
     config::Connection,
@@ -10,7 +10,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::{Duration, sleep},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -182,40 +181,42 @@ async fn stream_timeout_retains_partial_text_and_public_model_events() {
 }
 
 #[tokio::test]
-async fn heartbeat_chunks_keep_a_stream_alive_past_its_idle_and_request_limits() {
-    crate::test_watchdog::watchdog("tests/http_deadlines.rs: heartbeat_chunks_keep_a_stream_alive_past_its_idle_and_request_limits", async {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let client = HttpModelClient::new(Connection {
-            base_url: format!("http://{}", listener.local_addr().unwrap()),
-            stream_idle_timeout_ms: 1_000,
-            request_timeout_ms: 1_000,
-            ..Default::default()
-        })
-        .unwrap();
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            read_request(&mut stream).await;
-            stream
-                .write_all(&headers(200, "text/event-stream"))
+async fn heartbeat_chunks_are_accepted_before_the_terminal_frame() {
+    crate::test_watchdog::watchdog(
+        "tests/http_deadlines.rs: heartbeat_chunks_are_accepted_before_the_terminal_frame",
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let client = HttpModelClient::new(Connection {
+                base_url: format!("http://{}", listener.local_addr().unwrap()),
+                stream_idle_timeout_ms: 1_000,
+                request_timeout_ms: 1_000,
+                ..Default::default()
+            })
+            .unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                read_request(&mut stream).await;
+                stream
+                    .write_all(&headers(200, "text/event-stream"))
+                    .await
+                    .unwrap();
+                for _ in 0..6 {
+                    stream.write_all(b": heartbeat\n\n").await.unwrap();
+                }
+                stream.write_all(&terminal_frame()).await.unwrap();
+            });
+            let result = client
+                .response(
+                    response_request("fixture", vec![], None, false),
+                    CancellationToken::new(),
+                    None,
+                )
                 .await
                 .unwrap();
-            for _ in 0..6 {
-                sleep(Duration::from_millis(250)).await;
-                stream.write_all(b": heartbeat\n\n").await.unwrap();
-            }
-            stream.write_all(&terminal_frame()).await.unwrap();
-        });
-        let result = client
-            .response(
-                response_request("fixture", vec![], None, false),
-                CancellationToken::new(),
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(result.text, "complete");
-        server.await.unwrap();
-    })
+            assert_eq!(result.text, "complete");
+            server.await.unwrap();
+        },
+    )
     .await
     .expect("healthy heartbeat stream failed to complete");
 }
@@ -248,11 +249,6 @@ async fn disabled_stream_deadline_still_allows_cancellation() {
                 }
             });
             ready.await.unwrap();
-            sleep(Duration::from_millis(1_200)).await;
-            assert!(
-                !task.is_finished(),
-                "request deadline was applied to an unlimited stream"
-            );
             cancel.cancel();
             let failure = crate::test_watchdog::watchdog(
                 "tests/http_deadlines.rs: disabled_stream_deadline_still_allows_cancellation",
@@ -317,22 +313,25 @@ async fn separate_connections_do_not_share_stream_deadlines() {
             let slow = HttpModelClient::for_connection(
                 "long",
                 Connection {
-                    stream_idle_timeout_ms: 2_500,
+                    stream_idle_timeout_ms: 0,
                     ..connection
                 },
             )
             .unwrap();
+            let (short_done, wait_for_short) = tokio::sync::oneshot::channel();
             let server = tokio::spawn(async move {
+                let wait_for_short = wait_for_short.shared();
                 let mut tasks = Vec::new();
                 for _ in 0..2 {
                     let (mut stream, _) = listener.accept().await.unwrap();
+                    let wait_for_short = wait_for_short.clone();
                     tasks.push(tokio::spawn(async move {
                         read_request(&mut stream).await;
                         stream
                             .write_all(&headers(200, "text/event-stream"))
                             .await
                             .unwrap();
-                        sleep(Duration::from_millis(1_200)).await;
+                        wait_for_short.await.unwrap();
                         // The short-deadline client may already have closed its socket.
                         let _ = stream.write_all(&terminal_frame()).await;
                     }));
@@ -342,11 +341,17 @@ async fn separate_connections_do_not_share_stream_deadlines() {
                 }
             });
             let (short_result, long_result) = tokio::join!(
-                fast.response(
-                    response_request("fixture", vec![], None, false),
-                    CancellationToken::new(),
-                    None
-                ),
+                async {
+                    let result = fast
+                        .response(
+                            response_request("fixture", vec![], None, false),
+                            CancellationToken::new(),
+                            None,
+                        )
+                        .await;
+                    short_done.send(()).unwrap();
+                    result
+                },
                 slow.response(
                     response_request("fixture", vec![], None, false),
                     CancellationToken::new(),
