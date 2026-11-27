@@ -120,7 +120,10 @@ Slice 2 (live work) is on `task/core311-4d-s2-live`: shell waits on
 usage from the display `thread.get` replace the TUI's wait registry, pause and
 context-usage private reads
 ([design](../design/tui-client.md#live-work-and-header-facts-4d-slice-2)).
-The rest of the activity projection is still a private snapshot read.
+Slice 2b (`task/core311-4d-s2b-activity`) moves the rest of the activity
+to the owner's `thread.get` `activity`, shared with the window observation,
+and live work to `shell.list`/`shell.get`; the activity snapshot read and the
+TUI live-work SQL are deleted.
 
 ## Core #311 selected history client (4e/4f)
 

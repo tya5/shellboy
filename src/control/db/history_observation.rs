@@ -244,32 +244,15 @@ fn pending(
 }
 
 fn activity(db: &Connection, thread: &str) -> Result<HistoryWindowActivity> {
-    let run_id: Option<String> = db
-        .query_row(
-            "SELECT id FROM run WHERE thread_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
-            [thread],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(sql_error)?;
-    let Some(run_id) = run_id else {
+    let Some(activity) =
+        super::thread_activity::read(db, thread).map_err(StorageError::into_api_error)?
+    else {
         return Ok(HistoryWindowActivity::default());
     };
-    let turn_id: Option<String> = db.query_row(
-        "SELECT id FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1", [&run_id], |r| r.get(0),
-    ).optional().map_err(sql_error)?;
-    let attempt_id = if let Some(turn_id) = &turn_id {
-        db.query_row(
-            "SELECT id FROM model_attempt INDEXED BY activity_attempt_turn WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1", [turn_id], |r| r.get(0),
-        ).optional().map_err(sql_error)?
-    } else {
-        None
-    };
-    let waiting_reason = crate::readback::run_wait_reason(db, thread, &run_id)?;
     Ok(HistoryWindowActivity {
-        run_id: Some(run_id),
-        turn_id,
-        attempt_id,
-        waiting_reason,
+        turn_id: activity.turn.map(|turn| turn.turn_id),
+        attempt_id: activity.current_attempt.map(|attempt| attempt.attempt_id),
+        waiting_reason: activity.run.waiting_reason,
+        run_id: Some(activity.run.run_id),
     })
 }

@@ -289,6 +289,7 @@ pub fn schema_json() -> String {
     add_root!("Page", ThreadListPage);
     add_root!("ThreadSummary", ThreadSummary);
     add_root!("ThreadDetails", ThreadDetails);
+    add_root!("ThreadActivity", ThreadActivity);
     add_root!("MessageDetails", MessageDetails);
     add_root!("RunDetails", RunDetails);
     add_root!("TurnDetails", TurnDetails);
@@ -2459,7 +2460,89 @@ record!(InstructionWarning {
     reason: InstructionWarningReason,
     #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>
 });
-record!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] display_coverage: Option<ThreadDisplayCoverage>, #[serde(default, skip_serializing_if = "Vec::is_empty")] instruction_warnings: Vec<InstructionWarning>, #[serde(default, skip_serializing_if = "Option::is_none")] instruction_sources: Option<Value>, #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] auto_compact_target_percent: Option<u64>, #[serde(default)] summary_max_chars: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_auto_compact_target_percent: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_summary_max_chars: Option<u64>, #[serde(default)] max_tokens: Option<u64>, #[serde(default)] spill: Option<bool>, #[serde(default = "default_true")] effective_spill: bool, #[serde(default,skip_serializing_if="Option::is_none")] effective_max_tokens: Option<u64>, #[serde(default)] pending_replies: PendingReplyCounts, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, summarizing: bool, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_thread_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
+// The selected Thread's latest Run, its latest Turn and that Turn's latest
+// attempt, as one owner projection (the history.window activity IDs come from
+// the same read). Counts stop at 128; `capped` means "128 or more".
+record!(ThreadActivity {
+    run: ThreadActivityRun,
+    #[serde(default, skip_serializing_if = "Option::is_none")] turn: Option<ThreadActivityTurn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] current_attempt: Option<ThreadActivityAttempt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] automatic_compaction: Option<ThreadActivityCompaction>
+});
+record!(ThreadActivityRun {
+    run_id: String,
+    state: RunState,
+    #[serde(default, skip_serializing_if = "Option::is_none")] stop_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] ended_at: Option<String>,
+    #[schemars(description = "Starting, running or stopping shells owned by this Run, at most 128.")] owned_shells: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] waiting_reason: Option<RunWaitReason>
+});
+record!(ThreadActivityTurn {
+    turn_id: String,
+    generation: i64,
+    state: TurnState,
+    #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>,
+    tools: ThreadActivityTools,
+    #[serde(default, skip_serializing_if = "Option::is_none")] recovery_counts: Option<ThreadActivityRecoveryCounts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] context_reduction: Option<ThreadActivityReduction>
+});
+record!(ThreadActivityTools {
+    #[serde(default, skip_serializing_if = "Option::is_none")] running_since: Option<String>,
+    spawned: u64,
+    results: u64,
+    cancelled: u64,
+    capped: bool
+});
+// Present whenever the Turn has a saved recovery reason.
+record!(ThreadActivityRecoveryCounts {
+    receipts: u64,
+    results: u64,
+    active_shells: u64,
+    uncollected_shells: u64,
+    capped: bool
+});
+record!(ThreadActivityReduction {
+    before_characters: u64,
+    after_characters: u64,
+    spilled_groups: u64,
+    omitted_items: u64
+});
+// Generation-scoped facts (retry, attachments, error) are present only when the
+// attempt belongs to the Turn's current generation.
+record!(ThreadActivityAttempt {
+    attempt_id: String,
+    state: AttemptState,
+    #[serde(default, skip_serializing_if = "Option::is_none")] started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] automatic_retry: Option<ThreadActivityRetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] retry_exhausted: Option<ThreadActivityRetryExhausted>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] error_kind: Option<ThreadActivityErrorKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] error_message: Option<String>,
+    attachment_unavailable: bool,
+    attachment_unsupported: bool,
+    attachment_check_limited: bool
+});
+record!(ThreadActivityRetry {
+    number: u64,
+    limit: u64,
+    delay_ms: u64,
+    partial_response_discarded: bool
+});
+record!(ThreadActivityRetryExhausted {
+    retries: u32,
+    limit: u32
+});
+// The Turn's saved recovery reason is exactly this attempt's model error.
+states!(ThreadActivityErrorKind {
+    ModelRequest,
+    ModelContextLimit
+});
+record!(ThreadActivityCompaction {
+    input_tokens: u64,
+    threshold: u64,
+    started_at: String
+});
+record!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] display_coverage: Option<ThreadDisplayCoverage>, #[serde(default, skip_serializing_if = "Vec::is_empty")] instruction_warnings: Vec<InstructionWarning>, #[serde(default, skip_serializing_if = "Option::is_none")] instruction_sources: Option<Value>, #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] auto_compact_target_percent: Option<u64>, #[serde(default)] summary_max_chars: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_auto_compact_target_percent: Option<u64>, #[serde(default,skip_serializing_if="Option::is_none")] effective_summary_max_chars: Option<u64>, #[serde(default)] max_tokens: Option<u64>, #[serde(default)] spill: Option<bool>, #[serde(default = "default_true")] effective_spill: bool, #[serde(default,skip_serializing_if="Option::is_none")] effective_max_tokens: Option<u64>, #[serde(default)] pending_replies: PendingReplyCounts, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, summarizing: bool, #[serde(default, skip_serializing_if = "Option::is_none")] activity: Option<ThreadActivity>, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_thread_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
 
 // Present only in the result of a `thread set --parent-thread` that moved the Thread: where it was and which live Run still answers to its previous owner (#222).
 record!(ParentChange { #[serde(default)] previous_parent_id: Option<String>, #[serde(default)] live_run_id: Option<String> });
@@ -2513,7 +2596,10 @@ record!(ShellWait {
     accepted_at: String,
     timeout_ms: u64,
     condition_count: u32,
-    first_condition: WaitCondition
+    first_condition: WaitCondition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "The saved Thread of the first condition's Run, Turn or first Thread target.")]
+    target_thread_id: Option<String>
 });
 record!(ShellDetails {
     #[serde(default, skip_serializing_if = "Option::is_none")] foreground: Option<bool>,

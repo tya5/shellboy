@@ -12655,6 +12655,13 @@
         "operation_id": {
           "type": "string"
         },
+        "target_thread_id": {
+          "description": "The saved Thread of the first condition's Run, Turn or first Thread target.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "timeout_ms": {
           "format": "uint64",
           "minimum": 0,
@@ -13512,6 +13519,16 @@
     "ThreadDetails": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "agents_path": {
           "type": "string"
         },
@@ -15886,6 +15903,412 @@
         "targets"
       ],
       "title": "WorkItem",
+      "type": "object"
+    },
+    "AttemptState": {
+      "enum": [
+        "preparing",
+        "inflight",
+        "completed",
+        "failed",
+        "incomplete",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "ThreadActivity": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "automatic_compaction": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityCompaction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_attempt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityAttempt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run": {
+          "$ref": "#/definitions/ThreadActivityRun"
+        },
+        "turn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityTurn"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "title": "ThreadActivity",
+      "type": "object"
+    },
+    "ThreadActivityAttempt": {
+      "properties": {
+        "attachment_check_limited": {
+          "type": "boolean"
+        },
+        "attachment_unavailable": {
+          "type": "boolean"
+        },
+        "attachment_unsupported": {
+          "type": "boolean"
+        },
+        "attempt_id": {
+          "type": "string"
+        },
+        "automatic_retry": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityRetry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityErrorKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry_exhausted": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityRetryExhausted"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/AttemptState"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "state",
+        "attachment_unavailable",
+        "attachment_unsupported",
+        "attachment_check_limited"
+      ],
+      "type": "object"
+    },
+    "ThreadActivityCompaction": {
+      "properties": {
+        "input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "threshold": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "threshold",
+        "started_at"
+      ],
+      "type": "object"
+    },
+    "ThreadActivityErrorKind": {
+      "enum": [
+        "model_request",
+        "model_context_limit"
+      ],
+      "type": "string"
+    },
+    "ThreadActivityRecoveryCounts": {
+      "properties": {
+        "active_shells": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "capped": {
+          "type": "boolean"
+        },
+        "receipts": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "results": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uncollected_shells": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "receipts",
+        "results",
+        "active_shells",
+        "uncollected_shells",
+        "capped"
+      ],
+      "type": "object"
+    },
+    "ThreadActivityReduction": {
+      "properties": {
+        "after_characters": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "before_characters": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted_items": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spilled_groups": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "before_characters",
+        "after_characters",
+        "spilled_groups",
+        "omitted_items"
+      ],
+      "type": "object"
+    },
+    "ThreadActivityRetry": {
+      "properties": {
+        "delay_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "number": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "partial_response_discarded": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "number",
+        "limit",
+        "delay_ms",
+        "partial_response_discarded"
+      ],
+      "type": "object"
+    },
+    "ThreadActivityRetryExhausted": {
+      "properties": {
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retries": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "retries",
+        "limit"
+      ],
+      "type": "object"
+    },
+    "ThreadActivityRun": {
+      "properties": {
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owned_shells": {
+          "description": "Starting, running or stopping shells owned by this Run, at most 128.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revisit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RevisitSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/RunState"
+        },
+        "stop_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "waiting_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunWaitReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "run_id",
+        "state",
+        "owned_shells"
+      ],
+      "type": "object"
+    },
+    "ThreadActivityTools": {
+      "properties": {
+        "cancelled": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "capped": {
+          "type": "boolean"
+        },
+        "results": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "running_since": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spawned": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "spawned",
+        "results",
+        "cancelled",
+        "capped"
+      ],
+      "type": "object"
+    },
+    "ThreadActivityTurn": {
+      "properties": {
+        "context_reduction": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityReduction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "recovery_counts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivityRecoveryCounts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recovery_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/TurnState"
+        },
+        "tools": {
+          "$ref": "#/definitions/ThreadActivityTools"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "generation",
+        "state",
+        "tools"
+      ],
       "type": "object"
     }
   },
@@ -18290,6 +18713,16 @@
     "thread.get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "agents_path": {
           "type": "string"
         },
@@ -18560,6 +18993,16 @@
     "thread.set": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadActivity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "agents_path": {
           "type": "string"
         },
