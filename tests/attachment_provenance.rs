@@ -274,6 +274,38 @@ fn assert_position(body: &Value, item: &Value, before: &str, after: Option<&str>
         "internal references cannot escape onto the wire"
     );
 }
+fn assert_omission(
+    body: &Value,
+    entry: &Value,
+    reason: &str,
+    fingerprint: Option<&Value>,
+) -> Value {
+    let item = entry["api_item_index"].as_u64().unwrap() as usize;
+    let part = entry["api_content_index"].as_u64().unwrap() as usize;
+    let content = &body["input"][item]["content"][part];
+    assert_eq!(content["type"], "input_text");
+    let fact: Value = serde_json::from_str(
+        content["text"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("[Shellboy omitted content] ")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(fact["reason"], reason);
+    assert_eq!(fact["ref"]["attachment_id"], entry["attachment_id"]);
+    assert_eq!(fact["ref"]["path"], entry["path"]);
+    assert_eq!(fact["ref"]["kind"], entry["kind"]);
+    assert_eq!(fact.get("fingerprint"), fingerprint);
+    assert_eq!(fact["retained"], false);
+    assert!(
+        fact["read"]
+            .as_str()
+            .is_some_and(|read| read.contains("shellboy attach"))
+    );
+    fact
+}
+
 fn assert_input_prefix(before: &Value, after: &Value) {
     let before = before["input"].as_array().unwrap();
     let after = after["input"].as_array().unwrap();
@@ -619,8 +651,7 @@ fn updates(body: &Value) -> Vec<Value> {
         .collect()
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that_attachment_baseline()
- {
+async fn changed_file_retry_keeps_update_identity_and_adoption_freezes_only_that_slot() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let initial_owner = owner(root.path(), &url).await;
@@ -633,6 +664,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         "no baseline must not be described as a change"
     );
     finish(&control, &thread, first).await;
+    let original_bytes = std::fs::read(root.path().join("image-a.png")).unwrap();
     std::fs::write(
         root.path().join("image-a.png"),
         b"changed-image-version-with-different-size",
@@ -661,13 +693,29 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         attachments(&original)[0]["content_hash"]
     );
     assert_ne!(entry["content_hash"], entry["previous_hash"]);
-    assert_position(
+    let fingerprint = &attachments(&original)[0]["content_hash"];
+    let fact = assert_omission(
         &changed.body,
         entry,
-        "before A",
-        Some("after A"),
-        "input_image",
+        "attachment_changed",
+        Some(fingerprint),
     );
+    let position = entry["api_item_index"].as_u64().unwrap() as usize;
+    let slot = entry["api_content_index"].as_u64().unwrap() as usize;
+    let parts = &changed.body["input"][position]["content"];
+    assert!(
+        parts[slot - 1]["text"]
+            .as_str()
+            .unwrap()
+            .contains("before A")
+    );
+    assert!(
+        parts[slot + 1]["text"]
+            .as_str()
+            .unwrap()
+            .contains("after A")
+    );
+    assert!(!changed.body.to_string().contains("input_image"));
     let notification = updates(&changed.body);
     assert_eq!(notification.len(), 1);
     assert_eq!(notification[0]["attachment_id"], entry["attachment_id"]);
@@ -754,10 +802,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     );
     let current = manifest(&control, &thread).await;
     assert_eq!(attachments(&current)[0]["changed"], false);
-    assert_eq!(
-        attachments(&current)[0]["previous_hash"],
-        entry["content_hash"]
-    );
+    assert_eq!(attachments(&current)[0]["previous_hash"], *fingerprint);
     assert_eq!(attachments(&current)[0]["first_inclusion"], false);
     finish(&control, &thread, next).await;
     control.shutdown().await.unwrap();
@@ -798,6 +843,21 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         entry["source_node_id"]
     );
     finish(&control, &thread, replay).await;
+    std::fs::write(root.path().join("image-a.png"), original_bytes).unwrap();
+    send(&control, &thread, "file reverted").await;
+    let reverted = incoming(&control, &thread, &mut receive).await;
+    let current = manifest(&control, &thread).await;
+    assert_eq!(
+        assert_omission(
+            &reverted.body,
+            &attachments(&current)[0],
+            "attachment_changed",
+            Some(fingerprint)
+        ),
+        fact
+    );
+    assert!(!reverted.body.to_string().contains("input_image"));
+    finish(&control, &thread, reverted).await;
     control.shutdown().await.unwrap();
     restarted.shutdown().await.unwrap();
     server.abort();
@@ -823,12 +883,11 @@ async fn missing_and_excluded_states_add_only_suffix_notices_once_binary_is_abse
         entry["source_node_id"],
         attachments(&original)[0]["source_node_id"]
     );
-    assert_position(
+    assert_omission(
         &missing.body,
         entry,
-        "before A",
-        Some("after A"),
-        "input_text",
+        "attachment_unavailable",
+        Some(&attachments(&original)[0]["content_hash"]),
     );
     assert!(!missing.body.to_string().contains("input_image"));
     let missing_input = missing.body.clone();
@@ -858,12 +917,11 @@ async fn missing_and_excluded_states_add_only_suffix_notices_once_binary_is_abse
     let excluded_manifest = manifest(&control, &thread).await;
     let entry = &attachments(&excluded_manifest)[0];
     assert_eq!(entry["state"], "excluded");
-    assert_position(
+    assert_omission(
         &excluded.body,
         entry,
-        "before A",
-        Some("after A"),
-        "input_text",
+        "attachment_unavailable",
+        Some(&attachments(&original)[0]["content_hash"]),
     );
     assert!(!excluded.body.to_string().contains("input_image"));
     assert_input_prefix(&still_missing_input, &excluded.body);
@@ -1619,12 +1677,29 @@ async fn unavailable_new_attachment_is_consumed_by_success_without_a_fabricated_
     .await;
     let retry = incoming(&control, &thread, &mut receive).await;
     assert!(retry.body.to_string().contains("Attachment unavailable"));
+    let entry = &attachments(&failed_manifest)[0];
+    let omitted = assert_omission(&retry.body, entry, "attachment_unavailable", None);
     finish(&control, &thread, retry).await;
     control.store.database.call(move|db|{
         assert!(!db.query_row("SELECT protected FROM attachment_selection WHERE attachment_id=?1",[&id],|r|r.get::<_,bool>(0))?);
         assert_eq!(db.query_row("SELECT COUNT(*) FROM attachment_send WHERE attachment_id=?1 AND (state='sent' OR content_hash IS NOT NULL)",[id],|r|r.get::<_,i64>(0))?,0);
         Ok(())
     }).await.unwrap();
+    std::fs::write(root.path().join("not-created.txt"), "now available").unwrap();
+    send(&control, &thread, "file appeared").await;
+    let reappeared = incoming(&control, &thread, &mut receive).await;
+    let current = manifest(&control, &thread).await;
+    assert_eq!(
+        assert_omission(
+            &reappeared.body,
+            &attachments(&current)[0],
+            "attachment_unavailable",
+            None
+        ),
+        omitted
+    );
+    assert!(!reappeared.body.to_string().contains("input_file"));
+    finish(&control, &thread, reappeared).await;
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -1848,7 +1923,7 @@ async fn issue_158_unknown_binary_is_unavailable_not_sent_and_can_be_converted()
             .unwrap()
             .contains("Unsupported attachment format")
     );
-    assert_position(&first.body, entry, "inspect binary", None, "input_text");
+    assert_omission(&first.body, entry, "attachment_unavailable", None);
     let wire = first.body.to_string();
     assert!(wire.contains("Attachment unavailable"));
     assert!(wire.contains("the file was not sent"));
@@ -1870,10 +1945,11 @@ async fn issue_158_unknown_binary_is_unavailable_not_sent_and_can_be_converted()
     let entry = &attachments(&converted)[0];
     assert_eq!(entry["attachment_id"], id);
     assert_eq!(entry["source_node_id"], source);
-    assert_eq!(entry["state"], "ready");
+    assert_eq!(entry["state"], "observed");
     assert_eq!(entry["mime_type"], "text/plain");
     assert!(entry["previous_hash"].is_null());
-    assert!(second.body.to_string().contains("data:text/plain;base64,"));
+    assert_omission(&second.body, entry, "attachment_unavailable", None);
+    assert!(!second.body.to_string().contains("input_file"));
     finish(&control, &thread, second).await;
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
@@ -1906,7 +1982,7 @@ async fn issue_158_unknown_binary_image_is_not_sent() {
     let recorded = manifest(&control, &thread).await;
     let entry = &attachments(&recorded)[0];
     assert_eq!(entry["state"], "unavailable");
-    assert_position(&first.body, entry, "inspect image", None, "input_text");
+    assert_omission(&first.body, entry, "attachment_unavailable", None);
     let wire = first.body.to_string();
     assert!(wire.contains("Unsupported attachment format"));
     assert!(!wire.contains("input_image"));

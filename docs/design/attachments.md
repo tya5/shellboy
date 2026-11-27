@@ -46,7 +46,7 @@ CLI追加はshell／外部CLIとも専用の補助nodeを作る。保存済みAs
 
 新しい添付指定の保護は、その指定のready/unavailable/excludedメタデータを実際にadmitした最初の正常完了要求で解除する。不在・読取り不能・単体上限によるunavailableでも、指定の状態文を消費した正常要求後は過去扱いへ進める。失敗/取消/世代不一致では解除しない。解除対象は同attemptのattachment_sendへ保存された指定に限定する。後で復活/縮小したファイルも、過去添付として通常の古い順の容量除外へ従う。
 
-この消費は実体を送った事実とは別である。attachment_sendをsentへ進めhash比較基準に使うのはreadyだった実体だけで、unavailable/excludedは状態を維持し架空のhash/送信成功を保存しない。既存state/table/workerは増やさない。
+この消費は実体を送った事実とは別である。attachment_sendをsentへ進めhash比較基準に使うのはreadyだった実体だけで、unavailable/excludedは状態を維持し架空のhash/送信成功を保存しない。永続化については下記の固定スロット契約も参照。
 
 ## 置換除外の通知と原経路再選択（M10）
 
@@ -110,12 +110,11 @@ Recognized signatures and text are independent of extension. A known extension
 must not cause invalid UTF-8 or arbitrary binary to be declared text or an image.
 This classification does not prove that a provider accepts a recognized format.
 
-Unknown binary is handled exactly like an unreadable attachment: no binary is
-sent, its original source slot contains no binary and a suffix notice says
-the format was not sent, and the attempt manifest records `unavailable` with
-the reason. The original file and reference remain intact, and success does
-not mark that content sent or establish a hash baseline. A later request reads
-the current bytes again. The TUI projects a localized warning for unavailable attachments from the
+Unknown binary is handled like an unreadable attachment: no binary is sent,
+the source slot carries an omission, a suffix notice says the format was not
+sent, and the attempt manifest records `unavailable` with the reason. Adoption
+consumes the designation without making up a sent fingerprint. Future
+observations never resume binary delivery at an omitted slot. The TUI projects a localized warning for unavailable attachments from the
 latest observed attempt. This activity lookup scans only a bounded attempt
 prefix; if that prefix is full, it warns that the status is not fully verified.
 Explicit reload inspects current bytes, not a historical snapshot. The
@@ -136,3 +135,21 @@ file.
 ## Bounded list pages (#327)
 
 `attachment.list` returns `Page<AttachmentDetails>` in stable `(selected_order,id)` order. `limit` defaults to 50 and is capped at 200; its opaque version-1 cursor binds Thread scope, selection revision, watermark, and last sort key. The query fetches at most `limit + 1` rows to decide whether a next cursor exists. Filesystem metadata/open observations run only for the returned `items`, on the bounded file worker; later pages are observed only when requested. There is no bare-array response path.
+
+## Fixed attachment slots (#469)
+
+Adoption fixes each Thread/attachment ID's slot: live with the sent SHA-256, or
+permanently omitted if unavailable. A later adopted change or unavailability
+retires a live slot permanently. The adopted send ledger stores the omission
+reason (`next_attachment_omission`) alongside the observation, but only rows
+that actually supplied bytes become `sent`. Previous `sent` rows continue to
+provide the last known sent fingerprint for existing histories. Failed and
+non-adopted attempts fix nothing. A current observation can emit a bounded
+metadata-only tail notice and cannot become the slot's fingerprint.
+
+The original ordered `attachment_ref` binds to the shared omitted-content fact
+inside provider `input_text`: reason, reference (ID/path/kind), optional sent
+fingerprint, `retained: false`, and how to read the current file or explicitly
+attach it again under a new ID. Unchanged live slots keep the existing shape.
+Omitted slots do not resume sending after recovery or reversion. Source payloads,
+spill payloads and the existing input-byte categories are unchanged.

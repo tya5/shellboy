@@ -49,7 +49,7 @@ If you suspect a rewrite that preserved attributes, use this command on a saved 
 
 Alternatively press lowercase `r` in the `/attachments` management screen. Explicit reload bypasses the cache, checks current contents and hashes, and displays results. It does not by itself send a new conversation request or resume recovery wait.
 
-Before/after hash comparisons are per Thread and attachment ID. The baseline updates together with adoption of a successful send. The original position identifies the version read for this request; changes produce a separate Shellboy update notice containing source and comparison hashes. After adoption the notice replays from history as a past event, not as a new change. A failed request does not become the "last successfully sent content." If a file disappears, is unreadable, or exceeds its individual limit, Shellboy does not substitute old cached content. It supplies the model a suffix notice identifying the attachment and reason, then continues with the remaining sendable conversation. If the API rejects a format or the whole request, inspect recovery information and take action.
+An attachment's original slot is fixed by its first adopted send, per Thread and attachment ID. Unchanged files keep the same bytes at that slot. If a later adopted send observes a change or the file is unavailable (including unreadable or over its individual limit), a fixed omission replaces the bytes permanently. If the file was unavailable at first adoption, the omission has no sent fingerprint. Failed attempts do not fix or retire a slot. The omission records the attachment ID, path, kind and original sent fingerprint if any; Shellboy holds no copy of those old bytes. Later observations may add a small metadata-only notice, never the newer file bytes. Once adopted, the notice replays as a past event. To read current text, use the shell; to submit a file or image again, run `shellboy attach PATH --kind file` or `shellboy attach PATH --kind image`. This creates a new attachment ID at the tail, even if the file reappeared or reverted.
 
 ## Excluding an attachment from sending
 
@@ -104,8 +104,8 @@ requests replay the notice as historical context. The original file and referenc
 successful file-send baseline. The TUI shows an unavailable-attachment warning
 for the latest observed attempt, using the configured UI language. Use
 `/reload-attachments` to inspect current contents; this rereads the file and is
-not proof of its bytes in the earlier request. Converting the file can make it
-sendable on a later request. The saved attempt manifest records the unavailable
+not proof of its bytes in the earlier request. After conversion, attach the file
+again to send it under a new ID. The saved attempt manifest records the unavailable
 state instead of a successful file send.
 
 Accepting paths with arbitrary extensions does not mean the model understands their content. Image, PDF, and other file support depend on the proxy/model. Shellboy does not automatically add Office conversion, OCR, or audio/video conversion. For rejection of an unsupported format, convert it yourself into a supported input, exclude the attachment, or choose a suitable connection. There is no automatic model or format fallback.

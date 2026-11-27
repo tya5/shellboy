@@ -413,7 +413,7 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
                 if has_attachment_ref(item) {
                     note(
                         &mut parts,
-                        "attachment content: bound from files at send time".into(),
+                        "attachment slot: live bytes or a fixed omission fact were selected at send time; historical bytes are not reconstructed".into(),
                     );
                 } else {
                     let mut item = item.clone();

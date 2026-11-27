@@ -14,6 +14,8 @@ struct SelectionRow {
     source_node_id: Option<String>,
     payload: Option<String>,
     previous_state: Option<String>,
+    observation_hash: Option<String>,
+    omission: Option<String>,
 }
 impl SelectionRow {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
@@ -30,6 +32,8 @@ impl SelectionRow {
             source_node_id: row.get(9)?,
             payload: row.get(10)?,
             previous_state: row.get(11)?,
+            observation_hash: row.get(12)?,
+            omission: row.get(13)?,
         })
     }
 }
@@ -58,7 +62,7 @@ pub(super) fn snapshot_selection_tx(
     if expected_revision.is_some_and(|expected| expected != revision) {
         return Err(StorageError::from(stale()));
     }
-    let mut statement=tx.prepare("SELECT a.id,a.absolute_path,a.input_kind,s.protected,s.state,s.reason,m.id,m.state,(SELECT z.content_hash FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND z.state='sent' AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1),a.source_node_id,n.payload_json,(SELECT z.state FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1) FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path LEFT JOIN node n ON n.id=a.source_node_id WHERE s.thread_id=?1 AND (COALESCE(s.reason,'')<>'context_replacement' OR EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) OR NOT EXISTS(SELECT 1 FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND z.state='excluded' AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted')) AND NOT (s.state='excluded' AND COALESCE(s.reason,'')='context_replacement' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) AND n.id IS NOT NULL AND (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL)) AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.node_id=a.source_node_id AND d.thread_id=s.thread_id AND d.status<>'applied') ORDER BY s.selected_order,a.id")?;
+    let mut statement=tx.prepare("SELECT a.id,a.absolute_path,a.input_kind,s.protected,s.state,s.reason,m.id,m.state,(SELECT z.content_hash FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND z.state='sent' AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1),a.source_node_id,n.payload_json,(SELECT z.state FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1),(SELECT z.content_hash FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' AND z.state<>'excluded' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1),(SELECT z.omission_reason FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted' ORDER BY ma.started_at DESC,ma.rowid DESC,z.ordinal DESC LIMIT 1) FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path LEFT JOIN node n ON n.id=a.source_node_id WHERE s.thread_id=?1 AND (COALESCE(s.reason,'')<>'context_replacement' OR EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) OR NOT EXISTS(SELECT 1 FROM attachment_send z JOIN model_attempt ma ON ma.id=z.attempt_id JOIN turn tu ON tu.id=ma.turn_id WHERE z.attachment_id=a.id AND z.state='excluded' AND tu.thread_id=s.thread_id AND json_extract(ma.input_manifest_json,'$.adoption.outcome')='adopted')) AND NOT (s.state='excluded' AND COALESCE(s.reason,'')='context_replacement' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=s.thread_id AND p.node_id=a.source_node_id) AND n.id IS NOT NULL AND (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL)) AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.node_id=a.source_node_id AND d.thread_id=s.thread_id AND d.status<>'applied') ORDER BY s.selected_order,a.id")?;
     let mut selected = Vec::new();
     let mut pinned = 0;
     let mut detached_count = 0;
@@ -76,6 +80,8 @@ pub(super) fn snapshot_selection_tx(
             source_node_id,
             payload,
             previous_state,
+            observation_hash,
+            omission,
         } = row?;
         let source_node_id = source_node_id.ok_or_else(|| {
             StorageError::InvalidInput(format!("Attachment {id} source is missing"))
@@ -152,8 +158,19 @@ pub(super) fn snapshot_selection_tx(
             protected,
             active,
             reason,
-            previous_hash: hash,
+            sent_fingerprint: hash,
             previous_state,
+            observation_hash,
+            omission: match omission.as_deref() {
+                Some("attachment_changed") => Some(OmissionReason::AttachmentChanged),
+                Some("attachment_unavailable") => Some(OmissionReason::AttachmentUnavailable),
+                None => None,
+                Some(_) => {
+                    return Err(StorageError::InvalidInput(
+                        "Invalid attachment omission reason".into(),
+                    ));
+                }
+            },
             detached,
         });
     }

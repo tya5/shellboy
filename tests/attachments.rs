@@ -292,6 +292,16 @@ async fn failed_attempt_does_not_change_hash_baseline_or_protection() {
     let retry = f.prepare().await;
     assert!(retry.manifest[0].changed);
     drop(retry);
+    std::fs::write(f.path.join("a.txt"), b"one").unwrap();
+    let reverted = f.prepare().await;
+    assert!(
+        reverted.placements[0]
+            .content
+            .iter()
+            .any(|part| part["type"] == "input_file"),
+        "a non-adopted omission must not retire a live slot"
+    );
+    drop(reverted);
     f.db.shutdown().await.unwrap();
 }
 #[tokio::test]
@@ -669,18 +679,12 @@ async fn explicit_reload_detects_an_attribute_preserving_rewrite() {
         .unwrap();
     assert!(reloaded.manifest[0].changed);
     assert_ne!(reloaded.manifest[0].content_hash, original_hash);
-    use base64::Engine;
-    let data = reloaded
-        .placements
-        .iter()
-        .flat_map(|p| &p.content)
-        .find_map(|item| item.get("file_data").and_then(serde_json::Value::as_str))
-        .unwrap();
-    assert_eq!(
-        base64::engine::general_purpose::STANDARD
-            .decode(data.split_once(',').unwrap().1)
-            .unwrap(),
-        b"omega"
+    assert!(
+        reloaded
+            .placements
+            .iter()
+            .flat_map(|p| &p.content)
+            .all(|part| part["type"] == "input_text")
     );
     drop(reloaded);
     f.db.shutdown().await.unwrap();
@@ -1055,8 +1059,15 @@ async fn unavailable_designations_become_past_only_after_a_successful_request() 
         std::fs::write(f.path.join("old"), b"123456").unwrap();
         f.add("new", b"123456").await;
         let restored = f.prepare().await;
-        assert_eq!(restored.excluded_ids, vec![old]);
-        assert_eq!(restored.manifest[0].state, "excluded");
+        assert!(restored.excluded_ids.is_empty());
+        assert_eq!(restored.manifest[0].attachment_id, old);
+        assert_eq!(restored.manifest[0].state, "observed");
+        assert!(
+            restored.placements[0]
+                .content
+                .iter()
+                .all(|part| part["type"] == "input_text")
+        );
         assert_eq!(restored.manifest[1].state, "ready");
         f.db.shutdown().await.unwrap();
     }
@@ -1504,16 +1515,11 @@ async fn managed_path_uses_ordinary_hash_baselines_missing_facts_and_gc() {
         assert!(observed_list(&f).await[0].unavailable_reason.is_some());
         let missing = f.prepare().await;
         assert_eq!(missing.manifest[0].state, "unavailable");
-        let metadata: serde_json::Value = serde_json::from_str(
-            missing.placements[0].content[0]["text"]
-                .as_str()
-                .unwrap()
-                .strip_prefix("[Shellboy attachment metadata] ")
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(metadata["path"], path.to_str().unwrap());
-        assert!(metadata.get("unavailable_reason").is_none());
+        let fact: serde_json::Value = serde_json::from_str(missing.placements[0].content[0]["text"].as_str().unwrap()
+            .strip_prefix("[Shellboy omitted content] ").unwrap()).unwrap();
+        assert_eq!(fact["reason"], "attachment_changed", "the adopted reason does not change when the file disappears");
+        assert_eq!(fact["ref"]["path"], path.to_str().unwrap());
+        assert_eq!(fact["fingerprint"].as_str(), first_hash.as_deref());
         assert!(missing.manifest[0].error.is_some());
         writeln!(
             log,

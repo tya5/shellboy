@@ -377,6 +377,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0071_service_name.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 72,
+        sql: include_str!("../../migrations/next_attachment_omission.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
