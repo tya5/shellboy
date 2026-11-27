@@ -97,7 +97,7 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
             AttachmentListArgs {
                 attachment_id: None,
                 thread_id: Some("actual".into()),
-                limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
+                limit: 2,
                 cursor: None,
             },
         )))
