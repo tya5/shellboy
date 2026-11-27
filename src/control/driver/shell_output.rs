@@ -191,7 +191,7 @@ pub(in crate::control) async fn install_shell(
         (None, None)
     };
     let publication = match &current {
-        ShellOwner::Schedule { endpoint, .. } => endpoint.clone(),
+        ShellOwner::Schedule { endpoint, .. } => endpoint.as_ref().map(Arc::downgrade),
         _ => None,
     };
     tokio::spawn(async move {
@@ -371,7 +371,26 @@ pub(in crate::control) async fn collect_shell(
         _ => None,
     };
     let settlement_detail = match (publication, &save_failure) {
-        (Some(publication), _) => publication.retire(control).await,
+        (Some(live), _) => {
+            // Drop the startup admission handle before revoking: a fast exit
+            // can reach this point before the running transition runs.
+            let publication = (*live).clone();
+            drop(live);
+            let registry = control.publications.clone();
+            let id = execution.to_owned();
+            if let Err(error) = control
+                .store
+                .database
+                .call(move |_| {
+                    registry.revoke(&id);
+                    Ok(())
+                })
+                .await
+            {
+                save_failure.get_or_insert_with(|| error.into_api_error());
+            }
+            publication.retire(control).await
+        }
         (None, Some(error)) => return Err(error.clone()),
         (None, None) => None,
     };
@@ -412,7 +431,6 @@ async fn save_completion(
     let index = control.index.clone();
     let wakes = control.waits.keyed.clone();
     let store = control.store.clone();
-    let registry = control.publications.clone();
     let effects = control.store.database.call(move|db|{let tx=db.transaction()?;
         let service = super::super::schedule::service_settlement(&tx,&execution)?;
         let state=serde_json::to_value(completed.state).unwrap_or(Value::Null);
@@ -439,7 +457,6 @@ async fn save_completion(
         }
         let mut effects = service.map(|service| service.finish(&store,&tx,&execution,None)).transpose()?.flatten();
         tx.commit()?;
-        registry.revoke(&execution);
         wakes.publish(Key::shell_terminal(execution).into_iter().chain(effects.iter_mut().flat_map(|effects| std::mem::take(&mut effects.wait_keys))));
         Ok(effects)}).await.map_err(storage_error)?;
     control.apply_effects(effects).await;

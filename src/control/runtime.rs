@@ -909,7 +909,7 @@ impl Control {
         &self,
         execution: &str,
         spawned: bool,
-        publication: Option<Arc<super::service_endpoint::Publication>>,
+        publication: Option<std::sync::Weak<super::service_endpoint::Publication>>,
     ) -> Result<(bool, bool), ApiError> {
         let execution = execution.to_owned();
         let registry = self.publications.clone();
@@ -926,7 +926,7 @@ impl Control {
                 terminal = true;
             }
             tx.commit()?;
-            if spawned && !stop && let Some(publication) = publication {
+            if spawned && !stop && let Some(publication) = publication.and_then(|publication| publication.upgrade()) {
                 registry.register(execution.clone(), &publication);
             }
             if terminal { wait_wakes.publish(super::wait::wakes::Key::shell_terminal(execution)); }
@@ -942,7 +942,7 @@ impl Control {
         &self,
         execution: &str,
         handle: &ShellHandle,
-        publication: Option<Arc<super::service_endpoint::Publication>>,
+        publication: Option<std::sync::Weak<super::service_endpoint::Publication>>,
     ) -> Result<(), ApiError> {
         let (stop, eof) = self
             .shell_start_intent(execution, true, publication)
