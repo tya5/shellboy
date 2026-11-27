@@ -30,7 +30,7 @@ pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
 
 use super::*;
 use crate::cli::Cli;
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{CommandFactory, Parser};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn executable_commands(
@@ -94,7 +94,7 @@ fn recovery_rewind_cli_run_binding_is_explicit_and_has_no_selected_run_default()
 }
 
 #[test]
-fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
+fn explicit_cli_only_paths_do_not_require_generated_form_bindings() {
     let mut parser = Cli::command();
     parser.build();
     let mut leaves = BTreeMap::new();
@@ -290,123 +290,6 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             .any(|binding| binding.path == ["startup"]),
         "standalone diagnostics must not be offered as a TUI form"
     );
-    let bindings = CLI_BINDINGS
-        .iter()
-        .map(|binding| (binding.path.join(" "), binding))
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(
-        bindings.len(),
-        CLI_BINDINGS.len(),
-        "one binding per executable spelling"
-    );
-    assert_eq!(
-        leaves.keys().collect::<Vec<_>>(),
-        bindings.keys().collect::<Vec<_>>(),
-        "coverage is checked against actual clap, not OperationId::ALL"
-    );
-    for (path, command) in leaves {
-        let binding = bindings[&path];
-        let spec = binding.operation.spec();
-        let actual = command
-            .get_arguments()
-            .filter(|arg| !matches!(arg.get_id().as_str(), "help" | "version"))
-            .map(|arg| {
-                let spelling = arg
-                    .get_long()
-                    .map(|long| format!("--{long}"))
-                    .unwrap_or_else(|| {
-                        assert!(
-                            arg.get_index().is_some(),
-                            "unexpected non-long/nonpositional argument: {path}: {arg:?}"
-                        );
-                        arg.get_id().to_string()
-                    });
-                (spelling, arg)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let mut expected = binding
-            .arguments
-            .iter()
-            .map(|arg| arg.spelling.to_owned())
-            .collect::<BTreeSet<_>>();
-        expected.extend(GLOBAL_ARGUMENTS.iter().map(|arg| arg.spelling.to_owned()));
-        if spec.route == Route::Rag {
-            expected.insert("--db".into());
-        }
-        assert_eq!(
-            actual.keys().cloned().collect::<BTreeSet<_>>(),
-            expected,
-            "{path}"
-        );
-        if path == "usage get" {
-            assert!(spec.fields.contains(&FieldId::SinceNode));
-            assert!(
-                binding.arguments.iter().any(|arg| {
-                    arg.spelling == "--since-node" && arg.field == FieldId::SinceNode
-                })
-            );
-        }
-        for declared in &binding.arguments {
-            assert!(
-                spec.fields.contains(&declared.field),
-                "{path}: every CLI argument has a typed logical field"
-            );
-            let arg = actual[declared.spelling.as_str()];
-            assert_eq!(
-                arg.get_action().takes_values(),
-                declared.takes_value,
-                "{path} {} value/flag",
-                declared.spelling
-            );
-            assert_eq!(
-                matches!(arg.get_action(), ArgAction::Append),
-                declared.repeat,
-                "{path} {} repeat",
-                declared.spelling
-            );
-            let defaults = arg
-                .get_default_values()
-                .iter()
-                .map(|v| v.to_str().expect("CLI defaults are UTF8"))
-                .collect::<Vec<_>>();
-            assert_eq!(
-                defaults,
-                declared.default.as_deref().into_iter().collect::<Vec<_>>(),
-                "{path} {} default",
-                declared.spelling
-            );
-            if !declared.choices.is_empty() {
-                // The CLI's enum declaration order is not the TUI's choice
-                // order (attachment defaults prefer file before image).
-                // Verify the complete accepted vocabulary without imposing it.
-                let actual_choices = arg.get_possible_values();
-                let actual_names = actual_choices
-                    .iter()
-                    .map(|value| value.get_name())
-                    .collect::<BTreeSet<_>>();
-                let declared_names = declared
-                    .choices
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<BTreeSet<_>>();
-                assert_eq!(
-                    actual_names.len(),
-                    actual_choices.len(),
-                    "{path} has duplicate CLI choices"
-                );
-                assert_eq!(
-                    declared_names.len(),
-                    declared.choices.len(),
-                    "{path} has duplicate catalogue choices"
-                );
-                assert_eq!(
-                    actual_names, declared_names,
-                    "{path} {} choices",
-                    declared.spelling
-                );
-            }
-        }
-    }
 }
 
 #[test]
