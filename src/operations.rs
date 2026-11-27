@@ -453,8 +453,8 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
     FieldSpec {
         id: FieldId::ArtifactScheme,
         default_origin: DefaultOrigin::None,
-        label: "URI scheme",
-        help: "Filter by the URI scheme of the current version.",
+        label: "URIスキーム",
+        help: "現在の版のURIスキームで絞り込みます。",
         kind: FieldType::Text,
         discovery: Discovery::None,
     },
