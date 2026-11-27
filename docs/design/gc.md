@@ -33,8 +33,8 @@ creates it, so nothing is lost between a commit and the owner's pass:
   definition's latest was older than the retention).
 - `raw_settle.all` (value: the marker key reached): a full sweep, written by a
   schedule/service removal or Thread deletion (their executions go, their
-  markers stay), by the owner's first pass after startup, and by an explicit
-  `storage collect --category raw`/`all`.
+  markers stay), and by the startup transaction (markers orphaned by earlier
+  versions; once per start).
 
 Each producer marks `RawMarkers` after its commit. A unit visits at most 128
 rows: the first pending definition (its executions newest to oldest from the
@@ -297,8 +297,7 @@ maintenance owner's `Pins` pass reconciles: it deletes the rows whose prefix is
 not live, visiting at most 128 rows per unit and continuing from a saved
 cursor after a deferred unit. A failed or skipped release needs no bookkeeping:
 the rows stay until a later pass, and the lease's own drop marks that pass.
-Read pins still delete their row with an awaited explicit release when they
-can. Releasing managed or read pins marks managed and raw maintenance. Rows of
+Every pin row, read pins included, is deleted only by that pass. Releasing managed or read pins marks managed and raw maintenance. Rows of
 an earlier instance have no live prefix and are reconciled the same way.
 
 A clipboard save inserts the `creating` row and its pin before its writer

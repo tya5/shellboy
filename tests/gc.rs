@@ -384,7 +384,7 @@ async fn interrupted_raw_collection_resumes_marker_without_incrementing_generati
 }
 
 #[tokio::test]
-async fn raw_retention_deletes_superseded_schedule_runs_and_orphan_markers() {
+async fn raw_retention_deletes_superseded_schedule_runs() {
     let f = Fixture::new(Config::default()).await;
     f.db.call(|db| {
         db.execute("INSERT INTO schedule(id,thread_id,kind,cron,enabled,cwd,command)VALUES('hourly','live','time','0 * * * *',1,'/','true')", [])?;
@@ -396,8 +396,6 @@ async fn raw_retention_deletes_superseded_schedule_runs_and_orphan_markers() {
             }
         }
         db.execute("INSERT INTO runtime_pin VALUES('pin','fixture','shell_output','pinned',0,'now')", [])?;
-        // The execution of a removed definition went with it; its marker stayed.
-        db.execute("INSERT INTO app_meta(key,value)VALUES('raw_tombstone.removed',?1)", [serde_json::json!({"reason":"raw_retention_age","state":"deleted","generation":1}).to_string()])?;
         Ok(())
     })
     .await
