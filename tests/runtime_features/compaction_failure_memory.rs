@@ -142,12 +142,9 @@ pub(super) fn assert_provider_scope_records(
     ] {
         assert!(outcome.get(field).is_none(), "{field}: {outcome:#?}");
     }
+    assert_eq!(admitted[0]["metrics"]["model_requests"], admitted_requests);
     assert_eq!(
-        admitted[0]["error"]["details"]["model_requests"],
-        admitted_requests
-    );
-    assert_eq!(
-        admitted[0]["error"]["details"]["summary_usage"]["requests"],
+        admitted[0]["metrics"]["summary_usage"]["requests"],
         admitted_requests
     );
     assert_eq!(
@@ -188,7 +185,8 @@ pub(super) fn assert_provider_scope_records(
             assert!(outcome.get(field).is_none(), "{field}: {outcome:#?}");
         }
         assert!(
-            record["error"].get("details").is_none(),
+            record["metrics"]["model_requests"].is_null()
+                && record["metrics"]["summary_usage"].is_null(),
             "suppression must omit request and usage facts: {record:#?}"
         );
     }

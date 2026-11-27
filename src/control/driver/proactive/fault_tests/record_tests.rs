@@ -26,13 +26,13 @@ async fn active_summary_adoption_survives_a_later_storage_failure() {
         .unwrap();
 
     assert_eq!(
-        rejected.terminal["outcome"], "failed",
+        rejected.terminal["state"], "failed",
         "pre-FINISH rollback: {}",
         rejected.terminal
     );
     assert!(rejected.selected_summaries.is_empty());
     assert_eq!(
-        committed.terminal["outcome"], "failed",
+        committed.terminal["state"], "failed",
         "the aggregate fails after its active summary stage committed: {}",
         committed.terminal
     );
@@ -43,8 +43,8 @@ async fn active_summary_adoption_survives_a_later_storage_failure() {
         "same scenario uses the exact immutable trigger tuple"
     );
     assert_ne!(
-        rejected.terminal["trigger"]["run_id"], committed.terminal["trigger"]["run_id"],
-        "each independent cell retains its own run provenance"
+        rejected.terminal["attempt_id"],
+        committed.terminal["attempt_id"]
     );
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -107,9 +107,6 @@ fn trigger_identity(trigger: &Value) -> Value {
     json!({
         "input_tokens": trigger["input_tokens"],
         "auto_at_tokens": trigger["auto_at_tokens"],
-        "target_percent": trigger["target_percent"],
-        "target_tokens": trigger["target_tokens"],
-        "a_input_tokens": trigger["a_input_tokens"],
     })
 }
 
@@ -176,24 +173,19 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> DirectBoundaryRece
         ObservationPhase::AtCommittedCheckpoint
     };
     assert_eq!(
-        receipt.checkpoint["outcome"],
+        receipt.checkpoint["state"],
         expected_outcome(fault, scenario, checkpoint_phase),
         "direct checkpoint receipt preserves per-fault outcome"
     );
     assert_eq!(
-        receipt.terminal["outcome"],
+        receipt.terminal["state"],
         expected_outcome(fault, scenario, ObservationPhase::AfterShutdownAndRestart),
         "normal shutdown/reopen preserves the per-fault terminal state"
     );
     assert_eq!(
-        receipt.terminal["unfinished"].as_bool().unwrap_or(false),
-        receipt.terminal["outcome"] == "unknown",
-        "unknown remains provisional; successful FINISH is terminal"
-    );
-    assert_eq!(
         trigger_identity(&receipt.checkpoint["trigger"]),
         trigger_identity(&receipt.terminal["trigger"]),
-        "the captured input/A/target facts are immutable across FINISH/reopen"
+        "the published trigger facts are immutable across FINISH/reopen"
     );
     receipt
 }

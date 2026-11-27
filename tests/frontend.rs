@@ -192,11 +192,18 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     let values = owner
         .db
         .call(move |db| {
-            let correlated: String = db.query_row(
-                "SELECT message_node_id FROM receipt WHERE client_operation_id=?1",
+            let (correlated, receipt): (String, Option<String>) = db.query_row(
+                "SELECT message_node_id,result_json FROM receipt WHERE client_operation_id=?1",
                 [operation],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
+            assert!(
+                !receipt
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("saved message"),
+                "the receipt must not duplicate the submitted body"
+            );
             assert_eq!(correlated, saved_message);
             assert_eq!(
                 db.query_row(

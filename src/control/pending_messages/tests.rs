@@ -1592,6 +1592,15 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
         store
             .database
             .call(move |db| {
+                let receipt: Option<String> = db.query_row(
+                    "SELECT result_json FROM receipt WHERE client_operation_id=?1",
+                    [&operation],
+                    |row| row.get(0),
+                )?;
+                assert!(
+                    !receipt.as_deref().unwrap_or_default().contains(&text),
+                    "the receipt must not duplicate the submitted body"
+                );
                 assert!(!db.query_row(
                     "SELECT EXISTS(SELECT 1 FROM draft WHERE state='submitted')",
                     [],
