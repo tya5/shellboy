@@ -1185,6 +1185,10 @@ impl Form {
                 },
                 |form, cwd| {
                     Ok(Command::ThreadList(ThreadListArgs {
+                        root: None,
+                        include_descendant_count: false,
+                        include_activity: false,
+                        include_activity_evidence: false,
                         thread_ids: None,
                         state: None,
                         order: if form.optional("order")?.as_deref() == Some("created") {
@@ -2174,6 +2178,7 @@ impl Form {
                         thread_id: form.optional("thread")?,
                         run_id: form.optional("run")?,
                         since: form.optional("since")?,
+                        ended_after: None,
                         state: form
                             .value("state")?
                             .split_whitespace()

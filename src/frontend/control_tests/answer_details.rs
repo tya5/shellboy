@@ -53,14 +53,19 @@ async fn persisted_canonical_output_flows_through_frontend_into_human_and_intern
     let mut ui = UiState::new(&control.store.config, root.path().into());
     ui.select_thread("thread".into());
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
-    frontend::HistoryReader::new(&control, &updates, 100)
-        .page(
-            &frontend::Reply::new("thread", ui.view().generation),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+    frontend::HistoryReader::new(
+        frontend::selected_owner(&control),
+        control.store.config.ui.language,
+        &updates,
+        100,
+    )
+    .page(
+        &frontend::Reply::new("thread", ui.view().generation),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     while let Ok(update) = incoming.try_recv() {
         ui.apply(update);
     }

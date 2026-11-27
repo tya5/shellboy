@@ -1,15 +1,13 @@
 //! Display-only tails. Original node text/items and CLI raw reads remain immutable.
 use super::presentation_work;
 #[cfg(test)]
-use crate::presentation::{BlockKind, OutputStream, PresentationBlock, PresentationField};
-use crate::{
-    control::{
-        Control,
-        output::preview::{PreviewLimits, PreviewPage, preview_tail},
-    },
-    protocol::*,
-    ui::UiNode,
+use crate::control::{
+    Control,
+    output::preview::{PreviewLimits, preview_tail},
 };
+#[cfg(test)]
+use crate::presentation::{BlockKind, OutputStream, PresentationBlock, PresentationField};
+use crate::{control::output::preview::PreviewPage, protocol::*, ui::UiNode};
 
 /// Preview-only terminal current-line overwrite. The input has already been
 /// byte-bounded; no terminal execution or unbounded scrollback is involved.
@@ -63,6 +61,7 @@ fn normalize_page(page: &mut PreviewPage, budget: usize) {
     page.stdout = normalize(&page.stdout, budget.saturating_sub(page.stderr.len()));
 }
 
+#[cfg(test)]
 pub(super) async fn execution_preview(
     control: &Control,
     execution: String,
@@ -102,42 +101,50 @@ pub(super) async fn execution_preview(
     .await?
 }
 
-pub(super) async fn live_execution_preview(
-    control: &Control,
-    execution: String,
-    cursor: Option<crate::control::output::preview::live::LiveCursor>,
-) -> Result<
-    (
-        crate::control::output::preview::live::LiveCursor,
-        PreviewPage,
-    ),
-    ApiError,
-> {
-    let path = control.store.database.path().to_path_buf();
-    presentation_work(move || {
-        let db =
-            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(|e| {
-                    crate::storage::save_error(format!("live preview database open failed: {e}"))
-                })?;
-        db.busy_timeout(std::time::Duration::from_millis(250))
-            .and_then(|_| db.pragma_update(None, "query_only", true))
-            .map_err(|e| {
-                crate::storage::save_error(format!("live preview read-only setup failed: {e}"))
-            })?;
-        let (cursor, mut page) = crate::control::output::preview::live::read(
-            &db,
-            &execution,
-            cursor,
-            PreviewLimits { bytes: 4096 },
-        )?;
-        normalize_page(&mut page, 4096);
-        Ok((cursor, page))
-    })
-    .await?
+pub(super) fn from_native_tail(
+    execution: &str,
+    output: ShellOutput,
+    limit: usize,
+    terminal: bool,
+) -> Result<PreviewPage, ApiError> {
+    let invalid = || ApiError::new(ErrorCode::IoFailed, "Invalid shell tail response");
+    if output.execution_id != execution || output.raw_bytes > limit as u64 {
+        return Err(invalid());
+    }
+    let mut page = PreviewPage {
+        stdout: String::new(),
+        stderr: String::new(),
+        #[cfg(test)]
+        raw_bytes: output.raw_bytes as usize,
+        #[cfg(test)]
+        inspected_rows: 0,
+        skipped: output.tail_skipped,
+        decode_uncertain: output.decode_uncertain,
+        decode_errors: output.decode_errors,
+        terminal,
+        output_complete: output.output_complete,
+    };
+    let mut end = 0;
+    for segment in output.segments {
+        let start = segment.start_byte as usize;
+        if start != end {
+            return Err(invalid());
+        }
+        end = segment.end_byte as usize;
+        let text = output.text.get(start..end).ok_or_else(invalid)?;
+        match segment.stream {
+            crate::shell::OutputStream::Stdout => page.stdout.push_str(text),
+            crate::shell::OutputStream::Stderr => page.stderr.push_str(text),
+        }
+    }
+    if end != output.text.len() {
+        return Err(invalid());
+    }
+    normalize_page(&mut page, limit);
+    Ok(page)
 }
 
-/// Called only by the existing admitted frontend reader, never by the UI loop.
+#[cfg(test)]
 pub(super) async fn preview(
     control: &Control,
     source_node: &str,

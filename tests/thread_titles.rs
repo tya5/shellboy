@@ -62,6 +62,10 @@ async fn list(
         execute(
             store,
             Command::ThreadList(ThreadListArgs {
+                root: None,
+                include_descendant_count: false,
+                include_activity: false,
+                include_activity_evidence: false,
                 thread_ids: None,
                 state: None,
                 order: Default::default(),
@@ -361,6 +365,10 @@ async fn displayed_title_search_paginates_matches_and_retains_query_watermark() 
     let changed = store
         .execute(
             request(Command::ThreadList(ThreadListArgs {
+                root: None,
+                include_descendant_count: false,
+                include_activity: false,
+                include_activity_evidence: false,
                 thread_ids: None,
                 state: None,
                 order: Default::default(),

@@ -714,6 +714,10 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     let first = execute(
         &store,
         Command::ThreadList(ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),
@@ -733,6 +737,10 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     let second = execute(
         &store,
         Command::ThreadList(ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),
@@ -755,6 +763,10 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
     let wrong = store
         .execute(
             request(Command::ThreadList(ThreadListArgs {
+                root: None,
+                include_descendant_count: false,
+                include_activity: false,
+                include_activity_evidence: false,
                 thread_ids: None,
                 state: None,
                 order: Default::default(),
@@ -838,6 +850,10 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
     let first = execute(
         &store,
         Command::ThreadList(ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),
@@ -874,6 +890,10 @@ async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp
     let all = execute(
         &store,
         Command::ThreadList(ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),

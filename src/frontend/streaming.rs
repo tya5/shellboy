@@ -45,7 +45,7 @@ impl StreamBody {
     }
 }
 
-use super::{ApiError, Control, UiNode, UiUpdate, UpdateTarget, presentation_work};
+use super::{ApiError, UiNode, UiUpdate, UpdateTarget, presentation_work};
 use std::{
     collections::VecDeque,
     sync::{Arc, mpsc::TrySendError},
@@ -660,12 +660,13 @@ fn corresponding_offset(
     Ok(start + offset - source.base_char_offset)
 }
 pub(super) async fn rebase(
-    control: &Control,
+    owner: super::native_history::Owner<'_>,
+    language: crate::config::UiLanguage,
     updates: &dyn super::UpdateTarget,
     request: crate::ui::StreamRebase,
     width: u16,
 ) -> Result<(), ApiError> {
-    let canonical = super::HistoryReader::new(control, updates, width)
+    let canonical = super::HistoryReader::new(owner, language, updates, width)
         .node(request.node_id.clone(), 0, &request.thread_id)
         .await?;
     let crate::ui::StreamRebase {
@@ -679,7 +680,6 @@ pub(super) async fn rebase(
     let mapped =
         presentation_work(move || corresponding_offset(&source, &canonical, anchor.char_offset))
             .await?;
-    let language = control.store.config.ui.language;
     let (offset, note) = match mapped {
         Ok(offset) => (
             offset,
@@ -707,7 +707,7 @@ pub(super) async fn rebase(
         node_id: Some(node_id),
         char_offset: offset,
     };
-    super::HistoryReader::new(control, updates, width)
+    super::HistoryReader::new(owner, language, updates, width)
         .rebase(
             &super::WindowReply::new(thread_id.clone(), generation, view_revision),
             anchor.clone(),

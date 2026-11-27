@@ -19,7 +19,7 @@ LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn
     AND latest.state='live' AND u.state='running' ORDER BY rowid DESC LIMIT 1)"
     )
 }
-const CURRENT_STATE: &str = "COALESCE(u.state,latest.state,'idle')";
+pub(super) const CURRENT_STATE: &str = "COALESCE(u.state,latest.state,'idle')";
 
 fn columns_from() -> String {
     let activity_joins = activity_joins();
@@ -79,6 +79,7 @@ pub(crate) fn prepare_activity(raw: &RawActivity) -> crate::activity::ActivityPh
 }
 /// Native-state category only: no JSON, presentation formatting or extra reads.
 /// Inflight/retry/tool/ownership refinements do not alter Watch eligibility.
+#[cfg(test)]
 pub(crate) fn coarse_activity(raw: &RawActivity) -> crate::activity::ActivityPhase {
     crate::activity::classify(
         raw.run.as_deref(),
@@ -101,6 +102,7 @@ pub(crate) struct RawSummary {
     pub(super) state: String,
     stop_reason: Option<String>,
     pub(crate) activity: RawActivity,
+    #[cfg(test)]
     pub(crate) identity: SummaryIdentity,
     revisit_pending: bool,
     revisit_delivered: u64,
@@ -114,6 +116,7 @@ pub(crate) struct RawSummary {
 
 /// Saved identities/times, never an invented timestamp for a phase transition.
 #[derive(Clone)]
+#[cfg(test)]
 pub(crate) struct SummaryIdentity {
     pub run_id: Option<String>,
     pub turn_id: Option<String>,
@@ -124,7 +127,12 @@ pub(crate) struct SummaryIdentity {
 }
 
 /// Seek directly to the next key in the requested cwd/archive partition.
-pub(super) fn updated_candidate_sql(mode: ArchivedFilter, after: bool, cwd: bool) -> String {
+pub(super) fn updated_candidate_sql(
+    mode: ArchivedFilter,
+    after: bool,
+    cwd: bool,
+    rooted: bool,
+) -> String {
     let (index, archive) = match (mode, cwd) {
         (ArchivedFilter::Exclude, false) => ("threads_visible_updated", " AND archived_at IS NULL"),
         (ArchivedFilter::Only, false) => {
@@ -141,23 +149,48 @@ pub(super) fn updated_candidate_sql(mode: ArchivedFilter, after: bool, cwd: bool
         (ArchivedFilter::Include, true) => ("threads_cwd_updated", ""),
     };
     let range = if after {
-        " AND (updated_at,id)<(?2,?3)"
+        " AND (thread.updated_at,thread.id)<(?2,?3)"
     } else {
         ""
     };
+    let root_bind = 2 + usize::from(after) * 2 + usize::from(cwd);
     let cwd = match (after, cwd) {
         (true, true) => " AND cwd=?4",
         (false, true) => " AND cwd=?2",
         (_, false) => "",
     };
+    let source = if rooted {
+        format!(
+            "json_each(?{root_bind}) AS root_members CROSS JOIN thread ON thread.id=root_members.value"
+        )
+    } else {
+        format!("thread INDEXED BY {index}")
+    };
     format!(
-        "SELECT id,updated_at,title,cwd,rowid FROM thread INDEXED BY {index}
-        WHERE deleted_at IS NULL{archive}{cwd}{range} ORDER BY updated_at DESC,id DESC LIMIT ?1"
+        "SELECT thread.id,updated_at,title,cwd,thread.rowid FROM {source}
+        WHERE deleted_at IS NULL{archive}{cwd}{range} ORDER BY thread.updated_at DESC,thread.id DESC LIMIT ?1"
     )
 }
 
-pub(super) fn state_sql() -> String {
-    format!("SELECT {CURRENT_STATE} FROM thread t {RUN_TURN_JOINS} WHERE t.id=?1")
+pub(super) fn state_group_expression() -> String {
+    format!(
+        "CASE
+        WHEN {CURRENT_STATE} IN ('recovery_wait','failed') THEN {CURRENT_STATE}
+        WHEN EXISTS(SELECT 1 FROM receipt q INDEXED BY receipt_human_reply_pending
+          WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending'
+          AND json_extract(q.result_json,'$.to_human')=1) THEN 'awaiting_you'
+        WHEN latest.state IN ('live','stopping') THEN 'active_work'
+        ELSE 'other_work' END"
+    )
+}
+
+pub(super) fn state_sql(group: bool) -> String {
+    let state = if group {
+        state_group_expression()
+    } else {
+        CURRENT_STATE.into()
+    };
+    format!("SELECT {state} FROM thread t {RUN_TURN_JOINS} WHERE t.id=?1")
 }
 
 /// Each archive partition and nullable-key segment offers at most one page to
@@ -213,6 +246,7 @@ pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         state: row.get(5)?,
         stop_reason: row.get(6)?,
         activity: decode_activity(row, 8)?,
+        #[cfg(test)]
         identity: SummaryIdentity {
             run_id: row.get(7)?,
             turn_id: row.get(16)?,
@@ -239,6 +273,9 @@ pub(super) fn reply_count_exact(count: u64) -> bool {
 
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
     ThreadSummary {
+        descendants: None,
+        activity_detail: None,
+        latest_completion: None,
         awaiting_reply: if raw.awaiting_reply_exact {
             raw.awaiting_reply
         } else {

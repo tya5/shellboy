@@ -254,3 +254,163 @@ async fn record_page_contract_cli_and_native_ipc() {
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn rooted_thread_list_pages_and_intersects_exact_ids_over_ipc() {
+    use shellboy::protocol::{ThreadGetArgs, ThreadListPage, ThreadListState};
+
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path()).await;
+    let control = shellboy::control::Control::new(&owner, root.path().into());
+    control.start().await.unwrap();
+    owner.db.call(|db| {
+        db.execute_batch("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at,deleted_at) VALUES
+            ('root',NULL,'Root','/','','p','m','2026-11-24T00:00:00Z',NULL),
+            ('bridge','root','Bridge','/','','p','m','2026-11-24T00:00:00Z','2026-11-24T00:00:01Z'),
+            ('leaf','bridge','Leaf','/','','p','m','2026-11-24T00:00:03Z',NULL),
+            ('child','root','Child','/','','p','m','2026-11-24T00:00:02Z',NULL),
+            ('other',NULL,'Other','/','','p','m','2026-11-24T00:00:04Z',NULL);
+            UPDATE thread SET archived_at='2026-11-24T00:00:01Z' WHERE id='child';
+            INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES
+            ('finished','leaf','completed','2026-11-24T00:00:00Z','2026-11-24T00:00:01Z'),
+            ('active','child','live','2026-11-24T00:00:00Z',NULL);
+            INSERT INTO node(id,kind,created_at,payload_json) VALUES ('answer','message','2026-11-24T00:00:01Z','{\"content\":[{\"type\":\"output_text\",\"text\":\"selected answer\"}]}');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at,answer_node_id) VALUES
+            ('finished-turn','leaf','finished','completed','2026-11-24T00:00:00Z','answer');")?;
+        Ok(())
+    }).await.unwrap();
+    let (send, receive) = mpsc::channel(8);
+    let server = LocalServer::bind(&owner, send).await.unwrap();
+    let serving = tokio::spawn(control.clone().serve(receive));
+    let data = &owner.loaded.data_dir;
+    let list = |args| async move {
+        let response = ipc::call(data, Command::ThreadList(args), None, None)
+            .await
+            .unwrap();
+        match response.error {
+            Some(error) => Err(error),
+            None => Ok(serde_json::from_value::<ThreadListPage>(response.result.unwrap()).unwrap()),
+        }
+    };
+    let args = ThreadListArgs {
+        root: Some("root".into()),
+        limit: 1,
+        include_activity: true,
+        include_descendant_count: true,
+        archived: shellboy::protocol::ArchivedFilter::Include,
+        ..Default::default()
+    };
+    let first = list(args.clone()).await.unwrap();
+    assert_eq!(first.items[0].thread_id, "leaf");
+    let zero = first.items[0].descendants.as_ref().unwrap();
+    assert_eq!(zero.total, 0);
+    assert!(!zero.capped);
+    assert!(!zero.cycle);
+    let details = ipc::call(
+        data,
+        Command::ThreadGet(ThreadGetArgs {
+            thread_id: Some("leaf".into()),
+            display: false,
+        }),
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .result
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(&first.items[0].activity_detail).unwrap(),
+        details["activity"]
+    );
+    assert_eq!(details["activity"]["turn"]["answer_node_id"], "answer");
+    let completion = first.items[0].latest_completion.as_ref().unwrap();
+    assert_eq!(completion.run_id, "finished");
+    assert_eq!(completion.ended_at, "2026-11-24T00:00:01Z");
+    let second = list(ThreadListArgs {
+        cursor: first.next_cursor.clone(),
+        ..args.clone()
+    })
+    .await
+    .unwrap();
+    assert_eq!(second.items[0].thread_id, "child");
+    assert!(second.next_cursor.is_none());
+    assert!(second.read_sequence > first.read_sequence);
+    let error = list(ThreadListArgs {
+        root: Some("other".into()),
+        cursor: first.next_cursor,
+        ..args.clone()
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::CursorExpired);
+    let active = list(ThreadListArgs {
+        state: Some(ThreadListState::ActiveWork),
+        ..args.clone()
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        active
+            .items
+            .iter()
+            .map(|row| row.thread_id.as_str())
+            .collect::<Vec<_>>(),
+        ["child"]
+    );
+    assert!(active.items[0].archived_at.is_some());
+    let other = list(ThreadListArgs {
+        state: Some(ThreadListState::OtherWork),
+        ..args.clone()
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        other
+            .items
+            .iter()
+            .map(|row| row.thread_id.as_str())
+            .collect::<Vec<_>>(),
+        ["leaf"]
+    );
+    let root_facts = list(ThreadListArgs {
+        thread_ids: Some(vec!["root".into()]),
+        include_descendant_count: true,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let descendants = root_facts.items[0].descendants.as_ref().unwrap();
+    assert_eq!(descendants.total, 2);
+    assert_eq!(descendants.by_state[&ThreadListState::ActiveWork], 1);
+    assert_eq!(descendants.by_state[&ThreadListState::Completed], 1);
+    let exact = list(ThreadListArgs {
+        include_activity_evidence: true,
+        archived: shellboy::protocol::ArchivedFilter::Exclude,
+        state: Some(ThreadListState::Completed),
+        thread_ids: Some(vec![
+            "root".into(),
+            "leaf".into(),
+            "child".into(),
+            "other".into(),
+        ]),
+        ..args
+    })
+    .await
+    .unwrap();
+    let evidence = &exact.activity_evidence["leaf"];
+    assert!(evidence.parent_deleted);
+    assert_eq!(evidence.answer_excerpt.as_deref(), Some("selected answer"));
+    assert_eq!(
+        exact
+            .items
+            .into_iter()
+            .map(|row| row.thread_id)
+            .collect::<Vec<_>>(),
+        ["leaf"]
+    );
+    server.shutdown().await.unwrap();
+    serving.await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

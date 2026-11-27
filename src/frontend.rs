@@ -4,6 +4,7 @@ mod admission;
 mod program_status;
 use admission::{spawn_read, spawn_work};
 pub(crate) mod browser;
+#[cfg(test)]
 mod browser_read;
 mod client_operations;
 mod compaction_markers;
@@ -14,8 +15,7 @@ use crate::thread_header as header;
 mod history_reader;
 mod input_history;
 pub(crate) mod inspection_external;
-mod inspection_history;
-mod lineage;
+use crate::control::db::thread_lineage as lineage;
 mod lineage_observer;
 mod live_output;
 mod live_work;
@@ -31,6 +31,7 @@ mod saved_events;
 pub(crate) use saved_events::tests::{
     Observed as SavedEventObservation, observe_run as observe_saved_event_run,
 };
+#[cfg(test)]
 mod snapshot;
 mod thread_deletion;
 mod update_delivery;
@@ -187,53 +188,27 @@ async fn update(sender: &(impl UpdateTarget + ?Sized), mut value: UiUpdate) {
     }
 }
 
-fn operation(control: &Control, command: Command) -> Request {
-    Request::new(control.store.operation_epoch.mint(), command)
-}
-async fn dispatch_native(control: &Control, request: Request) -> Result<Response<Value>, ApiError> {
-    crate::ipc::call_selected_operation(
-        compose_data_dir(control),
-        &control.store.instance_id,
-        request.command,
-        Some(request.operation_id),
-    )
-    .await
-}
-async fn request(control: &Arc<Control>, command: Command) -> Result<Value, ApiError> {
-    let response = dispatch_native(control, operation(control, command)).await?;
-    if response.ok {
-        Ok(response.result.unwrap_or(Value::Null))
-    } else {
-        Err(response.error.unwrap_or_else(|| {
-            ApiError::new(ErrorCode::IoFailed, "Operation failed without details")
-        }))
+fn selected_owner(control: &Control) -> native_history::Owner<'_> {
+    native_history::Owner {
+        data_dir: compose_data_dir(control),
+        instance: &control.store.instance_id,
     }
-}
-async fn native_request<T: serde::de::DeserializeOwned>(
-    data_dir: &Path,
-    command: Command,
-) -> Result<T, ApiError> {
-    let response = crate::ipc::call_selected(data_dir, command).await?;
-    let malformed = || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid owner response");
-    if !response.ok {
-        return Err(response.error.unwrap_or_else(malformed));
-    }
-    serde_json::from_value(response.result.ok_or_else(malformed)?).map_err(|_| malformed())
 }
 
+#[cfg(test)]
+async fn request(control: &Arc<Control>, command: Command) -> Result<Value, ApiError> {
+    selected_owner(control).call(command).await
+}
 async fn management_request(
-    control: &Arc<Control>,
-    data_dir: &Path,
+    owner: native_history::Owner<'_>,
     command: Command,
     cancel: CancellationToken,
 ) -> Result<Value, ApiError> {
     let is_read_projection = !command.requires_receipt();
-    let request = operation(control, command);
+    let request = owner.operation(command);
     let response = tokio::select! { biased;
         _ = cancel.cancelled(), if is_read_projection => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
-        response = crate::ipc::call_selected_operation(
-            data_dir, &control.store.instance_id, request.command, Some(request.operation_id),
-        ) => match response {
+        response = owner.dispatch(request) => match response {
             Ok(response) => response,
             Err(error) => return Ok(management::native_failure(error)),
         },
@@ -353,7 +328,7 @@ enum BackgroundResult {
     DraftIndexPause(Result<Option<crate::index::PauseReason>, ApiError>),
     ProgramStatus {
         epoch: u64,
-        result: Result<program_status::Projected, ApiError>,
+        result: Result<crate::program_status::Snapshot, ApiError>,
     },
     ViewFacts {
         tickets: view_read::Tickets,
@@ -369,7 +344,6 @@ enum BackgroundResult {
         request_id: u64,
         args: ThreadDeleteArgs,
         execute: bool,
-        known_thread_ids: Vec<String>,
         result: Result<thread_deletion::Outcome, ApiError>,
     },
     StreamFrame {
@@ -382,6 +356,7 @@ enum BackgroundResult {
     },
     DraftSaved {
         thread_id: String,
+        restored: Option<(String, crate::draft::RestoredSource)>,
         anchor: ViewAnchor,
         result: Result<(), ApiError>,
     },
@@ -562,42 +537,24 @@ async fn prepare_management(
 
 /// One bounded page of the selected Thread's branch tree.
 async fn load_branches(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     thread_id: &str,
     cursor: Option<String>,
 ) -> Result<Value, ApiError> {
-    native_history::Owner {
-        data_dir: compose_data_dir(control),
-        instance: &control.store.instance_id,
-    }
-    .call(Command::ThreadBranches(ThreadBranchesArgs {
-        thread_id: Some(thread_id.to_owned()),
-        limit: crate::protocol::MAX_LIST_LIMIT,
-        cursor,
-    }))
-    .await
+    owner
+        .call(Command::ThreadBranches(ThreadBranchesArgs {
+            thread_id: Some(thread_id.to_owned()),
+            limit: crate::protocol::MAX_LIST_LIMIT,
+            cursor,
+        }))
+        .await
 }
 async fn load_edit_request(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     thread_id: &str,
     node_id: &str,
 ) -> Result<EditableRequest, ApiError> {
-    let owner = native_history::Owner {
-        data_dir: compose_data_dir(control),
-        instance: &control.store.instance_id,
-    };
-    let source: MessageSource = owner
-        .call(Command::MessageGet(MessageTarget {
-            message_id: node_id.into(),
-            source_thread_id: Some(thread_id.into()),
-        }))
-        .await?;
-    if source.message_id != node_id || source.thread_id != thread_id {
-        return Err(ApiError::new(
-            ErrorCode::ProtocolMismatch,
-            "Invalid selected message source",
-        ));
-    }
+    let source = selected_message_source(owner, thread_id, node_id).await?;
     let thread: ThreadDetails = owner
         .call(Command::ThreadGet(ThreadGetArgs {
             thread_id: Some(thread_id.into()),
@@ -621,6 +578,7 @@ async fn load_edit_request(
     })
 }
 /// Source DB failures stop the owner even when observed through a UI read.
+#[cfg(test)]
 fn storage_error(error: crate::storage::StorageError) -> ApiError {
     match error {
         crate::storage::StorageError::QueueFull => ApiError::new(
@@ -698,25 +656,62 @@ async fn stream_commits(
         .await;
     }
 }
-async fn restore_snapshot(
-    control: &Control,
-    node_id: String,
-) -> Result<(String, Vec<UiAttachment>), ApiError> {
-    let result = async {
-    let limit = control.store.config.limits.draft_bytes;
-    control.store.database.call(move|db|{use rusqlite::OptionalExtension;let body:Option<Option<String>>=db.query_row("SELECT payload_json FROM node WHERE id=?1",[&node_id],|r|r.get(0)).optional()?;
-        let Some(Some(body))=body else{return Ok(Err(ApiError::new(ErrorCode::OutputExpired,"Saved request source expired; its pending snapshot cannot be reconstructed")));};
-        let payload:Value=serde_json::from_str(&body).map_err(|_|crate::storage::StorageError::Schema("Saved request is malformed".into()))?;
-        let attachments=db.prepare("SELECT id,absolute_path,input_kind FROM attachment_ref WHERE source_node_id=?1 ORDER BY id")?.query_map([node_id],|r|Ok(UiAttachment{id:r.get(0)?,path:PathBuf::from(r.get::<_,String>(1)?),kind:r.get(2)?,state:"saved source; revalidated on send".into(),position:None}))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let (text,attachments)=match crate::draft::restore(&payload,attachments,false){Ok(value)=>value,Err(error)=>return Ok(Err(error))};
-        if text.len()as u64>limit{return Ok(Err(ApiError::new(ErrorCode::InputLimit,"Saved request exceeds current draft limit; no text was truncated")));}
-        Ok(Ok((text,attachments)))
-    }).await.map_err(storage_error)?
-
-    }.await;
-    checked_storage(control, result).await
+async fn selected_message_source(
+    owner: &native_history::Owner<'_>,
+    thread: &str,
+    node_id: &str,
+) -> Result<MessageSource, ApiError> {
+    let source: MessageSource = owner
+        .call(Command::MessageGet(MessageTarget {
+            message_id: node_id.to_owned(),
+            source_thread_id: Some(thread.to_owned()),
+        }))
+        .await?;
+    if source.message_id != node_id || source.thread_id != thread {
+        return Err(ApiError::new(
+            ErrorCode::ProtocolMismatch,
+            "Invalid selected message source",
+        ));
+    }
+    Ok(source)
 }
 pub(crate) const COMMAND_CAPACITY: usize = 32;
+
+/// Run the terminal client against the already handshaken owner instance.
+pub async fn run_attached(
+    loaded: crate::config::LoadedConfig,
+    instance: String,
+    cwd: PathBuf,
+    actions: impl Into<crate::ui::actions::ActionReceiver>,
+    updates: SyncSender<UiUpdate>,
+) -> Result<(), ApiError> {
+    let context = client_operations::ClientContext {
+        config_path: loaded.config_path,
+        data_dir: loaded.data_dir,
+        cwd: cwd.clone(),
+    };
+    let (_unused, failures) = tokio::sync::watch::channel(None);
+    Box::pin(run_client(
+        Diagnostics::disabled(),
+        actions.into(),
+        BufferedUpdates::new(updates),
+        cwd,
+        context,
+        Arc::new(loaded.config),
+        instance,
+        failures,
+        std::future::pending(),
+        Arc::new(ClipboardAdapter::new()?),
+        Arc::new(Semaphore::new(COMMAND_CAPACITY)),
+        std::future::ready(()),
+        std::future::ready(()),
+        std::future::ready(Ok(())),
+        std::future::ready(Ok(())),
+        #[cfg(test)]
+        None,
+    ))
+    .await
+}
 
 pub async fn run(
     control: Arc<Control>,
@@ -817,13 +812,21 @@ async fn run_with_delivery(
     };
     // Only the embedded launch composition owns this policy. Its completion
     // participates in the existing terminal grace and force-close UI.
+    actions.close_tool_starts_on_quit(&control);
+    let stopping = async { control.stopping().await };
+    let diagnostics = control.diagnostics().clone();
+    let config = control.store.config.clone();
+    let instance = control.store.instance_id.clone();
     Box::pin(run_client(
-        control,
+        diagnostics,
         actions,
         updates,
         cwd,
         client_context,
+        config,
+        instance,
         ipc_failure,
+        stopping,
         clipboard,
         command_slots,
         stop_listener,
@@ -841,22 +844,28 @@ fn dispatch_shown_refresh(
     management: &mut management_state::Management,
     workers: &mut JoinSet<()>,
     permit: tokio::sync::OwnedSemaphorePermit,
-    control: &Arc<Control>,
+    owner: native_history::Owner<'_>,
     background_tx: &mpsc::Sender<BackgroundResult>,
-    data_dir: &std::path::Path,
+    body_bytes: u64,
     language: UiLanguage,
 ) {
     let Some((generation, shown)) = management.start_refresh() else {
         return;
     };
-    let control = control.clone();
     let sender = background_tx.clone();
-    let data_dir = data_dir.to_owned();
+    let data_dir = owner.data_dir.to_owned();
+    let instance = owner.instance.to_owned();
     spawn_work(workers, permit, async move {
-        let response =
-            management_request(&control, &data_dir, shown.command, CancellationToken::new()).await;
-        let result =
-            prepare_management(language, response, control.store.config.cache.body_bytes).await;
+        let response = management_request(
+            native_history::Owner {
+                data_dir: &data_dir,
+                instance: &instance,
+            },
+            shown.command,
+            CancellationToken::new(),
+        )
+        .await;
+        let result = prepare_management(language, response, body_bytes).await;
         let _ = sender
             .send(BackgroundResult::Command {
                 external: None,
@@ -871,12 +880,15 @@ fn dispatch_shown_refresh(
 }
 #[allow(clippy::too_many_arguments)]
 async fn run_client(
-    control: Arc<Control>,
+    diagnostics: Diagnostics,
     mut actions: crate::ui::actions::ActionReceiver,
     updates: BufferedUpdates,
     cwd: PathBuf,
     client_context: client_operations::ClientContext,
+    config: Arc<crate::config::Config>,
+    instance: String,
     mut ipc_failure: tokio::sync::watch::Receiver<Option<ApiError>>,
+    owner_stopping: impl Future<Output = ()>,
     clipboard: Arc<dyn ClipboardBackend>,
     command_slots: Arc<Semaphore>,
     before_client_drain: impl Future<Output = ()>,
@@ -885,8 +897,14 @@ async fn run_client(
     after_worker_drain: impl Future<Output = Result<(), ApiError>>,
     #[cfg(test)] startup: Option<receipt_delivery::Startup>,
 ) -> Result<(), ApiError> {
-    let language = control.store.config.ui.language;
-    actions.close_tool_starts_on_quit(&control);
+    let event_instance = &instance;
+    let event_directory = &client_context.data_dir;
+    let selected = native_history::Owner {
+        data_dir: event_directory,
+        instance: event_instance,
+    };
+    let language = config.ui.language;
+    tokio::pin!(owner_stopping);
     let mut selection = selection::Selection::default();
     let mut live_output = live_output::Observation::default();
     let mut watch_ipc_failure = true;
@@ -896,8 +914,7 @@ async fn run_client(
     let mut stream_retry: Option<Box<streaming::Prepared>> = None;
     let mut stream_next = tokio::time::Instant::now();
     let mut delivery_next = tokio::time::Instant::now();
-    let stream_period =
-        Duration::from_secs_f64(1.0 / f64::from(control.store.config.ui.max_fps.clamp(1, 30)));
+    let stream_period = Duration::from_secs_f64(1.0 / f64::from(config.ui.max_fps.clamp(1, 30)));
     #[cfg(not(test))]
     let (mut pending, mut receipt_batch) = (
         HashMap::<String, receipt_delivery::PendingReceipt>::new(),
@@ -925,7 +942,8 @@ async fn run_client(
     let mut refreshing: HashSet<String> = HashSet::new();
     let compose_disconnected = Arc::new(AtomicBool::new(false));
     let mut draft_saver = draft_saver::DraftSaver::new(
-        control.clone(),
+        selected,
+        language,
         background_tx.clone(),
         compose_disconnected.clone(),
     );
@@ -940,8 +958,6 @@ async fn run_client(
     let mut pending_index: Option<u64> = None;
     let mut pending_deletion: Option<u64> = None;
     let cancel = CancellationToken::new();
-    let event_instance = &control.store.instance_id;
-    let event_directory = &client_context.data_dir;
     let mut saved_events = Some(Box::pin(saved_events::wait(
         event_directory,
         event_instance,
@@ -953,7 +969,7 @@ async fn run_client(
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut status_session = program_status::Session::new();
-    let status_enabled = control.store.config.ui.program_status == crate::config::ProgramStatus::On;
+    let status_enabled = config.ui.program_status == crate::config::ProgramStatus::On;
     let mut status_dirty = status_enabled;
     let mut status_ready = true;
     let mut status_inflight = false;
@@ -968,7 +984,7 @@ async fn run_client(
         while !compose_disconnected.load(Ordering::Acquire)
             && let Some((draft, attachment)) = images.next_release()
         {
-            if let Err(error) = draft_images::release(&control, &draft, attachment).await {
+            if let Err(error) = draft_images::release(&selected, &draft, attachment).await {
                 status(&updates, None, error).await;
             }
         }
@@ -977,8 +993,8 @@ async fn run_client(
             && !draft_pause_running
             && !updates.backpressured()
         {
-            let data_dir = compose_data_dir(&control).to_path_buf();
-            let instance = control.store.instance_id.clone();
+            let data_dir = event_directory.clone();
+            let instance = event_instance.clone();
             let sender = background_tx.clone();
             if spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                 let owner = native_history::Owner {
@@ -1034,18 +1050,17 @@ async fn run_client(
             read_workers.spawn(refresh::run(
                 refresh::Query {
                     data_dir: client_context.data_dir.clone(),
-                    instance_id: control.store.instance_id.clone(),
+                    instance_id: event_instance.clone(),
                     thread,
                     ids,
                     generation,
                     visible,
                     epoch: selection.progress_epoch,
                     render_width,
-                    language: control.store.config.ui.language,
                     known,
                     tool_scope,
                 },
-                control.clone(),
+                config.ui.clone(),
                 updates.worker(),
                 background_tx.clone(),
                 read_cancel.clone(),
@@ -1083,11 +1098,15 @@ async fn run_client(
             let started = status_session.started;
             let seen = status_session.seen.clone();
             let epoch = status_epoch;
-            let source = control.clone();
+            let directory = event_directory.clone();
+            let instance = event_instance.clone();
             let sender = background_tx.clone();
             if spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                 let result = program_status::read(
-                    source.store.database.path().to_path_buf(),
+                    native_history::Owner {
+                        data_dir: &directory,
+                        instance: &instance,
+                    },
                     selected,
                     started,
                     seen,
@@ -1102,12 +1121,16 @@ async fn run_client(
                 status_inflight = true;
             }
         }
-        let selected_preview = selection.active_thread.as_ref().and_then(|thread| {
-            selection
-                .generations
-                .get(thread)
-                .map(|generation| (thread.clone(), *generation))
-        });
+        let selected_preview = selection
+            .active_thread
+            .as_ref()
+            .filter(|_| !compose_disconnected.load(Ordering::Acquire))
+            .and_then(|thread| {
+                selection
+                    .generations
+                    .get(thread)
+                    .map(|generation| (thread.clone(), *generation))
+            });
         if preview_scope != selected_preview {
             preview_scope = selected_preview;
             preview_events = preview_scope.as_ref().map(|(thread, _)| {
@@ -1137,11 +1160,11 @@ async fn run_client(
                     let tickets=view_read::Tickets {browser:browser.take(at),descendants:descendants.take(at)};
                     if !tickets.is_empty() {
                         view_read_next=Some(at+Duration::from_millis(500));
-                        let control=control.clone();let results=background_tx.clone();
+                        let directory=event_directory.clone();let instance=event_instance.clone();let results=background_tx.clone();
                         let progress_slots=progress_slots.clone();let stop=read_cancel.clone();
                         read_workers.spawn(async move {
                             let _permit=permit;
-                            let result=view_read::read(&control,&tickets,progress_slots,stop).await;
+                            let result=view_read::read(&native_history::Owner {data_dir:&directory,instance:&instance},&tickets,language,progress_slots,stop).await;
                             let _=results.send(BackgroundResult::ViewFacts {tickets,result:result.map(Box::new)}).await;
                         });
                     }
@@ -1151,11 +1174,11 @@ async fn run_client(
                 if live_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
                 if let Ok(permit)=read_slots.clone().try_acquire_owned()
                     && let Some(ticket)=live_output.take(tokio::time::Instant::now()) {
-                    let cursor=live_output.take_cursor();
-                    let control=control.clone();let results=background_tx.clone();
+                    let data_dir=event_directory.clone();let instance=event_instance.clone();let results=background_tx.clone();
                     read_workers.spawn(async move {
                         let _permit=permit;
-                        let result=tokio::select! {biased;_=ticket.stop.cancelled()=>Err("Live output view closed".into()),r=live_output::read(&control,&ticket.execution,cursor)=>r};
+                        let owner=native_history::Owner{data_dir:&data_dir,instance:&instance};
+                        let result=tokio::select! {biased;_=ticket.stop.cancelled()=>Err("Live output view closed".into()),r=live_output::read(&owner,&ticket)=>r};
                         let _=results.send(BackgroundResult::LivePreview {ticket,result}).await;
                     });
                 }
@@ -1163,7 +1186,7 @@ async fn run_client(
             _=tokio::time::sleep_until(refresh_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if refresh_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{},
             // Fatal Control persistence stops enter the same draft/worker drain as Quit.
-            _ = control.stopping() => break,
+            _ = &mut owner_stopping => break,
             _=tokio::task::yield_now(),if receipt_batch.active() && updates.main_slot()=> {},
             changed=ipc_failure.changed(),if watch_ipc_failure=> {
                 watch_ipc_failure = false;
@@ -1266,7 +1289,7 @@ async fn run_client(
                 match action {
                     UiAction::ReconnectCompose => {
                         if !compose_disconnected.load(Ordering::Acquire) { continue; }
-                        let result = reconcile_compose(&control, &updates, &mut compose_unknown, &mut images, &mut selection, &mut dirty_threads).await;
+                        let result = reconcile_compose(selected, &updates, &mut compose_unknown, &mut images, &mut selection, &mut dirty_threads).await;
                         match result {
                             Ok(()) => {
                                 if saved_events.is_none() {
@@ -1284,12 +1307,7 @@ async fn run_client(
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
                     }
-                    UiAction::Quit => {
-                        // Also covers ordinary Tokio action receivers used by
-                        // embedders, which do not have the UI control mailbox.
-                        control.close_tool_start_admission();
-                        break;
-                    },
+                    UiAction::Quit => break,
                     UiAction::RenderWidth { width } => {
                         render_width = width.max(1);
                         if let Some(thread) = &selection.active_thread {
@@ -1297,10 +1315,10 @@ async fn run_client(
                         }
                     }
                     UiAction::LoadReceived{thread_id,cursor}=>{
-                        let selected_dir=client_context.data_dir.clone();let sender=updates.worker();
+                        let selected_dir=client_context.data_dir.clone();let instance=event_instance.clone();let sender=updates.worker();
                         let reply_context=context.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move{
-                            match received::list(&selected_dir,language,thread_id,cursor).await{
+                            match received::list(&native_history::Owner { data_dir: &selected_dir, instance: &instance },language,thread_id,cursor).await{
                                 Ok((title,fields))=>management_update(&sender,reply_context,UiUpdate::ReceivedList{title,fields}).await,
                                 Err(error)=>management_status(&sender,reply_context,error).await,
                             }
@@ -1310,20 +1328,20 @@ async fn run_client(
                         connection,
                         request_id,
                     } => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let token = read_cancel.child_token();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
+                            let owner = native_history::Owner { data_dir: &data_dir, instance: &instance };
                             let result = tokio::select! { biased;
                                 _ = token.cancelled() => return,
-                                result = request(&control, Command::ModelList(crate::protocol::ModelListArgs {
+                                result = owner.call::<crate::protocol::ModelListResult>(Command::ModelList(crate::protocol::ModelListArgs {
                                     connection: Some(connection), thread_id: None,
                                 })) => result,
                             }
                             .map_err(|error| error.to_string())
-                            .and_then(|value| serde_json::from_value::<crate::protocol::ModelListResult>(value)
-                                .map(|result| result.models)
-                                .map_err(|error| error.to_string()));
+                            .map(|result| result.models);
                             update(&sender, UiUpdate::Models { request_id, completed_at: chrono::Utc::now(), result }).await;
                         }) {
                             update(
@@ -1342,24 +1360,26 @@ async fn run_client(
                     UiAction::InterruptTurn {thread_id,turn_id} => {
                         if !control_tasks.is_empty() {status(&updates,Some(thread_id),i18n::local!(language, "中断操作を処理中です。状態を確認して再操作してください", "An interrupt is being processed. Check its state, then try again")).await;continue;}
                         let data_dir=client_context.data_dir.clone();
+                        let instance=event_instance.clone();
                         control_tasks.spawn(async move {
-                            let result=native_request::<TurnInterruptResult>(&data_dir,Command::TurnInterrupt(TurnTarget {turn_id})).await.map(|_|());
+                            let result=(native_history::Owner { data_dir: &data_dir, instance: &instance }).call::<TurnInterruptResult>(Command::TurnInterrupt(TurnTarget {turn_id})).await.map(|_|());
                             (thread_id,result)
                         });
                     }
                     UiAction::CancelMessages {message_ids,target} => {
                         let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,target.thread_id.clone(),i18n::local!(language, "取消キューが満杯です。未受付です", "The cancel queue is full. Request not accepted")).await;continue;};
-                        let control=control.clone();let sender=updates.worker();
-                        spawn_work(&mut workers,permit,async move {message_queue::cancel(&control,&sender,target,message_ids).await;});
+                        let data_dir=event_directory.clone();let instance=event_instance.clone();let sender=updates.worker();
+                        let draft_bytes=config.limits.draft_bytes;
+                        spawn_work(&mut workers,permit,async move {message_queue::cancel(&native_history::Owner {data_dir:&data_dir,instance:&instance},language,draft_bytes,&sender,target,message_ids).await;});
                     }
                     UiAction::RestoreArchive {archive_id,target} => {
-                        let control=control.clone();let sender=updates.worker();let rejected=target.thread_id.clone();
-                        if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {message_queue::restore(&control,&sender,target,archive_id).await;}) {status(&updates,rejected,i18n::local!(language, "復元キューが満杯です。再操作してください", "The restore queue is full. Try again")).await;}
+                        let data_dir=event_directory.clone();let instance=event_instance.clone();let sender=updates.worker();let rejected=target.thread_id.clone();
+                        if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {message_queue::restore(&native_history::Owner {data_dir:&data_dir,instance:&instance},language,&sender,target,archive_id).await;}) {status(&updates,rejected,i18n::local!(language, "復元キューが満杯です。再操作してください", "The restore queue is full. Try again")).await;}
                     }
                     UiAction::ListRestore {thread_id,generation,request_id} => {
-                        let control=control.clone();let sender=updates.worker();let rejected=thread_id.clone();
+                        let data_dir=event_directory.clone();let instance=event_instance.clone();let sender=updates.worker();let rejected=thread_id.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {
-                            match message_queue::archives(&control,thread_id.clone()).await {
+                            match message_queue::archives(&native_history::Owner {data_dir:&data_dir,instance:&instance},language,thread_id.clone()).await {
                                 Ok(entries)=>update(&sender,UiUpdate::RestoreArchives {thread_id,generation,request_id,entries,error:None}).await,
                                 Err(error)=>update(&sender,UiUpdate::RestoreArchives {thread_id,generation,request_id,entries:vec![],error:Some(error.to_string())}).await,
                             }
@@ -1377,12 +1397,16 @@ async fn run_client(
                         model,
                         effort,
                     } => {
-                        let diagnostics = control.diagnostics().clone();
+                        let diagnostics = diagnostics.clone();
                         let trace = MessageSendTrace {
                             stage: MessageSendStage::Queued,
                             draft_id: draft_id.clone(),
                             revision,
-                            operation_id: control.store.operation_epoch.mint(),
+                            operation_id: format!(
+                                "{}:{}",
+                                event_instance,
+                                uuid::Uuid::new_v4()
+                            ),
                             message_id: None,
                         };
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, thread_id.as_deref(), None);
@@ -1409,7 +1433,9 @@ async fn run_client(
                         }
                         let projection_stop = cancel.clone();
                         images.begin_send(&draft_id, &attachments);
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
+                        let draft_bytes = config.limits.draft_bytes;
                         let sender = background_tx.clone();
                         send_workers.spawn(async move {
                             trace_send(&diagnostics, &trace, MessageSendStage::Processing, thread_id.as_deref(), None);
@@ -1425,8 +1451,8 @@ async fn run_client(
                                         "Thread cwd must be valid Unicode",
                                     )
                                 })?;
-                                let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,None,control.store.config.limits.draft_bytes)?;
-                                compose_call(&control,
+                                let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,None,draft_bytes)?;
+                                compose_call(&native_history::Owner { data_dir: &data_dir, instance: &instance },
                                     Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                         expected_thread_revision: thread_id.as_ref().map(|_| selection_revision),
                                         expected_source_message: None,
@@ -1448,7 +1474,7 @@ async fn run_client(
                             );
                             let projection=match &result {
                                 Ok(value)=>post_commit_projection(&projection_stop,
-                                    HistoryReader::saved(&control,render_width,known,draft_id.clone(),revision,generation,value)).await,
+                                    HistoryReader::saved(&native_history::Owner { data_dir: &data_dir, instance: &instance },language,render_width,known,(draft_id.clone(),revision),generation,value)).await,
                                 Err(_)=>None,
                             };
                             let _ = sender
@@ -1469,10 +1495,10 @@ async fn run_client(
                             update(&updates,UiUpdate::AgentsSelected { request_id,draft_id,generation,result:Err(error) }).await;
                             continue;
                         };
-                        let control=control.clone();
+                        let data_dir=event_directory.clone();let instance=event_instance.clone();
                         let sender=updates.worker();
                         spawn_work(&mut workers,permit,async move {
-                            let result=request(&control,Command::ThreadCreate(args)).await.and_then(|v|serde_json::from_value::<ThreadDetails>(v).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Invalid Thread creation response")));
+                            let result=(native_history::Owner { data_dir: &data_dir, instance: &instance }).call::<ThreadDetails>(Command::ThreadCreate(args)).await;
                             command_outcome(&sender,submission,&result).await;
                             update(&sender,UiUpdate::AgentsSelected {request_id,draft_id,generation,result}).await;
                         });
@@ -1508,20 +1534,12 @@ async fn run_client(
                             continue;
                         };
                         status(&updates, target.clone(), crate::ui::text_width::glyphs::select(i18n::local!(language, "設定を反映中…", "Applying settings…"), i18n::local!(language, "設定を反映中.", "Applying settings."))).await;
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result =
-                                request(&control, Command::ThreadSet(args))
-                                    .await
-                                    .and_then(|value| {
-                                        serde_json::from_value::<ThreadDetails>(value).map_err(|_| {
-                                            ApiError::new(
-                                                ErrorCode::InvalidState,
-                                                "Invalid settings response",
-                                            )
-                                        })
-                                    });
+                                (native_history::Owner { data_dir: &data_dir, instance: &instance }).call::<ThreadDetails>(Command::ThreadSet(args)).await;
                             command_outcome(&sender, submission, &result).await;
                             match result {
                                 Ok(details) => {
@@ -1555,7 +1573,7 @@ async fn run_client(
                             continue;
                         };
                         let data_dir = client_context.data_dir.clone();
-                        let instance = control.store.instance_id.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result = browser::NativeBrowser::new(&data_dir, &instance)
@@ -1586,11 +1604,12 @@ async fn run_client(
                             }
                             continue;
                         };
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let target = selection.active_thread.clone();
                         spawn_work(&mut workers, permit, async move {
-                            let result = request(&control, Command::RunRetry(args)).await;
+                            let result = (native_history::Owner { data_dir: &data_dir, instance: &instance }).call::<Value>(Command::RunRetry(args)).await;
                             command_outcome(&sender, submission, &result).await;
                             match result {
                                 Ok(_) => {
@@ -1604,7 +1623,7 @@ async fn run_client(
                             }
                         });
                     }
-                    UiAction::ThreadDeletion { request_id, args, execute, mut known_thread_ids } => {
+                    UiAction::ThreadDeletion { request_id, args, execute, .. } => {
                         if execute {
                             let accepted = accepted_deletion.take().is_some_and(|(preview_id, saved)|
                                 request_id == preview_id.wrapping_add(1)
@@ -1618,24 +1637,18 @@ async fn run_client(
                             accepted_deletion = None;
                             pending_deletion = Some(request_id);
                         }
-                        known_thread_ids = thread_deletion::candidates(known_thread_ids, &selection,
-                            draft_saver.threads().chain(images.threads()).cloned());
-                        if known_thread_ids.len() > thread_deletion::MAX_KNOWN_THREADS {
-                            update(&updates, UiUpdate::ThreadDeletion { request_id, args, execute, result: Err(ApiError::new(ErrorCode::InvalidArgument, "削除確認の会話件数が上限を超えました。Shellboy を再起動して再操作してください")) }).await;
-                            continue;
-                        }
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let results = background_tx.clone();
                         let action_args = args.clone();
                         let refusal_args = args.clone();
                         let work = async move {
-                            let language = control.store.config.ui.language;
                             let result = thread_deletion::guard(
-                                thread_deletion::run(&control, action_args, execute),
+                                thread_deletion::run(native_history::Owner { data_dir: &data_dir, instance: &instance }, action_args, execute),
                                 language,
                             )
                             .await;
-                            let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, known_thread_ids, result }).await;
+                            let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, result }).await;
                         };
                         if execute {
                             let Ok(permit) = command_slots.clone().try_acquire_owned() else {
@@ -1677,7 +1690,7 @@ async fn run_client(
                                 (identity, kind, previous)
                             });
                         let client_context = client_context.clone();
-                        let control = control.clone();
+                        let body_bytes = config.cache.body_bytes;
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
@@ -1696,7 +1709,7 @@ async fn run_client(
                                 });
                                 update(&outcomes, owner.update(format!("{title}{}{}", crate::ui::text_width::glyphs::separator(), if success {i18n::local!(language, "処理結果を受信", "Result received")} else {crate::ui::text_width::glyphs::select(i18n::local!(language, "失敗 · 詳細を確認してください", "Failed · Check details"), i18n::local!(language, "失敗 | 詳細を確認してください", "Failed | Check details"))}))).await;
                             }
-                            let (external, result) = prepare_external(language,response, control.store.config.cache.body_bytes, external).await;
+                            let (external, result) = prepare_external(language,response, body_bytes, external).await;
                             let _ = sender.send(BackgroundResult::Command { external, work_status: false, context, generation, title, result }).await;
                         });
                     }
@@ -1732,7 +1745,8 @@ async fn run_client(
                         let stop = matches!(command, Command::RunStop(_));
                         let work_status = management::work_status(&command);
                         management.dispatched(generation, management_state::Shown::of(&command, &title, &context, work_status));
-                        let control = control.clone();
+                        let body_bytes = config.cache.body_bytes;
+                        let instance = event_instance.clone();
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         let observe = management.observe(&command);
@@ -1746,7 +1760,7 @@ async fn run_client(
                             })).flatten();
                         let data_dir = client_context.data_dir.clone();
                         spawn_work(&mut workers, permit, async move {
-                            let mut response = management_request(&control, &data_dir, command, observe).await;
+                            let mut response = management_request(native_history::Owner { data_dir: &data_dir, instance: &instance }, command, observe).await;
                             if memory_observation && let Ok(value) = &mut response {
                                 value["client_observation"] = serde_json::json!({
                                     "completed_at": chrono::Utc::now().to_rfc3339(),
@@ -1764,7 +1778,7 @@ async fn run_client(
                                 .await;
                             }
                             let (external, result) =
-                                prepare_external(language,response, control.store.config.cache.body_bytes, external).await;
+                                prepare_external(language,response, body_bytes, external).await;
                             let _ = sender
                                 .send(BackgroundResult::Command { external,
                                     work_status,
@@ -1799,13 +1813,15 @@ async fn run_client(
                             continue;
                         };
                         let generation = management.next_generation();
-                        let control = control.clone();
+                        let body_bytes = config.cache.body_bytes;
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let title = ui_diagnostics::attachments_reloaded(language, &thread_id);
                             let response = compose_call::<crate::protocol::AttachmentReloadResult>(
-                                &control,
+                                &native_history::Owner { data_dir: &data_dir, instance: &instance },
                                 Command::AttachmentReload(crate::protocol::AttachmentReloadArgs { thread_id }),
                                 None,
                             ).await.and_then(|result| serde_json::to_value(result).map_err(|_| {
@@ -1820,7 +1836,7 @@ async fn run_client(
                                 .await;
                             }
                             let result =
-                                prepare_management(language,response, control.store.config.cache.body_bytes)
+                                prepare_management(language,response, body_bytes)
                                     .await;
                             let _ = sender
                                 .send(BackgroundResult::Command { external:None,
@@ -1845,23 +1861,13 @@ async fn run_client(
                             .await;
                             continue;
                         };
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = background_tx.clone();
                         spawn_work(&mut workers, permit, async move {
-                            let result =
-                                control
-                                    .index
-                                    .preview(args.clone())
-                                    .await;
+                            let result = native_history::Owner { data_dir: &data_dir, instance: &instance }
+                                .call::<Value>(Command::IndexPreview(args.clone())).await;
                             let captured_at = chrono::Utc::now();
-                            let result = result.and_then(|preview| {
-                                        serde_json::to_value(preview).map_err(|_| {
-                                            ApiError::new(
-                                                ErrorCode::InvalidState,
-                                                "Cannot encode index preview",
-                                            )
-                                        })
-                                    });
                             let result = match result {
                                 Ok(value) => {
                                     presentation_work(move || management::index_preview_captured_text_in(language,&value, captured_at)).await
@@ -1892,10 +1898,11 @@ async fn run_client(
                             .await;
                             continue;
                         };
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = background_tx.clone();
                         spawn_work(&mut workers, permit, async move {
-                            let result = load_branches(&control, &thread_id, cursor).await;
+                            let result = load_branches(&native_history::Owner { data_dir: &data_dir, instance: &instance }, &thread_id, cursor).await;
                             let _ = sender
                                 .send(BackgroundResult::Branches { request_id, append, result })
                                 .await;
@@ -1912,11 +1919,11 @@ async fn run_client(
                         };
                         let command = Command::ThreadRewind(args.clone());
                         let observe = management.observe(&command);
-                        let control = control.clone();
+                        let instance = event_instance.clone();
                         let outcomes = updates.worker();
                         let data_dir = client_context.data_dir.clone();
                         spawn_work(&mut workers, permit, async move {
-                            let response = management_request(&control, &data_dir, command, observe).await;
+                            let response = management_request(native_history::Owner { data_dir: &data_dir, instance: &instance }, command, observe).await;
                             let result = management_outcome(&response).map(|()| response.unwrap_or_default());
                             command_outcome(&outcomes, submission, &result).await;
                             update(&outcomes, UiUpdate::RewindResult { request_id, args, result: result.map_err(|error| error.message) }).await;
@@ -1948,11 +1955,12 @@ async fn run_client(
                             }
                             continue;
                         };
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
-                            let result = load_edit_request(&control, &thread_id, &node_id).await;
+                            let result = load_edit_request(&native_history::Owner { data_dir: &data_dir, instance: &instance }, &thread_id, &node_id).await;
                             command_outcome(&outcomes, submission, &result).await;
                             if has_submission && result.is_err() {
                                 return;
@@ -1981,12 +1989,16 @@ async fn run_client(
                         model,
                         effort,
                     } => {
-                        let diagnostics = control.diagnostics().clone();
+                        let diagnostics = diagnostics.clone();
                         let trace = MessageSendTrace {
                             stage: MessageSendStage::Queued,
                             draft_id: draft_id.clone(),
                             revision,
-                            operation_id: control.store.operation_epoch.mint(),
+                            operation_id: format!(
+                                "{}:{}",
+                                event_instance,
+                                uuid::Uuid::new_v4()
+                            ),
                             message_id: None,
                         };
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, Some(source_thread_id.as_str()), None);
@@ -1998,23 +2010,25 @@ async fn run_client(
                         }
                         let projection_stop = cancel.clone();
                         images.begin_send(&draft_id, &attachments);
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
+                        let draft_bytes = config.limits.draft_bytes;
                         let sender = background_tx.clone();
                         send_workers.spawn(async move {
                             trace_send(&diagnostics, &trace, MessageSendStage::Processing, Some(source_thread_id.as_str()), None);
                             let trace_thread = Some(source_thread_id.clone());
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
                             let result = async {
-                                let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,Some((&source_thread_id,&source_node_id)),control.store.config.limits.draft_bytes)?;
+                                let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,Some((&source_thread_id,&source_node_id)),draft_bytes)?;
                                 let cwd = match cwd.into_os_string().into_string() {
                                     Ok(cwd) => cwd,
                                     Err(_) => {
                                         // Preserve edited-input error precedence without revalidating successful sends.
-                                        crate::control::native_draft_input(&snapshot)?;
+                                        crate::draft::submission_input(&snapshot)?;
                                         return Err(ApiError::new(ErrorCode::InvalidArgument, "Thread cwd must be valid Unicode"));
                                     }
                                 };
-                                compose_call(&control, Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
+                                compose_call(&native_history::Owner { data_dir: &data_dir, instance: &instance }, Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                     thread_id: Some(source_thread_id),
                                     expected_thread_revision: Some(selection_revision),
                                     expected_source_message: snapshot.edit.as_ref().map(|edit| edit.node_id.clone()),
@@ -2033,7 +2047,7 @@ async fn run_client(
                             );
                             let projection=match &result {
                                 Ok(value)=>post_commit_projection(&projection_stop,
-                                    HistoryReader::saved(&control,render_width,Vec::new(),draft_id.clone(),revision,generation,value)).await,
+                                    HistoryReader::saved(&native_history::Owner { data_dir: &data_dir, instance: &instance },language,render_width,Vec::new(),(draft_id.clone(),revision),generation,value)).await,
                                 Err(_)=>None,
                             };
                             let _ = sender
@@ -2059,24 +2073,27 @@ async fn run_client(
                         draft_id,
                         revision,
                         node_id,
+                        thread_id,
                         expected_revision,
                     } => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let rejected = submission.clone();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                            let result = restore_snapshot(&control, node_id).await;
+                            let result = selected_message_source(&native_history::Owner { data_dir: &data_dir, instance: &instance }, &thread_id, &node_id).await;
                             command_outcome(&sender, submission, &result).await;
                             match result {
-                                Ok((text, attachments)) => {
+                                Ok(source) => {
                                     update(
                                         &sender,
                                         UiUpdate::RestoredSnapshot {
                                             draft_id,
                                             revision,
                                             expected_revision,
-                                            text,
-                                            attachments,
+                                            source: crate::draft::RestoredSource { message_id: source.message_id, selection_revision: source.selection_revision },
+                                            text: source.text,
+                                            attachments: source.attachments,
                                         },
                                     )
                                     .await
@@ -2113,22 +2130,22 @@ async fn run_client(
                     UiAction::ObserveDescendants {generation,roots}=>{
                         if let Err(error)=descendants.observe(generation,roots) {update(&updates,UiUpdate::Descendants {generation,read_sequence:message_queue::read_revision(),counts:Vec::new(),error:Some(error.to_string())}).await;}
                     },
-                    UiAction::LoadThreads {cursor,filter,generation,mode,archived,descendant_root,seen_completions,seen_history_limited}=>{
+                    UiAction::LoadThreads {cursor,filter,generation,mode,archived,descendant_root,..}=>{
                         let page_stop=match browser.begin_page_view(generation,filter.clone(),mode,descendant_root.clone()) {
                             Ok(Some(stop))=>stop,Ok(None)=>continue,
                             Err(error)=>{update(&updates,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await;continue;}
                         };
                         #[cfg(test)]
                         saved_events::tests::observe(saved_events::tests::Observed::Page { generation, stop: page_stop.clone() });
-                        let control=control.clone();let results=background_tx.clone();let progress_slots=progress_slots.clone();let diagnostics=control.diagnostics().clone();
+                        let data_dir=event_directory.clone();let instance=event_instance.clone();let results=background_tx.clone();let progress_slots=progress_slots.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {
                             let requested_cursor=cursor.clone();
                             let result=tokio::select! { biased;_=page_stop.cancelled()=>return,
                                 value=async {
                                     if mode==BrowserMode::Watch {
-                                        watch_page::read(&control,watch_page::Request {filter,cursor,descendant_root,seen_completions,seen_history_limited,limit:DEFAULT_LIST_LIMIT as usize},page_stop.clone(),progress_slots,diagnostics).await.map(ThreadPageResult::Watch)
+                                        watch_page::read(&native_history::Owner {data_dir:&data_dir,instance:&instance},ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter),archived,root:descendant_root,..Default::default()},page_stop.clone(),progress_slots).await.map(ThreadPageResult::Watch)
                                     } else {
-                                        browser::page(&control,ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter),archived,..Default::default()},page_stop.clone(),progress_slots).await.map(|(page,times,sequence)|ThreadPageResult::List(page,times,sequence))
+                                        browser::page(&native_history::Owner {data_dir:&data_dir,instance:&instance},ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter),archived,..Default::default()},page_stop.clone(),progress_slots).await.map(|(page,times,sequence)|ThreadPageResult::List(page,times,sequence))
                                     }
                                 }=>value,
                             };
@@ -2141,8 +2158,8 @@ async fn run_client(
                         let title=match target.kind {watch::WatchActionKind::Stop=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 停止", "Watch · Stop"), i18n::local!(language, "Watch | 停止", "Watch | Stop")),watch::WatchActionKind::Retry=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 再試行", "Watch · Retry"), i18n::local!(language, "Watch | 再試行", "Watch | Retry")),watch::WatchActionKind::Output=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 保存出力", "Watch · Saved output"), i18n::local!(language, "Watch | 保存出力", "Watch | Saved output"))}.to_owned();
                         let generation=if output {management.next_generation()}else{0};
                         let selected=selection.active_thread.clone();let results=background_tx.clone();let outcomes=updates.worker();
-                        let data_dir=client_context.data_dir.clone();let instance=control.store.instance_id.clone();
-                        let body_bytes=control.store.config.cache.body_bytes;
+                        let data_dir=client_context.data_dir.clone();let instance=event_instance.clone();
+                        let body_bytes=config.cache.body_bytes;
                         spawn_work(&mut workers,permit,async move {
                             let response=watch_action::execute(&native_history::Owner {data_dir:&data_dir,instance:&instance},target).await;
                             if output {
@@ -2162,8 +2179,7 @@ async fn run_client(
                         });
                     },
                     UiAction::ProgramStatusSeen { thread_id, run_id } => {
-                        if status_enabled && status_session.seen.get(&thread_id) != Some(&run_id) {
-                            status_session.seen.insert(thread_id, run_id);
+                        if status_enabled && status_session.seen.insert((thread_id, run_id)) {
                             status_epoch = status_epoch.wrapping_add(1);
                             status_dirty = true;
                         }
@@ -2184,7 +2200,9 @@ async fn run_client(
                         selection.select_thread(thread_id.clone(), generation);
                         streams.clear();
                         stream_retry = None;
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
+                        let ui = config.ui.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         let known = known_submissions.get(&thread_id).cloned().unwrap_or_default();
@@ -2199,7 +2217,8 @@ async fn run_client(
                             &selection.cancel,
                             async move {
                                 match select_thread(
-                                    &control,
+                                    native_history::Owner { data_dir: &data_dir, instance: &instance },
+                                    language,
                                     &sender,
                                     &target,
                                     generation,
@@ -2214,10 +2233,10 @@ async fn run_client(
                                     Ok(()) => {
                                         if let Ok(_permit) = progress_slots.acquire_owned().await {
                                             let owner = native_history::Owner {
-                                                data_dir: compose_data_dir(&control),
-                                                instance: &control.store.instance_id,
+                                                data_dir: &data_dir,
+                                                instance: &instance,
                                             };
-                                            let result = activity::read_cancellable(&control, &owner, &target, stop).await;
+                                            let result = activity::read_cancellable(&ui, &owner, &target, stop).await;
                                             let _ = results
                                                 .send(BackgroundResult::Progress {
                                                     thread_id: target,
@@ -2249,7 +2268,8 @@ async fn run_client(
                         generation,
                         before_cursor,
                     } => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         let known = known_submissions.get(&thread_id).cloned().unwrap_or_default();
@@ -2259,7 +2279,7 @@ async fn run_client(
                             &selection.cancel,
                             async move {
                                 let reply = Reply::new(target, generation);
-                                if let Err(error) = HistoryReader::new(&control, &sender, render_width)
+                                if let Err(error) = HistoryReader::new(native_history::Owner { data_dir: &data_dir, instance: &instance }, language, &sender, render_width)
                                     .with_submissions(known)
                                     .page(&reply, before_cursor, None)
                                     .await
@@ -2296,7 +2316,8 @@ async fn run_client(
                         selection.clear_tools(&thread_id,generation);
                     }
                     UiAction::RebaseStream(request) => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let target = request.thread_id.clone();
                         let rejected = target.clone();
@@ -2308,7 +2329,7 @@ async fn run_client(
                             &selection.cancel,
                             async move {
                                 if let Err(error) =
-                                    streaming::rebase(&control, &sender, *request, render_width).await
+                                    streaming::rebase(native_history::Owner { data_dir: &data_dir, instance: &instance }, language, &sender, *request, render_width).await
                                 {
                                     load_failed_at(&sender, target, generation, Some(revision), error)
                                         .await;
@@ -2334,7 +2355,8 @@ async fn run_client(
                         view_revision,
                         anchor,
                     } => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         let known = known_submissions.get(&thread_id).cloned().unwrap_or_default();
@@ -2344,7 +2366,7 @@ async fn run_client(
                             &selection.cancel,
                             async move {
                                 let reply = WindowReply::new(target, generation, view_revision);
-                                if let Err(error) = HistoryReader::new(&control, &sender, render_width)
+                                if let Err(error) = HistoryReader::new(native_history::Owner { data_dir: &data_dir, instance: &instance }, language, &sender, render_width)
                                     .with_submissions(known)
                                     .rebase(&reply, anchor)
                                     .await
@@ -2375,7 +2397,8 @@ async fn run_client(
                         from_end,
                         selection_revision,
                     } => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         let known = known_submissions.get(&thread_id).cloned().unwrap_or_default();
@@ -2391,7 +2414,7 @@ async fn run_client(
                                     from_end,
                                     selection_revision,
                                 );
-                                if let Err(error) = HistoryReader::new(&control, &sender, render_width)
+                                if let Err(error) = HistoryReader::new(native_history::Owner { data_dir: &data_dir, instance: &instance }, language, &sender, render_width)
                                     .with_submissions(known)
                                     .window(&reply, query)
                                     .await
@@ -2411,11 +2434,11 @@ async fn run_client(
                         }
                     }
                     UiAction::LoadDetailLinks { thread_id, generation, request_id, node_ids } => {
-                        let control=control.clone();
+                        let data_dir=event_directory.clone();let instance=event_instance.clone();
                         let sender=updates.worker();
                         let target=thread_id.clone();
                         if !spawn_read(&mut read_workers,&read_slots,&selection.cancel,async move {
-                            let result=HistoryReader::new(&control,&sender,render_width).links(node_ids).await.map_err(|error|error.to_string());
+                            let result=HistoryReader::new(native_history::Owner { data_dir: &data_dir, instance: &instance }, language, &sender,render_width).links(&target, node_ids).await.map_err(|error|error.to_string());
                             update(&sender,UiUpdate::DetailLinks {thread_id:target,generation,request_id,result}).await;
                         }) {
                             update(&updates,UiUpdate::DetailLinks {thread_id,generation,request_id,result:Err(i18n::local!(language, "リンクの読込キューが満杯です。完了後に再操作してください", "The link-read queue is full. Wait for completion, then try again").into())}).await;
@@ -2432,7 +2455,9 @@ async fn run_client(
                         group_id,
                         call_id,
                     } => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
+                        let tool_excerpt_bytes = config.limits.tool_excerpt_bytes;
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         let requested_key = key.clone();
@@ -2455,8 +2480,10 @@ async fn run_client(
                                 let result = if !identity_matches {
                                     Err(i18n::local!(language, "出力の表示対象が変わりました。項目を開き直してください", "The displayed output target changed. Reopen the item").into())
                                 } else {
-                                    let limit = limit_bytes.min(control.store.config.limits.tool_excerpt_bytes.min(16 * 1024) as usize).max(1);
-                                    preview_reads::load(&control, &source_node_id, group_id.as_deref(), &call_id, limit).await
+                                    let limit = limit_bytes.min(tool_excerpt_bytes.min(16 * 1024) as usize).max(1);
+                                    preview_reads::load(native_history::Owner { data_dir: &data_dir, instance: &instance },
+                                        preview_reads::Source { thread: &target, node: &source_node_id, group: group_id.as_deref(), call: &call_id },
+                                        limit, language).await
                                 };
                                 update(&sender, UiUpdate::ToolPreview {
                                     thread_id: target, generation, key: requested_key, request_revision, result,
@@ -2477,7 +2504,8 @@ async fn run_client(
                         char_offset,
                         view_revision,
                     } => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
@@ -2486,7 +2514,7 @@ async fn run_client(
                             &selection.cancel,
                             async move {
                                 let reply = WindowReply::new(target.clone(), generation, view_revision);
-                                match HistoryReader::new(&control, &sender, render_width)
+                                match HistoryReader::new(native_history::Owner { data_dir: &data_dir, instance: &instance }, language, &sender, render_width)
                                     .node(node_id, char_offset, &target)
                                     .await
                                 {
@@ -2514,6 +2542,7 @@ async fn run_client(
                         older,
                     } => {
                         let data_dir = client_context.data_dir.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let target = thread_id.clone();
                         if !spawn_read(
@@ -2522,7 +2551,7 @@ async fn run_client(
                             &selection.cancel,
                             async move {
                                 let result = input_history::recall(
-                                    &data_dir,
+                                    &native_history::Owner { data_dir: &data_dir, instance: &instance },
                                     target.clone(),
                                     before_ordinal,
                                     before_node_id,
@@ -2634,8 +2663,9 @@ async fn run_client(
                         .await;
                         let ticket = images.begin_image(&draft_id, thread_id.as_deref());
                         let clipboard = clipboard.clone();
-                        let control = control.clone();
-                        let timeout = control.store.config.io.file_prepare_timeout_ms;
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
+                        let timeout = config.io.file_prepare_timeout_ms;
                         let cancel = cancel.child_token();
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
@@ -2643,7 +2673,7 @@ async fn run_client(
                             let result = async {
                                 let pixels = clipboard.capture(timeout, cancel).await?;
                                 let png = presentation_work(move || pixels.encode_png()).await??;
-                                draft_images::upload(&control, &draft_id, png).await
+                                draft_images::upload(&native_history::Owner { data_dir: &data_dir, instance: &instance }, &draft_id, png).await
                             }
                             .await.map_err(|error| image_acquisition_error(error, language));
                             command_outcome(&outcomes, submission, &result).await;
@@ -2672,14 +2702,14 @@ async fn run_client(
                         .await;
                     }
                     UiAction::LoadCopyChoices { node_id, request_id, cancel } => {
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         let read_node = node_id.clone();
                         if cancel.is_cancelled() { continue; }
-                        let data_dir = client_context.data_dir.clone();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             tokio::select! { biased; _=cancel.cancelled()=>{}, _=async {
-                                let result = checked_storage(&control, copying::choices(&control, &data_dir, read_node.clone()).await).await
+                                let result = copying::choices(language, &native_history::Owner { data_dir: &data_dir, instance: &instance }, read_node.clone()).await
                                     .map_err(|error| error.to_string());
                                 update(&sender, UiUpdate::CopyChoices { node_id: read_node, request_id, result }).await;
                             } => {} }
@@ -2693,12 +2723,11 @@ async fn run_client(
                         cursor,
                         request_id,
                     } => {
-                        let language = control.store.config.ui.language;
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         let sender = updates.worker();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                            match request(
-                                &control,
+                            match (native_history::Owner { data_dir: &data_dir, instance: &instance }).call::<HistoryBody>(
                                 Command::HistoryRead(HistoryReadArgs { display: None, end_message_only: false, parts: false,
                                     node_id,
                                     cursor,
@@ -2706,12 +2735,7 @@ async fn run_client(
                                     encoding: DEFAULT_ENCODING.into(),
                                 }),
                             )
-                            .await
-                            .and_then(|value| {
-                                serde_json::from_value(value).map_err(|_| {
-                                    ApiError::new(ErrorCode::IoFailed, "Invalid original page")
-                                })
-                            }) {
+                            .await {
                                 Ok(body) => match presentation_work(move || {
                                     UiUpdate::original_page_localized(request_id, body, language)
                                 })
@@ -2754,7 +2778,8 @@ async fn run_client(
                             continue;
                         };
                         let generation = management.next_generation();
-                        let control = control.clone();
+                        let body_bytes = config.cache.body_bytes;
+                        let instance = event_instance.clone();
                         let sender = background_tx.clone();
                         let follow_updates = updates.worker();
                         let data_dir = client_context.data_dir.clone();
@@ -2776,7 +2801,7 @@ async fn run_client(
                             };
                             let title=command_title(&command, language);
                             let work_status=management::work_status(&command);
-                            let response=management_request(&control, &data_dir,command,CancellationToken::new()).await;
+                            let response=management_request(native_history::Owner { data_dir: &data_dir, instance: &instance }, command,CancellationToken::new()).await;
                             let observed=match response {
                                 Ok(value)=>value,
                                 Err(error)=> {
@@ -2797,7 +2822,7 @@ async fn run_client(
                                 return;
                             }
                             let result =
-                                prepare_management(language,Ok(observed), control.store.config.cache.body_bytes)
+                                prepare_management(language,Ok(observed), body_bytes)
                                     .await;
                             let _ = sender
                                 .send(BackgroundResult::Command { external:None,
@@ -2862,7 +2887,8 @@ async fn run_client(
                                 .await;
                             continue;
                         };
-                        let control = control.clone();
+                        let copy_backend = config.ui.copy_backend;
+                        let prepare_timeout = config.io.file_prepare_timeout_ms;
                         let clipboard = clipboard.clone();
                         let sender = background_tx.clone();
                         let cancel = cancel.child_token();
@@ -2871,9 +2897,9 @@ async fn run_client(
                             let result = clipboard
                                 .copy(
                                     text,
-                                    control.store.config.ui.copy_backend,
+                                    copy_backend,
                                     MAX_BODY_BYTES as usize,
-                                    control.store.config.io.file_prepare_timeout_ms,
+                                    prepare_timeout,
                                     cancel,
                                 )
                                 .await.map(|outcome| (outcome, characters));
@@ -2911,22 +2937,24 @@ async fn run_client(
                             }
                             continue;
                         };
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
+                        let copy_backend = config.ui.copy_backend;
+                        let prepare_timeout = config.io.file_prepare_timeout_ms;
                         let clipboard = clipboard.clone();
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         let cancel = cancel.child_token();
-                        let data_dir = client_context.data_dir.clone();
                         spawn_work(&mut workers, permit, async move {
                             let result = async {
-                                let text = checked_storage(&control, copying::text(&control, &data_dir, node_id, code_block, expected_copy_hash).await).await?;
+                                let text = copying::text(language, &native_history::Owner { data_dir: &data_dir, instance: &instance }, node_id, code_block, expected_copy_hash).await?;
                                 let characters = text.chars().count();
                                 clipboard
                                     .copy(
                                         text,
-                                        control.store.config.ui.copy_backend,
+                                        copy_backend,
                                         MAX_BODY_BYTES as usize,
-                                        control.store.config.io.file_prepare_timeout_ms,
+                                        prepare_timeout,
                                         cancel,
                                     )
                                     .await.map(|outcome| (outcome, characters))
@@ -2950,9 +2978,10 @@ async fn run_client(
                             .await;
                             continue;
                         };
-                        let control = control.clone();
+                        let data_dir = event_directory.clone();
+                        let instance = event_instance.clone();
                         control_tasks.spawn(async move {
-                            let result = request(&control, Command::RunStop(crate::protocol::RunStopTarget::Thread {
+                            let result = (native_history::Owner {data_dir:&data_dir,instance:&instance}).call::<Value>(Command::RunStop(crate::protocol::RunStopTarget::Thread {
                                 thread_id: thread_id.clone(), expected_turn: None,
                             })).await.map(|_| ());
                             (thread_id, result)
@@ -2980,11 +3009,11 @@ async fn run_client(
                             continue;
                         };
                         let data_dir = client_context.data_dir.clone();
+                        let instance = event_instance.clone();
                         let updates = updates.worker();
                         spawn_work(&mut workers, permit, async move {
-                            let result = native_request::<ShellBackgroundResult>(
-                                &data_dir, Command::ShellBackground(ExecutionTarget { execution_id }),
-                            ).await;
+                            let result = (native_history::Owner { data_dir: &data_dir, instance: &instance })
+                                .call::<ShellBackgroundResult>(Command::ShellBackground(ExecutionTarget { execution_id })).await;
                             command_outcome(&updates, submission, &result).await;
                             if let Err(error) = result
                                 && !has_submission
@@ -3005,12 +3034,12 @@ async fn run_client(
                 Some(BackgroundResult::ProgramStatus { epoch, result }) => {
                     status_inflight = false;
                     if epoch == status_epoch && status_selected == selection.active_thread {
-                        if let Some(snapshot) = status_session.accept(result, &mut status_dirty) {
+                        if let Some(snapshot) = program_status::Session::accept(result, &mut status_dirty) {
                             update(&updates, UiUpdate::ProgramStatus(snapshot)).await;
                         }
                     } else { status_dirty = true; }
                 }
-                Some(BackgroundResult::ThreadDeletion { request_id, args, execute, mut known_thread_ids, result }) => {
+                Some(BackgroundResult::ThreadDeletion { request_id, args, execute, result }) => {
                     if !execute {
                         if pending_deletion != Some(request_id) {
                             continue;
@@ -3022,14 +3051,10 @@ async fn run_client(
                     }
                     let result = match result {
                         Ok(thread_deletion::Outcome::Preview(value, captured_at)) => Ok(ThreadDeletionReply::Preview(value, captured_at)),
-                        Ok(thread_deletion::Outcome::Applied) => {
-                            known_thread_ids.push(args.thread_id.clone());
-                            known_thread_ids = thread_deletion::candidates(known_thread_ids, &selection,
-                                draft_saver.threads().chain(images.threads()).cloned());
-                            let (deleted, drafts, warning) = thread_deletion::finish_cleanup(&control, &args.thread_id, known_thread_ids).await;
+                        Ok(thread_deletion::Outcome::Applied(deleted)) => {
                             let ids: HashSet<_> = deleted.iter().cloned().collect();
                             draft_saver.forget_threads(&ids);
-                            images.forget_threads(&ids, &drafts);
+                            images.forget_threads(&ids);
                             selection.generations.retain(|thread, _| !ids.contains(thread));
                             dirty_threads.retain(|thread| !ids.contains(thread));
                             refreshing.retain(|thread| !ids.contains(thread));
@@ -3042,10 +3067,7 @@ async fn run_client(
                                 streams.clear();
                                 stream_retry = None;
                             }
-                            Ok(match warning {
-                                Some(warning) => ThreadDeletionReply::DeletedWithWarning { ids: deleted, warning },
-                                None => ThreadDeletionReply::Deleted(deleted),
-                            })
+                            Ok(ThreadDeletionReply::Deleted(deleted))
                         }
                         Err(error) => Err(error),
                     };
@@ -3067,7 +3089,7 @@ async fn run_client(
                         Err(error) => status(&updates, Some(ticket.thread), error).await,
                     }
                 }
-                Some(BackgroundResult::DraftSaved { thread_id, anchor, result: Err(error) }) => {
+                Some(BackgroundResult::DraftSaved { thread_id, anchor, result: Err(error), .. }) => {
                     if compose_transport_error(&error) {
                         compose_disconnected.store(true, Ordering::Release);
                         if let Some(operation) = unknown_compose_operation(&error) {
@@ -3082,7 +3104,10 @@ async fn run_client(
                         update(&updates, UiUpdate::StorageFailed { thread_id, message: crate::config_setup::tui_error(&error) }).await;
                     }
                 }
-                Some(BackgroundResult::DraftSaved { result: Ok(()), .. }) => {}
+                Some(BackgroundResult::DraftSaved { restored: Some((draft_id, source)), result: Ok(()), .. }) => {
+                    update(&updates, UiUpdate::DraftSourceSaved { draft_id, source }).await;
+                }
+                Some(BackgroundResult::DraftSaved { restored: None, result: Ok(()), .. }) => {},
                 Some(BackgroundResult::Refreshed {
                     thread_id,
                     receipts,
@@ -3107,7 +3132,7 @@ async fn run_client(
                     }
                 }
                 Some(BackgroundResult::ViewFacts {tickets,result})=>{
-                    view_read::complete(control.diagnostics(),&mut browser,&mut descendants,&updates,tickets,result.map(|value|*value)).await;
+                    view_read::complete(&diagnostics,&mut browser,&mut descendants,&updates,tickets,result.map(|value|*value)).await;
                 },
                 Some(BackgroundResult::ThreadPage {generation,requested_cursor,stop,result})=>{
                     if !stop.is_cancelled()&&browser.generation()==Some(generation) {
@@ -3126,7 +3151,6 @@ async fn run_client(
                 },
                 Some(BackgroundResult::LivePreview {ticket,result})=>{
                     if live_output.complete(&ticket) {
-                        let result=result.map(|(cursor,page)| {live_output.install_cursor(cursor);page});
                         update(&updates,UiUpdate::LiveWorkPreview {thread_id:ticket.thread,generation:ticket.generation,revision:ticket.revision,execution_id:ticket.execution,result}).await;
                     }
                 },
@@ -3434,7 +3458,7 @@ async fn run_client(
                         if management.wants_refresh(&page, resync) {
                             // The shown F8 result is read again with the command that made it.
                             match command_slots.clone().try_acquire_owned() {
-                                Ok(permit) => dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language),
+                                Ok(permit) => dispatch_shown_refresh(&mut management, &mut workers, permit, native_history::Owner { data_dir: event_directory, instance: event_instance }, &background_tx, config.cache.body_bytes, language),
                                 Err(_) => {
                                     management.defer_refresh();
                                     #[cfg(test)]
@@ -3454,7 +3478,7 @@ async fn run_client(
                                 update(&updates, value).await;
                             }
                         }
-                        if control.store.config.ui.bell {
+                        if config.ui.bell {
                             for _ in &page.recovery_transitions {
                                 update(&updates, UiUpdate::RecoveryBell).await;
                             }
@@ -3475,8 +3499,10 @@ async fn run_client(
                     }
                     Err(error) => {
                         saved_events = None;
+                        preview_scope = None;
+                        preview_events = None;
                         compose_disconnected.store(true, Ordering::Release);
-                        status(&updates, None, compose_disconnected_message(&error)).await;
+                        update(&updates, UiUpdate::OwnerDisconnected(error)).await;
                     }
                 }
             },
@@ -3578,7 +3604,7 @@ async fn run_client(
                 if management.refresh_ready()
                     && let Ok(permit) = command_slots.clone().try_acquire_owned()
                 {
-                    dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language);
+                    dispatch_shown_refresh(&mut management, &mut workers, permit, native_history::Owner { data_dir: event_directory, instance: event_instance }, &background_tx, config.cache.body_bytes, language);
                 }
             },
             _=send_workers.join_next(),if !send_workers.is_empty()=> {},
@@ -3593,9 +3619,9 @@ async fn run_client(
     selection.cancel.cancel();
     cancel.cancel();
     drop(background_rx);
-    let grace = Duration::from_millis(control.store.config.io.shutdown_grace_ms);
+    let grace = Duration::from_millis(config.io.shutdown_grace_ms);
     let shutdown_updates = &updates;
-    let shutdown_diagnostics = control.diagnostics().clone();
+    let shutdown_diagnostics = diagnostics.clone();
     // Keep the drain future heap-pinned across the nested shutdown waiters.
     let shutdown = Box::pin(async move {
         use crate::diagnostics::{ShutdownBoundary as Edge, ShutdownScope, ShutdownStage as Stage};
@@ -3816,7 +3842,7 @@ fn compose_disconnected_message(error: &ApiError) -> String {
 
 // Keep receipt reconciliation out of the terminal loop's stack frame.
 fn reconcile_compose<'a>(
-    control: &'a Control,
+    owner: native_history::Owner<'a>,
     updates: &'a BufferedUpdates,
     compose_unknown: &'a mut HashMap<String, UnknownCompose>,
     images: &'a mut draft_images::DraftImages,
@@ -3826,7 +3852,7 @@ fn reconcile_compose<'a>(
     Box::pin(async move {
         if compose_unknown.is_empty() {
             let _: Value =
-                compose_call(control, Command::Status(StatusArgs::default()), None).await?;
+                compose_call(&owner, Command::Status(StatusArgs::default()), None).await?;
         }
         let operations: Vec<_> = compose_unknown.keys().cloned().collect();
         for operation in operations {
@@ -3838,7 +3864,7 @@ fn reconcile_compose<'a>(
             }) = compose_unknown.get(&operation)
             {
                 match message_queue::exact_submission(
-                    control,
+                    &owner,
                     &operation,
                     draft_id,
                     *revision,
@@ -3870,7 +3896,7 @@ fn reconcile_compose<'a>(
                 }
             }
             let receipt: Value = compose_call(
-                control,
+                &owner,
                 Command::OperationGet(crate::protocol::OperationTarget {
                     operation_id: operation.clone(),
                 }),
@@ -3943,17 +3969,13 @@ fn reconcile_compose<'a>(
 }
 
 async fn compose_call<T: serde::de::DeserializeOwned>(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     command: Command,
     operation: Option<String>,
 ) -> Result<T, ApiError> {
-    let reply = crate::ipc::call_selected_operation(
-        compose_data_dir(control),
-        &control.store.instance_id,
-        command,
-        operation,
-    )
-    .await?;
+    let reply =
+        crate::ipc::call_selected_operation(owner.data_dir, owner.instance, command, operation)
+            .await?;
     if let Some(error) = reply.error {
         return Err(error);
     }
@@ -3962,18 +3984,19 @@ async fn compose_call<T: serde::de::DeserializeOwned>(
 }
 
 async fn save_draft(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     thread_id: String,
-    draft: DraftSnapshot,
+    mut draft: DraftSnapshot,
     anchor: ViewAnchor,
     follow_tail: bool,
 ) -> Result<(), ApiError> {
-    let operation = control.store.operation_epoch.mint();
+    let expected_source = draft.restored_source.take();
+    let operation = format!("{}:{}", owner.instance, uuid::Uuid::new_v4());
     compose_call::<crate::protocol::Accepted>(
-        control,
+        owner,
         Command::DraftSave(crate::protocol::DraftSaveArgs {
-            expected_source_message: None,
-            expected_thread_revision: None,
+            expected_thread_revision: expected_source.as_ref().map(|source| source.selection_revision),
+            expected_source_message: expected_source.map(|source| source.message_id),
             thread_id,
             draft: Box::new(draft),
             anchor,

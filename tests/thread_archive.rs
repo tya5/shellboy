@@ -96,6 +96,10 @@ async fn list(
     run(
         store,
         Command::ThreadList(ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),
@@ -421,6 +425,10 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
     let found = run(
         &store,
         Command::ThreadList(ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),

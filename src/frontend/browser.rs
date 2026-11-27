@@ -29,10 +29,13 @@ pub(super) struct Ticket {
     pub stop: CancellationToken,
     pub mode: BrowserMode,
     pub descendant_root: Option<String>,
+    #[cfg(test)]
     pub cached_scope: Option<(bool, Vec<String>)>,
     pub detail_ids: Vec<String>,
+    #[cfg(test)]
     pub detail_parent_ids: Vec<String>,
     pub detail_stop: CancellationToken,
+    #[cfg(test)]
     pub known_requested_ids: Vec<String>,
     serial: u64,
 }
@@ -432,6 +435,7 @@ impl Browser {
         self.next = Some(now + PERIOD);
         Some(Ticket {
             generation: s.generation,
+            #[cfg(test)]
             known_requested_ids: ids
                 .iter()
                 .filter(|id| s.known.contains_key(*id))
@@ -442,8 +446,10 @@ impl Browser {
             stop: s.stop.child_token(),
             mode: s.mode,
             descendant_root: s.descendant_root.clone(),
+            #[cfg(test)]
             cached_scope: s.cached_scope.clone(),
             detail_ids: details,
+            #[cfg(test)]
             detail_parent_ids: s.detail_parents.iter().cloned().collect(),
             detail_stop: s.detail_stop.child_token(),
             serial: self.serial,
@@ -501,15 +507,16 @@ pub(super) struct Observation {
     pub patch: Option<crate::ui::thread_patch::BrowserPatch>,
     pub details: Option<WatchDetailsBatch>,
 }
+#[cfg(test)]
 pub(super) struct RawObservation {
     mode: BrowserMode,
-    requested: Vec<String>,
     patch: Option<super::browser_read::RawPatch>,
     details: Option<super::watch_read::RawWatch>,
     detail_ids: Vec<String>,
     title_only: BTreeSet<String>,
 }
 
+#[cfg(test)]
 pub(super) fn read_tx(
     db: &rusqlite::Connection,
     ticket: &Ticket,
@@ -601,7 +608,6 @@ pub(super) fn read_tx(
     };
     Ok(RawObservation {
         mode: ticket.mode,
-        requested,
         patch,
         details,
         detail_ids,
@@ -617,6 +623,7 @@ fn prepare(raw: RawObservation, read_sequence: u64, generation: u64) -> Observat
         crate::config::UiLanguage::Ja,
     )
 }
+#[cfg(test)]
 pub(super) fn prepare_localized(
     raw: RawObservation,
     read_sequence: u64,
@@ -684,17 +691,6 @@ impl<'a> NativeBrowser<'a> {
             owner: super::native_history::Owner { data_dir, instance },
         }
     }
-    pub(super) fn embedded(control: &'a Control) -> Self {
-        Self::new(
-            control
-                .store
-                .database
-                .path()
-                .parent()
-                .expect("owner database has a directory"),
-            &control.store.instance_id,
-        )
-    }
     pub(crate) async fn list(
         &self,
         args: ThreadListArgs,
@@ -725,57 +721,145 @@ impl<'a> NativeBrowser<'a> {
             Ok(result.unarchived.len())
         }
     }
-
-    pub(crate) async fn exact(
-        &self,
-        ids: Vec<String>,
-        stop: &CancellationToken,
-    ) -> Result<Vec<ThreadSummary>, ApiError> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        self.list(
-            ThreadListArgs {
-                thread_ids: Some(ids),
-                ..Default::default()
-            },
-            stop,
-        )
-        .await
-        .map(|page| page.items)
-    }
 }
 
 pub(super) async fn observe_native(
-    native: &NativeBrowser<'_>,
-    raw: RawObservation,
+    owner: &super::native_history::Owner<'_>,
     ticket: &Ticket,
-    sequence: u64,
     language: crate::config::UiLanguage,
-) -> Result<Observation, ApiError> {
-    let mut rows = native.exact(raw.requested.clone(), &ticket.stop).await?;
-    let title_only = raw.title_only.clone();
-    let ids = ticket.ids.clone();
-    let generation = ticket.generation;
-    presentation_work(move || {
-        let mut result = prepare_localized(raw, sequence, generation, language);
-        if let Some(patch) = &mut result.patch {
-            let found: BTreeSet<_> = rows.iter().map(|row| row.thread_id.as_str()).collect();
-            patch.missing_ids = ids
-                .into_iter()
+) -> Result<(Observation, u64), ApiError> {
+    let native = NativeBrowser::new(owner.data_dir, owner.instance);
+    let patch = if ticket.ids.is_empty() {
+        None
+    } else {
+        let page = native
+            .list(
+                ThreadListArgs {
+                    root: ticket.descendant_root.clone(),
+                    thread_ids: Some(ticket.ids.clone()),
+                    include_activity: true,
+                    ..Default::default()
+                },
+                &ticket.stop,
+            )
+            .await?;
+        let found: BTreeSet<_> = page.items.iter().map(|r| r.thread_id.as_str()).collect();
+        Some(crate::ui::thread_patch::BrowserPatch {
+            generation: ticket.generation,
+            read_sequence: page.read_sequence,
+            missing_ids: ticket
+                .ids
+                .iter()
                 .filter(|id| !found.contains(id.as_str()))
-                .collect();
-            rows.retain(|row| !title_only.contains(&row.thread_id));
-            patch.display_times = thread_display_times(&rows);
-            patch.rows = rows;
+                .cloned()
+                .collect(),
+            display_times: thread_display_times(&page.items),
+            watch_summaries: page.items.iter().map(super::watch_page::summary).collect(),
+            rows: page.items,
+            limited_titles: Vec::new(),
+            excerpt: None,
+        })
+    };
+    let (details, sequence) = if ticket.detail_ids.is_empty() || ticket.detail_stop.is_cancelled() {
+        (None, 0)
+    } else {
+        let result = native
+            .list(
+                ThreadListArgs {
+                    root: ticket.descendant_root.clone(),
+                    thread_ids: Some(ticket.detail_ids.clone()),
+                    include_activity: true,
+                    include_activity_evidence: true,
+                    ..Default::default()
+                },
+                &ticket.detail_stop,
+            )
+            .await;
+        match result {
+            _ if ticket.detail_stop.is_cancelled() => (None, 0),
+            Err(error) => return Err(error),
+            Ok(mut page) => {
+                let requested = ticket.detail_ids.clone();
+                let sequence = page.read_sequence;
+                let details = presentation_work(move || {
+                    let details = page
+                        .items
+                        .into_iter()
+                        .filter_map(|row| {
+                            let evidence = page.activity_evidence.remove(&row.thread_id)?;
+                            Some(super::watch_read::prepare_native(&row, evidence, language))
+                        })
+                        .collect::<Vec<_>>();
+                    let found: BTreeSet<_> = details
+                        .iter()
+                        .map(|d| d.facts().thread_id.as_str())
+                        .collect();
+                    let missing_ids = requested
+                        .into_iter()
+                        .filter(|id| !found.contains(id.as_str()))
+                        .collect();
+                    WatchDetailsBatch {
+                        details,
+                        missing_ids,
+                    }
+                })
+                .await?;
+                (Some(details), sequence)
+            }
         }
-        result
+    };
+    Ok((Observation { patch, details }, sequence))
+}
+
+pub(super) async fn observe_list(
+    owner: &super::native_history::Owner<'_>,
+    ticket: &Ticket,
+) -> Result<Observation, ApiError> {
+    let page = NativeBrowser::new(owner.data_dir, owner.instance)
+        .list(
+            ThreadListArgs {
+                thread_ids: Some(ticket.ids.clone()),
+                ..Default::default()
+            },
+            &ticket.stop,
+        )
+        .await?;
+    let found = page
+        .items
+        .iter()
+        .map(|item| item.thread_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let missing_ids = ticket
+        .ids
+        .iter()
+        .filter(|id| !found.contains(id.as_str()))
+        .cloned()
+        .collect();
+    let excerpt = ticket.selected.as_ref().map(|id| {
+        let result = match page.items.iter().find(|item| &item.thread_id == id) {
+            Some(item) if item.excerpt_complete => Ok(item.excerpt.clone()),
+            Some(_) => Err("Selected preview is outside its finite membership prefix".into()),
+            None => Err("Selected Thread is unavailable".into()),
+        };
+        (id.clone(), result)
+    });
+    Ok(Observation {
+        patch: Some(crate::ui::thread_patch::BrowserPatch {
+            generation: ticket.generation,
+            read_sequence: page.read_sequence,
+            display_times: thread_display_times(&page.items),
+            rows: page.items,
+            missing_ids,
+            limited_titles: Vec::new(),
+            excerpt,
+            watch_summaries: Vec::new(),
+        }),
+        details: None,
     })
-    .await
 }
 
 pub(super) async fn page(
-    control: &Control,
+    owner: &super::native_history::Owner<'_>,
     args: ThreadListArgs,
     stop: CancellationToken,
     progress_slots: Arc<Semaphore>,
@@ -784,8 +868,9 @@ pub(super) async fn page(
         _=stop.cancelled()=>return Err(observation_closed()),
         permit=progress_slots.acquire_owned()=>permit.map_err(|_|observation_closed())?,
     };
-    let sequence = super::message_queue::read_revision();
-    let page = NativeBrowser::embedded(control).list(args, &stop).await?;
+    let page = NativeBrowser::new(owner.data_dir, owner.instance)
+        .list(args, &stop)
+        .await?;
     drop(_permit);
     presentation_work(move || {
         let times = thread_display_times(&page.items);
@@ -795,7 +880,7 @@ pub(super) async fn page(
                 next_cursor: page.next_cursor,
             },
             times,
-            sequence,
+            page.read_sequence,
         )
     })
     .await

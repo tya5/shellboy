@@ -22,6 +22,7 @@ impl StatusArgs {
             && (self.thread_id.is_some()
                 || self.run_id.is_some()
                 || self.since.is_some()
+                || self.ended_after.is_some()
                 || !self.state.is_empty()
                 || self.all
                 || self.cursor.is_some()
@@ -36,6 +37,11 @@ impl StatusArgs {
         optional_nonempty(self.cursor.as_deref(), "cursor")?;
         if let Some(since) = &self.since {
             rfc3339(since, || invalid("since must be RFC3339 with timezone"))?;
+        }
+        if let Some(ended_after) = &self.ended_after {
+            rfc3339(ended_after, || {
+                invalid("ended_after must be RFC3339 with timezone")
+            })?;
         }
         if self.state.len() > 32 || self.state.iter().any(|s| s.is_empty() || s.len() > 64) {
             return Err(invalid(
@@ -78,6 +84,22 @@ fn validate_recipient_name(name: &str) -> Result<(), ApiError> {
 impl ThreadListArgs {
     fn validate(&self) -> Result<(), ApiError> {
         limit(self.limit, MAX_LIST_LIMIT)?;
+        optional_nonempty(self.root.as_deref(), "root")?;
+        if self.root.as_ref().is_some_and(|root| root.len() > 256) {
+            return Err(invalid("root exceeds the Thread identity bound"));
+        }
+        if self.root.is_some()
+            && (self.order == ThreadListOrder::Created || self.awaiting.is_some())
+        {
+            return Err(invalid(
+                "root cannot be combined with order=created or awaiting",
+            ));
+        }
+        if self.include_activity_evidence && (!self.include_activity || self.thread_ids.is_none()) {
+            return Err(invalid(
+                "activity evidence requires include_activity and exact Thread IDs",
+            ));
+        }
         if let Some(ids) = &self.thread_ids {
             if ids.len() > MAX_LIST_LIMIT as usize {
                 return Err(ApiError::new(
@@ -86,7 +108,6 @@ impl ThreadListArgs {
                 ));
             }
             if self.cursor.is_some()
-                || self.state.is_some()
                 || !self.order.is_updated()
                 || self.query.is_some()
                 || self.awaiting.is_some()
@@ -95,7 +116,7 @@ impl ThreadListArgs {
                 || self.cwd.is_some()
             {
                 return Err(invalid(
-                    "thread_ids cannot be combined with a cursor, order, or list filters",
+                    "thread_ids cannot be combined with a cursor, non-default order, or discovery filters other than state",
                 ));
             }
             let mut seen = std::collections::HashSet::with_capacity(ids.len());

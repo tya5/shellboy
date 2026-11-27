@@ -63,7 +63,10 @@ pub struct Counts {
     pub error: u64,
     pub working: u64,
     pub done: u64,
-    pub idle: u64,
+    pub working_capped: bool,
+    pub awaiting_you: u64,
+    pub awaiting_you_capped: bool,
+    pub done_capped: bool,
 }
 impl Counts {
     pub fn add(&mut self, state: State, auth: bool) {
@@ -77,8 +80,7 @@ impl Counts {
             State::Error => self.error += 1,
             State::Working => self.working += 1,
             State::Done => self.done += 1,
-            State::Idle => self.idle += 1,
-            State::Clear => {}
+            State::Idle | State::Clear => {}
         }
     }
     pub fn state(&self) -> State {
@@ -88,7 +90,7 @@ impl Counts {
             State::Error
         } else if self.working > 0 {
             State::Working
-        } else if self.done > 0 {
+        } else if self.done > 0 || self.done_capped {
             State::Done
         } else {
             State::Idle
@@ -100,8 +102,15 @@ impl Counts {
             state: self.state(),
             auth: self.blocked > 0 && self.blocked == self.auth,
             title: format!(
-                "blocked {}, error {}, working {}, done {}, idle {}",
-                self.blocked, self.error, self.working, self.done, self.idle
+                "blocked {}, error {}, working {}{}, awaiting you {}{}, done {}{}",
+                self.blocked,
+                self.error,
+                self.working,
+                if self.working_capped { "+" } else { "" },
+                self.awaiting_you,
+                if self.awaiting_you_capped { "+" } else { "" },
+                self.done,
+                if self.done_capped { "+" } else { "" }
             ),
             msg: if self.blocked > 0 {
                 format!("{} conversations need recovery", self.blocked)
@@ -452,10 +461,7 @@ mod tests {
                 .any(|bytes| fields(bytes).get("state") == Some(&"blocked".into()))
         );
         snapshot.children.clear();
-        snapshot.counts = Counts {
-            idle: 40,
-            ..Default::default()
-        };
+        snapshot.counts = Counts::default();
         publisher.sync(&snapshot, &mut bytes).unwrap();
         assert_eq!(publisher.sent.len(), 1);
         publisher.clear(&mut bytes).unwrap();

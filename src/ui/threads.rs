@@ -852,13 +852,6 @@ impl ThreadBrowser {
             mode: self.mode,
             archived: self.archived,
             descendant_root: self.descendant_root().map(str::to_owned),
-            seen_completions: if self.mode == BrowserMode::Watch {
-                self.watch.borrow().seen_completions()
-            } else {
-                vec![]
-            },
-            seen_history_limited: self.mode == BrowserMode::Watch
-                && self.watch.borrow().seen_history_limited(),
         }
     }
     pub fn mode(&self) -> BrowserMode {
@@ -3534,6 +3527,9 @@ mod tests {
 
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
+            descendants: None,
+            activity_detail: None,
+            latest_completion: None,
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_named_count_exact: true,
@@ -3840,6 +3836,7 @@ mod tests {
                             updated_at: "saved".into(),
                             latest_run_id: Some("run".into()),
                             answer_id: Some("answer".into()),
+                            awaiting_you: false,
                             interrupted: false,
                         }]
                     ));
@@ -4353,7 +4350,7 @@ mod tests {
                 let client = NativeBrowser::new(&data, &instance);
                 let page = client.list(ThreadListArgs::default(), &stop).await.unwrap();
                 assert_eq!(page.items.iter().map(|row| row.thread_id.as_str()).collect::<Vec<_>>(), ["wire-thread"]);
-                let exact = client.exact(vec!["other-thread".into(), "wire-thread".into()], &stop).await.unwrap();
+                let exact = client.list(ThreadListArgs { thread_ids: Some(vec!["other-thread".into(), "wire-thread".into()]), ..Default::default() }, &stop).await.unwrap().items;
                 assert_eq!(exact.len(), 1);
                 assert_eq!(exact[0].thread_id, "wire-thread");
                 let mut browser = ThreadBrowser::default();
@@ -4470,6 +4467,9 @@ mod tests {
     #[test]
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
+            descendants: None,
+            activity_detail: None,
+            latest_completion: None,
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_named_count_exact: true,
@@ -4726,6 +4726,9 @@ mod patch_tests {
     use super::*;
     fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
+            descendants: None,
+            activity_detail: None,
+            latest_completion: None,
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_named_count_exact: true,
@@ -5467,6 +5470,9 @@ mod archive_tests {
 
     fn row(id: &str, archived: bool) -> ThreadSummary {
         ThreadSummary {
+            descendants: None,
+            activity_detail: None,
+            latest_completion: None,
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_named_count_exact: true,
@@ -5870,6 +5876,9 @@ mod watch_integration_tests {
     use crossterm::event::Event;
     fn row(id: &str, phase: crate::activity::ActivityPhase) -> ThreadSummary {
         ThreadSummary {
+            descendants: None,
+            activity_detail: None,
+            latest_completion: None,
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_named_count_exact: true,
@@ -6036,17 +6045,25 @@ mod watch_integration_tests {
         let id = browser.items[browser.selected].thread_id.clone();
         let result = browser.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert!(
-            matches!(result,ThreadOutcome::Load(action) if matches!(*action,UiAction::LoadThreads {mode:BrowserMode::List,ref seen_completions,..} if seen_completions.is_empty()))
+            matches!(result,ThreadOutcome::Load(action) if matches!(*action,UiAction::LoadThreads {mode:BrowserMode::List,..}))
         );
         assert_eq!(browser.items[browser.selected].thread_id, id);
         assert_eq!(browser.filter, "task");
         let result = browser.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert!(
-            matches!(result,ThreadOutcome::Load(action) if matches!(*action,UiAction::LoadThreads {mode:BrowserMode::Watch,ref seen_completions,..} if seen_completions.iter().any(|key|key.run_id=="run-done" && key.answer_id=="answer-done")))
+            matches!(result,ThreadOutcome::Load(action) if matches!(*action,UiAction::LoadThreads {mode:BrowserMode::Watch,..}))
         );
         assert_eq!(
             browser.items[browser.selected].thread_id, id,
             "read row stays within this open Watch session"
+        );
+        assert!(
+            browser
+                .watch
+                .borrow()
+                .seen_completions()
+                .iter()
+                .any(|key| key.run_id == "run-done" && key.answer_id == "answer-done")
         );
     }
     #[test]
@@ -6602,6 +6619,9 @@ mod language_tests {
 
     fn record(id: &str, phase: ActivityPhase) -> ThreadSummary {
         ThreadSummary {
+            descendants: None,
+            activity_detail: None,
+            latest_completion: None,
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_named_count_exact: true,

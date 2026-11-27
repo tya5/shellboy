@@ -364,14 +364,6 @@ pub async fn call(
     connect(endpoint, command, operation_id, origin).await
 }
 
-/// Use the selected directory's listener, not an inherited invocation endpoint.
-pub(crate) async fn call_selected(
-    data_dir: &Path,
-    command: Command,
-) -> Result<Response<Value>, ApiError> {
-    connect(read_endpoint(data_dir).await?, command, None, None).await
-}
-
 /// A connected composer never addresses a replacement owner implicitly.
 pub(crate) async fn call_selected_operation(
     data_dir: &Path,
@@ -1489,6 +1481,10 @@ mod frame_delivery_tests {
             client,
             endpoint(),
             Command::ThreadList(crate::protocol::ThreadListArgs {
+                root: None,
+                include_descendant_count: false,
+                include_activity: false,
+                include_activity_evidence: false,
                 thread_ids: None,
                 state: None,
                 order: Default::default(),

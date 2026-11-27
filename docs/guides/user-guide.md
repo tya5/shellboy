@@ -152,7 +152,7 @@ are refused with `details.reason=network_data_directory`. Select a local path
 with `shellboy --data-dir PATH`. The final data-directory component must not be
 a symbolic link. For model-shell behavior, see [Windows shell notes](shell.md#windows-shell-notes).
 
-During startup, the screen shows current preparation such as configuration, DB migration, or cleanup of previously interrupted work. Conversation input becomes available after startup completes. Esc / Ctrl+C / Ctrl+Q request exit; initialization and persistence already started proceed to a safe boundary before closing. This does not roll back a migration or immediately release the lock. If startup fails, read the reason and close with Enter or Esc.
+The terminal connects to the owner for the selected data directory. If none is running, it starts `serve` as a detached process and waits for a compatible handshake. Esc, Ctrl+C, or Ctrl+Q cancels the terminal's wait; it does not stop the owner or roll back its work.
 
 The startup migration markers count schema upgrade steps, not the fraction of startup time or work completed. A long step can remain on the same marker; no remaining time is estimated. When there is not enough room for the markers, only the step count is shown.
 
@@ -551,7 +551,7 @@ Ctrl+C stops the current Run and its owned work. Esc closes an open overlay; oth
 
 Waiting to observe completion differs from interrupting the target. To cancel only an observation started in F8's wait form, press lowercase w on the result screen or use `/cancel-wait`. This does not stop the target Run or shell. In forms, Enter executes, Ctrl+J inserts a newline in multiline text, and Ctrl+U replaces a suggested value.
 
-Exit with Ctrl+Q or `/quit`. Shellboy waits for persistence and for owned work to stop and be reaped. After the grace period, W/Enter continues waiting; F opens force-exit confirmation, then Y confirms. Force exit can leave unsaved state or unreaped work. See [Recovery and storage](recovery-and-storage.md).
+Exit the terminal client with Ctrl+Q or `/quit`. Normal quit waits for pending client saves; Runs and schedules continue in the owner. Open Shellboy again with the same data directory to return to the same owner and restore saved state. If the owner becomes unavailable, the terminal stays open and reports the reason. `/reconnect` checks the same owner instance without replaying unconfirmed writes. Use `shellboy shutdown --data-dir DIR` when you intend to shut down the owner itself.
 
 Next, explore [Attachments](attachments.md), [History and search](history-and-search.md), and the [CLI reference](cli-reference.md).
 

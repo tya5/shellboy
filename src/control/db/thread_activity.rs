@@ -10,6 +10,14 @@ use crate::storage::StorageError;
 use rusqlite::{Connection, OptionalExtension};
 
 type Result<T> = std::result::Result<T, StorageError>;
+
+struct SavedTurn {
+    id: String,
+    state: String,
+    generation: i64,
+    recovery_reason: Option<String>,
+    answer_node_id: Option<String>,
+}
 /// Latest attempt row: id, state, generation, error, retry, exhausted, started.
 type SavedAttempt = (
     String,
@@ -121,10 +129,10 @@ pub(crate) fn read(db: &Connection, thread: &str) -> Result<Option<ThreadActivit
         None
     };
     let waiting_reason = crate::readback::run_wait_reason(db, thread, &run_id)?;
-    let saved_turn: Option<(String, String, i64, Option<String>)> = db.query_row(
-        "SELECT id,state,generation,recovery_reason_json FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
+    let saved_turn: Option<SavedTurn> = db.query_row(
+        "SELECT id,state,generation,recovery_reason_json,answer_node_id FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
         [&run_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        |r| Ok(SavedTurn {id:r.get(0)?, state:r.get(1)?, generation:r.get(2)?, recovery_reason:r.get(3)?, answer_node_id:r.get(4)?}),
     ).optional()?;
     let mut activity = ThreadActivity {
         run: ThreadActivityRun {
@@ -140,7 +148,14 @@ pub(crate) fn read(db: &Connection, thread: &str) -> Result<Option<ThreadActivit
         current_attempt: None,
         automatic_compaction: None,
     };
-    let Some((turn_id, turn_state, generation, reason)) = saved_turn else {
+    let Some(SavedTurn {
+        id: turn_id,
+        state: turn_state,
+        generation,
+        recovery_reason: reason,
+        answer_node_id,
+    }) = saved_turn
+    else {
         return Ok(Some(activity));
     };
     let reason = crate::control::usage_limit_retry::public_reason(reason);
@@ -285,6 +300,7 @@ pub(crate) fn read(db: &Connection, thread: &str) -> Result<Option<ThreadActivit
     activity.turn = Some(ThreadActivityTurn {
         state: decode::<TurnState>(&turn_state, "Turn")?,
         turn_id,
+        answer_node_id,
         generation,
         recovery_reason: reason,
         tools,

@@ -1,31 +1,25 @@
-//! Read-only terminal metadata on existing finite read admission, not a poller.
-use crate::program_status::{
-    CHILD_LIMIT, Counts, Record, Snapshot, State, clean, map_phase, thread_id,
-};
-use crate::protocol::ApiError;
-use std::{collections::BTreeMap, path::PathBuf};
+//! Bounded terminal metadata on existing finite read admission.
+use super::native_history::Owner;
+use crate::program_status::{CHILD_LIMIT, Counts, Record, Snapshot, State, clean, thread_id};
+use crate::protocol::{ApiError, Command, ErrorCode, MAX_LIST_LIMIT, StatusArgs};
+use crate::status::{ActivityCounts, StatusSnapshot, WorkItem};
+use std::collections::{BTreeMap, BTreeSet};
+
 pub(super) struct Session {
     pub started: chrono::DateTime<chrono::Utc>,
-    pub seen: BTreeMap<String, String>,
+    pub seen: BTreeSet<(String, String)>,
 }
 impl Session {
     pub fn new() -> Self {
         Self {
             started: chrono::Utc::now(),
-            seen: BTreeMap::new(),
+            seen: BTreeSet::new(),
         }
     }
 
-    pub fn accept(
-        &mut self,
-        result: Result<Projected, ApiError>,
-        dirty: &mut bool,
-    ) -> Option<Snapshot> {
+    pub fn accept(result: Result<Snapshot, ApiError>, dirty: &mut bool) -> Option<Snapshot> {
         match result {
-            Ok(projected) => {
-                self.seen = projected.seen;
-                Some(projected.snapshot)
-            }
+            Ok(snapshot) => Some(snapshot),
             Err(_) => {
                 *dirty = true;
                 None
@@ -34,408 +28,203 @@ impl Session {
     }
 }
 
-/// Only called through finite frontend admission; never occupies the writer queue.
 pub(super) async fn read(
-    path: PathBuf,
+    owner: Owner<'_>,
     selected: Option<String>,
     started: chrono::DateTime<chrono::Utc>,
-    seen: BTreeMap<String, String>,
-) -> Result<Projected, ApiError> {
-    super::presentation_work(move || {
-        let mut db = rusqlite::Connection::open_with_flags(
-            path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )?;
-        db.busy_timeout(std::time::Duration::from_millis(250))?;
-        db.pragma_update(None, "query_only", true)?;
-        // Keep all rows and retained-child titles on the same WAL snapshot.
-        let transaction = db.transaction()?;
-        let projected = project(&transaction, selected, started, seen)?;
-        transaction.commit()?;
-        Ok::<_, crate::storage::StorageError>(projected)
-    })
-    .await?
-    .map_err(super::storage_error)
-}
-
-pub(super) struct Projected {
-    pub snapshot: Snapshot,
-    pub seen: BTreeMap<String, String>,
-}
-const SQL:&str="SELECT t.id,substr(t.title,1,1024),r.id,r.state,u.state,r.ended_at,
- EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=r.id AND state IN ('starting','running','stopping')),
- a.state,CASE WHEN a.state='failed' AND a.generation=u.generation AND json_valid(a.error_json) THEN json_extract(a.error_json,'$.automatic_retry') END,
- CASE WHEN r.state='live' AND u.state='running' THEN EXISTS(SELECT 1 FROM tool_group WHERE turn_id=u.id AND state='running') ELSE 0 END,
- CASE WHEN json_valid(u.recovery_reason_json) THEN substr(json_extract(u.recovery_reason_json,'$.message'),1,4096) ELSE '' END,
- CASE WHEN json_valid(u.recovery_reason_json) THEN json_extract(u.recovery_reason_json,'$.code') END,
- CASE WHEN json_valid(u.recovery_reason_json) THEN json_extract(u.recovery_reason_json,'$.details.failure_kind') END,
- CASE WHEN a.generation=u.generation AND json_valid(a.error_json) THEN json_extract(a.error_json,'$.error.status') END
- FROM thread t LEFT JOIN run r ON r.id=(SELECT id FROM run WHERE thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1)
- LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1)
- LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id ORDER BY rowid DESC LIMIT 1)
- WHERE t.deleted_at IS NULL ORDER BY t.id";
-
-pub(super) fn project(
-    db: &rusqlite::Connection,
-    selected: Option<String>,
-    started: chrono::DateTime<chrono::Utc>,
-    seen: BTreeMap<String, String>,
-) -> Result<Projected, crate::storage::StorageError> {
-    let mut statement = db.prepare(SQL)?;
-    let mut rows = statement.query([])?;
-    let mut counts = Counts::default();
-    let mut children: Vec<(String, String, Record)> = Vec::new();
-    let mut keep_seen = BTreeMap::new();
-    let mut viewed = None;
-    while let Some(row) = rows.next()? {
-        let id: String = row.get(0)?;
-        let stored: String = row.get(1)?;
-        let run_id: Option<String> = row.get(2)?;
-        let run: Option<String> = row.get(3)?;
-        let turn: Option<String> = row.get(4)?;
-        let ended: Option<String> = row.get(5)?;
-        let attempt: Option<String> = row.get(7)?;
-        let diagnostic: Option<String> = row.get(8)?;
-        let retrying = diagnostic
-            .as_deref()
-            .and_then(|value| {
-                serde_json::from_str::<crate::activity::AutomaticRetrySnapshot>(value).ok()
-            })
-            .is_some_and(|retry| retry.number > 0 && retry.number <= retry.limit);
-        let phase = crate::activity::classify(
-            run.as_deref(),
-            turn.as_deref(),
-            row.get(6)?,
-            attempt.as_deref() == Some("inflight"),
-            retrying,
-            row.get(9)?,
-        );
-        let already_seen = run_id
-            .as_ref()
-            .is_some_and(|run| seen.get(&id) == Some(run));
-        if already_seen && let Some(run) = &run_id {
-            keep_seen.insert(id.clone(), run.clone());
-        }
-        let recent = ended
-            .as_deref()
-            .and_then(|date| chrono::DateTime::parse_from_rfc3339(date).ok())
-            .is_some_and(|date| date >= started);
-        let current = selected.as_deref() == Some(&id);
-        if phase == crate::activity::ActivityPhase::Completed
-            && recent
-            && current
-            && !already_seen
-            && let Some(run) = &run_id
+    seen: BTreeSet<(String, String)>,
+) -> Result<Snapshot, ApiError> {
+    let active: StatusSnapshot = owner
+        .call(Command::Status(StatusArgs {
+            limit: MAX_LIST_LIMIT,
+            ..Default::default()
+        }))
+        .await?;
+    let counts = active.activity_counts.ok_or_else(|| {
+        ApiError::new(ErrorCode::IoFailed, "Owner status omitted activity counts")
+    })?;
+    let cutoff = started.to_rfc3339();
+    let mut ended = Vec::new();
+    let mut cursor = None;
+    let capped = loop {
+        let remaining = MAX_LIST_LIMIT - ended.len() as u32;
+        let page: StatusSnapshot = owner
+            .call(Command::Status(StatusArgs {
+                ended_after: Some(cutoff.clone()),
+                limit: remaining,
+                cursor,
+                ..Default::default()
+            }))
+            .await?;
+        if page.page.items.len() > remaining as usize
+            || page.page.items.iter().any(|item| item.kind != "run")
         {
-            viewed = Some((id.clone(), run.clone()));
+            return Err(ApiError::new(ErrorCode::IoFailed, "Invalid ended Run page"));
         }
-        let state = map_phase(phase, recent && !current && !already_seen);
-        let code: Option<String> = row.get(11)?;
-        let kind: Option<String> = row.get(12)?;
-        let status: Option<i64> = row.get(13)?;
-        let auth = state == State::Blocked
-            && (code.as_deref() == Some("config_invalid")
-                || matches!(
-                    kind.as_deref(),
-                    Some("config_invalid" | "config_missing" | "config_missing_credentials")
-                )
-                || matches!(status, Some(401 | 403)));
-        counts.add(state, auth);
-        if state == State::Idle {
-            continue;
+        let more = page.page.next_cursor.is_some();
+        if more && page.page.items.is_empty() {
+            return Err(ApiError::new(
+                ErrorCode::IoFailed,
+                "Empty ended Run page has a continuation",
+            ));
         }
-        let reason: Option<String> = row.get(10)?;
-        let msg = if state == State::Blocked {
-            clean(
-                reason
-                    .as_deref()
-                    .filter(|text| !text.trim().is_empty())
-                    .unwrap_or("Recovery required; saved reason unavailable"),
-                crate::program_status::MSG_BYTES,
-            )
-        } else {
-            phase.label().into()
-        };
-        children.push((
-            id.clone(),
-            stored,
+        ended.extend(page.page.items);
+        if !more || ended.len() == MAX_LIST_LIMIT as usize {
+            break more;
+        }
+        cursor = page.page.next_cursor;
+    };
+    Ok(project(
+        counts,
+        active.page.items,
+        ended,
+        capped,
+        selected,
+        &seen,
+    ))
+}
+
+fn project(
+    activity: ActivityCounts,
+    active: Vec<WorkItem>,
+    ended: Vec<WorkItem>,
+    ended_capped: bool,
+    selected: Option<String>,
+    seen: &BTreeSet<(String, String)>,
+) -> Snapshot {
+    let mut counts = Counts {
+        working: activity.running.count.into(),
+        working_capped: activity.running.capped,
+        awaiting_you: activity.awaiting_you.count.into(),
+        awaiting_you_capped: activity.awaiting_you.capped,
+        done_capped: ended_capped,
+        ..Default::default()
+    };
+    let mut children = BTreeMap::<String, Record>::new();
+    let mut add = |item: &WorkItem, state, auth, msg: &str| {
+        if children
+            .get(&item.thread_id)
+            .is_some_and(|record| record.state >= state)
+        {
+            return;
+        }
+        children.insert(
+            item.thread_id.clone(),
             Record {
-                id: Some(thread_id(&id)),
+                id: Some(thread_id(&item.thread_id)),
                 state,
                 auth,
-                title: String::new(),
-                msg,
+                title: clean(&item.thread_title, crate::program_status::TITLE_BYTES),
+                msg: clean(msg, crate::program_status::MSG_BYTES),
             },
-        ));
-        children.sort_by(|a, b| b.2.state.cmp(&a.2.state).then(a.0.cmp(&b.0)));
-        children.truncate(CHILD_LIMIT);
-    }
-    for (id, stored, record) in &mut children {
-        record.title = clean(
-            &crate::control::db::thread_display_title(db, id, stored)
-                .map_err(crate::storage::StorageError::from)?,
-            crate::program_status::TITLE_BYTES,
         );
+    };
+    for item in &active {
+        if item.kind == "turn" && item.state == "recovery_wait" {
+            let auth = matches!(
+                item.reason.as_deref(),
+                Some("config_invalid" | "config_missing" | "config_missing_credentials")
+            );
+            add(
+                item,
+                State::Blocked,
+                auth,
+                item.message.as_deref().unwrap_or("Recovery required"),
+            );
+        } else if item.kind == "run" {
+            add(item, State::Working, false, &item.state);
+        }
     }
-    Ok(Projected {
-        snapshot: Snapshot {
-            selected,
-            viewed,
-            counts,
-            children: children.into_iter().map(|(_, _, record)| record).collect(),
-        },
-        seen: keep_seen,
-    })
+    let mut viewed = None;
+    for item in &ended {
+        if item.state == "failed" {
+            add(item, State::Error, false, "Failed");
+        } else if item.state == "completed" {
+            let identity = (item.thread_id.clone(), item.id.clone());
+            if seen.contains(&identity) {
+                continue;
+            }
+            if selected.as_ref() == Some(&item.thread_id) && viewed.is_none() {
+                viewed = Some(identity);
+                continue;
+            }
+            counts.done += 1;
+            add(item, State::Done, false, "Completed");
+        }
+    }
+    let mut children = children.into_values().collect::<Vec<_>>();
+    for record in &children {
+        match record.state {
+            State::Blocked => {
+                counts.blocked += 1;
+                counts.auth += u64::from(record.auth);
+            }
+            State::Error => counts.error += 1,
+            _ => {}
+        }
+    }
+    children.sort_by_key(|record| std::cmp::Reverse(record.state));
+    children.truncate(CHILD_LIMIT);
+    Snapshot {
+        selected,
+        viewed,
+        counts,
+        children,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::DbWorker;
-    fn insert(
-        db: &rusqlite::Connection,
-        id: &str,
-        run: Option<&str>,
-        turn: &str,
-        ended: Option<&str>,
-        reason: Option<String>,
-    ) -> Result<(), crate::storage::StorageError> {
-        db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?1,'/fixture','/fixture/AGENTS.md','fixture','fixture','2026-01-01')",[id])?;
-        if let Some(state) = run {
-            db.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,?3,'2026-01-01',?4)",rusqlite::params![format!("r-{id}"),id,state,ended])?;
-            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES(?1,?2,?3,?4,'2026-01-01',?5)",rusqlite::params![format!("u-{id}"),id,format!("r-{id}"),turn,reason])?;
-        }
-        Ok(())
-    }
-    #[tokio::test]
-    async fn failed_projection_retries_without_changed_and_preserves_seen() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("db");
-        let mut session = Session::new();
-        session.seen.insert("seen".into(), "r-seen".into());
-        let mut dirty = false;
-        let failed = read(path.clone(), None, session.started, session.seen.clone()).await;
-        assert!(failed.is_err());
-        assert!(!path.exists(), "read-only open must not create a database");
-        assert!(session.accept(failed, &mut dirty).is_none());
-        assert!(
-            dirty,
-            "the next existing tick must be able to retry without Changed"
-        );
-        assert_eq!(session.seen.get("seen").map(String::as_str), Some("r-seen"));
 
-        let worker = DbWorker::open(&path).await.unwrap();
-        worker
-            .call(|db| insert(db, "idle", None, "completed", None, None))
-            .await
-            .unwrap();
-        // Simulate admission at the next coalescing opportunity, without Changed.
-        dirty = false;
-        let retried = read(path, None, session.started, session.seen.clone()).await;
-        let snapshot = session.accept(retried, &mut dirty).unwrap();
-        assert!(!dirty);
-        assert_eq!(snapshot.counts.idle, 1);
-        assert!(session.seen.is_empty());
-        worker.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn ten_thousand_threads_read_while_writer_is_occupied() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("db");
-        let worker = DbWorker::open(&path).await.unwrap();
-        worker
-            .call(|db| {
-                let tx = db.transaction()?;
-                for i in 0..9992 {
-                    insert(
-                        &tx,
-                        &format!("historical-{i:05}"),
-                        Some("completed"),
-                        "completed",
-                        Some("2026-01-01T00:00:00Z"),
-                        None,
-                    )?;
-                }
-                insert(&tx, "live", Some("live"), "running", None, None)?;
-                insert(&tx, "stopping", Some("stopping"), "running", None, None)?;
-                insert(&tx, "recovery", Some("live"), "recovery_wait", None, None)?;
-                insert(
-                    &tx,
-                    "failed",
-                    Some("failed"),
-                    "failed",
-                    Some("2026-01-01T00:00:00Z"),
-                    None,
-                )?;
-                insert(
-                    &tx,
-                    "fresh",
-                    Some("completed"),
-                    "completed",
-                    Some("2026-01-03T00:00:00Z"),
-                    None,
-                )?;
-                insert(
-                    &tx,
-                    "seen",
-                    Some("completed"),
-                    "completed",
-                    Some("2026-01-03T00:00:00Z"),
-                    None,
-                )?;
-                insert(&tx, "stopped", Some("stopped"), "stopped", None, None)?;
-                insert(&tx, "idle", None, "completed", None, None)?;
-                tx.execute(
-                    "INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) SELECT 'conversation',thread_id, 'a-'||id,id,0,0,'fixture','fixture',0,CASE WHEN state='running' THEN 'inflight' WHEN state='recovery_wait' THEN 'failed' ELSE 'completed' END,'{}','2026-01-01' FROM turn",
-                    [],
-                )?;
-                tx.commit()?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let start = chrono::DateTime::parse_from_rfc3339("2026-01-02T00:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        let seen = BTreeMap::from([("seen".into(), "r-seen".into())]);
-        let (entered, ready) = tokio::sync::oneshot::channel();
-        let (release, gate) = std::sync::mpsc::channel();
-        let writing = worker
-            .try_call(move |db| {
-                let tx = db.transaction()?;
-                tx.execute("UPDATE run SET state='failed' WHERE id='r-live'", [])?;
-                entered.send(()).unwrap();
-                // Synthetic only: hold a writer transaction until all reads finish.
-                crate::test_watchdog::blocking_recv("release writer hold", &gate).unwrap();
-                tx.commit()?;
-                Ok(())
-            })
-            .unwrap();
-        ready.await.unwrap();
-        let reads = crate::test_watchdog::watchdog(
-            "src/frontend/program_status.rs: ten_thousand_threads_read_while_writer_is_occupied",
-            async {
-                for _ in 0..10 {
-                    let projected = read(path.clone(), None, start, seen.clone()).await.unwrap();
-                    let counts = &projected.snapshot.counts;
-                    assert_eq!(
-                        (
-                            counts.working,
-                            counts.blocked,
-                            counts.error,
-                            counts.done,
-                            counts.idle
-                        ),
-                        (2, 1, 1, 1, 9995)
-                    );
-                    assert_eq!(projected.snapshot.children.len(), 5);
-                    assert_eq!(projected.seen, seen);
-                }
-            },
+    #[test]
+    fn completed_runs_are_acknowledged_by_exact_identity_without_sending_seen() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(
+            "INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)
+            VALUES('t','Title','/','','p','m','2026-11-24T00:00:00Z');
+            INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES
+              ('old','t','completed','2026-11-24T00:00:00Z','2026-11-24T00:00:01Z'),
+              ('new','t','completed','2026-11-24T00:00:01Z','2026-11-24T00:00:02Z');",
         )
-        .await;
-        release.send(()).unwrap();
-        writing.receive().await.unwrap();
-        reads.expect("read-only projection must not queue behind writer");
-        let after = read(path.clone(), None, start, seen).await.unwrap();
-        assert_eq!(after.snapshot.counts.working, 1);
-        assert_eq!(after.snapshot.counts.error, 2);
-        worker.shutdown().await.unwrap();
-        // No retained read connection/transaction should obstruct shutdown/checkpoint.
-        let db = rusqlite::Connection::open(&path).unwrap();
-        let busy: i64 = db
-            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(busy, 0);
+        .unwrap();
+        let page = crate::status::snapshot(
+            &db,
+            &StatusArgs {
+                ended_after: Some("2026-11-24T00:00:00Z".into()),
+                ..Default::default()
+            },
+            "fixture",
+        )
+        .unwrap();
+        let counts = page.activity_counts.unwrap();
+        let items = page.page.items;
+        let mut seen = BTreeSet::from([("t".to_owned(), "old".to_owned())]);
+        let selected = project(
+            counts.clone(),
+            Vec::new(),
+            items.clone(),
+            true,
+            Some("t".into()),
+            &seen,
+        );
+        let new = ("t".to_owned(), "new".to_owned());
+        assert_eq!(selected.viewed.as_ref(), Some(&new));
+        let away = project(counts.clone(), Vec::new(), items.clone(), true, None, &seen);
+        assert_eq!(away.counts.done, 1);
+        assert!(away.counts.done_capped);
+        seen.insert(new);
+        let after = project(counts, Vec::new(), items, false, None, &seen);
+        assert_eq!(after.counts.done, 0);
+        assert!(!after.counts.done_capped);
     }
 
-    #[tokio::test]
-    async fn all_threads_count_but_only32_export_and_seen_completion_is_ephemeral() {
-        let root = tempfile::tempdir().unwrap();
-        let worker = DbWorker::open(root.path().join("db")).await.unwrap();
-        worker.call(|db| {
-            for i in 0..40 {insert(db,&format!("working-{i}"),Some("live"),"running",None,None)?;}
-            insert(db,"auth",Some("live"),"recovery_wait",None,Some(serde_json::json!({"code":"config_invalid","message":"set TEST_KEY\u{202e}"}).to_string()))?;
-            insert(db,"other",Some("live"),"recovery_wait",None,Some(serde_json::json!({"code":"io_failed","message":"inspect saved result"}).to_string()))?;
-            insert(db,"failed",Some("failed"),"failed",Some("2026-01-03T00:00:00Z"),None)?;
-            insert(db,"fresh",Some("completed"),"completed",Some("2026-01-03T00:00:00Z"),None)?;
-            insert(db,"historical",Some("completed"),"completed",Some("2026-01-01T00:00:00Z"),None)?;
-            insert(db,"stopped",Some("stopped"),"stopped",None,None)?;
-            insert(db,"idle",None,"completed",None,None)?;
-            Ok(())
-        }).await.unwrap();
-        let start = chrono::DateTime::parse_from_rfc3339("2026-01-02T00:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        worker
-            .call(move |db| {
-                let first = project(db, None, start, BTreeMap::new())?;
-                assert_eq!(first.snapshot.counts.working, 40);
-                assert_eq!(first.snapshot.counts.blocked, 2);
-                assert_eq!(first.snapshot.counts.auth, 1);
-                assert_eq!(first.snapshot.counts.error, 1);
-                assert_eq!(first.snapshot.counts.done, 1);
-                assert_eq!(first.snapshot.children.len(), 32);
-                assert!(
-                    first
-                        .snapshot
-                        .children
-                        .iter()
-                        .any(|record| record.auth && record.state == State::Blocked)
-                );
-                assert!(
-                    first
-                        .snapshot
-                        .children
-                        .iter()
-                        .all(|record| !record.msg.contains('\u{202e}'))
-                );
-                let selected = project(db, Some("fresh".into()), start, BTreeMap::new())?;
-                assert_eq!(selected.snapshot.counts.done, 0);
-                assert_eq!(
-                    selected.snapshot.viewed,
-                    Some(("fresh".into(), "r-fresh".into()))
-                );
-                let seen = BTreeMap::from([selected.snapshot.viewed.unwrap()]);
-                assert_eq!(
-                    project(db, None, start, seen.clone())?.snapshot.counts.done,
-                    0
-                );
-                db.execute(
-                    "UPDATE thread SET deleted_at='2026-01-04' WHERE id='fresh'",
-                    [],
-                )?;
-                assert!(project(db, None, start, seen)?.seen.is_empty());
-                for id in ["auth", "other", "failed", "stopped", "idle", "working-0"] {
-                    let same = crate::frontend::activity::from_thread_activity(
-                        crate::control::db::thread_activity::read(db, id)?,
-                        crate::config::UiLanguage::Ja,
-                    )
-                    .snapshot
-                    .phase;
-                    let counts = project(db, None, start, BTreeMap::new())?.snapshot.counts;
-                    assert!(matches!(
-                        same,
-                        crate::activity::ActivityPhase::Recovery
-                            | crate::activity::ActivityPhase::Failed
-                            | crate::activity::ActivityPhase::Stopped
-                            | crate::activity::ActivityPhase::Idle
-                            | crate::activity::ActivityPhase::Running
-                    ));
-                    assert_eq!(counts.working, 40);
-                    let mapped = project(db, None, start, BTreeMap::new())?
-                        .snapshot
-                        .children
-                        .into_iter()
-                        .find(|record| record.id.as_deref() == Some(thread_id(id).as_str()))
-                        .map_or(State::Idle, |record| record.state);
-                    assert_eq!(mapped, map_phase(same, false));
-                }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        worker.shutdown().await.unwrap();
+    #[test]
+    fn failed_observation_retries_at_existing_admission() {
+        let mut dirty = false;
+        let result = Err(ApiError::new(ErrorCode::IoFailed, "fixture"));
+        assert!(Session::accept(result, &mut dirty).is_none());
+        assert!(dirty);
     }
 }

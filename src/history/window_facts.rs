@@ -1,4 +1,5 @@
 //! Owner read of exact source correlation facts for selected-window observation.
+pub(crate) mod compactions;
 use crate::protocol::{HistoryWindowRecovery, HistoryWindowTools, HistoryWindowUsage};
 use crate::storage::StorageError;
 use rusqlite::Connection;

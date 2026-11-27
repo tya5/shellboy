@@ -215,20 +215,7 @@ fn profile_is_unowned(data: &std::path::Path) -> Result<bool, ApiError> {
             ));
         }
     }
-    let path = data.join("owner.lock");
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-    let file = match options.open(path) {
+    let file = match crate::app::open_owner_lock(data, false) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
         Err(_) => {
@@ -237,14 +224,6 @@ fn profile_is_unowned(data: &std::path::Path) -> Result<bool, ApiError> {
             ));
         }
     };
-    if !file
-        .metadata()
-        .is_ok_and(|m| m.is_file() && !m.is_symlink())
-    {
-        return Err(attach_error(
-            "The selected owner lock is not a regular file",
-        ));
-    }
     match fs2::FileExt::try_lock_exclusive(&file) {
         Ok(()) => {
             fs2::FileExt::unlock(&file)

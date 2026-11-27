@@ -69,7 +69,7 @@ fn operation_result_schemas(
     opaque!("thread.create");
     result!("thread.import", ThreadImportResult);
     opaque!("thread.fork");
-    opaque!("thread.delete");
+    result!("thread.delete", ThreadDeleteResult);
     opaque!("thread.delete_preview");
     opaque!("thread.delete_set_preview");
     result!("thread.delete_set", Accepted);
@@ -1246,7 +1246,8 @@ states!(MessageCancelOutcome {
 });
 record!(MessageCancelItem { message_id: String, outcome: MessageCancelOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] archive_draft_id: Option<String>
+    #[serde(default, skip_serializing_if = "Option::is_none")] archive_draft_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] archive_order: Option<u32>
 });
 record!(MessageCancelResult { items: Vec<MessageCancelItem> });
 states!(IdKind {
@@ -1387,7 +1388,9 @@ impl ThreadListOrder {
     }
 }
 /// The current state reported by a Thread list row, not its activity phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadListState {
     Idle,
@@ -1400,6 +1403,9 @@ pub enum ThreadListState {
     Completed,
     Stopped,
     Failed,
+    AwaitingYou,
+    ActiveWork,
+    OtherWork,
 }
 impl ThreadListState {
     pub(crate) const ALL: &[Self] = &[
@@ -1413,6 +1419,9 @@ impl ThreadListState {
         Self::Completed,
         Self::Stopped,
         Self::Failed,
+        Self::AwaitingYou,
+        Self::ActiveWork,
+        Self::OtherWork,
     ];
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -1426,13 +1435,20 @@ impl ThreadListState {
             Self::Completed => "completed",
             Self::Stopped => "stopped",
             Self::Failed => "failed",
+            Self::AwaitingYou => "awaiting_you",
+            Self::ActiveWork => "active_work",
+            Self::OtherWork => "other_work",
         }
     }
 }
-args!(ThreadListArgs { #[serde(default, skip_serializing_if = "Option::is_none")] state: Option<ThreadListState>, #[serde(default, skip_serializing_if = "Option::is_none")] thread_ids: Option<Vec<String>>, #[serde(default, skip_serializing_if = "ThreadListOrder::is_updated")] order: ThreadListOrder, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
+args!(ThreadListArgs { #[serde(default, skip_serializing_if = "Option::is_none")] root: Option<String>, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_descendant_count: bool, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity: bool, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity_evidence: bool, #[serde(default, skip_serializing_if = "Option::is_none")] state: Option<ThreadListState>, #[serde(default, skip_serializing_if = "Option::is_none")] thread_ids: Option<Vec<String>>, #[serde(default, skip_serializing_if = "ThreadListOrder::is_updated")] order: ThreadListOrder, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
 impl Default for ThreadListArgs {
     fn default() -> Self {
         Self {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: ThreadListOrder::Updated,
@@ -1479,6 +1495,7 @@ record!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec
 });
 record!(HistoryWindowObservation {
     read_sequence: u64,
+    observed_at: String,
     pending: HistoryWindowPending,
     committed_attempts: Vec<HistoryWindowCommittedAttempt>,
     activity: HistoryWindowActivity,
@@ -1492,6 +1509,12 @@ record!(HistoryWindowObservation {
     received_root_revision: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     branches: Vec<HistoryWindowBranch>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    compactions: Vec<HistoryWindowCompaction>,
+});
+record!(HistoryWindowCompaction {
+    node_id: String,
+    facts: crate::presentation::compaction_marker::MarkerFacts,
 });
 record!(HistoryWindowBranch {
     anchor_node_id: String,
@@ -1544,12 +1567,15 @@ record!(HistoryWindowToolCall {
     #[serde(skip_serializing_if = "Option::is_none")] shell_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] shell_exit_code: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")] execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] shell_owner: Option<ShellReadOwner>,
     #[serde(skip_serializing_if = "Option::is_none")] call_node_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] result_node_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] prior_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] elapsed_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")] started_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")] output_revision: Option<(u64, bool)>
+    #[serde(skip_serializing_if = "Option::is_none")] output_revision: Option<(u64, bool)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] retention_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_false")] has_output: bool
 });
 record!(HistoryWindowRecovery {
     node_id: String, failure_count: u64, latest_attempt_id: String,
@@ -1788,7 +1814,7 @@ impl From<IndexArgs> for IndexStatusArgs {
     }
 }
 args!(StorageArgs { #[serde(default)] category: Option<StorageCategory> });
-args!(StatusArgs { #[serde(default)] memory: bool, #[serde(default)] thread_id: Option<String>, #[serde(default)] run_id: Option<String>, #[serde(default)] since: Option<String>, #[serde(default)] state: Vec<String>, #[serde(default)] all: bool, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
+args!(StatusArgs { #[serde(default)] memory: bool, #[serde(default)] thread_id: Option<String>, #[serde(default)] run_id: Option<String>, #[serde(default)] since: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] ended_after: Option<String>, #[serde(default)] state: Vec<String>, #[serde(default)] all: bool, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String> });
 impl Default for StatusArgs {
     fn default() -> Self {
         Self {
@@ -1796,6 +1822,7 @@ impl Default for StatusArgs {
             thread_id: None,
             run_id: None,
             since: None,
+            ended_after: None,
             state: Vec::new(),
             all: false,
             limit: DEFAULT_LIST_LIMIT,

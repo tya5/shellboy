@@ -485,6 +485,10 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
         .request(request(
             &control.store.operation_epoch.current(),
             Command::ThreadList(ThreadListArgs {
+                root: None,
+                include_descendant_count: false,
+                include_activity: false,
+                include_activity_evidence: false,
                 thread_ids: None,
                 state: None,
                 order: Default::default(),
@@ -662,6 +666,10 @@ async fn full_receipt_budget_keeps_replay_status_gc_epoch_roll_and_owner_restart
             .request(request(
                 &control.store.operation_epoch.current(),
                 Command::ThreadList(ThreadListArgs {
+                    root: None,
+                    include_descendant_count: false,
+                    include_activity: false,
+                    include_activity_evidence: false,
                     thread_ids: None,
                     state: None,
                     order: Default::default(),

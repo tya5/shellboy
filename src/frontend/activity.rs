@@ -314,7 +314,7 @@ pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiErro
         instance: &control.store.instance_id,
     };
     read_cancellable(
-        control,
+        &control.store.config.ui,
         &owner,
         thread,
         tokio_util::sync::CancellationToken::new(),
@@ -324,19 +324,19 @@ pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiErro
 
 /// Read the selected header's activity, then project it.
 pub(super) async fn read_cancellable(
-    control: &Control,
+    ui: &crate::config::Ui,
     owner: &super::native_history::Owner<'_>,
     thread: &str,
     stop: tokio_util::sync::CancellationToken,
 ) -> Result<Projection, ApiError> {
     let header = super::native_header(owner.data_dir, owner.instance, thread).await?;
-    project_native(control, owner, thread, header.activity().cloned(), stop).await
+    project_native(ui, owner, thread, header.activity().cloned(), stop).await
 }
 
 /// Project an owner activity already read with its header, joining the Run's
 /// running shells (`shell.list`) and the index pause (`index.status`).
 pub(super) async fn project_native(
-    control: &Control,
+    ui: &crate::config::Ui,
     owner: &super::native_history::Owner<'_>,
     thread: &str,
     activity: Option<ThreadActivity>,
@@ -350,8 +350,8 @@ pub(super) async fn project_native(
                 thread,
                 &activity.run.run_id,
                 activity.run.owned_shells,
-                control.store.config.ui.live_work_rows,
-                control.store.config.ui.language,
+                ui.live_work_rows,
+                ui.language,
             )
             .await?,
         ),
@@ -364,7 +364,7 @@ pub(super) async fn project_native(
             "Activity observation closed",
         ));
     }
-    let language = control.store.config.ui.language;
+    let language = ui.language;
     super::presentation_work(move || {
         let mut projection = prepare_in(activity, live_work, language);
         projection.snapshot.index_pause = index.pause_kind;

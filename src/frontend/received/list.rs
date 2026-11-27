@@ -4,20 +4,18 @@ use super::*;
 use crate::protocol::{Command, HistoryReceivedArgs, HistoryReceivedPage, HistoryReceivedRow};
 
 pub(super) async fn read(
-    data_dir: &std::path::Path,
+    owner: &native_history::Owner<'_>,
     language: UiLanguage,
     thread: String,
     cursor: Option<String>,
 ) -> Result<(String, Vec<crate::presentation::PresentationField>), ApiError> {
     let continued = cursor.is_some();
-    let page: HistoryReceivedPage = super::super::inspection_history::native_read(
-        data_dir,
-        Command::HistoryReceived(HistoryReceivedArgs {
+    let page: HistoryReceivedPage = owner
+        .call(Command::HistoryReceived(HistoryReceivedArgs {
             thread_id: thread.clone(),
             cursor,
-        }),
-    )
-    .await?;
+        }))
+        .await?;
     presentation_work(move || {
         let title = title(
             language,

@@ -250,9 +250,17 @@ with `draft.submit` retains its existing source-node and revision checks in
 the same transaction as the fork and reports a typed not-applied refusal
 when either witness does not match.
 
-`draft.save` and `draft.submit` accept separate optional `expected_source_message`
-and `expected_thread_revision` fields. The owner checks them in the same
-transaction as the draft/view save or edited submission.
-Use these witnesses when saving a draft reconstructed from a selected message.
-See the [preconditions table](../protocol.md#preconditions-for-observed-state)
-for the common refusal shape, also used by `config.set` with `expected_hash`.
+
+### Bounded activity counts and ended Run pagination
+
+Unscoped `status` responses include `activity_counts.running` and
+`activity_counts.awaiting_you`. Each contains `count` and `capped`, independent
+of the result page size. Counts examine at most the list cap plus one matching
+live/stopping Run or pending human reply duty. Scoped status does not reveal
+these owner-wide counts.
+
+`status` with `ended_after` selects saved Runs whose end timestamp is strictly
+after the RFC3339 cutoff. It uses the same bounded page contract and continuation
+with the cutoff included in the cursor scope. The TUI uses that result to
+subtract its own session-local seen Run identities; seen identities are neither
+sent to the owner nor persisted.

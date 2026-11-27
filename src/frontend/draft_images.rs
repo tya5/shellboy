@@ -1,5 +1,5 @@
 //! Local image identities; managed pins remain with the owner.
-use super::{ApiError, Command, Control, UiAttachment};
+use super::{ApiError, Command, UiAttachment, native_history};
 use crate::protocol::{
     DRAFT_IMAGE_CHUNK_BYTES, DraftImageAction, DraftImageArgs, DraftImageResult, ErrorCode,
 };
@@ -50,17 +50,17 @@ impl DraftImages {
             .remove(&ticket)
             .map(|(_, thread)| thread.is_none())
     }
+    #[cfg(test)]
     pub(super) fn threads(&self) -> impl Iterator<Item = &String> {
         self.owners.values()
     }
-    pub(super) fn forget_threads(&mut self, deleted: &HashSet<String>, drafts: &[String]) {
-        let mut drafts: HashSet<_> = drafts.iter().cloned().collect();
-        drafts.extend(
-            self.owners
-                .iter()
-                .filter(|(_, thread)| deleted.contains(*thread))
-                .map(|(draft, _)| draft.clone()),
-        );
+    pub(super) fn forget_threads(&mut self, deleted: &HashSet<String>) {
+        let mut drafts: HashSet<_> = self
+            .owners
+            .iter()
+            .filter(|(_, thread)| deleted.contains(*thread))
+            .map(|(draft, _)| draft.clone())
+            .collect();
         drafts.extend(
             self.pending
                 .values()
@@ -157,16 +157,16 @@ impl DraftImages {
 }
 
 async fn call(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     draft: &str,
     action: DraftImageAction,
 ) -> Result<DraftImageResult, ApiError> {
     let op = matches!(action, DraftImageAction::Commit { .. })
-        .then(|| control.store.operation_epoch.mint());
+        .then(|| format!("{}:{}", owner.instance, uuid::Uuid::new_v4()));
     super::compose_call(
-        control,
+        owner,
         Command::DraftImage(DraftImageArgs {
-            instance_id: control.store.instance_id.clone(),
+            instance_id: owner.instance.to_owned(),
             draft_id: draft.to_owned(),
             action,
         }),
@@ -176,14 +176,14 @@ async fn call(
 }
 
 pub(super) async fn upload(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     draft: &str,
     bytes: Vec<u8>,
 ) -> Result<UiAttachment, ApiError> {
     let invalid_reply =
         || ApiError::new(ErrorCode::ProtocolMismatch, "Invalid draft image response");
     let DraftImageResult::Begun { upload_id } = call(
-        control,
+        owner,
         draft,
         DraftImageAction::Begin {
             encoded_bytes: bytes.len() as u64,
@@ -196,7 +196,7 @@ pub(super) async fn upload(
     let mut offset = 0;
     for chunk in bytes.chunks(DRAFT_IMAGE_CHUNK_BYTES) {
         let reply = call(
-            control,
+            owner,
             draft,
             DraftImageAction::Append {
                 upload_id: upload_id.clone(),
@@ -215,7 +215,7 @@ pub(super) async fn upload(
         }
     }
     let DraftImageResult::Committed { attachment } =
-        call(control, draft, DraftImageAction::Commit { upload_id }).await?
+        call(owner, draft, DraftImageAction::Commit { upload_id }).await?
     else {
         return Err(invalid_reply());
     };
@@ -229,11 +229,11 @@ pub(super) async fn upload(
 }
 
 pub(super) async fn release(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     draft: &str,
     attachment_id: String,
 ) -> Result<(), ApiError> {
-    call(control, draft, DraftImageAction::Release { attachment_id })
+    call(owner, draft, DraftImageAction::Release { attachment_id })
         .await
         .map(|_| ())
 }
@@ -248,7 +248,7 @@ mod tests {
         let newly_sent = images.begin_image("draft-new", None);
         images.associate("draft-new", "deleted");
         let unrelated = images.begin_image("draft-other", Some("kept"));
-        images.forget_threads(&HashSet::from(["deleted".into()]), &[]);
+        images.forget_threads(&HashSet::from(["deleted".into()]));
         assert!(images.accept_image(old).is_none());
         assert!(images.accept_image(newly_sent).is_none());
         assert_eq!(images.accept_image(unrelated), Some(false));

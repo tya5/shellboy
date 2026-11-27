@@ -3,20 +3,6 @@ use super::*;
 use crate::config::UiLanguage;
 use futures_util::FutureExt;
 
-fn cleanup_warning(error: &ApiError, language: UiLanguage) -> String {
-    if !error.is_storage_failure() {
-        return error.to_string();
-    }
-    match language {
-        UiLanguage::En => format!(
-            "A primary database storage failure has stopped new runs; resources are being reclaimed: {error}"
-        ),
-        UiLanguage::Ja => {
-            format!("正本DBの保存障害により新規実行を停止し資源を回収しています: {error}")
-        }
-    }
-}
-
 /// Keep request ownership intact if the operation future panics. The existing
 /// worker still delivers a terminal reply and releases its admission permit;
 /// an uncertain mutation must be checked again, never automatically replayed.
@@ -39,186 +25,35 @@ pub(super) async fn guard<T>(
         })
 }
 
-pub(super) const MAX_KNOWN_THREADS: usize = 4_096;
-/// Selection generations are stale-response fences, not owned view IDs. They
-/// deliberately do not contribute to the finite deletion observation set.
-pub(super) fn candidates(
-    mut known: Vec<String>,
-    selection: &selection::Selection,
-    owned: impl Iterator<Item = String>,
-) -> Vec<String> {
-    known.extend(selection.active_thread.iter().cloned());
-    known.extend(owned);
-    known.sort();
-    known.dedup();
-    known
-}
 pub(super) enum Outcome {
     Preview(Value, chrono::DateTime<chrono::Utc>),
-    Applied,
+    Applied(Vec<String>),
 }
 pub(super) async fn run(
-    control: &Arc<Control>,
+    owner: native_history::Owner<'_>,
     args: ThreadDeleteArgs,
     execute: bool,
 ) -> Result<Outcome, ApiError> {
-    let command = if execute {
-        Command::ThreadDelete(args)
-    } else {
-        Command::ThreadDeletePreview(args)
-    };
-    let value = request(control, command).await?;
     if !execute {
+        let value = owner.call(Command::ThreadDeletePreview(args)).await?;
         return Ok(Outcome::Preview(value, chrono::Utc::now()));
     }
-    if value.get("accepted").and_then(Value::as_bool) != Some(true) {
+    let target = args.thread_id.clone();
+    let result: crate::protocol::ThreadDeleteResult =
+        owner.call(Command::ThreadDelete(args)).await?;
+    if !result.accepted || !result.deleted_thread_ids.contains(&target) {
         return Err(ApiError::new(
             ErrorCode::IoFailed,
-            "Thread deletion was not accepted",
-        ));
+            "Thread deletion receipt did not identify its committed targets",
+        )
+        .details(serde_json::json!({"deletion_outcome_uncertain": true})));
     }
-    Ok(Outcome::Applied)
-}
-
-/// Observe only frontend-known IDs. Never traverse an unbounded descendant tree
-/// or assume that preview results describe the later mutation's actual outcome.
-pub(super) async fn cleanup(
-    control: &Control,
-    candidates: Vec<String>,
-) -> Result<(Vec<String>, Vec<String>), ApiError> {
-    let candidates: HashSet<_> = candidates.into_iter().collect();
-    if candidates.len() > MAX_KNOWN_THREADS {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            "Too many cached Thread IDs for deletion cleanup",
-        ));
-    }
-    control
-        .store
-        .database
-        .call(move |db| {
-            let tx = db.transaction()?;
-            let mut deleted = Vec::new();
-            let mut drafts = Vec::new();
-            for thread in candidates {
-                let live: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
-                    [&thread],
-                    |row| row.get(0),
-                )?;
-                if live {
-                    continue;
-                }
-                let mut statement = tx.prepare(
-                    "SELECT id FROM draft WHERE thread_id=?1 AND state='editing' LIMIT 4096",
-                )?;
-                drafts.extend(
-                    statement
-                        .query_map([&thread], |row| row.get::<_, String>(0))?
-                        .collect::<rusqlite::Result<Vec<_>>>()?,
-                );
-                drop(statement);
-                tx.execute("DELETE FROM draft WHERE thread_id=?1", [&thread])?;
-                tx.execute("DELETE FROM view_state WHERE thread_id=?1", [&thread])?;
-                deleted.push(thread);
-            }
-            deleted.sort();
-            drafts.sort();
-            drafts.dedup();
-            tx.commit()?;
-            Ok((deleted, drafts))
-        })
-        .await
-        .map_err(storage_error)
-}
-
-/// Core success is irreversible even when local saved-view cleanup fails.
-/// Always return the confirmed root; descendants require a successful DB observation.
-pub(super) async fn finish_cleanup(
-    control: &Control,
-    root: &str,
-    candidates: Vec<String>,
-) -> (Vec<String>, Vec<String>, Option<String>) {
-    let observed_candidates = candidates.clone();
-    let cleanup_result = cleanup(control, candidates).await;
-    match checked_storage(control, cleanup_result).await {
-        Ok((mut deleted, drafts)) => {
-            if !deleted.iter().any(|id| id == root) {
-                deleted.push(root.to_owned());
-            }
-            (deleted, drafts, None)
-        }
-        Err(error) => {
-            // A failed write transaction can still permit read-only tombstone
-            // observation, so an active deleted child also leaves its view.
-            let observed = if observed_candidates.len() <= MAX_KNOWN_THREADS {
-                control.store.database.call(move |db| {
-                    let mut deleted = Vec::new();
-                    for id in observed_candidates {
-                        let dead: bool = db.query_row(
-                            "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NOT NULL)",
-                            [&id], |row| row.get(0))?;
-                        if dead { deleted.push(id); }
-                    }
-                    Ok(deleted)
-                }).await.ok()
-            } else {
-                None
-            };
-            let mut deleted = observed.unwrap_or_default();
-            deleted.push(root.to_owned());
-            deleted.sort();
-            deleted.dedup();
-            let warning = cleanup_warning(&error, control.store.config.ui.language);
-            (deleted, vec![], Some(warning))
-        }
-    }
+    Ok(Outcome::Applied(result.deleted_thread_ids))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cleanup_warning_localizes_only_its_wrapper_and_preserves_source_error() {
-        for code in [
-            ErrorCode::SaveFailed,
-            ErrorCode::IoFailed,
-            ErrorCode::InvalidArgument,
-        ] {
-            for hint in [None, Some("source hint 🦀 e\u{301}".to_owned())] {
-                let mut error = ApiError::new(code, "正本DB source reason 🦀 e\u{301}（verbatim）");
-                error.hint = hint;
-                error.details = Some(
-                    serde_json::json!({"raw":"保存済み source", "deletion_outcome_uncertain":true}),
-                );
-                let before = serde_json::to_value(&error).unwrap();
-                let source = error.to_string();
-                for (language, prefix) in [
-                    (
-                        UiLanguage::En,
-                        "A primary database storage failure has stopped new runs; resources are being reclaimed: ",
-                    ),
-                    (
-                        UiLanguage::Ja,
-                        "正本DBの保存障害により新規実行を停止し資源を回収しています: ",
-                    ),
-                ] {
-                    let actual = cleanup_warning(&error, language);
-                    if code == ErrorCode::SaveFailed {
-                        assert_eq!(actual, format!("{prefix}{source}"));
-                    } else {
-                        assert_eq!(
-                            actual, source,
-                            "classification must not depend on source words"
-                        );
-                    }
-                    assert_eq!(serde_json::to_value(&error).unwrap(), before);
-                    assert_eq!(error.hint.is_none(), before.get("hint").is_none());
-                }
-            }
-        }
-    }
 
     async fn accept_preview(
         sender: &crate::ui::actions::ActionSender,
@@ -234,7 +69,6 @@ mod tests {
                     descendants: false,
                 },
                 execute: false,
-                known_thread_ids: vec!["thread".into()],
             })
             .unwrap();
         crate::test_watchdog::watchdog("deletion fixture preview", async {
@@ -283,128 +117,9 @@ mod tests {
             );
         }
         assert!(matches!(
-            guard(async { Ok(Outcome::Applied) }, UiLanguage::Ja).await,
-            Ok(Outcome::Applied)
+            guard(async { Ok(Outcome::Applied(vec![])) }, UiLanguage::Ja).await,
+            Ok(Outcome::Applied(ids)) if ids.is_empty()
         ));
-    }
-
-    #[tokio::test]
-    async fn frontend_cleanup_save_failed_warns_new_draft_and_stops_admission() {
-        let (root, owner, control, server) =
-            crate::frontend::control_tests::fixture_with_language("ja").await;
-        control.store.database.call(|db| {
-            db.execute("UPDATE turn SET state='completed' WHERE id='target-run'", [])?;
-            db.execute("UPDATE run SET state='completed' WHERE id='target-run'", [])?;
-            db.execute("INSERT INTO view_state(thread_id,follow_tail) VALUES('thread',1)", [])?;
-            db.execute_batch("CREATE TRIGGER fixture_cleanup_failure BEFORE DELETE ON view_state BEGIN SELECT RAISE(ABORT,'fixture frontend cleanup failure'); END;")?;
-            Ok(())
-        }).await.unwrap();
-        let mut ui = crate::ui::UiState::new(&control.store.config, root.path().into());
-        let (sender, receiver) = crate::ui::actions::channel(32);
-        let (updates, incoming) = std::sync::mpsc::sync_channel(128);
-        let mut bridge = tokio::spawn(crate::frontend::run(
-            control.clone(),
-            receiver,
-            updates,
-            root.path().into(),
-            owner,
-            server,
-        ));
-        for action in ui.select_thread("thread".into()) {
-            sender.try_send(action).unwrap();
-        }
-        crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_cleanup_save_failed_warns_new_draft_and_stops_admission", async {
-            loop {
-                while let Ok(update) = incoming.try_recv() {
-                    let loaded = matches!(&update, UiUpdate::History { thread_id, .. } if thread_id == "thread");
-                    ui.apply(update);
-                    if loaded { return; }
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        }).await.unwrap();
-        let old_draft = ui.view().draft.draft_id.clone();
-        accept_preview(&sender, &incoming, 143).await;
-        sender
-            .try_send(UiAction::ThreadDeletion {
-                request_id: 144,
-                args: ThreadDeleteArgs {
-                    preview_marker: None,
-                    thread_id: "thread".into(),
-                    descendants: false,
-                },
-                execute: true,
-                known_thread_ids: vec!["thread".into()],
-            })
-            .unwrap();
-        crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_cleanup_save_failed_warns_new_draft_and_stops_admission", async {
-            loop {
-                while let Ok(update) = incoming.try_recv() {
-                    let deleted = matches!(
-                        &update,
-                        UiUpdate::ThreadDeletion {
-                            request_id: 144,
-                            result: Ok(ThreadDeletionReply::DeletedWithWarning { .. }),
-                            ..
-                        }
-                    );
-                    ui.apply(update);
-                    if deleted {
-                        return;
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .unwrap();
-        assert!(ui.view().thread_id.is_none());
-        assert_ne!(ui.view().draft.draft_id, old_draft);
-        assert!(
-            ui.view()
-                .status
-                .contains("削除しました。後片付けに失敗しました")
-        );
-        assert!(ui.view().status.contains("新規実行を停止"));
-        assert!(
-            ui.view()
-                .status
-                .contains("fixture frontend cleanup failure")
-        );
-        ui.insert("retained fresh draft", false);
-        assert_eq!(ui.view().draft.text, "retained fresh draft");
-        assert!(
-            request(
-                &control,
-                Command::ThreadCreate(ThreadCreateArgs {
-                    agents: None,
-                    parent_thread_id: None,
-                    cwd: None,
-                    connection: None,
-                    model: None,
-                    effort: None,
-                })
-            )
-            .await
-            .is_err(),
-            "cleanup failure must close owner admission before delivering the warning"
-        );
-        sender.try_send(UiAction::Quit).unwrap();
-        let result = crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_cleanup_save_failed_warns_new_draft_and_stops_admission",
-            async {
-                loop {
-                    while incoming.try_recv().is_ok() {}
-                    tokio::select! {
-                        result = &mut bridge => return result,
-                        _ = tokio::time::sleep(Duration::from_millis(5)) => {},
-                    }
-                }
-            },
-        )
-        .await
-        .unwrap()
-        .expect("frontend task must not panic");
-        assert_eq!(result.unwrap_err().code, ErrorCode::SaveFailed);
     }
 
     #[tokio::test]
@@ -432,7 +147,7 @@ mod tests {
             ..Default::default()
         };
         save_draft(
-            &control,
+            &selected_owner(&control),
             "thread".into(),
             draft.clone(),
             ViewAnchor::default(),
@@ -440,7 +155,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let args = ThreadDeleteArgs {
+        let mut args = ThreadDeleteArgs {
             preview_marker: None,
             thread_id: "thread".into(),
             descendants: true,
@@ -454,10 +169,15 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(matches!(
-            run(&control, args.clone(), false).await.unwrap(),
-            Outcome::Preview(value, _) if value["deletable_now"] == true
-        ));
+        let Outcome::Preview(value, _) = run(selected_owner(&control), args.clone(), false)
+            .await
+            .unwrap()
+        else {
+            panic!("expected preview")
+        };
+        assert_eq!(value["deletable_now"], true);
+        args.preview_marker =
+            Some(serde_json::from_value(value["preview_marker"].clone()).unwrap());
         // The preview is only a snapshot: a Run starting afterwards must
         // still prevent the actual mutation.
         control
@@ -470,7 +190,9 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            run(&control, args.clone(), true).await.is_err(),
+            run(selected_owner(&control), args.clone(), true)
+                .await
+                .is_err(),
             "live Run must remain the Core rejection boundary"
         );
         control
@@ -486,30 +208,28 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(matches!(
-            run(&control, args, true).await.unwrap(),
-            Outcome::Applied
-        ));
-        let (deleted, drafts) = cleanup(
-            &control,
-            vec!["thread".into(), child.clone(), "independent".into()],
-        )
-        .await
-        .unwrap();
+        let Outcome::Applied(deleted) = run(selected_owner(&control), args, true).await.unwrap()
+        else {
+            panic!("expected commit")
+        };
         assert!(deleted.contains(&"thread".to_owned()));
         assert!(deleted.contains(&child));
-        assert!(!deleted.contains(&"independent".to_owned()));
-        assert_eq!(drafts, ["deleted-draft"]);
-        // This models an already queued/inflight autosave arriving after the
-        // deletion transaction and cleanup, with a newer revision than the old one.
+        assert_eq!(deleted.len(), 2);
+        // A newer autosave queued before deletion cannot resurrect the draft.
         let mut late = draft;
         late.revision += 1;
         late.text = "must never return".into();
         assert_eq!(
-            save_draft(&control, "thread".into(), late, ViewAnchor::default(), true)
-                .await
-                .unwrap_err()
-                .code,
+            save_draft(
+                &selected_owner(&control),
+                "thread".into(),
+                late,
+                ViewAnchor::default(),
+                true
+            )
+            .await
+            .unwrap_err()
+            .code,
             ErrorCode::TargetUnavailable
         );
         control
@@ -620,7 +340,6 @@ mod tests {
                     descendants: false,
                 },
                 execute: true,
-                known_thread_ids: vec!["thread".into(), "independent".into()],
             })
             .unwrap();
         let deleted = crate::test_watchdog::watchdog("src/frontend/thread_deletion.rs: frontend_delete_worker_returns_typed_outcome_and_cleans_up_without_popup_ownership", async {
@@ -727,122 +446,51 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn successful_core_delete_remains_success_when_saved_view_cleanup_fails() {
-        for (language, prefix, status) in [
-            (
-                "en",
-                "A primary database storage failure has stopped new runs; resources are being reclaimed: ",
-                "Deleted, but cleanup failed: ",
-            ),
-            (
-                "ja",
-                "正本DBの保存障害により新規実行を停止し資源を回収しています: ",
-                "削除しました。後片付けに失敗しました: ",
-            ),
-        ] {
-            let (root, owner, control, server) =
-                crate::frontend::control_tests::fixture_with_language(language).await;
-            control
-                .store
-                .database
-                .call(|db| {
-                    db.execute("UPDATE run SET state='completed' WHERE id='target-run'", [])?;
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            let args = ThreadDeleteArgs {
-                preview_marker: None,
-                thread_id: "thread".into(),
-                descendants: false,
-            };
-            assert!(matches!(
-                run(&control, args, true).await.unwrap(),
-                Outcome::Applied
-            ));
-            // A failure after Core commit must never become a deletion failure.
-            control.store.database.call(|db| {
-            db.execute_batch("CREATE TRIGGER fixture_cleanup_failure BEFORE DELETE ON view_state BEGIN SELECT RAISE(ABORT,'fixture cleanup failure'); END;")?;
-            db.execute("INSERT OR IGNORE INTO view_state(thread_id,follow_tail) VALUES('thread',1)", [])?;
+    async fn failed_saved_view_cleanup_rolls_back_thread_deletion_and_draft_cleanup() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let client = selected_owner(&control);
+        save_draft(
+            &client,
+            "thread".into(),
+            DraftSnapshot {
+                draft_id: "preserved-draft".into(),
+                text: "saved input".into(),
+                ..Default::default()
+            },
+            ViewAnchor::default(),
+            true,
+        )
+        .await
+        .unwrap();
+        let draft_get = || {
+            Command::DraftGet(crate::protocol::DraftGetArgs {
+                thread_id: Some("thread".into()),
+                operation_id: None,
+            })
+        };
+        let before: crate::protocol::DraftState = client.call(draft_get()).await.unwrap();
+        assert_eq!(before.draft.as_ref().unwrap().text, "saved input");
+        assert!(before.view.as_ref().unwrap().follow_tail);
+        owner.db.call(|db| {
+            db.execute_batch("UPDATE run SET state='completed' WHERE id='target-run';
+                CREATE TRIGGER fail_view_delete BEFORE DELETE ON view_state
+                WHEN OLD.thread_id='thread' BEGIN SELECT RAISE(ABORT,'fixture view cleanup failure'); END;")?;
             Ok(())
         }).await.unwrap();
-            let (deleted, _, warning) =
-                finish_cleanup(&control, "thread", vec!["thread".into()]).await;
-            assert_eq!(deleted, ["thread"]);
-            let warning = warning.unwrap();
-            assert!(warning.contains("fixture cleanup failure"));
-            assert!(warning.starts_with(prefix));
-            let mut ui = crate::ui::UiState::new(&control.store.config, root.path().into());
-            ui.apply(UiUpdate::ThreadDeletion {
-                request_id: 1,
-                args: ThreadDeleteArgs {
-                    preview_marker: None,
-                    thread_id: "thread".into(),
-                    descendants: false,
-                },
-                execute: true,
-                result: Ok(ThreadDeletionReply::DeletedWithWarning {
-                    ids: deleted,
-                    warning: warning.clone(),
-                }),
-            });
-            assert_eq!(ui.view().status, format!("{status}{warning}"));
-            assert!(ui.view().thread_id.is_none());
-            assert!(
-                request(
-                    &control,
-                    Command::ThreadCreate(ThreadCreateArgs {
-                        agents: None,
-                        parent_thread_id: None,
-                        cwd: None,
-                        connection: None,
-                        model: None,
-                        effort: None,
-                    })
-                )
-                .await
-                .is_err(),
-                "stopped owner must reject new mutations"
-            );
-            server.shutdown().await.unwrap();
-            assert_eq!(
-                control.shutdown().await.unwrap_err().code,
-                ErrorCode::SaveFailed
-            );
-            owner.shutdown().await.unwrap();
-        }
-    }
-
-    #[tokio::test]
-    async fn bounded_cleanup_observation_error_preserves_root_without_stopping_owner() {
-        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
-        let (deleted, _, warning) = finish_cleanup(
-            &control,
-            "confirmed-root",
-            (0..MAX_KNOWN_THREADS + 1)
-                .map(|n| format!("t{n}"))
-                .collect(),
-        )
-        .await;
-        assert_eq!(deleted, ["confirmed-root"]);
-        let warning = warning.unwrap();
-        assert!(warning.contains("Too many cached Thread IDs"));
-        assert!(!warning.contains("新規実行を停止"));
-        assert!(
-            request(
-                &control,
-                Command::ThreadCreate(ThreadCreateArgs {
-                    agents: None,
-                    parent_thread_id: None,
-                    cwd: None,
-                    connection: None,
-                    model: None,
-                    effort: None,
-                })
-            )
+        let args = ThreadDeleteArgs {
+            preview_marker: None,
+            thread_id: "thread".into(),
+            descendants: false,
+        };
+        let error = run(client, args, true)
             .await
-            .is_ok()
-        );
+            .err()
+            .expect("delete must fail");
+        assert_eq!(error.code, ErrorCode::SaveFailed);
+        let after: crate::protocol::DraftState =
+            selected_owner(&control).call(draft_get()).await.unwrap();
+        assert_eq!(after.draft, before.draft);
+        assert_eq!(after.view, before.view);
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
@@ -876,8 +524,8 @@ mod tests {
             })
             .await
             .unwrap();
-        run(
-            &control,
+        let outcome = run(
+            selected_owner(&control),
             ThreadDeleteArgs {
                 preview_marker: None,
                 thread_id: "thread".into(),
@@ -887,10 +535,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let (deleted, _, warning) =
-            finish_cleanup(&control, "thread", vec!["thread".into(), child.clone()]).await;
-        assert_eq!(deleted, ["thread"]);
-        assert!(warning.is_none());
+        assert!(matches!(outcome, Outcome::Applied(deleted) if deleted == ["thread"]));
         assert!(
             request(
                 &control,
@@ -905,21 +550,6 @@ mod tests {
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
-    }
-
-    #[test]
-    fn historical_selection_generations_do_not_exhaust_deletion_observation_budget() {
-        let mut selection = selection::Selection::default();
-        for n in 0..MAX_KNOWN_THREADS + 100 {
-            selection.select_thread(format!("old{n}"), n as u64);
-        }
-        selection.select_thread("active".into(), 1);
-        let result = candidates(
-            vec!["visible".into()],
-            &selection,
-            ["saved".into(), "image".into()].into_iter(),
-        );
-        assert_eq!(result, ["active", "image", "saved", "visible"]);
     }
 
     struct FailedClipboard;

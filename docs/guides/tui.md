@@ -141,8 +141,11 @@ on the same terminal, **between** cell frames. This does not alter the status ro
 or conversation renderer. It uses the existing activity classifier: active work
 maps to working, recovery to blocked (auth/config failures may carry kind=auth),
 failed work to error, unseen completion to done, and idle/stopped/viewed completion
-to idle. The root summarizes every conversation, including ones outside the
-32-child export cap; idle children are cleared. Normal exit sends a root clear.
+to idle. The root's working and awaiting-you counts come from the owner independently
+of the child list. Unseen completion counts use the bounded list of Runs ended
+since this TUI attached and exclude Runs already viewed in this session. A `+`
+after a count means the reported number is a lower bound. The root has no idle
+total; idle children are cleared. Normal exit sends a root clear.
 
 Only final changed reports are written. Titles/messages have controls, bidi and
 invisible-format characters removed, are UTF-8-byte bounded and standard-base64
@@ -163,8 +166,8 @@ Conversation titles and recovery-wait reason summaries are sent to the terminal,
 recordings (script/asciinema) and your local terminal when running Shellboy over SSH.
 After forced termination, done/error records may remain by design; clear them in the terminal.
 OSC 7501 rev 0.4 is young and its format may change.
-Status changes trigger a read of all conversations, at most once per 0.5 seconds, which can be costly
-with very many conversations; a separate read-only connection keeps these reads off the save queue.
+Status changes refresh the owner activity view. The TUI does not send its local
+set of seen Runs to the owner.
 
 ## Input and basic keys
 
@@ -300,7 +303,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/restore REVISION` | Restore failed/cancelled draft snapshot |
 | `/cancel` | Interrupt the current Thread |
 | `/background` | Background the foreground shell |
-| `/quit` | Normal shutdown |
+| `/quit` | Close this terminal client; the owner and its work keep running |
 
 Omitting the node in `/fork` suggests the anchor or tail; `/edit` and `/rewind` suggest the anchor or latest user node. Invalid node kinds/boundaries are errors. Specify IDs for reproducible actions. `/edit` never overwrites the old node: sending branches immediately before the original request. If a Run is active or stopping, sending is refused; stop it or wait for it to finish, then retry the retained draft.
 

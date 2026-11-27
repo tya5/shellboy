@@ -1,8 +1,10 @@
-//! Fixed collection of visible browser/count facts in one caller-owned snapshot.
+//! Visible browser and descendant observations use independent owner read sequences.
 //! Admission, task ownership and cancellation remain in the existing frontend.
-use super::{ApiError, Control, browser, checked_storage, lineage_observer, presentation_work};
-use crate::storage::StorageError;
-use rusqlite::Connection;
+#[cfg(test)]
+use super::Control;
+use super::{ApiError, browser, lineage_observer};
+#[cfg(test)]
+use {crate::storage::StorageError, rusqlite::Connection};
 
 #[derive(Clone, Default)]
 pub(super) struct Tickets {
@@ -12,15 +14,6 @@ pub(super) struct Tickets {
 impl Tickets {
     pub fn is_empty(&self) -> bool {
         self.browser.is_none() && self.descendants.is_none()
-    }
-    fn active(&self) -> bool {
-        self.browser
-            .as_ref()
-            .is_some_and(|ticket| !ticket.stop.is_cancelled())
-            || self
-                .descendants
-                .as_ref()
-                .is_some_and(|ticket| !ticket.stop.is_cancelled())
     }
     async fn closed(&self) {
         async fn closed(stop: Option<&tokio_util::sync::CancellationToken>) {
@@ -34,8 +27,10 @@ impl Tickets {
         );
     }
 }
+#[cfg(test)]
 pub(super) struct RawBatch {
     browser: Option<Result<browser::RawObservation, ApiError>>,
+    #[cfg(test)]
     descendants: Option<Result<lineage_observer::RawBatch, ApiError>>,
     cold_lineage: Option<(std::time::Duration, usize, bool)>,
 }
@@ -43,7 +38,9 @@ pub(super) struct Prepared {
     pub browser: Option<Result<browser::Observation, ApiError>>,
     pub descendants: Option<Result<lineage_observer::Prepared, ApiError>>,
     cold_lineage: Option<(std::time::Duration, usize, bool)>,
+    descendant_sequence: Option<u64>,
 }
+#[cfg(test)]
 fn observed<T>(result: Result<T, StorageError>) -> Result<Result<T, ApiError>, StorageError> {
     match result {
         Ok(value) => Ok(Ok(value)),
@@ -55,8 +52,22 @@ fn observed<T>(result: Result<T, StorageError>) -> Result<Result<T, ApiError>, S
         Err(error) => Err(error),
     }
 }
-pub(super) fn read_tx(db: &Connection, tickets: &Tickets) -> Result<RawBatch, StorageError> {
+#[cfg(test)]
+fn read_tx(db: &Connection, tickets: &Tickets) -> Result<RawBatch, StorageError> {
+    collect_tx(db, tickets, None)
+}
+
+#[cfg(test)]
+fn collect_tx(
+    db: &Connection,
+    tickets: &Tickets,
+    membership: Option<(bool, Vec<String>)>,
+) -> Result<RawBatch, StorageError> {
+    #[cfg(test)]
     let mut cold_lineage = None;
+    #[cfg(not(test))]
+    let cold_lineage = None;
+    #[cfg(test)]
     let descendants = tickets
         .descendants
         .as_ref()
@@ -68,32 +79,39 @@ pub(super) fn read_tx(db: &Connection, tickets: &Tickets) -> Result<RawBatch, St
         .as_ref()
         .filter(|ticket| !ticket.stop.is_cancelled())
         .map(|ticket| {
-            let mut scope = ticket.descendant_root.as_deref().and_then(|root| {
-                descendants
-                    .as_ref()
-                    .and_then(|result| result.as_ref().ok())
-                    .and_then(|raw| raw.scope(root))
+            let scope = membership.clone();
+            #[cfg(test)]
+            let scope = scope.or_else(|| {
+                ticket.descendant_root.as_deref().and_then(|root| {
+                    descendants
+                        .as_ref()
+                        .and_then(|result| result.as_ref().ok())
+                        .and_then(|raw| raw.scope(root))
+                })
             });
-            if scope.is_none()
-                && ticket.cached_scope.is_none()
-                && let Some(root) = &ticket.descendant_root
-            {
-                // Cold user-open only; steady reads reuse the paired count or page
-                // scope. This does not start a second count worker or timer.
-                let began = std::time::Instant::now();
-                let rows = super::lineage::read_roots_tx(db, std::slice::from_ref(root))?;
-                cold_lineage = Some((
-                    began.elapsed(),
-                    rows.iter().map(super::lineage::RawLineage::witnesses).sum(),
-                    rows.iter().any(super::lineage::RawLineage::truncated),
-                ));
-                scope = rows.first().map(super::lineage::membership);
-            }
+            #[cfg(test)]
+            let scope = if scope.is_none() && ticket.cached_scope.is_none() {
+                if let Some(root) = &ticket.descendant_root {
+                    let began = std::time::Instant::now();
+                    let rows = super::lineage::read_roots_tx(db, std::slice::from_ref(root))?;
+                    cold_lineage = Some((
+                        began.elapsed(),
+                        rows.iter().map(super::lineage::RawLineage::witnesses).sum(),
+                        rows.iter().any(super::lineage::RawLineage::truncated),
+                    ));
+                    rows.first().map(super::lineage::membership)
+                } else {
+                    None
+                }
+            } else {
+                scope
+            };
             observed(browser::read_tx(db, ticket, scope))
         })
         .transpose()?;
     Ok(RawBatch {
         browser,
+        #[cfg(test)]
         descendants,
         cold_lineage,
     })
@@ -112,6 +130,7 @@ pub(super) async fn complete(
         Err(error) => (
             Prepared {
                 cold_lineage: None,
+                descendant_sequence: None,
                 browser: tickets.browser.as_ref().map(|_| Err(error.clone())),
                 descendants: tickets.descendants.as_ref().map(|_| Err(error)),
             },
@@ -127,25 +146,6 @@ pub(super) async fn complete(
             truncated,
         );
     }
-    let already_read = tickets
-        .browser
-        .as_ref()
-        .filter(|ticket| !ticket.stop.is_cancelled())
-        .filter(|_| {
-            prepared.browser.as_ref().is_some_and(|result| {
-                result
-                    .as_ref()
-                    .is_ok_and(|observation| observation.patch.is_some())
-            })
-        })
-        .map(|ticket| {
-            ticket
-                .ids
-                .iter()
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>()
-        })
-        .unwrap_or_default();
     if let Some(ticket) = tickets.descendants {
         let result = prepared.descendants.take().unwrap_or_else(|| {
             Err(ApiError::new(
@@ -153,7 +153,6 @@ pub(super) async fn complete(
                 "Descendant observation unavailable",
             ))
         });
-        let success = result.is_ok();
         if let Ok(prepared) = &result {
             diagnostics.record_lineage_query(
                 crate::diagnostics::DiagnosticIds::default(),
@@ -163,27 +162,18 @@ pub(super) async fn complete(
                 prepared.truncated,
             );
         }
-        if let Some(completion) = descendants.complete(&ticket, sequence, result) {
-            if success && let Some(generation) = browser.generation() {
-                for scope in descendants.snapshots() {
-                    browser.adopt_scope(generation, sequence, scope);
-                }
-                for id in completion.changed_members {
-                    if !already_read.contains(&id) {
-                        browser.changed(&id);
-                    }
-                }
-            }
-            if let Some(update) = completion.update {
-                super::update(updates, update).await;
-            }
+        if let Some(completion) =
+            descendants.complete(&ticket, prepared.descendant_sequence, result)
+            && let Some(update) = completion.update
+        {
+            super::update(updates, update).await;
         }
     }
     if let Some(ticket) = tickets.browser {
         match prepared.browser.take() {
             Some(Ok(observation)) if browser.complete(&ticket) => {
                 if let Some(patch) = observation.patch {
-                    browser.adopt_patch(ticket.generation, sequence, &patch.rows, None);
+                    browser.adopt_patch(ticket.generation, patch.read_sequence, &patch.rows, None);
                     super::update(
                         updates,
                         crate::ui::UiUpdate::BrowserPatch {
@@ -223,7 +213,8 @@ pub(super) async fn complete(
         }
     }
 }
-pub(super) fn prepare(
+#[cfg(test)]
+fn prepare(
     raw: RawBatch,
     sequence: u64,
     tickets: &Tickets,
@@ -231,6 +222,7 @@ pub(super) fn prepare(
 ) -> Prepared {
     Prepared {
         cold_lineage: raw.cold_lineage,
+        descendant_sequence: None,
         browser: raw.browser.map(|result| {
             result.map(|raw| {
                 browser::prepare_localized(
@@ -250,37 +242,10 @@ pub(super) fn prepare(
             .map(|result| result.map(lineage_observer::RawBatch::prepare)),
     }
 }
-pub(super) async fn prepare_native(
-    control: &Control,
-    mut raw: RawBatch,
-    sequence: u64,
+pub(super) async fn read(
+    owner: &super::native_history::Owner<'_>,
     tickets: &Tickets,
     language: crate::config::UiLanguage,
-) -> Result<Prepared, ApiError> {
-    let browser = match raw.browser.take() {
-        Some(Ok(raw)) => Some(
-            browser::observe_native(
-                &browser::NativeBrowser::embedded(control),
-                raw,
-                tickets.browser.as_ref().expect("browser raw owns ticket"),
-                sequence,
-                language,
-            )
-            .await,
-        ),
-        Some(Err(error)) => Some(Err(error)),
-        None => None,
-    };
-    let tickets = tickets.clone();
-    let mut prepared =
-        presentation_work(move || prepare(raw, sequence, &tickets, language)).await?;
-    prepared.browser = browser;
-    Ok(prepared)
-}
-
-pub(super) async fn read(
-    control: &Control,
-    tickets: &Tickets,
     progress_slots: std::sync::Arc<tokio::sync::Semaphore>,
     stop: tokio_util::sync::CancellationToken,
 ) -> Result<(Prepared, u64), ApiError> {
@@ -289,36 +254,35 @@ pub(super) async fn read(
         _=tickets.closed()=>return Err(ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read closed")),
         permit=progress_slots.acquire_owned()=>permit.map_err(|_|ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read admission closed"))?,
     };
-    let collect = tickets.clone();
-    let active = tickets.clone();
-    let read_stop = stop.child_token();
-    let cancel_on_drop = read_stop.clone().drop_guard();
-    let pending = super::snapshot::read_sequenced_guarded(
-        control.store.database.path().to_path_buf(),
-        read_stop.clone(),
-        move || active.active(),
-        move |db, _sequence| {
-            if !collect.active() {
-                return Err(ApiError::new(
-                    crate::protocol::ErrorCode::InvalidState,
-                    "Visible read closed",
-                )
-                .into());
-            }
-            read_tx(db, &collect)
-        },
-    );
-    let result = tokio::select! {biased;
-        _=stop.cancelled()=>Err(ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read closed")),
-        _=tickets.closed()=>Err(ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read closed")),
-        result=pending=>result,
-    };
-    drop(cancel_on_drop);
-    drop(_permit);
-    let (raw, sequence) = checked_storage(control, result).await?;
-    let language = control.store.config.ui.language;
-    let prepared = prepare_native(control, raw, sequence, tickets, language).await?;
-    Ok((prepared, sequence))
+    tokio::select! { biased;
+        _ = stop.cancelled() => Err(ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read closed")),
+        _ = tickets.closed() => Err(ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read closed")),
+        result = async {
+            let (descendants, browser) = tokio::join!(async {
+                match &tickets.descendants {
+                    Some(ticket) => Some(lineage_observer::read_native(owner, ticket).await),
+                    None => None,
+                }
+            }, async {
+                match &tickets.browser {
+                    Some(ticket) if ticket.mode == crate::ui::watch::BrowserMode::List => Some(browser::observe_list(owner, ticket).await.map(|p| (p, 0))),
+                    Some(ticket) => Some(browser::observe_native(owner, ticket, language).await),
+                    None => None,
+                }
+            });
+            let (descendants, descendant_sequence) = match descendants {
+                Some(Ok((counts, sequence))) => (Some(Ok(counts)), Some(sequence)),
+                Some(Err(error)) => (Some(Err(error)), None),
+                None => (None, None),
+            };
+            let (browser, sequence) = match browser {
+                Some(Ok((value, sequence))) => (Some(Ok(value)), sequence),
+                Some(Err(error)) => (Some(Err(error)), 0),
+                None => (None, 0),
+            };
+            Ok((Prepared { browser, descendants, cold_lineage: None, descendant_sequence }, sequence))
+        } => result,
+    }
 }
 
 #[cfg(test)]
@@ -337,11 +301,12 @@ mod cancellation_tests {
             let root=tempfile::tempdir().unwrap();
             let owner=crate::app::DataOwner::start(None,Some(root.path().join("data")),root.path().into()).await.unwrap();
             let control=Control::new(&owner,root.path().into());
+            let selected=super::super::selected_owner(&control);
             let slots=std::sync::Arc::new(Semaphore::new(0));
             let stop=CancellationToken::new();
             let empty=Tickets::default();
             let empty_ready={
-                let mut pending=std::pin::pin!(read(&control,&empty,slots.clone(),stop.clone()));
+                let mut pending=std::pin::pin!(read(&selected,&empty,crate::config::UiLanguage::En,slots.clone(),stop.clone()));
                 matches!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())),Poll::Ready(Err(error)) if error.code==crate::protocol::ErrorCode::InvalidState)
             };
             let mut browser=browser::Browser::default();
@@ -350,7 +315,7 @@ mod cancellation_tests {
             descendants.observe(1,vec!["t".into()]).unwrap();
             let tickets=Tickets { browser:Some(browser.take(tokio::time::Instant::now()).unwrap()), descendants:Some(descendants.take(tokio::time::Instant::now()).unwrap()) };
             let (single_stays_pending,all_closed_ready)={
-                let mut pending=std::pin::pin!(read(&control,&tickets,slots.clone(),stop));
+                let mut pending=std::pin::pin!(read(&selected,&tickets,crate::config::UiLanguage::En,slots.clone(),stop));
                 assert!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
                 tickets.browser.as_ref().unwrap().stop.cancel();
                 let single=pending.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending();

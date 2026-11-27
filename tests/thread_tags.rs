@@ -99,6 +99,10 @@ async fn list_with(
     run(
         store,
         Command::ThreadList(ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),
@@ -553,6 +557,10 @@ async fn the_cwd_filter_is_exact_and_combines_with_tags_and_the_text_query() {
     let page = run(
         &store,
         Command::ThreadList(ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),

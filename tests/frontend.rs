@@ -1125,7 +1125,6 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         request_id: 30,
         args: deletion.clone(),
         execute: false,
-        known_thread_ids: vec![],
     })
     .await
     .unwrap();
@@ -1165,7 +1164,6 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         request_id: 31,
         args: deletion,
         execute: true,
-        known_thread_ids: vec![],
     })
     .await
     .unwrap();
@@ -1497,8 +1495,6 @@ async fn queued_database_query_does_not_delay_quit_grace_notification() {
         mode: Default::default(),
         archived: Default::default(),
         descendant_root: None,
-        seen_completions: Vec::new(),
-        seen_history_limited: false,
     })
     .await
     .unwrap();

@@ -50,12 +50,12 @@ pub(super) fn submission_snapshot(
 const DRAFT_VIEW_LIMIT: u32 = 128;
 
 async fn draft_records(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     thread_id: Option<String>,
     kind: crate::protocol::DraftListKind,
 ) -> Result<Vec<crate::protocol::DraftRecord>, ApiError> {
     let page: crate::protocol::DraftListPage = compose_call(
-        control,
+        owner,
         Command::DraftList(crate::protocol::DraftListArgs {
             thread_id,
             kind,
@@ -69,7 +69,7 @@ async fn draft_records(
 }
 
 pub(super) async fn exact_submission(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     operation: &str,
     draft_id: &str,
     revision: u64,
@@ -77,7 +77,7 @@ pub(super) async fn exact_submission(
 ) -> Result<(String, UiUpdate), ApiError> {
     use crate::protocol::{DraftGetArgs, DraftRecord, DraftState};
     let saved: DraftState = compose_call(
-        control,
+        owner,
         Command::DraftGet(DraftGetArgs {
             thread_id: None,
             operation_id: Some(operation.into()),
@@ -116,13 +116,13 @@ pub(super) async fn exact_submission(
     }
 }
 pub(super) async fn archives(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
+    language: UiLanguage,
     thread: Option<String>,
 ) -> Result<Vec<(String, String)>, ApiError> {
     use crate::protocol::DraftRecord;
-    let language = control.store.config.ui.language;
     let separator = crate::ui::text_width::glyphs::separator();
-    draft_records(control, thread, crate::protocol::DraftListKind::Restorable)
+    draft_records(owner, thread, crate::protocol::DraftListKind::Restorable)
         .await?
         .into_iter()
         .map(|record| match record {
@@ -157,11 +157,11 @@ pub(super) async fn archives(
         .collect()
 }
 pub(super) async fn restore_archive(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
     id: String,
 ) -> Result<DraftSnapshot, ApiError> {
     compose_call(
-        control,
+        owner,
         Command::DraftRestore(crate::protocol::DraftRestoreArgs { archive_id: id }),
         None,
     )
@@ -178,13 +178,13 @@ fn validate_restore(snapshot: &DraftSnapshot, limit: u64) -> Result<(), ApiError
     Ok(())
 }
 pub(super) async fn restore(
-    control: &Control,
+    owner: &native_history::Owner<'_>,
+    language: UiLanguage,
     updates: &dyn UpdateTarget,
     target: DraftRecoveryTarget,
     id: String,
 ) {
-    let language = control.store.config.ui.language;
-    let (draft, message) = match restore_archive(control, id).await {
+    let (draft, message) = match restore_archive(owner, id).await {
         Ok(draft) => (
             Some(Box::new(draft)),
             i18n::local!(language, "復元元は /restore list に保持しています。入力欄が空で変更されていなければ復元します", "Source kept in /restore list. Restore only into an empty, unchanged composer")
@@ -237,34 +237,30 @@ fn append_restored(combined: &mut DraftSnapshot, mut part: DraftSnapshot, limit:
         })
 }
 pub(super) async fn cancel(
-    control: &Arc<Control>,
+    owner: &native_history::Owner<'_>,
+    language: UiLanguage,
+    draft_bytes: u64,
     updates: &dyn UpdateTarget,
     target: DraftRecoveryTarget,
     ids: Vec<String>,
 ) {
-    let language = control.store.config.ui.language;
-    let operation = operation(
-        control,
-        Command::MessageCancel(MessageCancelArgs { message_ids: ids }),
-    );
+    let operation = owner.operation(Command::MessageCancel(MessageCancelArgs {
+        message_ids: ids,
+    }));
     let notification_id = operation.operation_id.clone();
-    let result = super::dispatch_native(control, operation)
-        .await
-        .and_then(|response| {
-            if response.ok {
-                serde_json::from_value::<MessageCancelResult>(
-                    response.result.unwrap_or(Value::Null),
-                )
+    let result = owner.dispatch(operation).await.and_then(|response| {
+        if response.ok {
+            serde_json::from_value::<MessageCancelResult>(response.result.unwrap_or(Value::Null))
                 .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Invalid cancellation reply"))
-            } else {
-                Err(response.error.unwrap_or_else(|| {
-                    ApiError::new(
-                        ErrorCode::InvalidState,
-                        "Cancellation failed without details",
-                    )
-                }))
-            }
-        });
+        } else {
+            Err(response.error.unwrap_or_else(|| {
+                ApiError::new(
+                    ErrorCode::InvalidState,
+                    "Cancellation failed without details",
+                )
+            }))
+        }
+    });
     let mut result = match result {
         Ok(result) => result,
         Err(error) => {
@@ -284,34 +280,21 @@ pub(super) async fn cancel(
             return;
         }
     };
-    let ids = result
+    result
         .items
-        .iter()
-        .map(|item| item.message_id.clone())
-        .collect::<Vec<_>>();
-    let ranks=control.store.database.call(move|db|{
-        let ids=serde_json::to_string(&ids).map_err(|_|crate::storage::StorageError::Schema("Cannot order cancelled sources".into()))?;
-        let mut query=db.prepare("SELECT message_node_id FROM receipt WHERE message_node_id IN (SELECT value FROM json_each(?1)) ORDER BY created_at,rowid")?;
-        Ok(query.query_map([ids],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?)
-    }).await;
-    let ranks = checked_storage(control, ranks.map_err(storage_error)).await;
-    let ordered = ranks.is_ok();
-    if let Ok(ranks) = ranks {
-        result.items.sort_by_key(|item| {
-            ranks
-                .iter()
-                .position(|id| id == &item.message_id)
-                .unwrap_or(usize::MAX)
-        });
-    }
+        .sort_by_key(|item| item.archive_order.unwrap_or(u32::MAX));
     let mut combined = DraftSnapshot::default();
     let mut newly_cancelled = 0;
-    let mut restorable = ordered;
+    let mut restorable = true;
     for item in &result.items {
         if item.outcome != MessageCancelOutcome::Cancelled {
             continue;
         }
+        let order = newly_cancelled;
         newly_cancelled += 1;
+        if item.archive_order != Some(order) {
+            restorable = false;
+        }
         let Some(id) = item.archive_draft_id.clone() else {
             restorable = false;
             continue;
@@ -319,11 +302,8 @@ pub(super) async fn cancel(
         if !restorable {
             continue;
         }
-        match restore_archive(control, id).await {
-            Ok(part) => {
-                restorable =
-                    append_restored(&mut combined, part, control.store.config.limits.draft_bytes)
-            }
+        match restore_archive(owner, id).await {
+            Ok(part) => restorable = append_restored(&mut combined, part, draft_bytes),
             Err(_) => restorable = false,
         }
     }
@@ -591,7 +571,9 @@ mod tests {
         // use original receipt order, including equal timestamps.
         crate::test_watchdog::watchdog("src/frontend/message_queue.rs: unknown_held_input_is_listed_cancelled_and_restored_in_receipt_order_across_restart",
             cancel(
-                &control,
+                &selected_owner(&control),
+                control.store.config.ui.language,
+                control.store.config.limits.draft_bytes,
                 &send,
                 target,
                 vec!["a-second".into(), "z-first".into()],
@@ -619,7 +601,13 @@ mod tests {
             ui.view().draft.text,
             format!("before{}after\n\nsecond", crate::ui::draft::MARKER)
         );
-        let listed = archives(&control, Some("thread".into())).await.unwrap();
+        let listed = archives(
+            &selected_owner(&control),
+            control.store.config.ui.language,
+            Some("thread".into()),
+        )
+        .await
+        .unwrap();
         assert_eq!(listed.len(), 2);
         let pending = super::native_page::read_queue(&control, "thread")
             .await
@@ -674,19 +662,26 @@ mod tests {
         let (rpc, requests) = tokio::sync::mpsc::channel(8);
         let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
         tokio::spawn(control.clone().serve(requests));
-        let restored = restore_archive(&control, "cancelled-message:z-first".into())
-            .await
-            .unwrap();
+        let restored = restore_archive(
+            &selected_owner(&control),
+            "cancelled-message:z-first".into(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             restored.text,
             format!("before{}after", crate::ui::draft::MARKER)
         );
         assert_eq!(restored.attachments[0].position, Some(6));
         assert_eq!(
-            archives(&control, Some("thread".into()))
-                .await
-                .unwrap()
-                .len(),
+            archives(
+                &selected_owner(&control),
+                control.store.config.ui.language,
+                Some("thread".into())
+            )
+            .await
+            .unwrap()
+            .len(),
             2
         );
         // Simulate the interval after logical Thread deletion but before the
@@ -700,16 +695,23 @@ mod tests {
             Ok(())
         }).await.unwrap();
         assert!(
-            archives(&control, Some("thread".into()))
-                .await
-                .unwrap()
-                .is_empty()
+            archives(
+                &selected_owner(&control),
+                control.store.config.ui.language,
+                Some("thread".into())
+            )
+            .await
+            .unwrap()
+            .is_empty()
         );
         assert_eq!(
-            restore_archive(&control, "cancelled-message:z-first".into())
-                .await
-                .unwrap_err()
-                .code,
+            restore_archive(
+                &selected_owner(&control),
+                "cancelled-message:z-first".into()
+            )
+            .await
+            .unwrap_err()
+            .code,
             ErrorCode::TargetUnavailable
         );
         drop(server);
@@ -775,7 +777,7 @@ mod retention_tests {
             Ok(())
         }).await.unwrap();
         let first: DraftListPage = compose_call(
-            &control,
+            &selected_owner(&control),
             Command::DraftList(DraftListArgs {
                 thread_id: Some("thread".into()),
                 kind: DraftListKind::Submitted,
@@ -790,20 +792,36 @@ mod retention_tests {
         assert!(first.next_cursor.is_some());
         assert!(!first.items.iter().any(|item| matches!(item, DraftRecord::Submitted {operation_id: id,..} if id == operation_id)));
         assert!(
-            exact_submission(&control, operation_id, draft_id, revision + 1, *generation)
-                .await
-                .is_err()
+            exact_submission(
+                &selected_owner(&control),
+                operation_id,
+                draft_id,
+                revision + 1,
+                *generation
+            )
+            .await
+            .is_err()
         );
-        let (_, stale) =
-            exact_submission(&control, operation_id, draft_id, *revision, generation + 1)
-                .await
-                .unwrap();
+        let (_, stale) = exact_submission(
+            &selected_owner(&control),
+            operation_id,
+            draft_id,
+            *revision,
+            generation + 1,
+        )
+        .await
+        .unwrap();
         ui.apply(stale);
         assert!(ui.view().thread_id.is_none());
-        let (thread, exact) =
-            exact_submission(&control, operation_id, draft_id, *revision, *generation)
-                .await
-                .unwrap();
+        let (thread, exact) = exact_submission(
+            &selected_owner(&control),
+            operation_id,
+            draft_id,
+            *revision,
+            *generation,
+        )
+        .await
+        .unwrap();
         ui.apply(exact);
         assert_eq!(ui.view().thread_id.as_deref(), Some(thread.as_str()));
         assert!(ui.view().draft.text.is_empty());
@@ -829,7 +847,8 @@ mod retention_tests {
             limit: 1,
             cursor: None,
         };
-        let list = |args| compose_call::<DraftListPage>(&control, Command::DraftList(args), None);
+        let native = selected_owner(&control);
+        let list = |args| compose_call::<DraftListPage>(&native, Command::DraftList(args), None);
         let first = list(request.clone()).await.unwrap();
         assert_eq!(first.limit, 1);
         assert_eq!(first.filters.thread_id.as_deref(), Some("thread"));
@@ -926,7 +945,9 @@ mod retention_tests {
             .collect(StorageCategory::History, chrono::Utc::now())
             .await
             .unwrap();
-        let snapshot = restore_archive(&control, archive.clone()).await.unwrap();
+        let snapshot = restore_archive(&selected_owner(&control), archive.clone())
+            .await
+            .unwrap();
         assert_eq!(
             snapshot.text,
             format!("before{}after", crate::ui::draft::MARKER)
@@ -964,10 +985,15 @@ mod retention_tests {
             })
             .await
             .unwrap();
-        let (thread, update) =
-            exact_submission(&control, "retention-op", "retention-composer", 7, 42)
-                .await
-                .unwrap();
+        let (thread, update) = exact_submission(
+            &selected_owner(&control),
+            "retention-op",
+            "retention-composer",
+            7,
+            42,
+        )
+        .await
+        .unwrap();
         assert_eq!(thread, "thread");
         assert!(
             matches!(update, UiUpdate::ExactSubmission {message_id, generation: 42, ..} if message_id == "retention-message")
@@ -980,9 +1006,19 @@ mod retention_tests {
             db.execute("INSERT INTO draft VALUES('older-submitting','thread',6,?1,'submitting','before')",[snapshot])?;Ok(())
         }).await.unwrap();
         let (updates, incoming) = std::sync::mpsc::sync_channel(128);
-        crate::frontend::select_thread(&control, &updates, "thread", 7, 0, None, 80, Vec::new())
-            .await
-            .unwrap();
+        crate::frontend::select_thread(
+            super::selected_owner(&control),
+            control.store.config.ui.language,
+            &updates,
+            "thread",
+            7,
+            0,
+            None,
+            80,
+            Vec::new(),
+        )
+        .await
+        .unwrap();
         assert!(
             incoming
                 .try_iter()
@@ -990,14 +1026,18 @@ mod retention_tests {
             "sent editable content must not restore"
         );
         assert!(
-            !archives(&control, Some("thread".into()))
-                .await
-                .unwrap()
-                .iter()
-                .any(|(id, _)| id == "older-submitting")
+            !archives(
+                &selected_owner(&control),
+                control.store.config.ui.language,
+                Some("thread".into())
+            )
+            .await
+            .unwrap()
+            .iter()
+            .any(|(id, _)| id == "older-submitting")
         );
         assert!(
-            restore_archive(&control, "older-submitting".into())
+            restore_archive(&selected_owner(&control), "older-submitting".into())
                 .await
                 .is_err()
         );
@@ -1014,7 +1054,7 @@ mod retention_tests {
                 ..Default::default()
             };
             let result = crate::frontend::save_draft(
-                &control,
+                &selected_owner(&control),
                 "thread".into(),
                 draft,
                 ViewAnchor::default(),

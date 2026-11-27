@@ -398,6 +398,22 @@ The optional `state` filter (#378) matches the row's `state`, not `activity`:
 `thread_ids` and `awaiting`, and binds the cursor to the state. Pre-v19
 state-filter cursors expire.
 
+`thread.list` accepts `root` to scope updated-order discovery to saved descendants
+of that Thread. Exact `thread_ids` intersect that same scope. Deleted bridges
+are traversed but not returned; the root itself is not a descendant. A rooted
+response carries `root_count` and `root_count_exact` for the bounded lineage,
+not the number of results that match the other filters. Missing roots produce
+`target_unavailable`. Continue with the same effective root and projection.
+
+`include_descendant_count` adds `descendants: {total, by_state, capped, cycle}`
+from one bounded lineage observation. `by_state` uses the `thread.list` state
+selectors; a Thread can count both in an exact state and in a work group.
+Absent keys mean zero. `capped` means the counts are lower bounds.
+`include_activity` adds `activity_detail` from the same observation as
+`thread.get` and a `latest_completion` Run ID and end timestamp when present.
+`read_sequence` orders owner observations within the selected instance; it is
+not a database revision, cursor, or write precondition.
+
 Ordinary updated-order `thread.list` seeks within the archive and optional cwd
 partition (#381). It examines at most 200 candidate Threads plus one lookahead;
 `next_cursor` resumes after the last examined key, even when the page is empty.

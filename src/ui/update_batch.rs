@@ -62,12 +62,14 @@ impl UiUpdate {
             | Self::ThreadsArchived { .. }
             | Self::Threads { .. }
             | Self::Thread { .. }
+            | Self::OwnerDisconnected(_)
             | Self::StorageFailed { .. }
             | Self::DraftAnchorExpired { .. }
             | Self::DraftSaveFailed { .. }
             | Self::ReceiptSource { .. }
             | Self::ExactSubmission { .. }
             | Self::RestoredSnapshot { .. }
+            | Self::DraftSourceSaved { .. }
             | Self::LoadFailed { .. }
             | Self::HistoryInvalidated { .. }
             | Self::Receipt { .. }

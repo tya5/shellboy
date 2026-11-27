@@ -1,5 +1,7 @@
 # Agent Guide — for models working in Shellboy
 
+The interactive TUI is a client. Its quit or terminal loss does not stop owner Runs, schedules, or the current protocol instance. Do not treat closing a terminal as cancellation; use the operation that targets the intended Run or shell.
+
 [Guide index](README.md) · [Delegation](delegation.md) · [Shell](shell.md) · [CLI reference](cli-reference.md)
 
 This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. A child agent works in a child Thread, whose Runs are independent of other Threads' Runs. A Run owns its own shells, never another Run. Schedules and services belong to a Thread, and their executions need not have a Run.
@@ -1404,7 +1406,7 @@ stderr. Use `shutdown --data-dir DIR` on every OS, or Unix SIGTERM/SIGHUP, to
 request the common cleanup. Accepted means saved request, not completed cleanup:
 observe the process and final stopped JSON. No final row after force-kill does
 not establish success. No bounded completion time or owner handover/reconnect is
-promised. TUI owners reject shutdown RPC. Native ownership/recovery qualification
+promised. Native ownership/recovery qualification
 is tracked in issue #5; use disposable data for experiments.
 
 Headless owners remain owned descendants of their launching background shell;

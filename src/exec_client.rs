@@ -160,6 +160,10 @@ impl Session {
             ipc::call(
                 &self.data,
                 Command::ThreadList(ThreadListArgs {
+                    root: None,
+                    include_descendant_count: false,
+                    include_activity: false,
+                    include_activity_evidence: false,
                     thread_ids: None,
                     state: None,
                     order: Default::default(),

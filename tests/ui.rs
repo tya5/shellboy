@@ -1254,6 +1254,10 @@ fn accepted_snapshot_releases_body_and_restores_from_correlated_immutable_source
         other => panic!("{other:?}"),
     };
     ui.apply(UiUpdate::RestoredSnapshot {
+        source: shellboy::protocol::DraftSourceFence {
+            message_id: "immutable-message".into(),
+            selection_revision: 17,
+        },
         draft_id: draft_id.clone(),
         revision,
         expected_revision,
@@ -1261,6 +1265,15 @@ fn accepted_snapshot_releases_body_and_restores_from_correlated_immutable_source
         attachments: vec![],
     });
     assert_eq!(ui.view().draft.text, original);
+    assert_eq!(
+        ui.view()
+            .draft
+            .restored_source
+            .as_ref()
+            .unwrap()
+            .selection_revision,
+        17
+    );
     assert_eq!(ui.view().draft.folds.len(), original_folds.len());
     assert_eq!(ui.view().draft.folds[0].start, original_folds[0].start);
     assert_eq!(ui.view().draft.folds[0].end, original_folds[0].end);
@@ -1268,6 +1281,10 @@ fn accepted_snapshot_releases_body_and_restores_from_correlated_immutable_source
     text(&mut ui, "new typing");
     let edited = ui.view().draft.text.clone();
     ui.apply(UiUpdate::RestoredSnapshot {
+        source: shellboy::protocol::DraftSourceFence {
+            message_id: "immutable-message".into(),
+            selection_revision: 17,
+        },
         draft_id,
         revision,
         expected_revision,
@@ -2998,6 +3015,9 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
         next_cursor: None,
         threads: (0..30)
             .map(|i| shellboy::protocol::ThreadSummary {
+                descendants: None,
+                activity_detail: None,
+                latest_completion: None,
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
                 awaiting_named_count_exact: true,

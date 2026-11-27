@@ -252,6 +252,10 @@ mod tests {
         let page = crate::control::db::thread_list(
             &db,
             &crate::protocol::ThreadListArgs {
+                root: None,
+                include_descendant_count: false,
+                include_activity: false,
+                include_activity_evidence: false,
                 thread_ids: None,
                 state: None,
                 order: Default::default(),

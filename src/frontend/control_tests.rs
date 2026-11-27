@@ -47,7 +47,12 @@ async fn missing_history_targets_are_local_errors_and_do_not_stop_other_runs() {
     }
     .encode()
     .unwrap();
-    let reader = super::HistoryReader::new(&control, &updates, 80);
+    let reader = super::HistoryReader::new(
+        super::selected_owner(&control),
+        control.store.config.ui.language,
+        &updates,
+        80,
+    );
     reader
         .page(&super::Reply::new("thread", 7), Some(cursor.clone()), None)
         .await
@@ -66,7 +71,12 @@ async fn missing_history_targets_are_local_errors_and_do_not_stop_other_runs() {
                 .await
                 .unwrap();
         }
-        let reader = super::HistoryReader::new(&control, &updates, 80);
+        let reader = super::HistoryReader::new(
+            super::selected_owner(&control),
+            control.store.config.ui.language,
+            &updates,
+            80,
+        );
         for before in [None, Some(cursor.clone())] {
             let error = reader
                 .page(&super::Reply::new(target, 0), before, None)
@@ -296,8 +306,10 @@ async fn recurring_management_mutations_use_selected_listener_without_fallback()
     ];
     for (command, result_key) in commands.into_iter().zip(["schedule_id", "service_id"]) {
         let refused = super::management_request(
-            &control,
-            &root.path().join("without-listener"),
+            super::native_history::Owner {
+                data_dir: &root.path().join("without-listener"),
+                instance: &control.store.instance_id,
+            },
             command.clone(),
             CancellationToken::new(),
         )
@@ -306,8 +318,10 @@ async fn recurring_management_mutations_use_selected_listener_without_fallback()
         assert!(refused["error"].is_object(), "{refused}");
         assert!(refused.get("request_operation_id").is_none());
         let applied = super::management_request(
-            &control,
-            &selected.loaded.data_dir,
+            super::native_history::Owner {
+                data_dir: &selected.loaded.data_dir,
+                instance: &control.store.instance_id,
+            },
             command,
             CancellationToken::new(),
         )
@@ -380,13 +394,27 @@ async fn recurring_management_reads_are_instance_fenced_without_fallback() {
         ),
     ];
     for (add, list, key) in pairs {
-        let added = super::management_request(&control, dir, add, CancellationToken::new())
-            .await
-            .unwrap();
+        let added = super::management_request(
+            super::native_history::Owner {
+                data_dir: dir,
+                instance: &control.store.instance_id,
+            },
+            add,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert!(added[key].is_string(), "{added}");
-        let seen = super::management_request(&control, dir, list.clone(), CancellationToken::new())
-            .await
-            .unwrap();
+        let seen = super::management_request(
+            super::native_history::Owner {
+                data_dir: dir,
+                instance: &control.store.instance_id,
+            },
+            list.clone(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(seen["thread_id"], "thread");
         assert_eq!(seen["items"].as_array().unwrap().len(), 1);
         assert_eq!(seen["items"][0][key], added[key]);
@@ -399,8 +427,10 @@ async fn recurring_management_reads_are_instance_fenced_without_fallback() {
             ),
         ] {
             let result = super::management_request(
-                &control,
-                &directory,
+                super::native_history::Owner {
+                    data_dir: &directory,
+                    instance: &control.store.instance_id,
+                },
                 list.clone(),
                 CancellationToken::new(),
             )
@@ -409,7 +439,15 @@ async fn recurring_management_reads_are_instance_fenced_without_fallback() {
         }
         let stop = CancellationToken::new();
         stop.cancel();
-        let result = super::management_request(&control, dir, list, stop).await;
+        let result = super::management_request(
+            super::native_history::Owner {
+                data_dir: dir,
+                instance: &control.store.instance_id,
+            },
+            list,
+            stop,
+        )
+        .await;
         assert_eq!(
             super::management_outcome(&result).unwrap_err().code,
             ErrorCode::InvalidState
@@ -1333,10 +1371,9 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     // A real RunStop completion emits canonical Changed. No history reload
     // is requested after it; the already-exited shell remains terminal.
     let response = control
-        .request(super::operation(
-            &control,
-            Command::RunStop(crate::protocol::RunStopTarget::exact("target-run".into())),
-        ))
+        .request(super::selected_owner(&control).operation(Command::RunStop(
+            crate::protocol::RunStopTarget::exact("target-run".into()),
+        )))
         .await;
     assert!(response.ok, "{response:?}");
     crate::test_watchdog::watchdog(
@@ -1805,7 +1842,7 @@ async fn quit_before_initial_draft_restore_cannot_mask_an_existing_saved_draft()
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     let (root, owner, control, server) = fixture().await;
     super::save_draft(
-        &control,
+        &super::selected_owner(&control),
         "thread".into(),
         DraftSnapshot {
             draft_id: "persisted".into(),
@@ -1995,7 +2032,7 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
     for command in commands {
         let response = crate::usage_totals::with_test_elapsed(
             std::time::Duration::from_millis(100),
-            control.request(super::operation(&control, command)),
+            control.request(super::selected_owner(&control).operation(command)),
         )
         .await;
         assert!(response.ok, "{response:?}");
@@ -2007,8 +2044,10 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
     crate::usage_totals::with_test_elapsed(
         std::time::Duration::from_millis(100),
         super::management_request(
-            &control,
-            &owner.loaded.data_dir,
+            super::native_history::Owner {
+                data_dir: &owner.loaded.data_dir,
+                instance: &control.store.instance_id,
+            },
             command.clone(),
             tokio_util::sync::CancellationToken::new(),
         ),
@@ -2019,8 +2058,10 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
         crate::usage_totals::with_test_elapsed(
             std::time::Duration::from_micros(99_999),
             super::management_request(
-                &control,
-                &owner.loaded.data_dir,
+                super::native_history::Owner {
+                    data_dir: &owner.loaded.data_dir,
+                    instance: &control.store.instance_id,
+                },
                 command.clone(),
                 tokio_util::sync::CancellationToken::new(),
             ),
@@ -2091,15 +2132,13 @@ async fn native_display_header_keeps_typed_title_omission_and_default_contract()
     assert!(
         matches!(mismatch, Err(error) if error.code == crate::protocol::ErrorCode::ProtocolMismatch)
     );
-    let ordinary: ThreadDetails = super::inspection_history::native_read(
-        path,
-        Command::ThreadGet(ThreadGetArgs {
+    let ordinary: ThreadDetails = super::selected_owner(&control)
+        .call(Command::ThreadGet(ThreadGetArgs {
             thread_id: Some("thread".into()),
             display: false,
-        }),
-    )
-    .await
-    .unwrap();
+        }))
+        .await
+        .unwrap();
     assert_eq!(ordinary.title, "exact title");
     assert!(ordinary.display_coverage.is_none());
     server.shutdown().await.unwrap();
@@ -2116,7 +2155,17 @@ async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_op
     for target in ["thread", "independent"] {
         crate::usage_totals::with_test_elapsed(
             std::time::Duration::from_millis(100),
-            super::select_thread(&control, &updates, target, 1, 0, None, 80, Vec::new()),
+            super::select_thread(
+                super::selected_owner(&control),
+                control.store.config.ui.language,
+                &updates,
+                target,
+                1,
+                0,
+                None,
+                80,
+                Vec::new(),
+            ),
         )
         .await
         .unwrap();
@@ -2132,8 +2181,10 @@ async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_op
     crate::usage_totals::with_test_elapsed(
         std::time::Duration::from_millis(100),
         super::management_request(
-            &control,
-            &owner.loaded.data_dir,
+            super::native_history::Owner {
+                data_dir: &owner.loaded.data_dir,
+                instance: &control.store.instance_id,
+            },
             Command::UsageGet(UsageGetArgs {
                 thread_id: Some("thread".into()),
                 ..Default::default()
@@ -2178,15 +2229,19 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
         tx.commit()?;
         Ok(())
     }).await.unwrap();
-    let offer = super::copying::choices(&control, &owner.loaded.data_dir, "copy-long".into())
-        .await
-        .unwrap();
+    let offer = super::copying::choices(
+        control.store.config.ui.language,
+        &super::selected_owner(&control),
+        "copy-long".into(),
+    )
+    .await
+    .unwrap();
     assert_eq!(offer.blocks.len(), 1);
     assert_eq!(offer.blocks[0].chars, code.chars().count());
     assert_eq!(
         super::copying::text(
-            &control,
-            &owner.loaded.data_dir,
+            control.store.config.ui.language,
+            &super::selected_owner(&control),
             "copy-long".into(),
             Some(0),
             Some(offer.source_hash.clone())
@@ -2197,8 +2252,8 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
     );
     assert_eq!(
         super::copying::text(
-            &control,
-            &owner.loaded.data_dir,
+            control.store.config.ui.language,
+            &super::selected_owner(&control),
             "copy-long".into(),
             None,
             None
@@ -2210,8 +2265,8 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
     );
     assert_eq!(
         super::copying::text(
-            &control,
-            &owner.loaded.data_dir,
+            control.store.config.ui.language,
+            &super::selected_owner(&control),
             "copy-long".into(),
             Some(8),
             None
@@ -2223,8 +2278,8 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
     );
     assert_eq!(
         super::copying::text(
-            &control,
-            &owner.loaded.data_dir,
+            control.store.config.ui.language,
+            &super::selected_owner(&control),
             "copy-long".into(),
             Some(128),
             None
@@ -2236,8 +2291,8 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
     );
     assert_eq!(
         super::copying::text(
-            &control,
-            &owner.loaded.data_dir,
+            control.store.config.ui.language,
+            &super::selected_owner(&control),
             "copy-large-block".into(),
             Some(0),
             None
@@ -2248,10 +2303,14 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
         ErrorCode::InputLimit
     );
     assert_eq!(
-        super::copying::choices(&control, &owner.loaded.data_dir, "copy-too-large".into())
-            .await
-            .unwrap_err()
-            .code,
+        super::copying::choices(
+            control.store.config.ui.language,
+            &super::selected_owner(&control),
+            "copy-too-large".into()
+        )
+        .await
+        .unwrap_err()
+        .code,
         ErrorCode::InputLimit
     );
     owner
@@ -2268,8 +2327,8 @@ async fn canonical_code_choices_read_past_a_page_but_never_copy_a_prefix_or_chan
         .unwrap();
     assert_eq!(
         super::copying::text(
-            &control,
-            &owner.loaded.data_dir,
+            control.store.config.ui.language,
+            &super::selected_owner(&control),
             "copy-long".into(),
             Some(0),
             Some(offer.source_hash)
@@ -2295,7 +2354,12 @@ async fn pinned_history_navigation_keeps_a_required_window_after_a_newer_read() 
     let _ = navigated.select_thread("thread".into());
     let generation = legacy.view().generation;
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
-    let reader = super::HistoryReader::new(&control, &updates, 80);
+    let reader = super::HistoryReader::new(
+        super::selected_owner(&control),
+        control.store.config.ui.language,
+        &updates,
+        80,
+    );
     reader
         .page(&super::Reply::new("thread", generation), None, None)
         .await
@@ -2497,7 +2561,7 @@ async fn refused_native_send_restores_the_exact_frozen_draft() {
         ..Default::default()
     };
     let refused = super::compose_call::<serde_json::Value>(
-        &control,
+        &super::selected_owner(&control),
         Command::DraftSubmit(Box::new(DraftSubmitArgs {
             thread_id: Some("thread".into()),
             expected_thread_revision: Some(99),
@@ -2520,7 +2584,7 @@ async fn refused_native_send_restores_the_exact_frozen_draft() {
     assert_eq!(refused.code, ErrorCode::OperationConflict);
     let archive = crate::control::db::DraftSubmission::id_for_operation(&operation);
     assert_eq!(
-        super::message_queue::restore_archive(&control, archive)
+        super::message_queue::restore_archive(&super::selected_owner(&control), archive)
             .await
             .unwrap(),
         draft

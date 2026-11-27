@@ -51,6 +51,20 @@ impl Owner {
             "send signal to owned fixture process"
         );
     }
+    async fn wait_for_display(&mut self, marker: &str) {
+        loop {
+            self.drain();
+            let display = String::from_utf8_lossy(&self.terminal_tail);
+            assert!(
+                self.child.try_wait().unwrap().is_none(),
+                "TUI exited before {marker}: {display}"
+            );
+            if display.contains(marker) {
+                return;
+            }
+            sleep(Duration::from_millis(5)).await;
+        }
+    }
     async fn exited(&mut self) -> ExitStatus {
         crate::test_watchdog::watchdog("tests/termination_signals.rs: exited", async {
             loop {
@@ -95,6 +109,16 @@ impl Drop for Owner {
     }
 }
 fn pty_owner(root: &Path, config: &Path, wrapper: Option<&str>, controlling: bool) -> Owner {
+    pty_process(root, root, config, wrapper, controlling, true)
+}
+fn pty_process(
+    cwd: &Path,
+    root: &Path,
+    config: &Path,
+    wrapper: Option<&str>,
+    controlling: bool,
+    serve: bool,
+) -> Owner {
     // Test-only override lets the same physical PTY fixture compare a saved
     // baseline binary without changing production configuration or behavior.
     let binary = std::env::var_os("SHELLBOY_SIGNAL_TEST_BIN")
@@ -136,6 +160,7 @@ fn pty_owner(root: &Path, config: &Path, wrapper: Option<&str>, controlling: boo
         0
     );
     let mut command = if let Some(wrapper) = wrapper {
+        assert!(serve);
         let quote = |v: &Path| format!("'{}'", v.to_string_lossy().replace('\'', "'\\''"));
         let mut command = std::process::Command::new(wrapper);
         if wrapper.ends_with("bash") {
@@ -144,7 +169,7 @@ fn pty_owner(root: &Path, config: &Path, wrapper: Option<&str>, controlling: boo
             command.arg("-f");
         }
         command.args(["-i", "-c"]).arg(format!(
-            "{} --config {} --data-dir {}; fixture_status=$?; exit \"$fixture_status\"",
+            "{} --config {} --data-dir {} serve >/dev/null; fixture_status=$?; exit \"$fixture_status\"",
             quote(&binary),
             quote(config),
             quote(&root.join("data"))
@@ -157,13 +182,20 @@ fn pty_owner(root: &Path, config: &Path, wrapper: Option<&str>, controlling: boo
             .arg(config)
             .arg("--data-dir")
             .arg(root.join("data"));
+        if serve {
+            command.arg("serve");
+        }
         command
     };
     command
-        .current_dir(root)
+        .current_dir(cwd)
         .env("TERM", "xterm-256color")
         .stdin(slave.try_clone().unwrap())
-        .stdout(slave.try_clone().unwrap())
+        .stdout(if serve && wrapper.is_none() {
+            Stdio::null()
+        } else {
+            Stdio::from(slave.try_clone().unwrap())
+        })
         .stderr(Stdio::from(slave));
     // Establish a real controlling terminal. Closing its master produces the
     // actual terminal-loss/HUP path rather than merely an injected draw error.
@@ -493,6 +525,101 @@ impl Fixture {
         .expect("first OS signal did not close the listener");
     }
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tui_quit_and_terminal_loss_leave_existing_serve_instance_running() {
+    use std::io::Write;
+    crate::test_watchdog::watchdog("attached TUI quit and terminal loss", async {
+        let mut fixture = Fixture::running().await;
+        let root = fixture.root.path();
+        let config = root.join("config.toml");
+        let data = root.join("data");
+        let profile = shellboy::config::Config::load_with_overrides(
+            Some(&config),
+            Some(&data),
+            root,
+            &shellboy::config::PathEnvironment::current(),
+        )
+        .unwrap();
+        let attach = || async {
+            shellboy::serve::attach_or_start(&profile, &tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap()
+                .unwrap()
+        };
+        let running_shell = || async {
+            let response = ipc::call(
+                &data,
+                Command::ShellList(ShellListArgs {
+                    thread_id: None,
+                    since: None,
+                    until: None,
+                    command_contains: None,
+                    state: Some("running".into()),
+                    exit_code: None,
+                    limit: DEFAULT_LIST_LIMIT,
+                    cursor: None,
+                }),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            assert!(response.ok, "{:?}", response.error);
+            response.result.unwrap()["items"][0]["execution_id"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let instance = attach().await.instance_id;
+        let execution = running_shell().await;
+        let cwd = root.join("attach-lifecycle-probe");
+        std::fs::create_dir(&cwd).unwrap();
+        for (terminal_loss, controlling) in [(false, true), (true, true), (true, false)] {
+            let mut tui = pty_process(&cwd, root, &config, None, controlling, false);
+            tui.wait_for_display("attach-lifecycle-probe").await;
+            if terminal_loss {
+                drop(tui.terminal.take());
+            } else {
+                tui.terminal
+                    .as_mut()
+                    .unwrap()
+                    .write_all(b"/quit\r")
+                    .unwrap();
+            }
+            assert!(tui.exited().await.success());
+            assert!(fixture.owner.child.try_wait().unwrap().is_none());
+            assert_eq!(attach().await.instance_id, instance);
+            assert_eq!(running_shell().await, execution);
+        }
+        let mut tui = pty_process(&cwd, root, &config, None, true, false);
+        tui.wait_for_display("attach-lifecycle-probe").await;
+        let stopped = ipc::call(
+            &data,
+            Command::OwnerShutdown(OwnerShutdownArgs {
+                instance_id: instance.to_owned(),
+            }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(stopped.ok, "{:?}", stopped.error);
+        assert!(fixture.owner.exited().await.success());
+        fixture.assert_graceful();
+        fixture.owner.native_group = None;
+        tui.wait_for_display("/reconnect").await;
+        assert!(tui.child.try_wait().unwrap().is_none());
+        tui.terminal
+            .as_mut()
+            .unwrap()
+            .write_all(b"/quit\r")
+            .unwrap();
+        assert!(tui.exited().await.success());
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn term_and_hup_stop_native_shell_and_save_results_before_success_exit() {
     for signal in [libc::SIGTERM, libc::SIGHUP] {
@@ -577,45 +704,17 @@ async fn actual_parent_shell_pty_close_kills_term_ignoring_owned_groups_without_
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn eof_without_a_controlling_terminal_signal_still_drains_owner() {
-    let mut fixture = Fixture::running_with(None, true, false, 2000).await;
-    drop(fixture.owner.terminal.take());
-    let status = fixture.owner.exited().await;
-    assert!(
-        status.success(),
-        "noncontrolling PTY EOF: {status}\n{}",
-        fixture.shutdown_diagnostic()
-    );
-    fixture.assert_graceful();
-    for line in fixture.log().lines() {
-        let record: Value = serde_json::from_str(line).unwrap();
-        if record["shutdown"]["scope"] == "signal" {
-            assert_eq!(record["shutdown"]["stage"], "terminal_lost");
-        }
-    }
-
-    fixture.owner.native_group = None;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn second_signal_forces_without_waiting_for_blocked_database_cleanup() {
+async fn repeated_term_keeps_one_owner_drain_until_storage_can_finish() {
     let mut fixture = Fixture::running_with(None, true, true, 2000).await;
-    let native = fixture.owner.native_group.unwrap();
     let hold = rusqlite::Connection::open(fixture.database()).unwrap();
     hold.execute_batch("BEGIN IMMEDIATE").unwrap();
     fixture.owner.signal(libc::SIGTERM);
     fixture.wait_listener_closed().await;
     fixture.owner.signal(libc::SIGTERM);
-    let status = fixture.owner.exited().await;
-    assert_eq!(status.code(), Some(1));
-
+    assert!(fixture.owner.child.try_wait().unwrap().is_none());
     hold.execute_batch("ROLLBACK").unwrap();
-    crate::test_watchdog::watchdog("tests/termination_signals.rs: second_signal_forces_without_waiting_for_blocked_database_cleanup", async {
-        while unsafe { libc::kill(-native, 0) } == 0 {
-            sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("forced exit left its known native process group alive");
+    assert!(fixture.owner.exited().await.success());
+    fixture.assert_graceful();
     fixture.owner.native_group = None;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

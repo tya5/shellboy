@@ -15,7 +15,6 @@ pub(super) struct Query {
     pub visible: bool,
     pub epoch: u64,
     pub render_width: u16,
-    pub language: crate::config::UiLanguage,
     pub tool_scope: Option<ToolObservation>,
     pub known: Vec<KnownSubmission>,
 }
@@ -47,15 +46,15 @@ fn reported_context_usage(usage: Option<&Value>) -> crate::ui::ContextUsage {
 
 #[allow(clippy::too_many_arguments)]
 async fn read_current(
-    control: &Control,
+    ui: &crate::config::Ui,
     owner: &Owner<'_>,
     thread: &str,
     render_width: u16,
-    language: crate::config::UiLanguage,
     known: &[KnownSubmission],
     mut tool_scope: Option<ToolObservation>,
     stop: CancellationToken,
 ) -> Result<Current, ApiError> {
+    let language = ui.language;
     if tool_scope
         .as_ref()
         .is_some_and(|scope| scope.nodes.len() > TOOL_SCOPE_NODES)
@@ -77,11 +76,10 @@ async fn read_current(
         })
         .unwrap_or_default();
     let page = history_reader::read_page(
-        control,
+        language,
         owner,
         render_width,
         known,
-        history_reader::Metadata::Window,
         history_reader::window_args(thread, Anchor::Tail, 49, 0, pinned),
         None,
         |items| 0..items.len(),
@@ -109,7 +107,7 @@ async fn read_current(
     }
     let received = Some(received::read_native(owner, &page, render_width, language).await?);
     let activity =
-        activity::project_native(control, owner, thread, details.activity().cloned(), stop).await?;
+        activity::project_native(ui, owner, thread, details.activity().cloned(), stop).await?;
     Ok(Current {
         details: details.prepare_for_ui(language),
         page,
@@ -123,7 +121,7 @@ async fn read_current(
 
 pub(super) async fn run(
     query: Query,
-    control: Arc<Control>,
+    ui: crate::config::Ui,
     updates: impl UpdateTarget + Send + 'static,
     sender: mpsc::Sender<BackgroundResult>,
     stop: CancellationToken,
@@ -139,7 +137,6 @@ pub(super) async fn run(
         visible,
         epoch,
         render_width,
-        language,
         tool_scope,
         known,
     } = query;
@@ -164,9 +161,9 @@ pub(super) async fn run(
             let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(Err(error)),epoch,generation:Some(generation)}).await;
             return;
         };
-        let current = read_current(&control, &owner, &thread, render_width, language, &known, tool_scope, stop.clone()).await;
+        let current = read_current(&ui, &owner, &thread, render_width, &known, tool_scope, stop.clone()).await;
         drop(_progress_permit);
-        let result=async {
+        let result: Result<activity::Projection, ApiError>=async {
             let Current {details, page, before_cursor, received, activity, context_usage, mut tool_scope} = current?;
             let Page {mut nodes, info, ..} = page;
             let page_len=nodes.len();
@@ -189,7 +186,6 @@ pub(super) async fn run(
             }).await;
             Ok(activity)
         }.await;
-        let result=checked_storage(&control,result).await;
         if let Err(error)=&result {
             if let Some(revision)=tool_revision {
                 update(&updates,UiUpdate::ToolFacts {thread_id:thread.clone(),generation,revision,result:Err(error.to_string())}).await;
@@ -252,11 +248,10 @@ mod tests {
                     visible: true,
                     epoch: 0,
                     render_width: 80,
-                    language: crate::config::UiLanguage::Ja,
                     tool_scope,
                     known: Vec::new(),
                 },
-                control.clone(),
+                control.store.config.ui.clone(),
                 updates,
                 sender,
                 CancellationToken::new(),
@@ -656,7 +651,7 @@ mod tests {
         };
         let cancelled = CancellationToken::new();
         cancelled.cancel();
-        let error = activity::read_cancellable(&control, &native, "t", cancelled)
+        let error = activity::read_cancellable(&control.store.config.ui, &native, "t", cancelled)
             .await
             .err()
             .unwrap();
@@ -678,7 +673,12 @@ mod tests {
                 .unwrap();
             let initial = crate::test_watchdog::watchdog(
                 "initial activity saved pause",
-                activity::read_cancellable(&control, &native, "t", CancellationToken::new()),
+                activity::read_cancellable(
+                    &control.store.config.ui,
+                    &native,
+                    "t",
+                    CancellationToken::new(),
+                ),
             )
             .await;
             drop(release);
@@ -700,11 +700,10 @@ mod tests {
                         visible: true,
                         epoch: 0,
                         render_width: 80,
-                        language: crate::config::UiLanguage::Ja,
                         tool_scope: None,
                         known: Vec::new(),
                     },
-                    control.clone(),
+                    control.store.config.ui.clone(),
                     updates,
                     sender,
                     CancellationToken::new(),
@@ -792,11 +791,10 @@ mod tests {
                     visible: true,
                     epoch: 0,
                     render_width: 80,
-                    language: crate::config::UiLanguage::Ja,
                     tool_scope: None,
                     known: Vec::new(),
                 },
-                control.clone(),
+                control.store.config.ui.clone(),
                 updates,
                 sender,
                 CancellationToken::new(),

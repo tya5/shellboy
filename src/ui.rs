@@ -93,8 +93,8 @@ pub use threads::ThreadDisplayTime;
 use view::{NavEvent, ReadEvent};
 pub use view::{Navigation, ThreadView};
 pub use watch::{
-    BrowserMode, CompletionIdentity, DescendantCount, PreparedWatchDetail, WatchActionTarget,
-    WatchPageInfo, WatchSummary,
+    BrowserMode, DescendantCount, PreparedWatchDetail, WatchActionTarget, WatchPageInfo,
+    WatchSummary,
 };
 
 use crossterm::{
@@ -513,7 +513,6 @@ pub enum UiAction {
         request_id: u64,
         args: ThreadDeleteArgs,
         execute: bool,
-        known_thread_ids: Vec<String>,
     },
     ManagementIntent {
         context: ManagementContext,
@@ -665,6 +664,7 @@ pub enum UiAction {
         draft_id: String,
         revision: u64,
         node_id: String,
+        thread_id: String,
         expected_revision: u64,
     },
     LoadHistoryWindow {
@@ -690,8 +690,6 @@ pub enum UiAction {
         mode: BrowserMode,
         archived: crate::protocol::ArchivedFilter,
         descendant_root: Option<String>,
-        seen_completions: Vec<CompletionIdentity>,
-        seen_history_limited: bool,
     },
     SelectThread {
         thread_id: String,
@@ -1014,6 +1012,7 @@ pub enum UiUpdate {
         details: ThreadDetails,
         draft: Option<DraftSnapshot>,
     },
+    OwnerDisconnected(ApiError),
     StorageFailed {
         thread_id: String,
         message: String,
@@ -1032,7 +1031,12 @@ pub enum UiUpdate {
         revision: u64,
         node_id: String,
     },
+    DraftSourceSaved {
+        draft_id: String,
+        source: crate::draft::RestoredSource,
+    },
     RestoredSnapshot {
+        source: crate::draft::RestoredSource,
         draft_id: String,
         revision: u64,
         expected_revision: u64,
@@ -1257,7 +1261,6 @@ pub struct ManagementView {
 pub enum ThreadDeletionReply {
     Preview(serde_json::Value, chrono::DateTime<chrono::Utc>),
     Deleted(Vec<String>),
-    DeletedWithWarning { ids: Vec<String>, warning: String },
 }
 #[derive(Clone, Debug)]
 enum Confirmation {
@@ -3487,8 +3490,20 @@ impl UiState {
                     view.observe_sent_nodes();
                 }
             }
+            UiUpdate::DraftSourceSaved { draft_id, source } => {
+                for view in self
+                    .views
+                    .values_mut()
+                    .filter(|view| view.draft.draft_id == draft_id)
+                {
+                    if view.draft.restored_source.as_ref() == Some(&source) {
+                        view.draft.restored_source = None;
+                    }
+                }
+            }
             UiUpdate::RestoredSnapshot {
                 draft_id,
+                source,
                 revision,
                 expected_revision,
                 text,
@@ -3502,6 +3517,7 @@ impl UiState {
                     && view.pending.contains_key(&revision)
                 {
                     view.on_restored_snapshot(revision, expected_revision, text, attachments);
+                    view.draft.restored_source = Some(source);
                 }
             }
             UiUpdate::LoadFailed {
@@ -3612,6 +3628,12 @@ impl UiState {
                 if !view.on_receipt(draft_id, revision, thread_id, status, message) {
                     return;
                 }
+            }
+            UiUpdate::OwnerDisconnected(error) => {
+                let text = format!("{:?}: {}. /reconnect | /quit", error.code, error.message);
+                self.active_view_mut().status = text;
+                self.active_view_mut()
+                    .promote_status_notice(history_interaction::NoticeKind::Failure);
             }
             UiUpdate::Status { thread_id, text } => {
                 if let Some(thread_id) = thread_id {
@@ -4327,6 +4349,9 @@ impl UiState {
                         || !view.pending.is_empty())
             })
             .map(|(key, view)| ThreadSummary {
+                descendants: None,
+                activity_detail: None,
+                latest_completion: None,
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
                 awaiting_named_count_exact: true,
@@ -5336,11 +5361,13 @@ cursor: None,
                 };
                 if let Some(pending) = self.view().pending.get(&revision)
                     && let Some(node_id) = &pending.source_node_id
+                    && let Some(thread_id) = thread_id.clone()
                 {
                     return vec![UiAction::RestoreSnapshot {
                         draft_id: pending.snapshot.draft_id.clone(),
                         revision,
                         node_id: node_id.clone(),
+                        thread_id,
                         expected_revision: self.view().draft.revision,
                     }];
                 }

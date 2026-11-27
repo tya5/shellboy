@@ -26,6 +26,9 @@ fn list(ui: &mut UiState, ids: &[&str]) {
             .iter()
             .enumerate()
             .map(|(position, id)| ThreadSummary {
+                descendants: None,
+                activity_detail: None,
+                latest_completion: None,
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
                 awaiting_named_count_exact: true,
@@ -200,6 +203,9 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
         generation: old,
         requested_cursor: None,
         threads: vec![ThreadSummary {
+            descendants: None,
+            activity_detail: None,
+            latest_completion: None,
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_named_count_exact: true,
@@ -369,35 +375,6 @@ fn images_in_an_edit_fork_draft_are_owned_by_the_source_thread_for_deletion() {
     });
     assert_ne!(ui.view().draft.draft_id, draft_id);
     assert!(ui.view().draft.edit.is_none());
-}
-
-#[test]
-fn cleanup_warning_preserves_applied_deletion_and_moves_current_to_editable_draft() {
-    let mut ui = ui();
-    ui.select_thread("chosen".into());
-    list(&mut ui, &["chosen"]);
-    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
-    accept(&mut ui, id, &args, true);
-    let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
-    ui.apply(UiUpdate::ThreadDeletion {
-        request_id: id,
-        args,
-        execute: true,
-        result: Ok(ThreadDeletionReply::DeletedWithWarning {
-            ids: vec!["chosen".into()],
-            warning: "fixture saved-view cleanup failure".into(),
-        }),
-    });
-    assert!(ui.view().thread_id.is_none());
-    assert!(!ui.threads_visible());
-    assert!(
-        ui.view()
-            .status
-            .contains("削除しました。後片付けに失敗しました")
-    );
-    assert!(!ui.view().status.contains("削除できません"));
-    ui.insert("fresh", false);
-    assert_eq!(ui.view().draft.text, "fresh");
 }
 
 #[test]

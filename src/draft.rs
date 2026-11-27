@@ -41,6 +41,12 @@ pub struct EditRequestTarget {
     pub node_id: String,
     pub run_id: Option<String>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RestoredSource {
+    pub message_id: String,
+    pub selection_revision: u64,
+}
+
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -55,6 +61,9 @@ pub struct DraftSnapshot {
     /// Contiguous manually entered prefix in bytes; never restored from storage.
     #[serde(skip)]
     pub typed_prefix: usize,
+    /// Client-only fence for reconstructed input until its first durable save.
+    #[serde(skip)]
+    pub restored_source: Option<crate::draft::RestoredSource>,
     #[serde(default)]
     pub edit: Option<EditRequestTarget>,
 }
@@ -69,6 +78,7 @@ impl Default for DraftSnapshot {
             folds: Vec::new(),
             literal_paste: false,
             typed_prefix: 0,
+            restored_source: None,
             edit: None,
         }
     }
@@ -88,6 +98,32 @@ fn invalid() -> ApiError {
         "Draft attachment positions or source elements are inconsistent; retain the draft and inspect its source",
     )
 }
+pub(crate) fn submission_input(
+    draft: &DraftSnapshot,
+) -> Result<
+    (
+        crate::attachments::DraftContent,
+        Vec<crate::attachments::AttachmentInput>,
+    ),
+    ApiError,
+> {
+    let (content, ordered) = decode(&draft.text, draft.attachments.clone())?;
+    let files = ordered
+        .into_iter()
+        .map(|attachment| {
+            let kind =
+                crate::protocol::AttachmentKind::parse(&attachment.kind).ok_or_else(|| {
+                    ApiError::new(ErrorCode::InvalidArgument, "Unknown draft attachment kind")
+                })?;
+            Ok(crate::attachments::AttachmentInput {
+                path: attachment.path,
+                kind,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    Ok((content, files))
+}
+
 pub(crate) fn decode(
     text: &str,
     mut attachments: Vec<UiAttachment>,

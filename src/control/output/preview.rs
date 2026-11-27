@@ -1,7 +1,9 @@
 //! Bounded, indexed retained-output suffixes for previews and shell.read.
 use super::*;
+#[cfg(test)]
 pub(crate) mod live;
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PreviewLimits {
     pub bytes: usize,
@@ -11,7 +13,9 @@ pub(crate) struct PreviewLimits {
 pub(crate) struct PreviewPage {
     pub stdout: String,
     pub stderr: String,
+    #[cfg(test)]
     pub raw_bytes: usize,
+    #[cfg(test)]
     pub inspected_rows: usize,
     pub skipped: bool,
     pub decode_uncertain: bool,
@@ -91,6 +95,7 @@ fn suffix_fragments(
     Ok((pieces, start))
 }
 
+#[cfg(test)]
 fn suffix(
     db: &Connection,
     execution: &str,
@@ -258,6 +263,7 @@ fn boundary_cut(bytes: &[u8], start: usize, encoding: &'static Encoding) -> (usi
     }
     (cut, uncertain)
 }
+#[cfg(test)]
 fn decode(bytes: &[u8], start: usize, encoding: &'static Encoding) -> (String, bool, bool) {
     let (cut, uncertain) = boundary_cut(bytes, start, encoding);
     let (text, errors) = encoding.decode_without_bom_handling(&bytes[cut..]);
@@ -265,6 +271,7 @@ fn decode(bytes: &[u8], start: usize, encoding: &'static Encoding) -> (String, b
 }
 
 /// Own one finite snapshot. The caller opens this connection read-only/query_only.
+#[cfg(test)]
 pub(crate) fn preview_tail(
     db: &Connection,
     execution: &str,

@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Agent Guide](agent-guide.md) · [Configuration](configuration.md)
 
-`chat` is the interactive line client (see [Interactive chat client](#interactive-chat-client-242)). Conversation/execution-control subcommands send local RPC to an already running owner; they never start it automatically. `shellboy` without arguments starts the TUI owner in an interactive terminal. The owner tables below describe the current operations and `attach` alias in `src/cli.rs` / `src/protocol.rs`. `protocol schema`, `docs`, `startup` and `rag` are standalone commands requiring no owner; see [retrieving guides](docs.md) and [document/history search](rag.md) for syntax/results. The model has one tool, shell; these commands run inside that shell.
+`chat` is the interactive line client (see [Interactive chat client](#interactive-chat-client-242)). Conversation/execution-control subcommands send local RPC to an already running owner; they never start it automatically. `shellboy` without arguments attaches its TUI to the selected local owner in an interactive terminal, or starts detached `serve` if no owner is running. The owner tables below describe the current operations and `attach` alias in `src/cli.rs` / `src/protocol.rs`. `protocol schema`, `docs`, `startup` and `rag` are standalone commands requiring no owner; see [retrieving guides](docs.md) and [document/history search](rag.md) for syntax/results. The model has one tool, shell; these commands run inside that shell.
 
 ## Standalone commands
 
@@ -1109,7 +1109,7 @@ Windows CTRL_BREAK is not a shutdown interface. No duration guarantee is made.
 
 The directory is required for shutdown too; inherited endpoint variables cannot
 select another owner. Requests are pinned to the observed instance, and a stale
-instance cannot stop a restarted owner. TUI owners reject this command. Existing
+instance cannot stop a restarted owner. Existing
 local IPC/OS access is the authority, not sender-label or a human approval claim.
 Owner replacement does not transfer work or reconnect a UI. Native ownership and
 failure-boundary qualification is tracked in issue #5; use disposable directories
@@ -1396,3 +1396,11 @@ revision links, even if the owner collected the submitted body. This does not
 restore, send, or retry input. Lists default to 50 items (`--limit` accepts
 1 through 200); pass `next_cursor` as `--cursor` with the same Thread and kind
 on the same owner. The list is live, not a frozen snapshot.
+
+### Thread work groups
+
+`thread list --state awaiting_you` selects Threads with pending human replies,
+after excluding recovery and failed Threads. `--state active_work` selects the
+remaining Threads with a live or stopping Run; `--state other_work` selects the
+rest. Each filter pages in the normal updated order. An empty page with a cursor
+still has more candidates to examine.

@@ -17,24 +17,34 @@ pub(super) struct DraftSaver {
 }
 impl DraftSaver {
     pub(super) fn new(
-        control: Arc<Control>,
+        owner: native_history::Owner<'_>,
+        language: UiLanguage,
         results: mpsc::Sender<BackgroundResult>,
         disconnected: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         use std::sync::atomic::Ordering;
-        let language = control.store.config.ui.language;
+        let data_dir = owner.data_dir.to_path_buf();
+        let instance = owner.instance.to_owned();
         let (sender, mut receiver) = mpsc::channel::<Snapshot>(32);
         let worker = tokio::spawn(async move {
+            let owner = native_history::Owner {
+                data_dir: &data_dir,
+                instance: &instance,
+            };
             let mut failure = None;
             let mut refused_anchors = HashMap::new();
             while let Some((thread, draft, anchor, follow)) = receiver.recv().await {
+                let restored = draft
+                    .restored_source
+                    .clone()
+                    .map(|source| (draft.draft_id.clone(), source));
                 let result = if disconnected.load(Ordering::Acquire) {
                     Err(ApiError::new(
                         ErrorCode::AppNotRunning,
                         "Composer is disconnected; draft kept",
                     ))
                 } else {
-                    save_draft(&control, thread.clone(), draft, anchor.clone(), follow).await
+                    save_draft(&owner, thread.clone(), draft, anchor.clone(), follow).await
                 };
                 match &result {
                     Ok(()) => {
@@ -69,6 +79,7 @@ impl DraftSaver {
                 let _ = results
                     .send(BackgroundResult::DraftSaved {
                         thread_id: thread,
+                        restored,
                         anchor,
                         result,
                     })
@@ -203,9 +214,6 @@ impl DraftSaver {
             );
         }
     }
-    pub(super) fn threads(&self) -> impl Iterator<Item = &String> {
-        self.backlog.keys()
-    }
     pub(super) fn forget_threads(&mut self, deleted: &HashSet<String>) {
         self.backlog.retain(|thread, _| !deleted.contains(thread));
     }
@@ -269,7 +277,12 @@ mod tests {
                     crate::frontend::control_tests::fixture_with_language(language).await
                 };
                 let (results, _incoming) = mpsc::channel(1);
-                let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+                let mut saver = DraftSaver::new(
+                    selected_owner(&control),
+                    control.store.config.ui.language,
+                    results,
+                    Default::default(),
+                );
                 saver.worker.abort();
                 crate::test_watchdog::watchdog(
                     "draft worker receiver closes",
@@ -290,6 +303,7 @@ mod tests {
                         text: format!("draft {index}: 日本語 🦀 e\u{301}（原文）"),
                         cursor: 5,
                         typed_prefix: 2,
+                        restored_source: None,
                         ..Default::default()
                     };
                     originals.insert(
@@ -403,7 +417,12 @@ mod tests {
     async fn full_backlog_distinguishes_stopped_worker_before_and_after_pump() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let (results, _incoming) = mpsc::channel(1);
-        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+        let mut saver = DraftSaver::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            results,
+            Default::default(),
+        );
         for number in 0..64 {
             assert!(saver.enqueue(
                 format!("thread-{number}"),
@@ -486,7 +505,7 @@ mod tests {
         };
         let thread = "thread".to_owned();
         save_draft(
-            &control,
+            &selected_owner(&control),
             thread.clone(),
             draft.clone(),
             ViewAnchor::default(),
@@ -499,7 +518,7 @@ mod tests {
             control.store.operation_epoch.current()
         );
         compose_call::<serde_json::Value>(
-            &control,
+            &selected_owner(&control),
             Command::DraftSubmit(Box::new(DraftSubmitArgs {
                 thread_id: Some(thread.clone()),
                 expected_thread_revision: Some(0),
@@ -520,7 +539,12 @@ mod tests {
         .await
         .unwrap();
         let (results, mut incoming) = mpsc::channel(1);
-        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+        let mut saver = DraftSaver::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            results,
+            Default::default(),
+        );
         assert!(saver.enqueue(thread.clone(), draft, ViewAnchor::default(), true, true));
         let worker = saver.finish().await;
         crate::test_watchdog::watchdog("obsolete save does not fail shutdown", worker)
@@ -530,7 +554,7 @@ mod tests {
             .unwrap();
         assert!(incoming.recv().await.is_none());
         let state: DraftState = compose_call(
-            &control,
+            &selected_owner(&control),
             Command::DraftGet(DraftGetArgs {
                 thread_id: Some(thread),
                 operation_id: None,
@@ -553,7 +577,12 @@ mod tests {
     async fn successful_same_thread_save_supersedes_refused_anchor_at_quit() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let (results, mut incoming) = mpsc::channel(4);
-        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+        let mut saver = DraftSaver::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            results,
+            Default::default(),
+        );
         let mut draft = DraftSnapshot {
             text: "retained input".into(),
             ..Default::default()
@@ -618,7 +647,12 @@ mod tests {
             );
         }
         assert!(!updates.main_ready());
-        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+        let mut saver = DraftSaver::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            results,
+            Default::default(),
+        );
         saver.enqueue(
             "thread".into(),
             DraftSnapshot {
@@ -667,7 +701,12 @@ mod tests {
     async fn closed_worker_projects_one_failure_across_ticks_and_keeps_newest_snapshot() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let (results, _incoming) = mpsc::channel(1);
-        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+        let mut saver = DraftSaver::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            results,
+            Default::default(),
+        );
         saver.worker.abort();
         crate::test_watchdog::watchdog("src/frontend/draft_saver.rs: closed_worker_projects_one_failure_across_ticks_and_keeps_newest_snapshot", saver.sender.closed())
             .await
@@ -779,7 +818,12 @@ mod tests {
     async fn closed_worker_reports_its_unsaved_owner_and_cannot_return_success_on_shutdown() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let (results, _incoming) = mpsc::channel(1);
-        let mut saver = DraftSaver::new(control.clone(), results, Default::default());
+        let mut saver = DraftSaver::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            results,
+            Default::default(),
+        );
         saver.worker.abort();
         crate::test_watchdog::watchdog("src/frontend/draft_saver.rs: closed_worker_reports_its_unsaved_owner_and_cannot_return_success_on_shutdown", saver.sender.closed())
             .await

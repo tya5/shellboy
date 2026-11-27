@@ -5,7 +5,9 @@ use crate::config::UiLanguage;
 use crate::ui::text_width::glyphs;
 use serde_json::Value;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum Outcome {
     Adopted,
     /// Proactive attempt found no safe target (`no_target`/`no_safe_reduction`).
@@ -15,12 +17,24 @@ pub enum Outcome {
     Unknown,
 }
 /// Summary request tokens: a known sum, and whether some requests reported none.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 pub struct Amount {
     pub known: Option<u64>,
     pub partial: bool,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum After {
     /// No later model request has started yet.
     Pending,
@@ -28,7 +42,9 @@ pub enum After {
     Unreported,
     Tokens(u64),
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct MarkerFacts {
     pub automatic: bool,
     pub outcome: Outcome,

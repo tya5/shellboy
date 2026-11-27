@@ -48,7 +48,8 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         settings(Some("renamed"), None, None),
         settings(None, Some("next-model"), Some(cwd.to_string_lossy().into())),
     ] {
-        let request = frontend::operation(&control, Command::ThreadSet(Box::new(args.clone())));
+        let request = frontend::selected_owner(&control)
+            .operation(Command::ThreadSet(Box::new(args.clone())));
         let response = control.request(request.clone()).await;
         assert!(response.ok, "{response:?}");
         assert!(
@@ -92,10 +93,11 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
     // Existing no-op revision behavior remains a commit and notification.
     assert!(
         control
-            .request(frontend::operation(
-                &control,
-                Command::ThreadSet(Box::new(settings(Some("renamed"), None, None)))
-            ))
+            .request(
+                frontend::selected_owner(&control).operation(Command::ThreadSet(Box::new(
+                    settings(Some("renamed"), None, None)
+                )))
+            )
             .await
             .ok
     );
@@ -105,10 +107,9 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
     invalid.connection = Some("missing".into());
     assert!(
         !control
-            .request(frontend::operation(
-                &control,
-                Command::ThreadSet(Box::new(invalid))
-            ))
+            .request(
+                frontend::selected_owner(&control).operation(Command::ThreadSet(Box::new(invalid)))
+            )
             .await
             .ok
     );
@@ -126,16 +127,16 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
     // Real SQLite failure rolls back and cannot return a notification effect.
     // Call the Store boundary directly: Control's fatal-save policy is tested
     // elsewhere and deliberately stops runs, unlike a settings notification.
-    let failed = control
-        .store
-        .execute(
-            frontend::operation(
-                &control,
-                Command::ThreadSet(Box::new(settings(Some("must not persist"), None, None))),
-            ),
-            None,
-        )
-        .await;
+    let failed =
+        control
+            .store
+            .execute(
+                frontend::selected_owner(&control).operation(Command::ThreadSet(Box::new(
+                    settings(Some("must not persist"), None, None),
+                ))),
+                None,
+            )
+            .await;
     assert_eq!(
         failed.unwrap_err().code,
         crate::protocol::ErrorCode::SaveFailed

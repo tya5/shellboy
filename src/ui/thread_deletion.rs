@@ -152,24 +152,10 @@ impl DeletionDialog {
 }
 impl UiState {
     fn deletion_action(&self, dialog: &DeletionDialog, execute: bool) -> UiAction {
-        let mut known = self
-            .views
-            .values()
-            .filter_map(|view| view.thread_id.clone())
-            .chain(
-                self.thread_browser
-                    .items()
-                    .iter()
-                    .filter(|thread| !thread.thread_id.starts_with("draft:"))
-                    .map(|thread| thread.thread_id.clone()),
-            )
-            .collect::<BTreeSet<_>>();
-        known.insert(dialog.args.thread_id.clone());
         UiAction::ThreadDeletion {
             request_id: dialog.request_id,
             args: dialog.args.clone(),
             execute,
-            known_thread_ids: known.into_iter().collect(),
         }
     }
     pub(super) fn begin_thread_deletion(&mut self, thread: String) -> Vec<UiAction> {
@@ -297,20 +283,6 @@ impl UiState {
         if execute && self.thread_deletions_inflight.get(&args.thread_id) == Some(&request_id) {
             self.thread_deletions_inflight.remove(&args.thread_id);
         }
-        let result = match result {
-            Ok(ThreadDeletionReply::DeletedWithWarning { ids, warning }) if execute => {
-                self.remove_deleted_threads(&ids);
-                let message = match self.config.ui.language {
-                    UiLanguage::En => format!("Deleted, but cleanup failed: {warning}"),
-                    UiLanguage::Ja => format!("削除しました。後片付けに失敗しました: {warning}"),
-                };
-                self.thread_browser.notice(message.clone());
-                self.active_view_mut().status = message;
-                self.dirty = true;
-                return;
-            }
-            other => other,
-        };
         let matches = matches!(&self.confirmation,Some(Confirmation::ThreadDeletion(dialog)) if dialog.matches(request_id,&args));
         match result {
             Ok(ThreadDeletionReply::Deleted(ids)) if execute => {

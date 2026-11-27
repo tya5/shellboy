@@ -239,12 +239,12 @@ async fn read_observation(
 }
 
 pub(super) async fn list(
-    data_dir: &std::path::Path,
+    owner: &native_history::Owner<'_>,
     language: UiLanguage,
     thread: String,
     cursor: Option<String>,
 ) -> Result<(String, Vec<crate::presentation::PresentationField>), ApiError> {
-    list::read(data_dir, language, thread, cursor).await
+    list::read(owner, language, thread, cursor).await
 }
 
 #[cfg(test)]
@@ -572,7 +572,8 @@ mod tests {
         let (rpc, receive) = tokio::sync::mpsc::channel(16);
         let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
         tokio::spawn(control.clone().serve(receive));
-        let list_page = |cursor| list(&owner.loaded.data_dir, UiLanguage::En, "t".into(), cursor);
+        let native = selected_owner(&control);
+        let list_page = |cursor| list(&native, UiLanguage::En, "t".into(), cursor);
         let (tx, rx) = std::sync::mpsc::sync_channel(8);
         refresh(
             &control,
@@ -823,10 +824,15 @@ mod tests {
                     .iter()
                     .any(|field| field.key == "/source_node_id" && field.value == "audit")
             );
-            let window = super::super::history_reader::HistoryReader::new(&control, &tx, 80)
-                .node("audit".into(), 5, "t")
-                .await
-                .unwrap();
+            let window = super::super::history_reader::HistoryReader::new(
+                selected_owner(&control),
+                control.store.config.ui.language,
+                &tx,
+                80,
+            )
+            .node("audit".into(), 5, "t")
+            .await
+            .unwrap();
             assert_eq!(
                 window.presentation.requires_attention(),
                 attention,
