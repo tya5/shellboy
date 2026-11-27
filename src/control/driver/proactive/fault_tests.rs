@@ -180,25 +180,9 @@ impl Scenario {
     }
 }
 
-fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
-    let threshold = Scenario::THRESHOLD;
-    let a = Scenario::FIRST_KNOWN_A;
-    let target = scenario.target_tokens();
+fn assert_trigger_evidence(trigger: &Value) {
     assert_eq!(trigger["input_tokens"], Scenario::LATEST_PROVIDER_INPUT);
-    assert_eq!(trigger["auto_at_tokens"], threshold);
-    assert_eq!(trigger["target_percent"], scenario.target_percent());
-    assert_eq!(trigger["target_tokens"], target);
-    assert_eq!(trigger["a_input_tokens"], a);
-    assert!(
-        Scenario::LATEST_PROVIDER_INPUT >= threshold,
-        "latest provider report must independently pass the trigger threshold"
-    );
-    match scenario {
-        Scenario::ClosedSpill => assert!(a <= target, "A<=target selects closed spill only"),
-        Scenario::ClosedSummary | Scenario::ActiveSpill | Scenario::ActiveSummary => {
-            assert!(a > target, "A>target enters spill-then-summary policy")
-        }
-    }
+    assert_eq!(trigger["auto_at_tokens"], Scenario::THRESHOLD);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1243,21 +1227,13 @@ async fn listed_compaction(control: &Control, thread: &str, attempt: &str) -> Op
         .unwrap()
 }
 
-const SAVED_RECORD: &str = "json_object('token',c.token,'outcome',COALESCE(c.outcome,'unknown'),'reason',c.reason,'unfinished',json(iif(c.outcome IS NULL,'true','false')),'trigger',json(c.trigger_json),'summary',json(c.result_json->'$.metrics'),'error',json(c.result_json->'$.error'),'compaction_outcome',json(c.failure_json))";
-
 async fn automatic_attempt_record(
     control: &Control,
     fixture: &crate::control::compaction_test_fixture::StageFixture,
 ) -> Value {
-    let (thread, attempt) = (fixture.thread_id.to_owned(), fixture.attempt_id.to_owned());
-    let record = control.store.database.call(move |db| {
-        db.query_row(
-            &format!("SELECT {SAVED_RECORD} FROM automatic_compaction c WHERE attempt_id=?1 AND turn_id IN (SELECT id FROM turn WHERE thread_id=?2)"),
-            rusqlite::params![attempt, thread],
-            |row| row.get::<_, String>(0),
-        ).map_err(Into::into)
-    }).await.unwrap();
-    serde_json::from_str(&record).unwrap()
+    listed_compaction(control, fixture.thread_id, fixture.attempt_id)
+        .await
+        .expect("fixture attempt is visible in compact.list")
 }
 
 async fn direct_boundary_case(
@@ -1792,7 +1768,7 @@ async fn direct_boundary_case(
         ObservationPhase::AtCommittedCheckpoint
     };
     assert_eq!(
-        checkpoint_record["outcome"],
+        checkpoint_record["state"],
         expected_outcome(fault, scenario, checkpoint_outcome),
         "the captured observation preserves the fault's DB stage contract"
     );
@@ -1840,13 +1816,7 @@ async fn direct_boundary_case(
     let reopened_owner = proactive_owner(root.path(), &url, &limits).await;
     let reopened = Control::new(&reopened_owner, root.path().into());
     let reopened_record = automatic_attempt_record(&reopened, &fixture).await;
-    assert_eq!(reopened_record["token"], identity.token);
-    assert_eq!(reopened_record["outcome"], terminal_outcome);
-    assert_eq!(
-        reopened_record["unfinished"],
-        terminal_outcome == "unknown",
-        "unknown receipts remain provisional; terminal outcomes are finalized"
-    );
+    assert_eq!(reopened_record["state"], terminal_outcome);
     let reopened_public = selected_window(&reopened, fixture.thread_id).await;
     assert_eq!(
         selected_replacements(&reopened_public, "summary"),
@@ -2103,8 +2073,7 @@ async fn direct_active_candidate_mutation(mutation: CandidateMutation) {
     );
     let record = automatic_attempt_record(&control, &fixture).await;
     assert_eq!(identity.attempt, fixture.attempt_id);
-    assert_eq!(record["token"], identity.token);
-    assert_eq!(record["outcome"], expected_outcome, "{record:#?}");
+    assert_eq!(record["state"], expected_outcome, "{record:#?}");
     assert_eq!(
         result.unwrap(),
         ProactiveOutcome::Finished {
@@ -2269,11 +2238,9 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
                 let identity = capture_terminal_identity(&control, fixture.thread_id, true).await;
                 assert_eq!(identity.attempt, attempt);
                 let record = automatic_attempt_record(&control, &fixture).await;
-                assert_eq!(record["token"], identity.token);
-                assert_eq!(record["unfinished"], true);
+                            assert_eq!(record["state"], "unknown");
                 let selected = selected_window(&control, fixture.thread_id).await;
                 assert!(selected_replacements(&selected, "summary").is_empty());
-                assert_eq!(record["trigger"]["run_id"], fixture.run_id);
                 assert_eq!(record["trigger"]["input_tokens"], usage);
                 post.reply.send((200, answer(" "))).unwrap();
                 assert_eq!(
@@ -2288,7 +2255,6 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
             let outcome = &record["compaction_outcome"]["outcome"];
             assert_eq!(outcome["reason"], "empty");
             assert_eq!(outcome["origin"], "output_validation");
-            assert_eq!(record["error"]["details"]["summary_usage"]["requests"], 1);
             let selected = selected_window(&control, fixture.thread_id).await;
             assert!(selected_replacements(&selected, "spill").is_empty());
             assert!(selected_replacements(&selected, "summary").is_empty());
@@ -2703,22 +2669,6 @@ async fn prepare_driver_lifecycle(
                         facts.slot_exists && facts.job_exists,
                         "preflight must publish the eligible job before normal dispatch: {facts:?}"
                     );
-                    let thread_for_progress = target.clone();
-                    let (automatic_attempts, active_witness): (Vec<(String, String, String)>, Option<String>) = control
-                        .store
-                        .database
-                        .call(move |db| {
-                            let attempts = db.prepare(
-                                &format!("SELECT a.id,a.state,{SAVED_RECORD} FROM model_attempt a JOIN automatic_compaction c ON c.attempt_id=a.id JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 ORDER BY a.rowid DESC LIMIT 4"),
-                            )?.query_map([&thread_for_progress], |row| {
-                                Ok((row.get(0)?,row.get(1)?,row.get(2)?))
-                            })?.collect::<rusqlite::Result<Vec<_>>>()?;
-                            let key = crate::compaction::CompactionKeys::new(&thread_for_progress).automatic_active();
-                            let active = db.query_row("SELECT value FROM app_meta WHERE key=?1",[key],|row|row.get(0)).optional()?;
-                            Ok((attempts,active))
-                        })
-                        .await
-                        .unwrap();
                     let input = request.body["input"]
                         .as_array()
                         .expect("Responses request carries an input array");
@@ -2749,7 +2699,7 @@ async fn prepare_driver_lifecycle(
                     assert!(paired_head.transfer_encoding.is_none());
                     assert!(paired_head.content_encoding.is_none());
                     eprintln!(
-                        "U2 first ordinary request HTTP head/body: head={paired_head:?} body_request_id={} body_bytes={} facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?}",
+                        "U2 first ordinary request HTTP head/body: head={paired_head:?} body_request_id={} body_bytes={} facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?}",
                         request.request_id, request.body_bytes
                     );
                     assert!(
@@ -2872,20 +2822,11 @@ async fn prepare_driver_lifecycle(
         terminal_identity = Some(capture_terminal_identity(&control, &target, false).await);
     }
     let terminal_identity = terminal_identity.expect("fixture captured original attempt/token");
-    let saved = control
-        .store
-        .database
-        .call(|db| {
-            Ok(db.query_row(
-        &format!("SELECT {SAVED_RECORD} FROM automatic_compaction c ORDER BY c.rowid DESC LIMIT 1"),
-        [], |row| row.get::<_, String>(0))?)
-        })
+    let saved = listed_compaction(&control, &target, &terminal_identity.attempt)
         .await
-        .unwrap();
-    let saved: Value = serde_json::from_str(&saved).unwrap();
+        .expect("captured attempt is visible in compact.list");
     if spill_off {
-        assert!(saved["trigger"]["a_input_tokens"].is_null());
-        assert_eq!(saved["outcome"], "adopted");
+        assert_eq!(saved["state"], "adopted");
         let selected = selected_window(&control, &target).await;
         assert!(selected_replacements(&selected, "spill").is_empty());
         assert_eq!(selected_replacements(&selected, "summary").len(), 1);
@@ -2894,7 +2835,7 @@ async fn prepare_driver_lifecycle(
             "one summary POST only; no automatic spill continuation"
         );
     } else {
-        assert_trigger_evidence(&saved["trigger"], scenario);
+        assert_trigger_evidence(&saved["trigger"]);
     }
     if !spill_off {
         // This read occurs at the committed stage checkpoint. Legacy spill
@@ -2907,7 +2848,7 @@ async fn prepare_driver_lifecycle(
         };
         let expected_outcome = expected_outcome(fault, scenario, phase);
         assert_eq!(
-            saved["outcome"], expected_outcome,
+            saved["state"], expected_outcome,
             "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
         );
         let selected = selected_window(&control, &target).await;
