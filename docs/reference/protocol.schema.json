@@ -10808,6 +10808,16 @@
             "null"
           ]
         },
+        "settlement_detail": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellSettlementDetail"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "started_at": {
           "type": [
             "string",
@@ -11256,6 +11266,12 @@
         "execution_id"
       ],
       "type": "object"
+    },
+    "ShellSettlementDetail": {
+      "enum": [
+        "service_endpoint_retirement_failed"
+      ],
+      "type": "string"
     },
     "ShellState": {
       "enum": [
@@ -16318,6 +16334,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "settlement_detail": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellSettlementDetail"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "started_at": {

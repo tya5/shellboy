@@ -596,8 +596,11 @@ async fn failed_grace_owner_does_not_swallow_another_saved_stop() {
         .await
         .unwrap();
     let registering = control.clone();
-    let applying =
-        tokio::spawn(async move { registering.reapply_shell_intent(&execution, &handle).await });
+    let applying = tokio::spawn(async move {
+        registering
+            .reapply_shell_intent(&execution, &handle, None)
+            .await
+    });
     crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: failed_grace_owner_does_not_swallow_another_saved_stop", async {
         while result.receiver_count() < 2 {
             tokio::task::yield_now().await;
@@ -682,7 +685,7 @@ async fn failed_self_stop_owner_does_not_preempt_another_saved_reply_grace() {
         .await
         .unwrap();
     control
-        .reapply_shell_intent(&execution, &handle)
+        .reapply_shell_intent(&execution, &handle, None)
         .await
         .unwrap();
     assert_eq!(

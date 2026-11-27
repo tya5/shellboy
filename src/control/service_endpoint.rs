@@ -35,11 +35,11 @@ impl Publication {
         Ok(Self(file))
     }
 
-    pub(super) fn retire(&self) -> Result<(), ApiError> {
+    pub(super) fn retire(&self) -> Option<crate::protocol::ShellSettlementDetail> {
         match std::fs::remove_file(&self.0) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(_) => Err(retirement_error()),
+            Ok(()) => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) => Some(crate::protocol::ShellSettlementDetail::ServiceEndpointRetirementFailed),
         }
     }
 
@@ -48,44 +48,22 @@ impl Publication {
     }
 }
 
-fn retirement_error() -> ApiError {
-    ApiError::new(
-        ErrorCode::IoFailed,
-        "Could not retire service endpoint runtime file",
-    )
-    .details(serde_json::json!({"reason":"service_endpoint_retirement_failed"}))
-}
-
 /// The DB owner is the sole caller of these transitions. The mutex provides
 /// interior mutability across worker jobs; it is never held across a commit.
 #[derive(Default)]
-pub(super) struct Publications(Mutex<HashMap<String, PublicationState>>);
-
-enum PublicationState {
-    Live(PathBuf),
-    RetirementFailed,
-}
+pub(super) struct Publications(Mutex<HashMap<String, PathBuf>>);
 
 impl Publications {
     pub(super) fn register(&self, id: String, publication: &Publication) {
-        self.0
-            .lock()
-            .unwrap()
-            .insert(id, PublicationState::Live(publication.0.clone()));
+        self.0.lock().unwrap().insert(id, publication.0.clone());
     }
 
     fn live(&self, id: &str) -> Option<PathBuf> {
-        match self.0.lock().unwrap().get(id) {
-            Some(PublicationState::Live(path)) => Some(path.clone()),
-            _ => None,
-        }
+        self.0.lock().unwrap().get(id).cloned()
     }
 
     pub(super) fn revoke(&self, id: &str) {
-        let mut entries = self.0.lock().unwrap();
-        if matches!(entries.get(id), Some(PublicationState::Live(_))) {
-            entries.remove(id);
-        }
+        self.0.lock().unwrap().remove(id);
     }
 
     pub(super) fn commit_revoke<'a>(
@@ -98,28 +76,6 @@ impl Publications {
             self.revoke(id);
         }
         Ok(())
-    }
-
-    pub(super) fn retirement_failed(&self, id: String) {
-        self.0
-            .lock()
-            .unwrap()
-            .insert(id, PublicationState::RetirementFailed);
-    }
-
-    pub(super) fn check_retired<'a>(
-        &self,
-        ids: impl IntoIterator<Item = &'a str>,
-    ) -> Result<(), ApiError> {
-        let entries = self.0.lock().unwrap();
-        if ids
-            .into_iter()
-            .any(|id| matches!(entries.get(id), Some(PublicationState::RetirementFailed)))
-        {
-            Err(retirement_error())
-        } else {
-            Ok(())
-        }
     }
 
     fn settle<T>(&self, id: &str, path: &Path, result: Result<T, ApiError>) -> Result<T, ApiError> {
@@ -270,6 +226,38 @@ fn read_file(path: &Path) -> Result<ServiceEndpoint, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn running_transition_does_not_publish_a_stopping_spawn() {
+        let (_root, owner, control, accepted) =
+            super::super::driver::preparation_tests::fixture("http://127.0.0.1:1/v1").await;
+        let execution = uuid::Uuid::new_v4().to_string();
+        let saved = execution.clone();
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO schedule(id,thread_id,kind,enabled,cwd,command) VALUES('service',?1,'service',0,'.','echo fixture')", [&accepted.thread_id])?;
+            db.execute("INSERT INTO shell_execution(id,schedule_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,'service',?1,'stopping','.','{}','utf-8','utf-8','closed','2020-01-01T00:00:00Z')", [&saved])?;
+            Ok(())
+        }).await.unwrap();
+        let publication = Arc::new(Publication::create(&control, &execution).unwrap());
+        assert!(
+            control
+                .shell_start_intent(&execution, true, Some(publication.clone()))
+                .await
+                .unwrap()
+                .0
+        );
+        assert!(control.publications.live(&execution).is_none());
+        assert_eq!(publication.retire(), None);
+        assert!(
+            control
+                .shell_start_intent(&execution, false, None)
+                .await
+                .unwrap()
+                .0
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
 
     #[test]
     fn stop_commit_revokes_only_the_exact_publication_before_settlement() {

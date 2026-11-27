@@ -1269,7 +1269,7 @@ async fn run_shell(
     ] {
         env.insert(name.into(), value);
     }
-    let (stop, _) = match control.shell_start_intent(&execution, false).await {
+    let (stop, _) = match control.shell_start_intent(&execution, false, None).await {
         Ok(intent) => intent,
         Err(error) => {
             control.origins.lock().await.remove(&origin.token);

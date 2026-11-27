@@ -332,9 +332,9 @@ impl ShellOutputReader {
             let tx = db.transaction().map_err(sql_error)?;
             let db = &tx;
             let mut details = snapshot(db, &execution)?.details;
-            let (command, cwd, thread, turn, forced, signal, confirmed, schedule) = db.query_row(
-                &format!("SELECT json_extract(s.shell_json,'$.command'),s.cwd,{SHELL_THREAD_ID},s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,s.schedule_id {SHELL_THREAD_JOIN} WHERE s.id=?1"),
-                [&execution], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
+            let (command, cwd, thread, turn, forced, signal, confirmed, schedule, settlement_detail) = db.query_row(
+                &format!("SELECT json_extract(s.shell_json,'$.command'),s.cwd,{SHELL_THREAD_ID},s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,s.schedule_id,s.shell_json -> '$.completion.settlement_detail' {SHELL_THREAD_JOIN} WHERE s.id=?1"),
+                [&execution], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get::<_, Option<String>>(8)?)),
             ).map_err(sql_error)?;
             (details.stdin_open,details.stdin_last_write_at)=crate::stdin_facts::read(db,&execution).map_err(sql_error)?;
             details.forced = forced;
@@ -349,6 +349,7 @@ impl ShellOutputReader {
             details.thread_id = Some(thread);
             details.turn_id = turn;
             details.schedule_id = schedule;
+            details.settlement_detail = settlement_detail.as_deref().and_then(|value| serde_json::from_str(value).ok()).flatten();
             tx.commit().map_err(sql_error)?;
             Ok(details)
         }).await
@@ -713,6 +714,7 @@ fn snapshot(db: &Connection, execution: &str) -> Result<Snapshot> {
         .to_owned();
     Ok(Snapshot {
         details: ShellDetails {
+            settlement_detail: None,
             foreground: None,
             stdin_open: None,
             stdin_last_write_at: None,

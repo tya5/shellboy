@@ -2356,7 +2356,14 @@ record!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")]
 // Optional shell fields describe unknown/live lifecycle facts and the internal
 // output-reader snapshot, which deliberately does not load command ownership.
 // They are not an older-owner protocol compatibility contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellSettlementDetail {
+    ServiceEndpointRetirementFailed,
+}
+
 record!(ShellDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")] settlement_detail: Option<ShellSettlementDetail>,
     #[serde(default, skip_serializing_if = "Option::is_none")] foreground: Option<bool>,
     execution_id: String, run_id: Option<String>, state: ShellState, output_complete: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] schedule_id: Option<String>,
