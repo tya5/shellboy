@@ -4101,9 +4101,13 @@
     "HistoryDisplayBlock": {
       "properties": {
         "event_kind": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayText"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "fields": {
@@ -4138,7 +4142,14 @@
     "HistoryDisplayField": {
       "properties": {
         "omitted": {
-          "type": "boolean"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayOmission"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "path": {
           "type": "string"
@@ -4149,6 +4160,9 @@
           },
           "type": "array"
         },
+        "truncated": {
+          "type": "boolean"
+        },
         "value": {
           "type": "string"
         }
@@ -4156,7 +4170,7 @@
       "required": [
         "path",
         "value",
-        "omitted",
+        "truncated",
         "shape"
       ],
       "type": "object"
@@ -4201,7 +4215,7 @@
               "type": "string"
             },
             "reason": {
-              "type": "string"
+              "$ref": "#/definitions/HistoryDisplayText"
             }
           },
           "required": [
@@ -4280,9 +4294,13 @@
               ]
             },
             "reason": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HistoryDisplayText"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           },
@@ -4327,6 +4345,12 @@
           "type": "object"
         }
       ]
+    },
+    "HistoryDisplayOmission": {
+      "enum": [
+        "deep_structure"
+      ],
+      "type": "string"
     },
     "HistoryDisplayOutline": {
       "properties": {
@@ -4580,6 +4604,21 @@
       ],
       "type": "object"
     },
+    "HistoryDisplayText": {
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "HistoryDisplayTool": {
       "properties": {
         "call_id": {
@@ -4589,15 +4628,23 @@
           ]
         },
         "command": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayText"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "description": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayText"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "execution_id": {
@@ -4628,9 +4675,13 @@
           ]
         },
         "status": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryDisplayText"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
