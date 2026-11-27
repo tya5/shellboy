@@ -35,36 +35,57 @@ impl Publication {
         Ok(Self(file))
     }
 
+    pub(super) fn retire(&self) -> Result<(), ApiError> {
+        match std::fs::remove_file(&self.0) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(retirement_error()),
+        }
+    }
+
     pub(super) fn env_value(&self) -> String {
         self.0.to_str().expect("validated endpoint path").to_owned()
     }
 }
 
-impl Drop for Publication {
-    fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_file(&self.0)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            eprintln!("Could not remove service endpoint runtime file");
-        }
-    }
+fn retirement_error() -> ApiError {
+    ApiError::new(
+        ErrorCode::IoFailed,
+        "Could not retire service endpoint runtime file",
+    )
+    .details(serde_json::json!({"reason":"service_endpoint_retirement_failed"}))
 }
 
-/// Revocations and successful reads are ordered at this short, in-memory
-/// boundary. A stop holds it through the DB commit; no filesystem I/O under it.
+/// The DB owner is the sole caller of these transitions. The mutex provides
+/// interior mutability across worker jobs; it is never held across a commit.
 #[derive(Default)]
-pub(super) struct Publications(Mutex<HashMap<String, PathBuf>>);
+pub(super) struct Publications(Mutex<HashMap<String, PublicationState>>);
+
+enum PublicationState {
+    Live(PathBuf),
+    RetirementFailed,
+}
 
 impl Publications {
-    pub(super) fn register(&self, id: &str, publication: &Publication) {
+    pub(super) fn register(&self, id: String, publication: &Publication) {
         self.0
             .lock()
             .unwrap()
-            .insert(id.into(), publication.0.clone());
+            .insert(id, PublicationState::Live(publication.0.clone()));
+    }
+
+    fn live(&self, id: &str) -> Option<PathBuf> {
+        match self.0.lock().unwrap().get(id) {
+            Some(PublicationState::Live(path)) => Some(path.clone()),
+            _ => None,
+        }
     }
 
     pub(super) fn revoke(&self, id: &str) {
-        self.0.lock().unwrap().remove(id);
+        let mut entries = self.0.lock().unwrap();
+        if matches!(entries.get(id), Some(PublicationState::Live(_))) {
+            entries.remove(id);
+        }
     }
 
     pub(super) fn commit_revoke<'a>(
@@ -72,17 +93,37 @@ impl Publications {
         tx: rusqlite::Transaction<'_>,
         ids: impl IntoIterator<Item = &'a str>,
     ) -> rusqlite::Result<()> {
-        let mut live = self.0.lock().unwrap();
         tx.commit()?;
         for id in ids {
-            live.remove(id);
+            self.revoke(id);
         }
         Ok(())
     }
 
+    pub(super) fn retirement_failed(&self, id: String) {
+        self.0
+            .lock()
+            .unwrap()
+            .insert(id, PublicationState::RetirementFailed);
+    }
+
+    pub(super) fn check_retired<'a>(
+        &self,
+        ids: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), ApiError> {
+        let entries = self.0.lock().unwrap();
+        if ids
+            .into_iter()
+            .any(|id| matches!(entries.get(id), Some(PublicationState::RetirementFailed)))
+        {
+            Err(retirement_error())
+        } else {
+            Ok(())
+        }
+    }
+
     fn settle<T>(&self, id: &str, path: &Path, result: Result<T, ApiError>) -> Result<T, ApiError> {
-        let live = self.0.lock().unwrap();
-        if live.get(id).is_some_and(|current| current == path) {
+        if self.live(id).is_some_and(|current| current == path) {
             result
         } else {
             Err(unavailable("service_not_running"))
@@ -130,8 +171,12 @@ fn unavailable(reason: &'static str) -> ApiError {
         .details(serde_json::json!({"reason":reason}))
 }
 
-async fn running(control: &Control, args: ServiceEndpointArgs) -> Result<String, ApiError> {
-    let row = control.store.database.call(move |db| {
+pub(super) async fn read(
+    control: &Control,
+    args: ServiceEndpointArgs,
+) -> Result<ServiceEndpoint, ApiError> {
+    let registry = Arc::clone(&control.publications);
+    let (execution, file) = control.store.database.call(move |db| {
         let selector = if args.service_id.is_some() { "q.id=?1" } else { "q.thread_id=?1 AND q.name=?2" };
         let sql = format!("SELECT CASE WHEN q.enabled AND s.state='running' THEN s.id END
              FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL
@@ -140,25 +185,11 @@ async fn running(control: &Control, args: ServiceEndpointArgs) -> Result<String,
         let key = args.service_id.as_deref().or(args.thread_id.as_deref());
         let parameters = [key, args.name.as_deref()];
         let count = if args.service_id.is_some() { 1 } else { 2 };
-        Ok(db.query_row(&sql, rusqlite::params_from_iter(&parameters[..count]), |row| row.get::<_, Option<String>>(0)).optional()?)
+        let row = db.query_row(&sql, rusqlite::params_from_iter(&parameters[..count]), |row| row.get::<_, Option<String>>(0)).optional()?;
+        let execution = row.ok_or_else(service_not_found)?.ok_or_else(|| unavailable("service_not_running"))?;
+        let file = registry.live(&execution).ok_or_else(|| unavailable("service_not_running"))?;
+        Ok((execution, file))
     }).await.map_err(storage_error)?;
-    row.ok_or_else(service_not_found)?
-        .ok_or_else(|| unavailable("service_not_running"))
-}
-
-pub(super) async fn read(
-    control: &Control,
-    args: ServiceEndpointArgs,
-) -> Result<ServiceEndpoint, ApiError> {
-    let execution = running(control, args).await?;
-    let registry = Arc::clone(&control.publications);
-    let file = registry
-        .0
-        .lock()
-        .unwrap()
-        .get(&execution)
-        .cloned()
-        .ok_or_else(|| unavailable("service_not_running"))?;
     let read_path = file.clone();
     let deadline = tokio::time::Instant::now()
         + Duration::from_millis(control.store.config.io.file_prepare_timeout_ms);
@@ -170,7 +201,13 @@ pub(super) async fn read(
         })
         .await
         .map_err(|_| unavailable("service_endpoint_unavailable"));
-    registry.settle(&execution, &file, value)
+    let registry = Arc::clone(&control.publications);
+    control
+        .store
+        .database
+        .call(move |_| Ok(registry.settle(&execution, &file, value)))
+        .await
+        .map_err(storage_error)?
 }
 
 fn read_file(path: &Path) -> Result<ServiceEndpoint, ApiError> {
@@ -240,8 +277,8 @@ mod tests {
         let pending = Publication(dir.path().join("pending"));
         let live = Publication(dir.path().join("live"));
         let publications = Publications::default();
-        publications.register("retiring", &pending);
-        publications.register("other", &live);
+        publications.register("retiring".into(), &pending);
+        publications.register("other".into(), &live);
         assert_eq!(
             publications.settle("retiring", &pending.0, Ok(5)).unwrap(),
             5
