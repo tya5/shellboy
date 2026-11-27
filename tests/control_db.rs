@@ -1253,7 +1253,7 @@ async fn runtime_intent_is_reserved_once_and_unknown_pending_result_is_not_reexe
     }));
     assert!(matches!(
         store.reserve_runtime(request.clone(), None).await.unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     assert!(matches!(
         store.reserve_runtime(request.clone(), None).await.unwrap(),
@@ -1526,7 +1526,7 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
             .reserve_runtime(runtime.clone(), Some(origin.clone()))
             .await
             .unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     assert!(matches!(
         store
@@ -1624,7 +1624,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
     }));
     assert!(matches!(
         store.reserve_runtime(intent.clone(), None).await.unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     let id = intent.operation_id.clone();
     store
@@ -1999,7 +1999,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
             )
             .await
             .unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     // Real pending reservations and trigger-maintained counters, without a
     // hundreds-of-MiB saved outcome. The chosen row owns only the missing bytes.
@@ -2079,7 +2079,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
             .reserve_runtime(shell_stop.clone(), None)
             .await
             .unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     assert!(matches!(
         store
@@ -2358,7 +2358,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
     }));
     assert!(matches!(
         store.reserve_runtime(pending.clone(), None).await.unwrap(),
-        RuntimeReservation::New
+        RuntimeReservation::New(_)
     ));
     let pressure_id = pending.operation_id.clone();
     store
