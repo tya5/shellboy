@@ -1152,7 +1152,7 @@ async fn from_an_empty_configuration_to_a_first_send_using_only_owner_operations
             call(
                 &control,
                 Command::ConfigSet(ConfigSetArgs {
-                    expected_hash: hash,
+                    expected_hash: Some(hash),
                     changes: vec![
                         shellboy::protocol::ConfigChange {
                             field: "connections.proxy".into(),
@@ -1522,7 +1522,7 @@ async fn live_connections_concurrent_definition_and_key_reach_the_next_http_requ
         let (owner, control) = start(root.path()).await;
         let got = call(&control, Command::ConfigGet(ConfigGetArgs {})).await.unwrap();
         let config = call(&control, Command::ConfigSet(ConfigSetArgs {
-            expected_hash: got["file"]["content_hash"].as_str().unwrap().into(),
+            expected_hash: Some(got["file"]["content_hash"].as_str().unwrap().into()),
             changes: vec![shellboy::protocol::ConfigChange {
                 field:"connections.proxy.request_timeout_ms".into(), value:Some(json!(12345)),
             }],

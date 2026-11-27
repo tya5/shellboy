@@ -21,7 +21,8 @@ pub(super) fn save(
 ) -> super::Result<()> {
     let DraftSaveArgs {
         thread_id: thread,
-        expected_source,
+        expected_source_message,
+        expected_thread_revision,
         draft,
         anchor,
         follow_tail,
@@ -35,12 +36,19 @@ pub(super) fn save(
                 "Draft Thread is not available",
             )
         })?;
-    if let Some(source) = expected_source {
-        if u64::try_from(revision).ok() != Some(source.selection_revision) {
-            return Err(error(ErrorCode::OperationConflict, "Selected history changed")
-                .details(serde_json::json!({"reason":"expected_source_revision_changed", "request_may_have_been_applied":false})));
+    if expected_thread_revision.is_some_and(|expected| u64::try_from(revision).ok() != Some(expected)) {
+        return Err(crate::protocol::ApiError::precondition_changed("thread_revision", Some(serde_json::json!(revision)), "Selected history changed"));
+    }
+    if let Some(message) = expected_source_message {
+        let present: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id
+             WHERE p.thread_id=?1 AND n.id=?2 AND n.deleted_reason IS NULL
+               AND n.kind IN ('user','user_message','message') AND json_extract(n.payload_json,'$.role')='user')",
+            params![thread, message], |row| row.get(0),
+        ).map_err(sql_error)?;
+        if !present {
+            return Err(crate::protocol::ApiError::precondition_changed("source_message", Some(Value::Null), "Original user request is unavailable"));
         }
-        super::message_source(tx, thread, &source.message_id, draft_bytes)?;
     }
     if !follow_tail
         && let Some(node) = anchor.node_id.as_deref()

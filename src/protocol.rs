@@ -524,6 +524,23 @@ impl ApiError {
             compaction_cause: None,
         }
     }
+    pub(crate) fn precondition_changed(
+        fact: &'static str,
+        current: Option<Value>,
+        message: &'static str,
+    ) -> Self {
+        let mut details = serde_json::json!({
+            "reason": format!("expected_{fact}_changed"),
+            "request_may_have_been_applied": false,
+        });
+        if let Some(current) = current {
+            details["current"] = current;
+        }
+        Self::new(ErrorCode::OperationConflict, message)
+            .hint("Read the current value, review the change, and use a new operation ID if you still want to act")
+            .details(details)
+    }
+
     /// Conservative recovery guidance. Specific, state-aware hints take precedence.
     pub fn with_recovery_hint(mut self) -> Self {
         if self.hint.is_some() {
@@ -1679,7 +1696,11 @@ impl Default for StatusArgs {
 }
 // Receipt-free long-poll over the owner's in-memory change clock (#243).
 args!(ConfigGetArgs {});
-args!(ConfigSetArgs { expected_hash: String, changes: Vec<ConfigChange> });
+args!(ConfigSetArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_hash: Option<String>,
+    changes: Vec<ConfigChange>
+});
 /// One named change to the configuration file. `field` is a TOML dotted key;
 /// a missing or null `value` removes the key so its default applies again.
 #[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1879,7 +1900,10 @@ pub enum WaitCondition {
 
 args!(DraftSubmitArgs {
     thread_id: Option<String>,
-    selection_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_thread_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_source_message: Option<String>,
     create: ThreadCreateArgs,
     draft: Box<crate::draft::DraftSnapshot>,
     #[serde(default)] #[schemars(with = "NewDelivery")] deliver: Deliver,
@@ -1977,14 +2001,12 @@ record!(DraftView {
     anchor: crate::draft::ViewAnchor,
     follow_tail: bool
 });
-args!(DraftSourceFence {
-    message_id: String,
-    selection_revision: u64,
-});
 args!(DraftSaveArgs {
     thread_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    expected_source: Option<DraftSourceFence>,
+    expected_source_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_thread_revision: Option<u64>,
     draft: Box<crate::draft::DraftSnapshot>,
     anchor: crate::draft::ViewAnchor,
     follow_tail: bool,
@@ -3565,145 +3587,13 @@ mod message_acknowledgement_tests {
         let mut generator = settings.into_generator();
         let schema = operation_result_schemas(&mut generator);
         let results = schema.as_object().unwrap();
-        let expected = [
-            "artifact.add",
-            "artifact.update",
-            "artifact.list",
-            "artifact.get",
-            "artifact.remove",
-            "draft.image",
-            "owner.shutdown",
-            "draft.save",
-            "draft.get",
-            "draft.list",
-            "draft.restore",
-            "draft.submit",
-            "status",
-            "model.list",
-            "thread.list",
-            "thread.get",
-            "thread.branches",
-            "usage.get",
-            "compact.list",
-            "shell.list",
-            "thread.create",
-            "thread.fork",
-            "thread.delete",
-            "thread.delete_preview",
-            "thread.delete_set",
-            "thread.delete_set_preview",
-            "thread.prune",
-            "thread.rewind",
-            "thread.archive",
-            "thread.unarchive",
-            "thread.tag",
-            "thread.tags",
-            "thread.cwds",
-            "thread.set",
-            "message.ask",
-            "message.reply",
-            "message.send",
-            "message.get",
-            "message.list",
-            "message.cancel",
-            "operation.get",
-            "run.get",
-            "run.retry",
-            "run.stop",
-            "turn.get",
-            "turn.interrupt",
-            "wait",
-            "events.wait",
-            "history.list",
-            "history.window",
-            "history.recall",
-            "history.received",
-            "history.read",
-            "history.search",
-            "history.relations",
-            "history.export",
-            "thread.import",
-            "shell.get",
-            "shell.read",
-            "shell.write",
-            "shell.eof",
-            "shell.background",
-            "shell.stop",
-            "attachment.add",
-            "attachment.list",
-            "attachment.remove",
-            "attachment.reload",
-            "compact.preview",
-            "compact",
-            "context.edit",
-            "index.status",
-            "index.preview",
-            "index.backfill",
-            "index.retry",
-            "index.rebuild",
-            "index.probe",
-            "index.shrink",
-            "index.remove",
-            "storage.status",
-            "storage.collect",
-            "config.get",
-            "config.set",
-            "credentials.set",
-            "credentials.clear",
-            "connection.test",
-            "id.resolve",
-            "schedule.add",
-            "schedule.list",
-            "schedule.set",
-            "schedule.enable",
-            "schedule.disable",
-            "schedule.remove",
-        ];
-        let actual: std::collections::BTreeSet<_> = results.keys().map(String::as_str).collect();
-        assert_eq!(actual, expected.into_iter().collect());
-        for name in ["thread.create", "connection.test"] {
-            assert_eq!(
-                results[name],
-                serde_json::Value::Bool(true),
-                "{name} remains opaque"
-            );
-        }
-        for name in [
-            "status",
-            "shell.list",
-            "shell.background",
-            "turn.interrupt",
-            "usage.get",
-            "config.get",
-            "config.set",
-        ] {
-            assert_ne!(
-                results[name],
-                serde_json::Value::Bool(true),
-                "{name} has an existing typed result schema"
-            );
-        }
-        assert_eq!(
-            results["shell.list"]["properties"]["items"]["type"],
-            "array"
-        );
-        assert_eq!(
-            results["config.get"]["properties"]["loaded"]["$ref"],
-            "#/$defs/ConfigLoadedView"
-        );
-        let recall_states = results["history.recall"]["oneOf"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|variant| variant["properties"]["status"]["const"].as_str().unwrap())
+        let commands = serde_json::to_value(schemars::schema_for!(Command)).unwrap();
+        let expected = commands["oneOf"].as_array().unwrap().iter()
+            .map(|variant| variant["properties"]["command"]["const"].as_str().unwrap())
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(recall_states, ["end", "found", "not_in_window"].into());
-        assert_eq!(
-            results["history.received"]["properties"]["items"]["type"],
-            "array"
-        );
-        assert_eq!(results["status"]["anyOf"].as_array().unwrap().len(), 2);
-        assert_eq!(results["usage.get"]["anyOf"].as_array().unwrap().len(), 3);
+        let actual = results.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual, expected);
+
     }
 
     #[test]

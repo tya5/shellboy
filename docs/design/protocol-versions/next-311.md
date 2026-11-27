@@ -217,7 +217,7 @@ ID does not choose a newer Run. The existing stop-priority lanes still apply.
 
 `run.stop` with a `thread_id` and `run.retry` also accept an optional
 `expected_turn` (`turn_id`, `generation`), verified in the mutation transaction.
-A stale fence returns `invalid_state` (`expected_turn_changed`,
+A stale fence returns `operation_conflict` (`expected_turn_changed`,
 `request_may_have_been_applied: false`) without applying the operation.
 
 An observed `history.window` can return `pinned_sources` for explicitly
@@ -228,7 +228,7 @@ received node through `history.read` for its bounded display body.
 
 `shell.read` can take `expected_owner` (`thread_id`, `run_id`). The read
 checks the execution's saved ownership in the snapshot before exposing
-output or changing decoding. A mismatch returns `target_unavailable`.
+output or changing decoding. A mismatch returns `operation_conflict` (`expected_owner_changed`).
 
 `message.get` with `source_thread_id` includes the selected original user
 request, its eligible attachments, and the selected path revision. Editing
@@ -236,6 +236,9 @@ with `draft.submit` retains its existing source-node and revision checks in
 the same transaction as the fork and reports a typed not-applied refusal
 when either witness does not match.
 
-`draft.save` optionally checks `expected_source` (message ID and selection
-revision) inside the save transaction before changing the draft or its view.
-Use this witness when saving a draft reconstructed from a selected message.
+`draft.save` and `draft.submit` accept separate optional `expected_source_message`
+and `expected_thread_revision` fields. The owner checks them in the same
+transaction as the draft/view save or edited submission.
+Use these witnesses when saving a draft reconstructed from a selected message.
+See the [preconditions table](../protocol.md#preconditions-for-observed-state)
+for the common refusal shape, also used by `config.set` with `expected_hash`.

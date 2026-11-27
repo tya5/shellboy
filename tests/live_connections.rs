@@ -21,7 +21,7 @@ async fn edit(control: &Arc<Control>, changes: Vec<ConfigChange>) -> Value {
     request(
         control,
         Command::ConfigSet(ConfigSetArgs {
-            expected_hash: got["file"]["content_hash"].as_str().unwrap().into(),
+            expected_hash: Some(got["file"]["content_hash"].as_str().unwrap().into()),
             changes,
         }),
     )
@@ -195,7 +195,7 @@ async fn live_connections_config_and_credentials_writes_are_serialized() {
         let set_config = request(
             &control,
             Command::ConfigSet(ConfigSetArgs {
-                expected_hash: got["file"]["content_hash"].as_str().unwrap().into(),
+                expected_hash: Some(got["file"]["content_hash"].as_str().unwrap().into()),
                 changes: vec![
                     change("default_model", json!("concurrent-model")),
                     change(
@@ -247,7 +247,7 @@ async fn live_connections_default_deletion_is_rejected_before_writing() {
             .request(Request::new(
                 format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
                 Command::ConfigSet(ConfigSetArgs {
-                    expected_hash: got["file"]["content_hash"].as_str().unwrap().into(),
+                    expected_hash: Some(got["file"]["content_hash"].as_str().unwrap().into()),
                     changes: vec![
                         ConfigChange {
                             field: "default_connection".into(),

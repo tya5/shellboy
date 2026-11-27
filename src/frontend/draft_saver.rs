@@ -499,7 +499,8 @@ mod tests {
             &control,
             Command::DraftSubmit(Box::new(DraftSubmitArgs {
                 thread_id: Some(thread.clone()),
-                selection_revision: Some(0),
+                expected_thread_revision: Some(0),
+                expected_source_message: None,
                 create: ThreadCreateArgs {
                     agents: None,
                     connection: None,

@@ -303,7 +303,7 @@ pub(crate) fn config_slash(text: &str) -> Result<ConfigSlashAction, String> {
 pub struct ConfigSetOptions {
     /// file.content_hash from config get; refused if the file has changed since.
     #[arg(long)]
-    pub expected_hash: String,
+    pub expected_hash: Option<String>,
     /// FIELD=VALUE; repeatable.
     #[arg(long = "set", value_name = "FIELD=VALUE")]
     pub set: Vec<String>,

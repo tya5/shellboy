@@ -2669,11 +2669,13 @@
           "type": "array"
         },
         "expected_hash": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "expected_hash",
         "changes"
       ],
       "type": "object"
@@ -3190,14 +3192,18 @@
         "draft": {
           "$ref": "#/definitions/DraftSnapshot"
         },
-        "expected_source": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/DraftSourceFence"
-            },
-            {
-              "type": "null"
-            }
+        "expected_source_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_thread_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
           ]
         },
         "follow_tail": {
@@ -3271,24 +3277,6 @@
       ],
       "type": "object"
     },
-    "DraftSourceFence": {
-      "additionalProperties": false,
-      "properties": {
-        "message_id": {
-          "type": "string"
-        },
-        "selection_revision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "message_id",
-        "selection_revision"
-      ],
-      "type": "object"
-    },
     "DraftSubmitArgs": {
       "additionalProperties": false,
       "properties": {
@@ -3302,7 +3290,13 @@
         "draft": {
           "$ref": "#/definitions/DraftSnapshot"
         },
-        "selection_revision": {
+        "expected_source_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_thread_revision": {
           "format": "uint64",
           "minimum": 0,
           "type": [

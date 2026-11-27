@@ -1465,7 +1465,9 @@ async fn run_client(
                                 let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,None,control.store.config.limits.draft_bytes)?;
                                 compose_call(&control,
                                     Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
-                                        selection_revision: thread_id.as_ref().map(|_| selection_revision),
+                                        expected_thread_revision: thread_id.as_ref().map(|_| selection_revision),
+                                        expected_source_message: None,
+
                                         thread_id,
                                         create: ThreadCreateArgs { agents: None, connection, cwd: Some(cwd), model, effort, parent_thread_id: None },
                                         draft: Box::new(snapshot),
@@ -2055,7 +2057,8 @@ async fn run_client(
                                 };
                                 compose_call(&control, Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                     thread_id: Some(source_thread_id),
-                                    selection_revision: Some(selection_revision),
+                                    expected_thread_revision: Some(selection_revision),
+                                    expected_source_message: snapshot.edit.as_ref().map(|edit| edit.node_id.clone()),
                                     create: ThreadCreateArgs { agents: None, cwd: Some(cwd), connection, model, effort, parent_thread_id: None },
                                     draft: Box::new(snapshot),
                                     deliver: crate::protocol::Deliver::Next,
@@ -4003,7 +4006,8 @@ async fn save_draft(
     compose_call::<crate::protocol::Accepted>(
         control,
         Command::DraftSave(crate::protocol::DraftSaveArgs {
-            expected_source: None,
+            expected_source_message: None,
+            expected_thread_revision: None,
             thread_id,
             draft: Box::new(draft),
             anchor,

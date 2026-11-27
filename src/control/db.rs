@@ -66,6 +66,7 @@ pub struct DraftSendOptions {
     pub deliver: Deliver,
     pub submission: Option<DraftSubmission>,
     pub expected_selection_revision: Option<i64>,
+    pub expected_source_message: Option<String>,
     /// Control's canonical preflight-independent request hash; never a wire field.
     #[doc(hidden)]
     pub request_fingerprint: Option<String>,
@@ -725,10 +726,7 @@ impl Store {
                         .expected_selection_revision
                         .is_some_and(|value| value != revision)
                     {
-                        return Err(error(
-                            ErrorCode::InvalidState,
-                            "Draft attachment selection changed; retry from the retained draft",
-                        ));
+                        return Err(ApiError::precondition_changed("thread_revision", Some(json!(revision)), "Draft attachment selection changed; retry from the retained draft"));
                     }
                     let result = store.send_content(
                         tx,
@@ -991,13 +989,21 @@ impl Store {
                     let current = history::selection_revision(&tx, &thread, history::ThreadScope::Live)
                         .optional().map_err(sql_error)?;
                     if current != Some(expected) {
-                        return Err(error(ErrorCode::OperationConflict, "Selected history changed").details(json!({"reason":"expected_source_revision_changed", "request_may_have_been_applied":false})));
+                        return Err(ApiError::precondition_changed("thread_revision", current.map(|value| json!(value)), "Selected history changed"));
                     }
+                }
+                if options.expected_source_message.as_deref().is_some_and(|expected| expected != node) {
+                    return Err(ApiError::precondition_changed("source_message", None, "Selected source message changed"));
                 }
                 let live:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[&thread],|r|r.get(0)).optional().map_err(sql_error)?;
                 if let Some(run)=live{return Err(error(ErrorCode::InvalidState,"A Run is active; stop it or wait until it finishes before editing").details(json!({"run_id":run})));}
                 let user:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN thread_path p ON p.node_id=n.id WHERE p.thread_id=?1 AND n.id=?2 AND n.deleted_reason IS NULL AND json_extract(n.payload_json,'$.role')='user')",params![thread,node],|r|r.get(0)).map_err(sql_error)?;
-                if !user{return Err(error(ErrorCode::InvalidArgument,"Edit target must be an original user request on this Thread's selected path").details(json!({"reason":"expected_source_unavailable", "request_may_have_been_applied":false})));}
+                if !user {
+                    let message = "Edit target must be an original user request on this Thread's selected path";
+                    return Err(if options.expected_source_message.is_some() {
+                        ApiError::precondition_changed("source_message", Some(serde_json::Value::Null), message)
+                    } else { error(ErrorCode::InvalidArgument, message) });
+                }
                 let fork=uuid::Uuid::new_v4().to_string();let now=chrono::Utc::now().to_rfc3339();
                 history::fork_thread(&tx,&ThreadForkArgs{ agents: None,thread_id:thread.clone(),node_id:node.clone(),cwd:args.cwd.clone()},&fork,&now)?;
                 let mut path:Vec<String>=tx.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal").map_err(sql_error)?.query_map([&fork],|r|r.get(0)).map_err(sql_error)?.collect::<rusqlite::Result<_>>().map_err(sql_error)?;
@@ -2852,9 +2858,6 @@ fn message_source(
         return Err(error(
             ErrorCode::TargetUnavailable,
             "Original user request is unavailable on the selected path",
-        )
-        .details(
-            json!({"reason":"expected_source_unavailable", "request_may_have_been_applied":false}),
         ));
     };
     let payload = payload.ok_or_else(|| {
@@ -3089,7 +3092,13 @@ fn stop_thread_run(
         )
         .optional()
         .map_err(sql_error)?;
-    let run = run.ok_or_else(|| error(ErrorCode::InvalidState, "No live Run to stop"))?;
+    let run = run.ok_or_else(|| {
+        if expected_turn.is_some() {
+            ApiError::precondition_changed("turn", Some(Value::Null), "The selected Run no longer has a live Turn")
+        } else {
+            error(ErrorCode::InvalidState, "No live Run to stop")
+        }
+    })?;
     check_expected_turn(tx, &run, expected_turn)?;
     stop_run(tx, &run, now)
 }
@@ -3106,16 +3115,12 @@ fn check_expected_turn(
         "SELECT id,generation FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
         [run], |row| Ok((row.get(0)?, row.get(1)?)),
     ).optional().map_err(sql_error)?;
-    if !current.is_some_and(|(id, generation)| {
-        id == expected.turn_id && u64::try_from(generation).ok() == Some(expected.generation)
-    }) {
-        return Err(error(
-            ErrorCode::InvalidState,
-            "The selected Run's Turn changed; read it again before acting",
-        )
-        .details(
-            json!({"reason":"expected_turn_changed", "request_may_have_been_applied":false}),
-        ));
+    let current = current.and_then(|(turn_id, generation)| {
+        Some(ExpectedTurn { turn_id, generation: u64::try_from(generation).ok()? })
+    });
+    if current.as_ref() != Some(expected) {
+        return Err(ApiError::precondition_changed("turn", Some(json!(current)),
+            "The selected Run's Turn changed; read it again before acting"));
     }
     Ok(())
 }
@@ -4321,7 +4326,8 @@ mod receipt_wait_tests {
             .unwrap();
         let thread_id = thread.result["thread_id"].as_str().unwrap().to_owned();
         let mut args = crate::protocol::DraftSaveArgs {
-            expected_source: None,
+            expected_source_message: None,
+            expected_thread_revision: None,
             thread_id,
             draft: Box::new(crate::draft::DraftSnapshot {
                 revision: 2,
@@ -4373,10 +4379,8 @@ mod receipt_wait_tests {
             .await
             .unwrap();
         let mut old_source = args.clone();
-        old_source.expected_source = Some(crate::protocol::DraftSourceFence {
-            message_id: "reading".into(),
-            selection_revision: u64::MAX,
-        });
+        old_source.expected_source_message = Some("reading".into());
+        old_source.expected_thread_revision = Some(u64::MAX);
         old_source.draft.revision = 3;
         old_source.draft.text = "must not restore".into();
         let refused = store
@@ -4388,7 +4392,7 @@ mod receipt_wait_tests {
             .unwrap_err();
         assert_eq!(refused.code, ErrorCode::OperationConflict);
         let details = refused.details.unwrap();
-        assert_eq!(details["reason"], "expected_source_revision_changed");
+        assert_eq!(details["reason"], "expected_thread_revision_changed");
         assert_eq!(details["request_may_have_been_applied"], false);
         let mut displaced = args.clone();
         displaced.anchor.node_id = Some("not-selected".into());
@@ -5713,7 +5717,7 @@ mod draft_recovery_revision_tests {
                 )
                 .await
                 .unwrap_err();
-            assert_eq!(rejected.code, ErrorCode::InvalidState);
+            assert_eq!(rejected.code, ErrorCode::OperationConflict);
             db.call(|db| {
                 assert_eq!(
                     db.query_row("SELECT count(*) FROM run WHERE state='live'", [], |r| r

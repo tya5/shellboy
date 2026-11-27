@@ -895,15 +895,34 @@ applies, adding a connection lists its fields, and a sensitive entry has no `pre
 Errors: `invalid_argument` for a malformed or refused change (`details.change_index`; `details.reason =
 "credential_value_refused"` for a credential in a name field, `"redacted_placeholder_refused"` for a value
 containing `[redacted`), `config_invalid` when the whole result fails
-`Config::parse`, `operation_conflict` with `details.reason = "config_changed"` and `current_hash` for a stale
-hash, `io_failed` or `input_limit` otherwise. An interrupted Windows replace that couldn't be finished is
+`Config::parse`, a [precondition conflict](#preconditions-for-observed-state) for a stale hash,
+`io_failed` or `input_limit` otherwise. An interrupted Windows replace that couldn't be finished is
 `io_failed` with `details.reason = "replace_interrupted"` and `details.recovery_file`; when it could be finished,
-the result gains a `warning`. All carry `details.written = false` when nothing was written,
+the result gains a `warning`. Non-precondition errors carry `details.written = false` when nothing was written,
 and none quotes a value from the file or the request. Bounds: 64 changes, 512-byte field, 128 KiB value
 (request validation), 1 MiB file before and after the change, 512 KiB result (checked before the replace, so a saved outcome never hides
 a finished write).
 
 The design is in [config.md](config.md#reading-and-changing-through-the-owner-266).
+## Preconditions for observed state
+
+When acting on a value you read, pass the operation's optional `expected_<fact>`
+field (`--expected-<fact>` where exposed by the CLI). A changed fact returns
+`operation_conflict` with `details.reason = "expected_<fact>_changed"`,
+`details.request_may_have_been_applied = false`, and `details.current` when
+readable (`null` if the readable fact is absent). Reread and review the new
+state. Use a new operation ID only for a newly intended action; do not replay
+the action automatically.
+
+| Operation | Precondition | Read it from |
+| --- | --- | --- |
+| `config.set` | `expected_hash` (`--expected-hash`) | `config.get` → `file.content_hash` |
+| `run.stop` by Thread, `run.retry` | `expected_turn` | The selected Run's current Turn ID and generation |
+| `draft.save`, `draft.submit` | `expected_thread_revision` | Selected history or `message.get` source `selection_revision` |
+| `draft.save`, edited `draft.submit` | `expected_source_message` | The original user message ID returned by `message.get` on the selected path |
+| `shell.read` | `expected_owner` | The shell's Run and Thread IDs |
+
+
 
 ## Live text on `events.wait` (#243 E3)
 

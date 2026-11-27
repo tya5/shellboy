@@ -142,7 +142,7 @@ async fn real_ipc_waiters_leave_status_and_run_stop_available() {
     .unwrap()
     .error
     .expect("obsolete Turn must refuse the stop");
-    assert_eq!(stale.code, ErrorCode::InvalidState);
+    assert_eq!(stale.code, ErrorCode::OperationConflict);
     let details = stale.details.unwrap();
     assert_eq!(details["reason"], "expected_turn_changed");
     assert_eq!(details["request_may_have_been_applied"], false);

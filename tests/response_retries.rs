@@ -4020,7 +4020,7 @@ async fn model_filter_changes_catalog_not_direct_model_execution() {
     let changed = request(
         &control,
         Command::ConfigSet(ConfigSetArgs {
-            expected_hash: config["file"]["content_hash"].as_str().unwrap().into(),
+            expected_hash: Some(config["file"]["content_hash"].as_str().unwrap().into()),
             changes: vec![
                 ConfigChange {
                     field: "connections.gpt.models.exclude".into(),

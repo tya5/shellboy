@@ -978,14 +978,13 @@ fn require_shell_owner(
     let Some(expected) = expected else {
         return Ok(());
     };
-    let matches = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1 AND r.id=?2 AND r.thread_id=?3)",
-        rusqlite::params![execution, expected.run_id, expected.thread_id],
-        |row| row.get::<_, bool>(0),
-    ).map_err(sql_error)?;
-    if !matches {
-        return Err(error(ErrorCode::TargetUnavailable, "Shell output does not belong to the expected Run and Thread")
-            .details(serde_json::json!({"reason":"shell_owner_changed", "request_may_have_been_applied":false})));
+    let current = db.query_row(
+        "SELECT r.id,r.thread_id FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1",
+        [execution], |row| Ok(crate::protocol::ShellReadOwner { run_id: row.get(0)?, thread_id: row.get(1)? }),
+    ).optional().map_err(sql_error)?;
+    if current.as_ref() != Some(expected) {
+        return Err(ApiError::precondition_changed("owner", current.map(|owner| serde_json::json!(owner)),
+            "Shell output does not belong to the expected Run and Thread"));
     }
     Ok(())
 }
