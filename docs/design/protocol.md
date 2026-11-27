@@ -827,9 +827,10 @@ from its bounded per-Thread entries. Every caller compares that entry with its o
 cursor; no waiter consumes it. It ignores the Thread filter, has no Thread ID, and
 can yield `status: changed` with an empty `changes` array. Baseline and resync return
 false; a cursor after the mark does not see it. `config.set` records it after any
-successful file write, including a restart-required write, and `credentials.set` and a
-`credentials.clear` that removed a stored key record it at the stored change (they change
-what `config.get` reports); refused and no-op writes do not. Readers use `config.get` to reread both on-disk and loaded values. The marker
+successful file write, including a restart-required write, and `credentials.set` that
+newly stores a key for a connection that had none and a `credentials.clear` that removed a
+stored key record it at the stored change (only a stored key's presence is reported by
+`config.get`, so replacing or re-setting a key does not mark); refused and no-op writes do not. Readers use `config.get` to reread both on-disk and loaded values. The marker
 contains no config values or diff and adds no event path, persistence, cache, or poller.
 
 `index_changed` and `retention_changed` (#311) are required marks of the same kind,
