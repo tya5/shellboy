@@ -131,6 +131,61 @@ async fn native_gap_retires_the_old_browser_page_and_reloads_one_bounded_page() 
 }
 
 #[tokio::test]
+async fn shown_config_result_is_read_again_when_a_saved_credential_change_wakes_the_wait() {
+    use crate::protocol::{Command, ConfigGetArgs, CredentialsSetArgs, Request};
+    let (root, owner, control, server) = control_tests::fixture().await;
+    let (send, receive) = actions::channel(32);
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let (observe_send, mut observed) = mpsc::channel(4);
+    let bridge = tokio::spawn(OBSERVE.scope(
+        observe_send,
+        run(
+            control.clone(),
+            receive,
+            updates,
+            root.path().into(),
+            owner,
+            server,
+        ),
+    ));
+    crate::test_watchdog::watchdog("F8 refresh on a saved change", async {
+        assert!(matches!(observed.recv().await, Some(Observed::Baseline)));
+        send.try_send(UiAction::Manage(Command::ConfigGet(ConfigGetArgs {})))
+            .unwrap();
+        let mut shown = 0;
+        let mut changed = false;
+        loop {
+            while let Ok(update) = incoming.try_recv() {
+                if matches!(update, UiUpdate::StructuredManagement { .. }) {
+                    shown += 1;
+                }
+            }
+            if shown == 1 && !changed {
+                changed = true;
+                let response = control
+                    .request(Request::new(
+                        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                        Command::CredentialsSet(CredentialsSetArgs {
+                            connection: "fixture".into(),
+                            value: "sk-fixture-key".into(),
+                        }),
+                    ))
+                    .await;
+                assert!(response.ok);
+            }
+            if shown == 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    send.try_send(UiAction::Quit).unwrap();
+    control_tests::finish_bridge(bridge, &incoming).await;
+}
+
+#[tokio::test]
 async fn native_preview_is_scoped_answer_only_and_instance_fenced() {
     let (_root, owner, control, server) = control_tests::fixture().await;
     let data_dir = &owner.loaded.data_dir;
