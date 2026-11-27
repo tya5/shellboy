@@ -478,6 +478,8 @@ pub(crate) fn interrupt_previous_work(
     tx.execute("UPDATE receipt SET state='held',hold_reason='previous_instance_interrupted',updated_at=?1 WHERE state='accepted'",[&now])?;
     super::revisit::hand_off_tx(tx, None, "previous_instance_interrupted", None, now)?;
     super::message_delivery::repair_terminal_tx(tx, now)?;
+    // Markers orphaned by earlier versions: one saved full sweep per start.
+    crate::gc::request_marker_sweep_tx(tx)?;
     Ok(report)
 }
 

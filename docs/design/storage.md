@@ -385,7 +385,7 @@ the `db_job_slow` names.
   work is persisted in `app_meta` (`raw_settle.def.<definition>`,
   `raw_settle.all` with its key cursor) by the producing transaction: a
   completed collection, a superseding reservation, a definition or Thread
-  removal, its first pass after startup, an explicit raw collect. Units are
+  removal, the startup transaction. Units are
   at most 128 rows and save progress with their changes. See
   [GC](gc.md#raw-markers-and-thread-owned-executions-450).
 - **Runtime pins (#450).** `Work::Pins` is the pin reconciliation. Why: a

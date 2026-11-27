@@ -108,8 +108,6 @@ pub struct GcService {
     /// The GC background requester: one outstanding unit (storage design #171).
     requester: Arc<Mutex<BackgroundRequester>>,
     raw_cursor: Arc<std::sync::Mutex<RawCursor>>,
-    /// The marker owner requests one full sweep on its first pass (#450).
-    marker_sweep_requested: Arc<std::sync::atomic::AtomicBool>,
     /// Where the pin reconciliation continues after a deferred unit (#450).
     pin_cursor: Arc<std::sync::Mutex<String>>,
     history_batch: Arc<std::sync::Mutex<HistoryBatch>>,
@@ -366,7 +364,6 @@ impl GcService {
         Self {
             requester: Arc::new(Mutex::new(BackgroundRequester::new(database.clone()))),
             raw_cursor: Arc::default(),
-            marker_sweep_requested: Arc::default(),
             pin_cursor: Arc::default(),
             history_batch: Arc::new(std::sync::Mutex::new(HistoryBatch::new(String::new()))),
             history_discovery: Arc::default(),
@@ -496,11 +493,6 @@ impl GcService {
             StorageCategory::ManagedImages => &[Work::Managed],
         };
         self.raw_cursor.lock().expect("raw cursor").rescan = true;
-        if works.contains(&Work::RawMarkers) {
-            // An explicit collect also sweeps every marker once.
-            self.marker_sweep_requested
-                .store(false, std::sync::atomic::Ordering::Release);
-        }
         let mut hold = self.hold().await;
         self.collect_held(&mut hold, works, at).await
     }
@@ -1018,7 +1010,7 @@ impl GcService {
     /// `app_meta` by the transactions that make markers settleable: a
     /// `raw_settle.def.<definition>` request by a collection or a superseding
     /// reservation, and `raw_settle.all` (a full sweep with its key cursor) by
-    /// definition or Thread removal, startup and explicit collect. Each unit
+    /// definition or Thread removal, and the startup transaction. Each unit
     /// settles at most 128 rows and saves its progress in the same
     /// transaction, so a deferred or interrupted pass continues from the
     /// saved state; the byte total and age deadline never gate it.
@@ -1027,36 +1019,20 @@ impl GcService {
         requester: &mut BackgroundRequester,
         report: &mut CollectionReport,
     ) -> Result<()> {
-        let mut request = !self
-            .marker_sweep_requested
-            .swap(true, std::sync::atomic::Ordering::AcqRel);
         loop {
             let unit = requester
                 .unit(UNIT, move |db, limit| {
                     let tx = db.transaction()?;
-                    if request {
-                        request_marker_sweep_tx(&tx)?;
-                    }
                     let outcome = settle_pending_tx(&tx, limit.rows())?;
                     tx.commit()?;
                     Ok(outcome)
                 })
-                .await;
-            if unit.is_err() && request {
-                // The sweep request was not committed; the next pass makes it.
-                self.marker_sweep_requested
-                    .store(false, std::sync::atomic::Ordering::Release);
-            }
-            let unit = unit.map_err(crate::app::storage_error)?;
+                .await
+                .map_err(crate::app::storage_error)?;
             let Background::Done((executions, more)) = unit else {
-                if request {
-                    self.marker_sweep_requested
-                        .store(false, std::sync::atomic::Ordering::Release);
-                }
                 report.defer(Work::RawMarkers);
                 return Ok(());
             };
-            request = false;
             self.publish_settled(executions);
             if !more {
                 return Ok(());
@@ -2156,6 +2132,9 @@ mod tests {
                 )?;
             }
             db.execute_batch("CREATE TRIGGER interrupt_sweep BEFORE DELETE ON app_meta WHEN OLD.key='raw_tombstone.gone-200' BEGIN SELECT RAISE(ABORT,'injected'); END;")?;
+            let tx = db.transaction()?;
+            super::request_marker_sweep_tx(&tx)?;
+            tx.commit()?;
             Ok(())
         })
         .await
@@ -2189,6 +2168,70 @@ mod tests {
         .unwrap();
         gc.collect_kinds(set, chrono::Utc::now()).await.unwrap();
         assert_eq!(markers().await.unwrap(), 0);
+        db.shutdown().await.unwrap();
+    }
+
+    /// #450: markers orphaned before this start (older versions) are swept
+    /// after a restart by the maintenance pass alone, without an explicit
+    /// collect; without the startup request they stay.
+    #[tokio::test]
+    async fn orphan_markers_left_before_startup_are_collected_after_restart() {
+        use super::{Work, WorkSet};
+        use std::sync::Arc;
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(temp.path().join("fixture.db"))
+            .await
+            .unwrap();
+        let config = crate::config::Config::default();
+        let attachments = Arc::new(crate::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = super::GcService::new(
+            db.clone(),
+            Arc::new(config),
+            temp.path().to_owned(),
+            attachments,
+        );
+        db.call(|db| {
+            db.execute(
+                "INSERT INTO app_meta(key,value)VALUES('raw_tombstone.gone-1','{\"state\":\"deleted\"}')",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let markers = || {
+            let db = db.clone();
+            async move {
+                db.call(|db| {
+                    Ok(db.query_row(
+                        "SELECT count(*) FROM app_meta WHERE key>='raw_tombstone.' AND key<'raw_tombstone/'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )?)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let mut set = WorkSet::default();
+        set.insert(Work::RawMarkers);
+        gc.collect_kinds(set, chrono::Utc::now()).await.unwrap();
+        assert_eq!(markers().await, 1, "no request, so the orphan stays");
+        db.call(|db| {
+            let tx = db.transaction()?;
+            crate::control::state::interrupt_previous_work(&tx, "now", false)?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        gc.collect_kinds(set, chrono::Utc::now()).await.unwrap();
+        assert_eq!(markers().await, 0);
         db.shutdown().await.unwrap();
     }
 
@@ -2250,9 +2293,6 @@ mod tests {
         };
         let mut set = WorkSet::default();
         set.insert(Work::RawMarkers);
-        // The startup sweep request is not part of this witness.
-        gc.marker_sweep_requested
-            .store(true, std::sync::atomic::Ordering::Release);
         assert!(gc.collect_kinds(set, chrono::Utc::now()).await.is_err());
         let left = runs().await;
         assert!(
