@@ -15,6 +15,7 @@ struct DueShell {
     thread: String,
     cwd: PathBuf,
     command: String,
+    service: bool,
 }
 
 fn next_cron(expression: &str, now: DateTime<Utc>, zone: &impl TimeZone) -> Option<i64> {
@@ -69,10 +70,11 @@ fn advance_due(
     shell_kind: &str,
 ) -> Result<Advanced, StorageError> {
     let due = tx.query_row(
-        "SELECT id,thread_id,cwd,command,cron,next_at,EXISTS(SELECT 1 FROM json_each(notify_json) WHERE value=?1) FROM schedule WHERE enabled=1 AND next_at IS NOT NULL ORDER BY next_at,id LIMIT 1", [ScheduleNotify::Skipped.as_str()],
-        |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,i64>(5)?,r.get::<_,bool>(6)?)),
+        "SELECT id,thread_id,cwd,command,cron,next_at,kind,EXISTS(SELECT 1 FROM json_each(notify_json) WHERE value=?1) FROM schedule WHERE enabled=1 AND next_at IS NOT NULL ORDER BY next_at,id LIMIT 1", [ScheduleNotify::Skipped.as_str()],
+        |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,i64>(5)?,r.get::<_,String>(6)?,r.get::<_,bool>(7)?)),
     ).optional()?;
-    let Some((schedule, thread, cwd, command, cron, scheduled_at, notify_skipped)) = due else {
+    let Some((schedule, thread, cwd, command, cron, scheduled_at, kind, notify_skipped)) = due
+    else {
         return Ok(Advanced::default());
     };
     let Occurrence::Due { next, invalid } = occurrence(scheduled_at, cron.as_deref(), now, &Local)
@@ -112,6 +114,7 @@ fn advance_due(
             thread,
             cwd: cwd.into(),
             command,
+            service: kind == "service",
         }),
         notice,
         superseded,
@@ -241,17 +244,31 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
         input_encoding: "utf-8".into(),
         output_encoding: "utf-8".into(),
     };
-    let env = shell_output::cli_environment(control, &shell.thread);
-    match control
-        .shell
-        .spawn_thread_owned(shell.id.clone(), shell.cwd, args, env)
-        .await
-    {
+    let mut env = shell_output::cli_environment(control, &shell.thread);
+    let endpoint = shell
+        .service
+        .then(|| super::service_endpoint::Publication::create(control, &shell.id))
+        .transpose();
+    let (spawned, endpoint) = match endpoint {
+        Ok(endpoint) => {
+            if let Some(file) = &endpoint {
+                env.insert(super::service_endpoint::ENV.into(), file.env_value());
+            }
+            let spawned = control
+                .shell
+                .spawn_thread_owned(shell.id.clone(), shell.cwd, args, env)
+                .await;
+            (spawned, endpoint)
+        }
+        Err(error) => (Err(error), None),
+    };
+    match spawned {
         Ok(spawned) => {
             shell_output::install_shell(
                 control,
                 shell_output::ShellOwner::Schedule {
                     thread: shell.thread,
+                    endpoint: endpoint.map(Arc::new),
                 },
                 None,
                 &shell.id,
@@ -260,6 +277,7 @@ async fn spawn_reserved(control: &Arc<Control>, shell: DueShell) -> Result<(), A
             .await?;
         }
         Err(error) => {
+            drop(endpoint);
             let shutdown = error
                 .details
                 .as_ref()
@@ -406,6 +424,7 @@ pub(super) fn add(
             cwd: a.cwd.as_deref(),
             description: a.description.as_deref(),
             timing: Some(a),
+            name: None,
         },
     )
 }
@@ -423,6 +442,7 @@ pub(super) fn add_service(
             cwd: a.cwd.as_deref(),
             description: a.description.as_deref(),
             timing: None,
+            name: a.name.as_deref(),
         },
     )
 }
@@ -432,6 +452,7 @@ struct DefinitionInput<'a> {
     cwd: Option<&'a str>,
     description: Option<&'a str>,
     timing: Option<&'a crate::protocol::ScheduleAddArgs>,
+    name: Option<&'a str>,
 }
 
 fn add_definition(
@@ -512,7 +533,7 @@ fn add_definition(
     };
     let cwd = PathBuf::from(cwd).join(input.cwd.unwrap_or(""));
     let id = uuid::Uuid::new_v4().to_string();
-    tx.execute("INSERT INTO schedule(id,thread_id,kind,cron,once_at,next_at,enabled,cwd,command,description,notify_json) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,?10)",params![id,thread,kind,cron,once,next,cwd.to_string_lossy(),input.command,input.description,notify]).map_err(sql)?;
+    tx.execute("INSERT INTO schedule(id,thread_id,kind,cron,once_at,next_at,enabled,cwd,command,description,notify_json,name) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,?10,?11)",params![id,thread,kind,cron,once,next,cwd.to_string_lossy(),input.command,input.description,notify,input.name]).map_err(service_name_write_error)?;
     let key = if kind == "service" {
         "service_id"
     } else {
@@ -528,9 +549,19 @@ pub(super) fn list(
     thread: &str,
     services: bool,
 ) -> Result<serde_json::Value, ApiError> {
+    let items = definition_rows(tx, thread, services, None)?;
+    Ok(serde_json::json!({"thread_id":thread,"items":items}))
+}
+
+fn definition_rows(
+    tx: &Transaction<'_>,
+    thread: &str,
+    services: bool,
+    service_id: Option<&str>,
+) -> Result<Vec<serde_json::Value>, ApiError> {
     let sql = |e| super::storage_error(StorageError::from(e));
-    let mut query=tx.prepare("SELECT q.id,q.enabled,q.next_at,q.cron,q.once_at,q.cwd,q.command,q.description,q.last_skipped_at,s.id,s.state,s.exit_code,s.end_reason,s.started_at,s.ended_at,q.notify_json FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY rowid DESC LIMIT 1) WHERE q.thread_id=?1 AND q.kind=?2 ORDER BY q.id LIMIT 64").map_err(sql)?;
-    let items=query.query_map(params![thread, if services { "service" } else { "time" }],|r| {
+    let mut query=tx.prepare("SELECT q.id,q.enabled,q.next_at,q.cron,q.once_at,q.cwd,q.command,q.description,q.last_skipped_at,s.id,s.state,s.exit_code,s.end_reason,s.started_at,s.ended_at,q.notify_json,q.name FROM schedule q JOIN thread t ON t.id=q.thread_id AND t.deleted_at IS NULL LEFT JOIN shell_execution s ON s.id=(SELECT id FROM shell_execution WHERE schedule_id=q.id ORDER BY rowid DESC LIMIT 1) WHERE q.thread_id=?1 AND q.kind=?2 AND (?3 IS NULL OR q.id=?3) ORDER BY q.id LIMIT 64").map_err(sql)?;
+    let items=query.query_map(params![thread, if services { "service" } else { "time" }, service_id],|r| {
         let id:Option<String>=r.get(9)?;
         let latest=if let Some(id)=id {
             let mut remaining=4096;
@@ -543,12 +574,71 @@ pub(super) fn list(
         }else{serde_json::Value::Null};
         let timestamp=|i| r.get::<_,Option<i64>>(i).map(|v|v.and_then(|at|DateTime::from_timestamp(at,0)).map(|at|at.to_rfc3339()));
         if services {
-            return Ok(serde_json::json!({"service_id":r.get::<_,String>(0)?,"enabled":r.get::<_,bool>(1)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"latest":latest}));
+            return Ok(serde_json::json!({"service_id":r.get::<_,String>(0)?,"name":r.get::<_,Option<String>>(16)?,"enabled":r.get::<_,bool>(1)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"latest":latest}));
         }
         let notify: Vec<ScheduleNotify> = serde_json::from_str(&r.get::<_, String>(15)?).map_err(|error| rusqlite::Error::FromSqlConversionFailure(15, rusqlite::types::Type::Text, Box::new(error)))?;
         Ok(serde_json::json!({"schedule_id":r.get::<_,String>(0)?,"enabled":r.get::<_,bool>(1)?,"next_at":timestamp(2)?,"cron":r.get::<_,Option<String>>(3)?,"at":timestamp(4)?,"cwd":r.get::<_,String>(5)?,"command":r.get::<_,String>(6)?,"description":r.get::<_,Option<String>>(7)?,"notify":notify,"last_skipped_at":timestamp(8)?,"latest":latest}))
     }).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
-    Ok(serde_json::json!({"thread_id":thread,"items":items}))
+    Ok(items)
+}
+
+fn service_name_write_error(error: rusqlite::Error) -> ApiError {
+    if matches!(&error, rusqlite::Error::SqliteFailure(e, _) if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE)
+    {
+        return ApiError::new(
+            crate::protocol::ErrorCode::InvalidArgument,
+            "A service already has this name in the Thread",
+        )
+        .details(serde_json::json!({"reason":"service_name_conflict"}));
+    }
+    super::storage_error(StorageError::from(error))
+}
+
+pub(super) fn service_not_found() -> ApiError {
+    ApiError::new(
+        crate::protocol::ErrorCode::TargetUnavailable,
+        "Service not found",
+    )
+    .details(serde_json::json!({"reason":"service_not_found"}))
+}
+
+pub(super) fn get_service(tx: &Transaction<'_>, id: &str) -> Result<serde_json::Value, ApiError> {
+    let thread: String = tx
+        .query_row(
+            "SELECT thread_id FROM schedule WHERE id=?1 AND kind='service'",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(StorageError::from)
+        .map_err(super::storage_error)?
+        .ok_or_else(service_not_found)?;
+    let mut saved = definition_rows(tx, &thread, true, Some(id))?
+        .pop()
+        .ok_or_else(service_not_found)?;
+    saved["thread_id"] = thread.into();
+    Ok(saved)
+}
+
+pub(super) fn set_service_name(
+    tx: &Transaction<'_>,
+    args: &crate::protocol::ServiceSetArgs,
+) -> Result<super::MutationResult, ApiError> {
+    let name = (!args.name.is_empty()).then_some(args.name.as_str());
+    let thread: String = tx
+        .query_row(
+            "UPDATE schedule SET name=?2 WHERE id=?1 AND kind='service' RETURNING thread_id",
+            params![args.service_id, name],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(service_name_write_error)?
+        .ok_or_else(service_not_found)?;
+    let mut result = super::MutationResult::value(
+        serde_json::json!({"service_id":args.service_id,"name":name}),
+    )?;
+    result.changed_threads.push(thread);
+    Ok(result)
 }
 
 pub(super) fn start_service(
@@ -988,6 +1078,7 @@ mod tests {
             spawn_reserved(
                 &control,
                 DueShell {
+                    service: false,
                     id: kind.into(),
                     thread: thread.clone(),
                     cwd: root.path().into(),
@@ -1732,6 +1823,7 @@ mod tests {
         );
         let added = control
             .request(request(Command::ServiceAdd(ServiceAddArgs {
+                name: None,
                 thread_id: Some(thread.clone()),
                 cwd: (failure == ServiceFailure::SpawnFailed).then(|| "missing-directory".into()),
                 description: None,
@@ -1858,6 +1950,7 @@ mod tests {
         let service = call(
             &control,
             Command::ServiceAdd(ServiceAddArgs {
+                name: None,
                 thread_id: Some(thread.clone()),
                 cwd: None,
                 description: None,

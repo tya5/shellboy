@@ -32,6 +32,7 @@ routes! {
     schedule_remove: "/schedule remove --schedule sched-a" => Command::ScheduleRemove(ScheduleTarget { schedule_id: "sched-a".into() });
     service_list: "/service list" => Command::ServiceList(ThreadTarget { thread_id: None });
     service_add: "/service add --thread thread-a --cwd '/a path' --description 'example service' --command 'echo hello'" => Command::ServiceAdd(ServiceAddArgs {
+        name: None,
         thread_id: Some("thread-a".into()), cwd: Some("/a path".into()), description: Some("example service".into()), command: "echo hello".into(),
     });
     service_start: "/service start --service svc-a" => Command::ServiceStart(ServiceTarget { service_id: "svc-a".into() });

@@ -70,14 +70,14 @@ async fn marker_case(rollback: bool) {
             )
             .await;
         handles.push(handle);
-        let shell_owner = ShellOwner::Run {
+        let mut shell_owner = ShellOwner::Run {
             thread: format!("t{index}"),
             run: format!("r{index}"),
             turn: format!("u{index}"),
         };
         let collecting = Arc::clone(&control);
         collectors.push(tokio::spawn(async move {
-            collect_shell(&collecting, &shell_owner, &execution, shell).await
+            collect_shell(&collecting, &mut shell_owner, &execution, shell).await
         }));
     }
     assert!(

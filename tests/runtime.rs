@@ -3492,6 +3492,7 @@ async fn thread_service_file_trigger_sends_through_ipc_and_drains() {
     let thread = created["thread_id"].as_str().unwrap().to_owned();
     let exe = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\\''");
     let added = command(&control, Command::ServiceAdd(ServiceAddArgs {
+        name: None,
         thread_id: Some(thread.clone()), cwd: Some(directory.path().to_string_lossy().into_owned()), description: None,
         command: format!("printf prefix; while [ ! -f trigger ]; do sleep 0.05; done; cat payload; printf retained-tail; '{exe}' message send --thread \"$SHELLBOY_THREAD_ID\" --text 'service file trigger witness' || exit 91; exec sleep 600"),
     })).await;

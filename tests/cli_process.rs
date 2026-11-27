@@ -1802,3 +1802,156 @@ async fn schedule_add_command_round_trips_and_runs_nested_shellboy_send() {
         assert!(owner.wait().await.unwrap().success());
     }).await.unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn named_service_endpoints_follow_the_exact_execution() {
+    use shellboy::{
+        ipc,
+        protocol::{
+            Command, ErrorCode, ServiceAddArgs, ServiceSetArgs, ServiceTarget, ThreadTarget,
+        },
+    };
+    use std::{os::unix::fs::MetadataExt, path::PathBuf};
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let owner = DataOwner::start(Some(config), Some(data.clone()), root.path().into())
+        .await
+        .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let (send, receive) = tokio::sync::mpsc::channel(8);
+    let local = LocalServer::bind(&owner, send).await.unwrap();
+    let serving = tokio::spawn(control.clone().serve(receive));
+    let rpc = async |command| ipc::call(&data, command, None, None).await.unwrap();
+    let ok = async |command| {
+        let reply = rpc(command).await;
+        assert!(reply.ok, "{:?}", reply.error);
+        reply.result.unwrap()
+    };
+    let create = async || {
+        ok(
+            serde_json::from_value(serde_json::json!({"command":"thread.create","args":{}}))
+                .unwrap(),
+        )
+        .await["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let first = create().await;
+    let second = create().await;
+    let add = |thread: &str, name: &str, port: u16| {
+        Command::ServiceAdd(ServiceAddArgs {
+            thread_id: Some(thread.into()),
+            name: Some(name.into()),
+            cwd: None,
+            description: None,
+            command: format!(
+                r#"file="$SHELLBOY_SERVICE_ENDPOINT_FILE"; test -f "$file" || exit 17; token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n'); printf '{{"port":{port},"token":"%s"}}' "$token" > "$file"; printf '%s\n' "$file"; exec sleep 600"#
+            ),
+        })
+    };
+    let id = |result: Value| result["service_id"].as_str().unwrap().to_owned();
+    let a = id(ok(add(&first, "tracker", 32101)).await);
+    let b = id(ok(add(&second, "tracker", 32102)).await);
+    let other = id(ok(add(&first, "other", 32103)).await);
+    let target = |id: &str| ServiceTarget {
+        service_id: id.into(),
+    };
+    let conflict = rpc(add(&first, "tracker", 32104)).await.error.unwrap();
+    assert_eq!(conflict.details.unwrap()["reason"], "service_name_conflict");
+    let set = |id: &str, name: &str| {
+        Command::ServiceSet(ServiceSetArgs {
+            service_id: id.into(),
+            name: name.into(),
+        })
+    };
+    let conflict = rpc(set(&other, "tracker")).await.error.unwrap();
+    assert_eq!(conflict.details.unwrap()["reason"], "service_name_conflict");
+    assert_eq!(ok(set(&other, "")).await["name"], Value::Null);
+    assert_eq!(
+        ok(Command::ServiceGet(target(&other))).await["name"],
+        Value::Null
+    );
+    assert_eq!(ok(set(&other, "renamed")).await["name"], "renamed");
+    let observe = async |thread: &str, id: &str, expected_port| {
+        crate::test_watchdog::watchdog("service publishes its private endpoint", async {
+            loop {
+                let list = ok(Command::ServiceList(ThreadTarget {
+                    thread_id: Some(thread.into()),
+                }))
+                .await;
+                let matches: Vec<_> = list["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|item| item["name"] == "tracker")
+                    .collect();
+                assert_eq!(matches.len(), 1);
+                assert_eq!(matches[0]["service_id"], id);
+                let tail = matches[0]["latest"]["output_tail"]
+                    .as_str()
+                    .unwrap_or_default();
+                let result = rpc(Command::ServiceEndpoint(target(id))).await;
+                if let Some(endpoint) = result.result.filter(|_| tail.ends_with('\n')) {
+                    let file = PathBuf::from(tail.trim());
+                    let metadata = std::fs::metadata(&file).unwrap();
+                    assert_eq!(metadata.mode() & 0o777, 0o600);
+                    assert_eq!(metadata.uid(), unsafe { libc::geteuid() });
+                    assert_eq!(endpoint["port"], expected_port);
+                    assert!(
+                        serde_json::from_slice::<Value>(&std::fs::read(&file).unwrap()).unwrap()
+                            == endpoint
+                    );
+                    assert!(
+                        !list
+                            .to_string()
+                            .contains(endpoint["token"].as_str().unwrap())
+                    );
+                    break (file, endpoint["token"].as_str().unwrap().to_owned());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap()
+    };
+    let (first_file, first_token) = observe(&first, &a, 32101).await;
+    let (second_file, _) = observe(&second, &b, 32102).await;
+    assert_ne!(first_file, second_file);
+    ok(Command::ServiceStop(target(&a))).await;
+    assert!(!first_file.exists());
+    let stopped = rpc(Command::ServiceEndpoint(target(&a)))
+        .await
+        .error
+        .unwrap();
+    assert_eq!(stopped.code, ErrorCode::InvalidState);
+    assert_eq!(stopped.details.unwrap()["reason"], "service_not_running");
+    assert_eq!(
+        ok(Command::ServiceEndpoint(target(&b))).await["port"],
+        32102
+    );
+    ok(Command::ServiceStart(target(&a))).await;
+    let (restarted, restarted_token) = observe(&first, &a, 32101).await;
+    assert_ne!(first_file, restarted);
+    assert!(first_token != restarted_token);
+    ok(Command::ServiceRemove(target(&a))).await;
+    assert!(!restarted.exists());
+    assert_eq!(
+        rpc(Command::ServiceEndpoint(target(&a)))
+            .await
+            .error
+            .unwrap()
+            .code,
+        ErrorCode::TargetUnavailable
+    );
+    ok(Command::ServiceStop(target(&b))).await;
+    assert!(!second_file.exists());
+    local.shutdown().await.unwrap();
+    serving.abort();
+    let _ = serving.await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

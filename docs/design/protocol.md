@@ -1,5 +1,14 @@
 # P1 公開操作・ローカル通信の実装契約
 
+## Named service endpoints
+
+Authenticated local clients resolve a service name using `service.list` for one
+Thread, then call `service.endpoint` with the exact `service_id`. This read
+returns `{port, token}` only for the current running execution; do not persist or
+log it. The endpoint is not included in `service.list` or `service.get` and does
+not create an operation receipt. See [#462](protocol-versions/next-462.md) for
+arguments and typed refusals.
+
 ## Current-only contract (Issue #33, 0.2.0)
 
 Before 1.0.0, release-specific backward-compatibility paths are not part of the contract. The general schema migration runner, `user_version`/ledger validation, and protocol-version checks remain. Earlier sections describing an old-format fallback, deprecated alias, metadata repair, or compatibility shim are historical and superseded by this section; they must not be used to justify a runtime fallback.

@@ -691,6 +691,7 @@ fn shutdown_owner_crash_child() {
                 "printf '%s\\n' \"$$\" >> service-pids; exec sleep 600"
             };
             rpc(&control, Command::ServiceAdd(ServiceAddArgs {
+                name: None,
                 thread_id:Some(t["thread_id"].as_str().unwrap().into()),
                 cwd:Some(root.to_string_lossy().into_owned()), description:None, command:command.into(),
             })).await;

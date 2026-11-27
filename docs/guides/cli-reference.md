@@ -1030,6 +1030,14 @@ For command examples and execution IDs, see the Agent Guide's
 [scheduled checks](agent-guide.md#scheduled-checks) and
 [services](agent-guide.md#services-for-long-running-commands).
 
+`service add --name NAME` optionally names a service within its Thread; use
+`service set --service ID --name NAME` to rename it, or `--name ''` to clear it.
+Names use 1–64 lowercase ASCII letters, digits or hyphens, and duplicates in
+one Thread return `service_name_conflict`. `service get --service ID` and
+`service list --thread THREAD` show the name but not credentials.
+`service endpoint --service ID` reads the live port and secret token for that
+exact service. Its JSON output is sensitive; do not log or save it.
+
 `schedule add` and `schedule set` take `--notify VALUE`, repeatable. `skipped`
 sends one ordinary message from `schedule:<id>` to the owning Thread for every
 occurrence skipped because the previous execution is still active; `none`

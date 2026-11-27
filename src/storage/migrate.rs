@@ -372,6 +372,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0070_artifact_current_scheme.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 71,
+        sql: include_str!("../../migrations/next_service_name.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(
