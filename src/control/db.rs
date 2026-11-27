@@ -8,6 +8,8 @@ mod reparent;
 mod run_action;
 mod tags;
 pub(crate) mod thread_activity;
+pub(crate) mod thread_evidence;
+pub(crate) mod thread_lineage;
 mod thread_list;
 pub(crate) mod thread_summary;
 mod usage_status;
@@ -3332,7 +3334,18 @@ pub(super) fn delete_thread(
     now: &str,
 ) -> Result<MutationResult> {
     let targets = delete_targets(tx, args)?;
-    delete_targets_effects(tx, &targets, now)
+    let mut result = delete_targets_effects(tx, &targets, now)?;
+    // A confirmed preview bounds the exact target list returned to the client.
+    result.result = serde_json::to_value(ThreadDeleteResult {
+        accepted: true,
+        deleted_thread_ids: if args.preview_marker.is_some() || !args.descendants {
+            targets
+        } else {
+            Vec::new()
+        },
+    })
+    .map_err(|_| error(ErrorCode::InvalidState, "Cannot serialize deletion result"))?;
+    Ok(result)
 }
 
 pub(super) fn delete_targets_effects(
@@ -3347,6 +3360,10 @@ pub(super) fn delete_targets_effects(
         tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;
     }
     for id in targets {
+        tx.execute("DELETE FROM draft WHERE thread_id=?1", [id])
+            .map_err(sql_error)?;
+        tx.execute("DELETE FROM view_state WHERE thread_id=?1", [id])
+            .map_err(sql_error)?;
         tx.execute(
             "DELETE FROM shell_execution WHERE detached_thread_id=?1",
             [id],
@@ -3682,6 +3699,10 @@ mod thread_list_plan_tests {
         for late in [0, 100, 2_000] {
             let db = setup(late);
             let args = |cursor| ThreadListArgs {
+                root: None,
+                include_descendant_count: false,
+                include_activity: false,
+                include_activity_evidence: false,
                 thread_ids: None,
                 state: None,
                 order: Default::default(),
@@ -3747,6 +3768,10 @@ mod thread_list_plan_tests {
         let page = thread_list_awaiting_human(
             &db,
             &ThreadListArgs {
+                root: None,
+                include_descendant_count: false,
+                include_activity: false,
+                include_activity_evidence: false,
                 thread_ids: None,
                 state: None,
                 order: Default::default(),
@@ -3807,6 +3832,10 @@ mod thread_list_plan_tests {
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied','now','{\"reply\":{\"state\":\"pending\"},\"ask_name\":\"human\",\"to_human\":true}')", params![format!("r{id}"), id, node]).unwrap();
         }
         let args = |cursor| ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),
@@ -3849,6 +3878,10 @@ mod thread_list_plan_tests {
             thread_list_awaiting_human(
                 db,
                 &ThreadListArgs {
+                    root: None,
+                    include_descendant_count: false,
+                    include_activity: false,
+                    include_activity_evidence: false,
                     thread_ids: None,
                     state: None,
                     order: Default::default(),
@@ -3887,6 +3920,10 @@ mod thread_list_plan_tests {
             db.execute(insert, params![id, thread, node, id]).unwrap();
         }
         let args = |cursor, archived| ThreadListArgs {
+            root: None,
+            include_descendant_count: false,
+            include_activity: false,
+            include_activity_evidence: false,
             thread_ids: None,
             state: None,
             order: Default::default(),
@@ -4211,6 +4248,10 @@ mod activity_list_tests {
             let page = thread_list(
                 &db,
                 &ThreadListArgs {
+                    root: None,
+                    include_descendant_count: false,
+                    include_activity: false,
+                    include_activity_evidence: false,
                     thread_ids: None,
                     state: None,
                     order: Default::default(),

@@ -460,6 +460,18 @@ pub struct Diagnostics {
     shared: Arc<Shared>,
 }
 impl Diagnostics {
+    pub(crate) fn disabled() -> Self {
+        Self {
+            shared: Arc::new(Shared {
+                sender: Mutex::new(None),
+                join: Mutex::new(None),
+                health: Arc::new(Health {
+                    failed: AtomicBool::new(false),
+                    dropped: AtomicU64::new(0),
+                }),
+            }),
+        }
+    }
     /// Starts a dedicated writer; no file open, metadata, or write on the caller.
     pub fn start(directory: PathBuf, settings: Logging) -> Self {
         let health = Arc::new(Health {

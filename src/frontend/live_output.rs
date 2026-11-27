@@ -1,8 +1,7 @@
 //! One scoped output observer on the existing frontend loop/read workers.
 use super::*;
-use crate::control::output::preview::live::LiveCursor;
 use crate::ui::live_work::LiveOutputPreview;
-pub(super) type ReadResult = Result<(LiveCursor, LiveOutputPreview), String>;
+pub(super) type ReadResult = Result<LiveOutputPreview, String>;
 
 pub(super) struct Ticket {
     pub thread: String,
@@ -27,7 +26,6 @@ pub(super) struct Observation {
     next: Option<tokio::time::Instant>,
     inflight: Option<(u64, String)>,
     dirty: bool,
-    cursor: Option<LiveCursor>,
 }
 impl Drop for Observation {
     fn drop(&mut self) {
@@ -39,7 +37,6 @@ impl Observation {
         if let Some(scope) = self.scope.take() {
             scope.stop.cancel();
         }
-        self.cursor = None;
         self.seen.clear();
         self.inflight = None;
         self.dirty = false;
@@ -140,7 +137,7 @@ impl Observation {
                 .collect(),
         })
     }
-    /// Missed output entries: the open preview re-reads from its cursor.
+    /// Missed output entries: the open preview reloads the bounded retained tail.
     pub fn resync(&mut self) {
         self.dirty |= self
             .scope
@@ -177,12 +174,6 @@ impl Observation {
             stop: scope.stop.child_token(),
         })
     }
-    pub fn take_cursor(&mut self) -> Option<LiveCursor> {
-        self.cursor.take()
-    }
-    pub fn install_cursor(&mut self, cursor: LiveCursor) {
-        self.cursor = Some(cursor);
-    }
     pub fn complete(&mut self, ticket: &Ticket) -> bool {
         if !self.scope.as_ref().is_some_and(|s| {
             s.thread == ticket.thread
@@ -200,31 +191,52 @@ impl Observation {
     }
 }
 
-pub(super) async fn read(
-    control: &Control,
-    execution: &str,
-    cursor: Option<LiveCursor>,
-) -> ReadResult {
-    let (cursor, page) =
-        super::streams::live_execution_preview(control, execution.to_owned(), cursor)
-            .await
-            .map_err(|e| e.to_string())?;
-    if page.raw_bytes > 4096
-        || page.stdout.len() + page.stderr.len() > 4096
-        || page.inspected_rows > 128
-    {
-        return Err("Live output exceeded its finite read allowance".into());
-    }
-    Ok((
-        cursor,
-        LiveOutputPreview {
-            stdout: page.stdout,
-            stderr: page.stderr,
-            decode_uncertain: page.decode_uncertain || page.decode_errors,
-            skipped: page.skipped,
-            complete: page.terminal && page.output_complete,
-        },
-    ))
+pub(super) async fn read(owner: &native_history::Owner<'_>, ticket: &Ticket) -> ReadResult {
+    use crate::protocol::{
+        ExecutionTarget, ShellDetails, ShellOutput, ShellReadArgs, ShellReadOwner, ShellState,
+    };
+    const LIMIT: usize = 4096;
+    let execution = &ticket.execution;
+    let shell: ShellDetails = owner
+        .call(Command::ShellGet(ExecutionTarget {
+            execution_id: execution.clone(),
+        }))
+        .await
+        .map_err(|error| error.to_string())?;
+    let run_id = shell
+        .run_id
+        .filter(|_| {
+            shell.execution_id == *execution && shell.thread_id.as_deref() == Some(&ticket.thread)
+        })
+        .ok_or_else(|| "Live output owner changed".to_owned())?;
+    let output: ShellOutput = owner
+        .call(Command::ShellRead(ShellReadArgs {
+            execution_id: execution.clone(),
+            expected_owner: Some(ShellReadOwner {
+                thread_id: ticket.thread.clone(),
+                run_id,
+            }),
+            tail: true,
+            segments: true,
+            cursor: None,
+            encoding: None,
+            limit_bytes: LIMIT as u32,
+        }))
+        .await
+        .map_err(|error| error.to_string())?;
+    let terminal = matches!(
+        shell.state,
+        ShellState::Exited | ShellState::Failed | ShellState::Stopped
+    );
+    let page = super::streams::from_native_tail(execution, output, LIMIT, terminal)
+        .map_err(|error| error.to_string())?;
+    Ok(LiveOutputPreview {
+        stdout: page.stdout,
+        stderr: page.stderr,
+        decode_uncertain: page.decode_uncertain || page.decode_errors,
+        skipped: page.skipped,
+        complete: page.terminal && page.output_complete,
+    })
 }
 
 #[cfg(test)]

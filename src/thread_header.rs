@@ -721,9 +721,11 @@ mod tests {
 }
 
 /// Owned title evidence for one bounded browser ID set.
+#[cfg(test)]
 pub(crate) struct RawTitles {
     entries: std::collections::BTreeMap<String, (String, Option<TitleWitness>)>,
 }
+#[cfg(test)]
 impl RawTitles {
     pub(crate) fn prepare(self) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
         let mut titles = std::collections::BTreeMap::new();
@@ -743,6 +745,7 @@ impl RawTitles {
 }
 // Recursive successors seek the existing membership indexes. Shared LIMITs
 // apply before user/body filtering: neither lane can inspect an entire history.
+#[cfg(test)]
 const TITLE_BATCH_SQL: &str = r"
 WITH RECURSIVE keys AS MATERIALIZED (
  SELECT json_extract(value,'$[0]') AS thread,CAST(key AS INTEGER) AS input_pos FROM json_each(?1)
@@ -800,12 +803,14 @@ SELECT thread,input_pos,lane,position,
  bytes IS NOT NULL AND (bytes>?2 OR used>?3),0,0 FROM budgeted
 ORDER BY input_pos,lane,position";
 
+#[cfg(test)]
 pub(crate) fn read_titles_tx(
     db: &Connection,
     requests: &[(String, String)],
 ) -> Result<RawTitles, StorageError> {
     read_titles_with_limits_tx(db, requests, SOURCE_BYTES, WITNESS_BYTES)
 }
+#[cfg(test)]
 fn read_titles_with_limits_tx(
     db: &Connection,
     requests: &[(String, String)],

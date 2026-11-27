@@ -1,65 +1,73 @@
 //! Untimed, bounded preview preparation in the existing frontend read workers.
-pub(super) async fn load(
-    control: &crate::control::Control,
-    source: &str,
-    group: Option<&str>,
-    call: &str,
-    limit: usize,
-) -> Result<crate::ui::ToolPreview, String> {
-    super::streams::preview(control, source, group, call, limit)
-        .await
-        .map(|page| super::tool_preview(page, control.store.config.ui.language))
-        .map_err(|error| error.to_string())
+use crate::{config::UiLanguage, protocol::*};
+
+pub(super) struct Source<'a> {
+    pub thread: &'a str,
+    pub node: &'a str,
+    pub group: Option<&'a str>,
+    pub call: &'a str,
 }
 
-#[cfg(test)]
-mod blocked_database_tests {
-    use super::*;
-    #[tokio::test]
-    async fn a_blocked_database_read_stays_pending_after_the_old_deadline_and_can_be_retired() {
-        use std::time::Duration;
-        use tokio::sync::oneshot;
-        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
-        let (entered, waiting) = oneshot::channel();
-        let (release, held) = std::sync::mpsc::channel();
-        let db = owner.db.clone();
-        let blocker = tokio::spawn(async move {
-            db.call(move |_| {
-                let _ = entered.send(());
-                crate::test_watchdog::blocking_recv("release preview database gate", &held)
-                    .unwrap();
-                Ok(())
+pub(super) async fn load(
+    owner: super::native_history::Owner<'_>,
+    source: Source<'_>,
+    limit: usize,
+    language: UiLanguage,
+) -> Result<crate::ui::ToolPreview, String> {
+    let result = async {
+        let window = owner
+            .window(HistoryWindowArgs {
+                thread_id: source.thread.to_owned(),
+                include_observation: true,
+                observe_node_ids: vec![source.node.to_owned()],
+                items: false,
+                ordinal: None,
+                node_id: None,
+                expect_node_id: None,
+                before: 0,
+                after: 0,
+                excerpt_chars: 0,
             })
-            .await
-            .unwrap()
+            .await?;
+        let observation = window
+            .observation
+            .ok_or_else(|| ApiError::new(ErrorCode::IoFailed, "Missing selected observation"))?;
+        let unavailable = || {
+            ApiError::new(
+                ErrorCode::TargetUnavailable,
+                "Saved tool output is unavailable",
+            )
+        };
+        let mut matches = observation.tools.calls.iter().filter(|call| {
+            call.node_id == source.node
+                && call.call_id == source.call
+                && source.group.is_none_or(|group| group == call.group_id)
         });
-        crate::test_watchdog::watchdog("database gate entered", waiting)
-            .await
-            .unwrap()
-            .unwrap();
-        tokio::time::pause();
-        let mut request = Box::pin(load(&control, "missing", None, "call", 16384));
-        assert!(futures_util::poll!(request.as_mut()).is_pending());
-        tokio::time::advance(Duration::from_secs(2)).await;
-        assert!(
-            futures_util::poll!(request.as_mut()).is_pending(),
-            "elapsed virtual time is not an I/O failure"
+        let call = matches
+            .next()
+            .filter(|_| matches.next().is_none())
+            .ok_or_else(unavailable)?;
+        let execution = call.execution_id.as_deref().ok_or_else(unavailable)?;
+        let output: ShellOutput = owner
+            .call(Command::ShellRead(ShellReadArgs {
+                execution_id: execution.to_owned(),
+                expected_owner: Some(call.shell_owner.clone().ok_or_else(unavailable)?),
+                tail: true,
+                segments: true,
+                cursor: None,
+                encoding: None,
+                limit_bytes: limit as u32,
+            }))
+            .await?;
+        let terminal = matches!(
+            call.shell_state.as_deref(),
+            Some("exited" | "failed" | "stopped")
         );
-        // Retiring the future leaves the queued read harmless; it exposes no late error.
-        drop(request);
-        tokio::time::resume();
-        release.send(()).unwrap();
-        crate::test_watchdog::watchdog("database gate released", blocker)
-            .await
-            .unwrap()
-            .unwrap();
-        let genuine = load(&control, "missing", None, "call", 16384).await;
-        assert!(genuine.is_err());
-        assert!(!genuine.unwrap_err().contains("時間内"));
-        server.shutdown().await.unwrap();
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
+        let page = super::streams::from_native_tail(execution, output, limit, terminal)?;
+        Ok::<_, ApiError>(super::tool_preview(page, language))
     }
+    .await;
+    result.map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

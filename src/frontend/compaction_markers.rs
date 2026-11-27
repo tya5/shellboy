@@ -1,139 +1,31 @@
-//! Compaction markers for the conversation (#230): a summary row names how it
-//! came about, and a skipped, failed or spill-only automatic attempt leaves one
-//! note after the response that triggered it. Saved facts only, read on the DB
-//! worker and projected on the presentation worker. A page without a summary or
-//! an automatic attempt does no compaction read.
+//! Render selected compaction facts already read by the owner.
 use crate::{
-    control::Control,
-    presentation::{PresentationKind, compaction_marker::MarkerFacts, messages::Message},
-    protocol::{ApiError, CompactListArgs},
-    storage::StorageError,
+    presentation::{PresentationKind, messages::Message},
+    protocol::HistoryWindowCompaction,
     ui::UiNode,
 };
-use rusqlite::Connection;
 
-const MAX_NODES: usize = 128;
-const AUTOMATIC_ATTEMPTS: &str = "SELECT oi.node_id,oi.attempt_id FROM output_item oi INDEXED BY output_item_node JOIN automatic_compaction c ON c.attempt_id=oi.attempt_id WHERE oi.node_id IN (SELECT value FROM json_each(?1))";
-
-pub(super) struct Raw {
-    attempts: Vec<(String, String)>,
-    events: crate::readback::RawCompactions,
-}
-pub(super) fn read_tx(
-    db: &Connection,
-    thread: &str,
-    summaries: usize,
-    assistants: &[String],
-) -> Result<Option<Raw>, StorageError> {
-    let encoded = serde_json::to_string(assistants).expect("String IDs serialize");
-    let attempts = if assistants.is_empty() {
-        Vec::new()
-    } else {
-        db.prepare_cached(AUTOMATIC_ATTEMPTS)?
-            .query_map([encoded], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    if summaries == 0 && attempts.is_empty() {
-        return Ok(None);
-    }
-    let args = CompactListArgs {
-        thread_id: Some(thread.into()),
-        since: None,
-        until: None,
-        limit: 200,
-    };
-    let events =
-        crate::readback::read_compactions_tx(db, thread, &args).map_err(StorageError::from)?;
-    Ok(Some(Raw { attempts, events }))
-}
-
-/// Applies prepared events to the page. Unmatched nodes keep their ordinary row.
-pub(super) fn apply(nodes: &mut [UiNode], raw: Raw) -> Result<(), ApiError> {
-    let page = crate::readback::prepare_compactions(raw.events)?;
-    let items = page["items"].as_array().cloned().unwrap_or_default();
-    let by_summary = |id: &str| {
-        items
-            .iter()
-            .find(|item| item["metrics"]["summary_node_id"].as_str() == Some(id))
-    };
-    for node in nodes.iter_mut() {
-        if node.presentation.kind == PresentationKind::Summary
-            && let Some(facts) = by_summary(&node.node_id).and_then(MarkerFacts::from_event)
-        {
-            node.presentation.title = facts.render(crate::config::UiLanguage::Ja);
-            node.presentation.ui_messages.title = Some(Message::CompactionMarker(facts));
-        }
-    }
-    for (node_id, attempt) in raw.attempts {
-        let Some(node) = nodes.iter_mut().find(|node| node.node_id == node_id) else {
+pub(super) fn apply(nodes: &mut [UiNode], markers: &[HistoryWindowCompaction]) {
+    for marker in markers {
+        let Some(node) = nodes.iter_mut().find(|node| node.node_id == marker.node_id) else {
             continue;
         };
-        let event = items.iter().find(|item| {
-            item["attempt_id"].as_str() == Some(attempt.as_str())
-                && item["reason"] == "proactive_threshold"
-        });
-        // A summary is drawn on its own row; this note covers everything else.
-        if let Some(facts) = event
-            .and_then(MarkerFacts::from_event)
-            .filter(|facts| !facts.has_summary)
-        {
-            node.presentation.compaction_note = Some(facts);
+        if node.presentation.kind == PresentationKind::Summary {
+            node.presentation.title = marker.facts.render(crate::config::UiLanguage::Ja);
+            node.presentation.ui_messages.title =
+                Some(Message::CompactionMarker(marker.facts.clone()));
+        } else if !marker.facts.has_summary {
+            node.presentation.compaction_note = Some(marker.facts.clone());
         }
     }
-    Ok(())
-}
-
-pub(super) async fn enrich(
-    control: &Control,
-    viewed_thread: Option<&str>,
-    nodes: &mut [UiNode],
-) -> Result<(), ApiError> {
-    let Some(thread) = viewed_thread.map(str::to_owned) else {
-        return Ok(());
-    };
-    if nodes.len() > MAX_NODES {
-        return Ok(());
-    }
-    let summaries = nodes
-        .iter()
-        .filter(|node| node.presentation.kind == PresentationKind::Summary)
-        .count();
-    let assistants = nodes
-        .iter()
-        .filter(|node| node.presentation.kind == PresentationKind::Assistant)
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    if summaries == 0 && assistants.is_empty() {
-        return Ok(());
-    }
-    // Markers are cosmetic: a failed or unreadable compaction read leaves the
-    // ordinary rows, and the page's own reads still report storage failures.
-    let Ok(Some(raw)) = control
-        .store
-        .database
-        .call(move |db| read_tx(db, &thread, summaries, &assistants))
-        .await
-    else {
-        return Ok(());
-    };
-    let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();
-    let projected = super::presentation_work(move || {
-        let mut owned = owned;
-        let result = apply(&mut owned, raw);
-        (owned, result)
-    })
-    .await?;
-    let (projected, _unreadable_events_keep_ordinary_rows) = projected;
-    for (target, node) in nodes.iter_mut().zip(projected) {
-        *target = node;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::UiLanguage;
+    use crate::history::window_facts::compactions::facts;
+    use rusqlite::Connection;
     use rusqlite::params;
     use serde_json::{Value, json};
 
@@ -229,10 +121,17 @@ mod tests {
             ui("resp1", "assistant_response", json!({"output":[]})),
             ui("resp2", "assistant_response", json!({"output":[]})),
         ];
-        let raw = read_tx(&db, "t", 1, &["resp1".into(), "resp2".into()])
-            .unwrap()
-            .unwrap();
-        apply(&mut nodes, raw).unwrap();
+        let observed = facts(
+            &db,
+            "t",
+            &[
+                ("sum".into(), "summary".into()),
+                ("resp1".into(), "assistant_response".into()),
+                ("resp2".into(), "assistant_response".into()),
+            ],
+        )
+        .unwrap();
+        apply(&mut nodes, &observed);
         let facts = match &nodes[0].presentation.ui_messages.title {
             Some(Message::CompactionMarker(facts)) => facts.clone(),
             other => panic!("{other:?}"),
@@ -280,11 +179,15 @@ mod tests {
     #[test]
     fn pages_without_summaries_or_automatic_attempts_do_no_compaction_read() {
         let db = fixture();
-        assert!(read_tx(&db, "t", 0, &[]).unwrap().is_none());
+        assert!(facts(&db, "t", &[]).unwrap().is_empty());
         assert!(
-            read_tx(&db, "t", 0, &["original".into()])
-                .unwrap()
-                .is_none()
+            facts(
+                &db,
+                "t",
+                &[("original".into(), "assistant_response".into())]
+            )
+            .unwrap()
+            .is_empty()
         );
     }
 }

@@ -2030,6 +2030,7 @@ impl Cli {
                 thread_id: a.thread_id,
                 run_id: a.run_id,
                 since: a.since,
+                ended_after: None,
                 state: a.state,
                 all: a.all,
                 limit: a.limit,
@@ -2137,6 +2138,10 @@ impl Cli {
                     document: crate::thread_import::read_file(&input)?,
                 }),
                 ThreadCommand::List(a) => C::ThreadList(wire::ThreadListArgs {
+                    root: None,
+                    include_descendant_count: false,
+                    include_activity: false,
+                    include_activity_evidence: false,
                     thread_ids: None,
                     state: a.state,
                     order: a.order,

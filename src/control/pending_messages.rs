@@ -27,13 +27,15 @@ pub(crate) fn cancel_tx(
         .unwrap_or_else(|| json!({"kind":"human"}));
     let mut items = Vec::with_capacity(args.message_ids.len());
     let mut changed = Vec::new();
+    let mut archived_order = Vec::new();
     for message in &args.message_ids {
-        let row = tx.query_row("SELECT r.id,r.target_thread_id,r.sender_json,r.state,r.path_admission,r.client_operation_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL),EXISTS(SELECT 1 FROM node n WHERE n.id=r.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL),r.created_at,COALESCE(json_extract(r.result_json,'$.to_human'),0)=1,json_extract(r.result_json,'$.reply.state') FROM receipt r WHERE r.message_node_id=?1",[message],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,bool>(8)?,r.get::<_,String>(9)?,r.get::<_,bool>(10)?,r.get::<_,Option<String>>(11)?))).optional()?;
+        let row = tx.query_row("SELECT r.id,r.target_thread_id,r.sender_json,r.state,r.path_admission,r.client_operation_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL),EXISTS(SELECT 1 FROM node n WHERE n.id=r.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL),r.created_at,COALESCE(json_extract(r.result_json,'$.to_human'),0)=1,json_extract(r.result_json,'$.reply.state'),r.rowid FROM receipt r WHERE r.message_node_id=?1",[message],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,bool>(8)?,r.get::<_,String>(9)?,r.get::<_,bool>(10)?,r.get::<_,Option<String>>(11)?,r.get::<_,i64>(12)?))).optional()?;
         let mut item = MessageCancelItem {
             message_id: message.clone(),
             outcome: NotFound,
             thread_id: None,
             archive_draft_id: None,
+            archive_order: None,
         };
         let Some((
             receipt,
@@ -48,6 +50,7 @@ pub(crate) fn cancel_tx(
             created,
             to_human,
             reply_state,
+            row_id,
         )) = row
         else {
             items.push(item);
@@ -158,7 +161,14 @@ pub(crate) fn cancel_tx(
                 changed.push(id.to_owned());
             }
         }
+        archived_order.push((created, row_id, items.len()));
         items.push(item);
+    }
+    // Preserve the selector order of the response, but report FIFO order for
+    // combining newly archived messages, without exposing internal row IDs.
+    archived_order.sort_unstable();
+    for (order, (_, _, index)) in archived_order.into_iter().enumerate() {
+        items[index].archive_order = Some(order as u32);
     }
     if !changed.is_empty()
         && tx.execute(

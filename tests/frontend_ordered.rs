@@ -304,6 +304,7 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
     }
     actions
         .send(UiAction::RestoreSnapshot {
+            thread_id: thread.clone(),
             draft_id: snapshot.draft_id.clone(),
             revision: snapshot.revision,
             node_id: source.clone(),

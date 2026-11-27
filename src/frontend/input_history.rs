@@ -2,7 +2,7 @@
 use crate::{protocol::*, ui::RecalledPrompt};
 
 pub(super) async fn recall(
-    data_dir: &std::path::Path,
+    owner: &super::native_history::Owner<'_>,
     thread_id: String,
     before_ordinal: Option<u64>,
     before_node_id: Option<String>,
@@ -18,9 +18,7 @@ pub(super) async fn recall(
     };
     // One initial window and one continuation; neither depends on retained size.
     for _ in 0..2 {
-        match super::inspection_history::native_read(data_dir, Command::HistoryRecall(args.clone()))
-            .await?
-        {
+        match owner.call(Command::HistoryRecall(args.clone())).await? {
             HistoryRecallResult::Found { input } => {
                 return Ok(Some(RecalledPrompt {
                     ordinal: input.ordinal,
@@ -70,25 +68,20 @@ mod tests {
             })
             .await
             .unwrap();
-        let path = &owner.loaded.data_dir;
+        let native = super::super::selected_owner(&control);
         let args = HistoryRecallArgs {
             thread_id: "thread".into(),
             older: true,
             anchor: None,
             expected_revision: None,
         };
-        let read = |args| {
-            super::super::inspection_history::native_read::<HistoryRecallResult>(
-                path,
-                Command::HistoryRecall(args),
-            )
-        };
+        let read = |args| native.call::<HistoryRecallResult>(Command::HistoryRecall(args));
         let HistoryRecallResult::NotInWindow { boundary, revision } = read(args).await.unwrap()
         else {
             panic!("first window has only assistant nodes")
         };
         assert_eq!(boundary.ordinal, 1);
-        let input = recall(path, "thread".into(), None, None, true)
+        let input = recall(&native, "thread".into(), None, None, true)
             .await
             .unwrap()
             .unwrap();
@@ -125,7 +118,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(stale.code, ErrorCode::CursorExpired);
-        let limit = recall(path, "thread".into(), None, None, true)
+        let limit = recall(&native, "thread".into(), None, None, true)
             .await
             .unwrap_err();
         assert_eq!(limit.code, ErrorCode::InputLimit);

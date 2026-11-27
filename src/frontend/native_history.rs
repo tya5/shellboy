@@ -3,7 +3,7 @@ use crate::protocol::{
     ApiError, Command, ErrorCode, HistoryBody, HistoryDisplayOutline, HistoryDisplayPage,
     HistoryDisplayPosition, HistoryDisplayRange, HistoryDisplayRead, HistoryDisplaySelection,
     HistoryReadArgs, HistorySnippet, HistoryWindow, HistoryWindowArgs, HistoryWindowObservation,
-    MAX_BODY_BYTES,
+    MAX_BODY_BYTES, Request, Response,
 };
 use std::path::Path;
 
@@ -11,12 +11,33 @@ const PAGE_BYTES: usize = 8 * 1024;
 // A page can end up to three bytes early at a UTF-8 boundary.
 const MAX_PAGES: usize = (MAX_BODY_BYTES as usize).div_ceil(PAGE_BYTES - 3);
 
+#[derive(Clone, Copy)]
 pub(crate) struct Owner<'a> {
     pub data_dir: &'a Path,
     pub instance: &'a str,
 }
 
 impl Owner<'_> {
+    pub(super) fn operation(&self, command: Command) -> Request {
+        Request::new(
+            format!("{}:{}", self.instance, uuid::Uuid::new_v4()),
+            command,
+        )
+    }
+
+    pub(super) async fn dispatch(
+        &self,
+        request: Request,
+    ) -> Result<Response<serde_json::Value>, ApiError> {
+        crate::ipc::call_selected_operation(
+            self.data_dir,
+            self.instance,
+            request.command,
+            Some(request.operation_id),
+        )
+        .await
+    }
+
     pub(crate) async fn call<T: serde::de::DeserializeOwned>(
         &self,
         command: Command,
@@ -356,6 +377,8 @@ pub(super) fn apply_observation(
     super::tools::apply_window(nodes, &observation.tools);
     super::recovery::apply_window(nodes, &observation.recovery, language);
     super::usage::apply_window(nodes, &observation.usage);
+    super::message_metadata::apply_pinned(nodes, &observation.pinned_sources);
+    super::compaction_markers::apply(nodes, &observation.compactions);
     for marker in &observation.branches {
         if marker.current < marker.alternatives.len()
             && let Some(node) = nodes

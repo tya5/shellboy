@@ -1,12 +1,15 @@
 //! Bounded parent-Thread lineage observations; Run ownership is not ancestry.
+#[cfg(test)]
+use crate::{activity::ActivityPhase, control::db::thread_summary::RawActivity};
 use crate::{
-    activity::ActivityPhase,
-    control::db::thread_summary::{self, RawActivity},
-    protocol::{ApiError, ErrorCode},
+    control::db::thread_summary,
+    protocol::{ApiError, ErrorCode, ThreadDescendants, ThreadListState},
     storage::StorageError,
 };
 use rusqlite::Connection;
-use std::collections::{BTreeSet, HashSet};
+#[cfg(test)]
+use std::collections::BTreeSet;
+use std::collections::{BTreeMap, HashSet};
 
 const ROOT_LIMIT: usize = 2;
 const MEMBER_LIMIT: usize = 256;
@@ -38,7 +41,7 @@ WITH RECURSIVE root AS MATERIALIZED (
 )
 ";
 
-pub(super) struct RawLineage {
+pub(crate) struct RawLineage {
     root: String,
     available: bool,
     rows: Vec<RawMember>,
@@ -46,19 +49,21 @@ pub(super) struct RawLineage {
     cycle: bool,
 }
 impl RawLineage {
-    pub(super) fn root(&self) -> &str {
+    #[cfg(test)]
+    pub(crate) fn root(&self) -> &str {
         &self.root
     }
-    pub(super) fn witnesses(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn witnesses(&self) -> usize {
         self.rows.len()
     }
-    pub(super) fn truncated(&self) -> bool {
+    pub(crate) fn truncated(&self) -> bool {
         self.truncated
     }
 }
 /// Bounded saved membership for another consumer in the same transaction.
 /// Count classification remains in prepare outside the database worker.
-pub(super) fn membership(raw: &RawLineage) -> (bool, Vec<String>) {
+pub(crate) fn membership(raw: &RawLineage) -> (bool, Vec<String>) {
     let mut seen = HashSet::new();
     (
         raw.available,
@@ -80,10 +85,13 @@ struct RawMember {
     position: usize,
     deleted: bool,
     cycle: bool,
+    #[cfg(test)]
     activity: RawActivity,
+    state: ThreadListState,
+    group: ThreadListState,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct DescendantSnapshot {
+pub(crate) struct DescendantSnapshot {
     pub root: String,
     pub available: bool,
     pub active: u64,
@@ -95,8 +103,9 @@ pub(super) struct DescendantSnapshot {
     /// Includes deleted bridges and the row sentinel for change invalidation.
     pub members: Vec<String>,
 }
+#[cfg(test)]
 #[derive(Clone, Debug)]
-pub(super) struct LineageScope {
+pub(crate) struct LineageScope {
     pub root: String,
     pub members: Vec<String>,
 }
@@ -109,17 +118,19 @@ fn invalid(message: &str) -> StorageError {
 fn query() -> String {
     // Count membership is unchanged by inflight/retry/tools/owned refinements.
     // Do not scan irrelevant global tool-group or attempt history per member.
+    let state = thread_summary::CURRENT_STATE;
+    let group = thread_summary::state_group_expression();
     format!(
         "{WALK_SQL}SELECT root.id,w.id,w.position,t.deleted_at IS NOT NULL,w.cycle,
       bounds.row_limited OR bounds.depth_limited OR bounds.cycle,bounds.cycle,
-      latest.state,u.state,0,NULL,NULL,0 FROM root CROSS JOIN bounds LEFT JOIN numbered w ON 1
+      latest.state,u.state,0,NULL,NULL,0,{state},{group} FROM root CROSS JOIN bounds LEFT JOIN numbered w ON 1
       LEFT JOIN thread t ON t.id=w.id {} ORDER BY w.position",
         thread_summary::RUN_TURN_JOINS
     )
 }
 /// One statement for each actual visible root, at most two in one caller-owned
 /// transaction. No titles, source bodies or per-descendant reader calls.
-pub(super) fn read_roots_tx(
+pub(crate) fn read_roots_tx(
     db: &Connection,
     roots: &[String],
 ) -> Result<Vec<RawLineage>, StorageError> {
@@ -152,7 +163,10 @@ pub(super) fn read_roots_tx(
                     position: row.get::<_, i64>(2)? as usize,
                     deleted: row.get(3)?,
                     cycle: row.get(4)?,
+                    #[cfg(test)]
                     activity: thread_summary::decode_activity(row, 7)?,
+                    state: list_state(row.get::<_, String>(13)?.as_str())?,
+                    group: list_state(row.get::<_, String>(14)?.as_str())?,
                 });
             }
         }
@@ -160,7 +174,41 @@ pub(super) fn read_roots_tx(
     }
     Ok(result)
 }
-pub(super) fn prepare(raw: RawLineage) -> DescendantSnapshot {
+fn list_state(value: &str) -> Result<ThreadListState, StorageError> {
+    ThreadListState::ALL
+        .iter()
+        .copied()
+        .find(|state| state.as_str() == value)
+        .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Unknown saved Thread state").into())
+}
+
+pub(super) fn counts(raw: &RawLineage) -> ThreadDescendants {
+    let mut seen = HashSet::new();
+    let mut by_state = BTreeMap::new();
+    for row in &raw.rows {
+        if row.position > MEMBER_LIMIT
+            || row.deleted
+            || row.cycle
+            || row.id == raw.root
+            || !seen.insert(&row.id)
+        {
+            continue;
+        }
+        *by_state.entry(row.state).or_insert(0) += 1;
+        if row.group != row.state {
+            *by_state.entry(row.group).or_insert(0) += 1;
+        }
+    }
+    ThreadDescendants {
+        total: seen.len() as u64,
+        by_state,
+        capped: raw.truncated,
+        cycle: raw.cycle,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn prepare(raw: RawLineage) -> DescendantSnapshot {
     let mut result = DescendantSnapshot {
         root: raw.root,
         available: raw.available,
@@ -193,6 +241,7 @@ pub(super) fn prepare(raw: RawLineage) -> DescendantSnapshot {
     result
 }
 
+#[cfg(test)]
 const AFFECTED_SQL: &str = r"
 WITH RECURSIVE requested AS MATERIALIZED(SELECT DISTINCT value AS id FROM json_each(?1)),
 wanted AS MATERIALIZED(SELECT json_extract(value,'$[0]') AS root,json_extract(value,'$[1]') AS id FROM json_each(?2)),
@@ -206,7 +255,8 @@ ancestors(id,parent,depth,path) AS (
 SELECT DISTINCT wanted.root FROM ancestors a JOIN wanted ON wanted.id=a.id ORDER BY wanted.root";
 /// Existing cached identities are positive membership evidence. Otherwise one
 /// bounded PK-upward batch finds new descendants/frontiers without a tree scan.
-pub(super) fn affected_tx(
+#[cfg(test)]
+pub(crate) fn affected_tx(
     db: &Connection,
     changed: &[String],
     scopes: &[LineageScope],

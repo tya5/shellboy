@@ -109,13 +109,7 @@ impl OwnerLock {
         let data_dir = resolved.as_path();
         #[cfg(not(any(unix, windows)))]
         std::fs::create_dir_all(data_dir).map_err(io_error)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(data_dir.join("owner.lock"))
-            .map_err(io_error)?;
+        let file = open_owner_lock(data_dir, true).map_err(io_error)?;
         file.try_lock_exclusive().map_err(|_| {
             ApiError::new(
                 ErrorCode::InvalidState,
@@ -135,6 +129,47 @@ impl OwnerLock {
         }
         Ok(owner)
     }
+}
+
+/// Open the authority file without following a replaced lock path. When
+/// probing, do not create the file or change its contents.
+pub(crate) fn open_owner_lock(data_dir: &Path, create: bool) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(create)
+        .truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(data_dir.join("owner.lock"))?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Owner lock is not a regular file",
+        ));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Owner lock is a reparse point",
+            ));
+        }
+    }
+    Ok(file)
 }
 
 #[cfg(windows)]

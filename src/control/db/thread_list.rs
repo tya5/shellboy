@@ -4,7 +4,7 @@ use super::{
 };
 use crate::digest::sha256_hex as hash;
 use crate::protocol::{
-    ArchivedFilter, ErrorCode, MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadListArgs,
+    ArchivedFilter, ErrorCode, MAX_LIST_LIMIT, PageCursor, ThreadCompletion, ThreadListArgs,
     ThreadListFilters, ThreadListOrder, ThreadListPage, ThreadSummary,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -23,14 +23,60 @@ pub(crate) fn thread_list(
     connection: &Connection,
     args: &ThreadListArgs,
 ) -> Result<ThreadListPage> {
+    let read_sequence = super::history_observation::next_read_sequence();
+    let root = args
+        .root
+        .as_ref()
+        .map(|root| {
+            super::thread_lineage::read_roots_tx(connection, std::slice::from_ref(root))
+                .map_err(StorageError::into_api_error)?
+                .into_iter()
+                .next()
+                .filter(|raw| super::thread_lineage::membership(raw).0)
+                .ok_or_else(|| error(ErrorCode::TargetUnavailable, "Root Thread is unavailable"))
+        })
+        .transpose()?;
+    let root_ids = root
+        .as_ref()
+        .map(|raw| super::thread_lineage::membership(raw).1);
+    let root_count = root
+        .as_ref()
+        .zip(root_ids.as_ref())
+        .map(|(raw, ids)| (ids.len() as u64, !raw.truncated()));
     if let Some(ids) = &args.thread_ids {
-        let items = summaries_by_id(connection, ids)?;
-        return Ok(RecordPage::new(
+        let mut ids = ids
+            .iter()
+            .filter(|id| root_ids.as_ref().is_none_or(|members| members.contains(id)))
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(state) = args.state {
+            let state = state.as_str();
+            let group = matches!(state, "awaiting_you" | "active_work" | "other_work");
+            let mut query = connection
+                .prepare_cached(&thread_summary::state_sql(group))
+                .map_err(sql_error)?;
+            let mut matching = Vec::with_capacity(ids.len());
+            for id in ids {
+                let found = query
+                    .query_row([&id], |row| row.get::<_, String>(0))
+                    .optional()
+                    .map_err(sql_error)?;
+                if found.as_deref() == Some(state) {
+                    matching.push(id);
+                }
+            }
+            ids = matching;
+        }
+        let items = summaries_by_id(connection, &ids)?;
+        return observation(
+            connection,
+            args,
             MAX_LIST_LIMIT,
-            list_filters(args, false),
+            false,
             items,
             None,
-        ));
+            (read_sequence, root_count),
+        );
     }
     if args.awaiting.is_some() {
         return thread_list_awaiting_human(connection, args);
@@ -57,7 +103,18 @@ pub(crate) fn thread_list(
         }
     };
     let cwd = cwd_normalized.as_deref();
-    let cursor_filter = list_cursor_filter(filter, &tags, cwd);
+    let mut cursor_filter = list_cursor_filter(filter, &tags, cwd);
+    if args.root.is_some() || args.include_activity || args.include_descendant_count {
+        cursor_filter = hash(
+            serde_json::to_vec(&(
+                cursor_filter,
+                &args.root,
+                args.include_activity,
+                args.include_descendant_count,
+            ))
+            .expect("serializable list filters"),
+        );
+    }
     let state = args.state.map(crate::protocol::ThreadListState::as_str);
     let scope = match (args.order, state) {
         (ThreadListOrder::Updated, Some(state)) => {
@@ -113,6 +170,7 @@ pub(crate) fn thread_list(
                 state,
                 has_query,
                 watermark,
+                root_ids: root_ids.as_deref(),
             },
         )?,
         ThreadListOrder::Created => {
@@ -155,17 +213,78 @@ pub(crate) fn thread_list(
         })
         .transpose()?;
     attach_tags(connection, &mut items)?;
-    Ok(RecordPage::new(
+    observation(
+        connection,
+        args,
         args.limit,
-        list_filters(args, has_query),
+        has_query,
         items,
         next_cursor,
-    ))
+        (read_sequence, root_count),
+    )
+}
+
+fn observation(
+    connection: &Connection,
+    args: &ThreadListArgs,
+    limit: u32,
+    has_query: bool,
+    mut items: Vec<ThreadSummary>,
+    next_cursor: Option<String>,
+    (read_sequence, root_count): (u64, Option<(u64, bool)>),
+) -> Result<ThreadListPage> {
+    for item in &mut items {
+        if args.include_descendant_count {
+            let lineage = super::thread_lineage::read_roots_tx(
+                connection,
+                std::slice::from_ref(&item.thread_id),
+            )
+            .map_err(StorageError::into_api_error)?;
+            if let Some(root) = lineage.first() {
+                item.descendants = Some(super::thread_lineage::counts(root));
+            }
+        }
+        if args.include_activity {
+            item.activity_detail = super::thread_activity::read(connection, &item.thread_id)
+                .map_err(StorageError::into_api_error)?;
+            item.latest_completion = connection.query_row(
+                "SELECT id,ended_at FROM run WHERE thread_id=?1 AND state='completed' AND ended_at IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1",
+                [&item.thread_id], |row| Ok(ThreadCompletion {run_id: row.get(0)?, ended_at: row.get(1)?}),
+            ).optional().map_err(sql_error)?;
+        }
+    }
+    let activity_evidence = if args.include_activity_evidence {
+        let ids = items
+            .iter()
+            .map(|item| item.thread_id.clone())
+            .collect::<Vec<_>>();
+        super::thread_evidence::read(connection, &ids)
+            .map_err(sql_error)?
+            .into_iter()
+            .map(|(id, facts)| (id, facts.evidence()))
+            .collect()
+    } else {
+        Default::default()
+    };
+    Ok(ThreadListPage {
+        activity_evidence,
+        items,
+        limit,
+        filters: list_filters(args, has_query),
+        next_cursor,
+        read_sequence,
+        root_count: root_count.map(|(count, _)| count),
+        root_count_exact: root_count.map(|(_, exact)| exact),
+    })
 }
 
 fn list_filters(args: &ThreadListArgs, has_query: bool) -> ThreadListFilters {
     let discovery = args.thread_ids.is_none();
     ThreadListFilters {
+        root: args.root.clone(),
+        include_activity: args.include_activity,
+        include_activity_evidence: args.include_activity_evidence,
+        include_descendant_count: args.include_descendant_count,
         order: (discovery && args.awaiting.is_none()).then_some(args.order),
         archived: discovery.then_some(args.archived),
         state: args.state,
@@ -185,6 +304,7 @@ struct UpdatedFilter<'a> {
     state: Option<&'a str>,
     has_query: bool,
     watermark: i64,
+    root_ids: Option<&'a [String]>,
 }
 
 fn updated_page(
@@ -194,7 +314,15 @@ fn updated_page(
     after: bool,
     filter: UpdatedFilter<'_>,
 ) -> Result<(Vec<ThreadSummary>, Option<ListPosition>)> {
-    let sql = thread_summary::updated_candidate_sql(args.archived, after, filter.cwd.is_some());
+    let root_json = filter
+        .root_ids
+        .map(|ids| serde_json::to_string(ids).expect("serializable Thread identities"));
+    let sql = thread_summary::updated_candidate_sql(
+        args.archived,
+        after,
+        filter.cwd.is_some(),
+        root_json.is_some(),
+    );
     let mut statement = connection.prepare_cached(&sql).map_err(sql_error)?;
     let limit = crate::protocol::MAX_LIST_LIMIT;
     let candidate_limit = i64::from(limit) + 1;
@@ -203,12 +331,16 @@ fn updated_page(
         binds.extend([&last_time as &dyn rusqlite::ToSql, &last_id]);
     }
     binds.extend(filter.cwd.iter().map(|cwd| cwd as &dyn rusqlite::ToSql));
+    binds.extend(root_json.iter().map(|ids| ids as &dyn rusqlite::ToSql));
     let mut rows = statement.query(binds.as_slice()).map_err(sql_error)?;
     let mut tag_probe = connection
         .prepare_cached("SELECT EXISTS(SELECT 1 FROM thread_tag WHERE thread_id=?1 AND tag=?2)")
         .map_err(sql_error)?;
     let mut state_probe = connection
-        .prepare_cached(&thread_summary::state_sql())
+        .prepare_cached(&thread_summary::state_sql(matches!(
+            filter.state,
+            Some("awaiting_you" | "active_work" | "other_work")
+        )))
         .map_err(sql_error)?;
     let mut ids = Vec::new();
     let mut titles = std::collections::HashMap::new();
@@ -425,12 +557,15 @@ pub(super) fn thread_list_awaiting_human(
     } else {
         None
     };
-    Ok(RecordPage::new(
+    observation(
+        connection,
+        args,
         args.limit,
-        list_filters(args, false),
+        false,
         items,
         next_cursor,
-    ))
+        (super::history_observation::next_read_sequence(), None),
+    )
 }
 
 #[derive(Debug)]
@@ -787,7 +922,8 @@ mod tests {
                 second.items[0].thread_id,
                 format!("t{:06}", num_threads - 200)
             );
-            let sql = thread_summary::updated_candidate_sql(ArchivedFilter::Include, true, false);
+            let sql =
+                thread_summary::updated_candidate_sql(ArchivedFilter::Include, true, false, false);
             let mut statement = db.prepare(&sql).unwrap();
             let rows = statement
                 .query_map(

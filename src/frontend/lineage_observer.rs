@@ -1,17 +1,19 @@
 //! At most two visible count scopes on existing frontend read admission.
-use super::lineage::{self, DescendantSnapshot, LineageScope, RawLineage};
+use super::lineage::DescendantSnapshot;
+#[cfg(test)]
+use super::lineage::{self, LineageScope, RawLineage};
 use crate::{
     protocol::{ApiError, ErrorCode},
-    storage::StorageError,
     ui::{UiUpdate, watch::DescendantCount},
 };
-use rusqlite::Connection;
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
 };
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+#[cfg(test)]
+use {crate::storage::StorageError, rusqlite::Connection};
 
 const PERIOD: Duration = Duration::from_millis(500);
 #[derive(Clone)]
@@ -20,16 +22,21 @@ pub(super) struct Ticket {
     pub roots: Vec<String>,
     pub stop: CancellationToken,
     serial: u64,
+    #[cfg(test)]
     force: bool,
+    #[cfg(test)]
     changed: Vec<String>,
+    #[cfg(test)]
     cached: Vec<DescendantSnapshot>,
 }
+#[cfg(test)]
 pub(super) struct RawBatch {
     cached: Vec<DescendantSnapshot>,
     rows: Vec<RawLineage>,
     pub elapsed: Duration,
     queried_roots: usize,
 }
+#[cfg(test)]
 impl RawBatch {
     /// Saved scalar membership only, without classification or JSON parsing.
     pub fn scope(&self, root: &str) -> Option<(bool, Vec<String>)> {
@@ -73,6 +80,7 @@ pub(super) struct Prepared {
     pub discovered: usize,
     pub truncated: bool,
 }
+#[cfg(test)]
 pub(super) fn read_tx(db: &Connection, ticket: &Ticket) -> Result<RawBatch, StorageError> {
     if ticket.stop.is_cancelled() {
         return Err(ApiError::new(ErrorCode::InvalidState, "Descendant observation closed").into());
@@ -99,6 +107,71 @@ pub(super) fn read_tx(db: &Connection, ticket: &Ticket) -> Result<RawBatch, Stor
         queried_roots: roots.len(),
     })
 }
+pub(super) async fn read_native(
+    owner: &super::native_history::Owner<'_>,
+    ticket: &Ticket,
+) -> Result<(Prepared, u64), ApiError> {
+    use crate::protocol::{ThreadListArgs, ThreadListState};
+    let began = Instant::now();
+    let page = super::browser::NativeBrowser::new(owner.data_dir, owner.instance)
+        .list(
+            ThreadListArgs {
+                thread_ids: Some(ticket.roots.clone()),
+                include_descendant_count: true,
+                ..Default::default()
+            },
+            &ticket.stop,
+        )
+        .await?;
+    let mut snapshots = Vec::with_capacity(ticket.roots.len());
+    for root in &ticket.roots {
+        let row = page.items.iter().find(|row| &row.thread_id == root);
+        let facts = row
+            .map(|row| {
+                row.descendants.as_ref().ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::InvalidState,
+                        "Missing requested descendant counts",
+                    )
+                })
+            })
+            .transpose()?;
+        let count = |state| {
+            facts
+                .and_then(|facts| facts.by_state.get(&state))
+                .copied()
+                .unwrap_or(0)
+        };
+        snapshots.push(DescendantSnapshot {
+            root: root.clone(),
+            available: facts.is_some(),
+            active: count(ThreadListState::ActiveWork),
+            recovery: count(ThreadListState::RecoveryWait),
+            truncated: facts.is_some_and(|facts| facts.capped),
+            cycle: facts.is_some_and(|facts| facts.cycle),
+            threads: Vec::new(),
+            members: Vec::new(),
+        });
+    }
+    let truncated = snapshots.iter().any(|row| row.truncated);
+    let discovered = page
+        .items
+        .iter()
+        .filter_map(|row| row.descendants.as_ref())
+        .map(|facts| facts.total as usize)
+        .sum();
+    Ok((
+        Prepared {
+            snapshots,
+            elapsed: began.elapsed(),
+            queried_roots: ticket.roots.len(),
+            discovered,
+            truncated,
+        },
+        page.read_sequence,
+    ))
+}
+
 #[derive(Default)]
 pub(super) struct Observer {
     generation: Option<u64>,
@@ -119,9 +192,6 @@ impl Drop for Observer {
     }
 }
 impl Observer {
-    pub fn snapshots(&self) -> impl Iterator<Item = &DescendantSnapshot> {
-        self.cached.values()
-    }
     pub fn observe(&mut self, generation: u64, mut roots: Vec<String>) -> Result<bool, ApiError> {
         if self.generation.is_some_and(|old| generation < old) {
             return Ok(false);
@@ -191,15 +261,20 @@ impl Observer {
         self.serial = self.serial.wrapping_add(1);
         self.inflight = Some(self.serial);
         self.next = Some(now + PERIOD);
-        let force = std::mem::take(&mut self.force);
-        let changed = std::mem::take(&mut self.changed).into_iter().collect();
+        #[cfg(test)]
+        let (force, changed) = (self.force, self.changed.iter().cloned().collect());
+        self.force = false;
+        self.changed.clear();
         Some(Ticket {
             generation: self.generation.expect("visible scope has generation"),
             roots: self.roots.clone(),
             stop: self.stop.child_token(),
             serial: self.serial,
+            #[cfg(test)]
             force,
+            #[cfg(test)]
             changed,
+            #[cfg(test)]
             cached: self.cached.values().cloned().collect(),
         })
     }
@@ -207,7 +282,7 @@ impl Observer {
     pub fn complete(
         &mut self,
         ticket: &Ticket,
-        sequence: u64,
+        sequence: Option<u64>,
         result: Result<Prepared, ApiError>,
     ) -> Option<Completion> {
         if ticket.stop.is_cancelled()
@@ -217,10 +292,11 @@ impl Observer {
             return None;
         }
         self.inflight = None;
-        if sequence < self.last_sequence {
+        if sequence.is_some_and(|sequence| sequence < self.last_sequence) {
             self.resync();
             return None;
         }
+        #[cfg(test)]
         let mut changed_members = BTreeSet::new();
         let mut counts_changed = self.cached.is_empty();
         let error = match result {
@@ -231,11 +307,15 @@ impl Observer {
                     }
                     if let Some(old) = self.cached.get(&row.root) {
                         counts_changed |= count(old) != count(&row);
-                        let old = old.threads.iter().collect::<BTreeSet<_>>();
-                        let new = row.threads.iter().collect::<BTreeSet<_>>();
-                        changed_members
-                            .extend(old.symmetric_difference(&new).map(|id| (*id).clone()));
+                        #[cfg(test)]
+                        {
+                            let old = old.threads.iter().collect::<BTreeSet<_>>();
+                            let new = row.threads.iter().collect::<BTreeSet<_>>();
+                            changed_members
+                                .extend(old.symmetric_difference(&new).map(|id| (*id).clone()));
+                        }
                     } else {
+                        #[cfg(test)]
                         changed_members.extend(row.threads.iter().cloned());
                         counts_changed = true;
                     }
@@ -250,10 +330,12 @@ impl Observer {
         };
         counts_changed |= self.error != error;
         self.error = error.clone();
-        self.last_sequence = sequence;
+        if let Some(sequence) = sequence {
+            self.last_sequence = sequence;
+        }
         let update = counts_changed.then(|| UiUpdate::Descendants {
             generation: ticket.generation,
-            read_sequence: sequence,
+            read_sequence: self.last_sequence,
             counts: self
                 .roots
                 .iter()
@@ -275,12 +357,14 @@ impl Observer {
         });
         Some(Completion {
             update,
+            #[cfg(test)]
             changed_members: changed_members.into_iter().collect(),
         })
     }
 }
 pub(super) struct Completion {
     pub update: Option<UiUpdate>,
+    #[cfg(test)]
     pub changed_members: Vec<String>,
 }
 fn count(row: &DescendantSnapshot) -> DescendantCount {
@@ -332,7 +416,7 @@ mod tests {
         assert!(observer.deadline().is_none());
         assert!(
             observer
-                .complete(&first, 1, Ok(prepared(snapshot("root", &[]))))
+                .complete(&first, Some(1), Ok(prepared(snapshot("root", &[]))))
                 .is_none()
         );
         observer.observe(3, vec!["other".into()]).unwrap();
@@ -349,7 +433,7 @@ mod tests {
         let first = observer.take(now).unwrap();
         observer.changed("late-child");
         let initial = observer
-            .complete(&first, 1, Ok(prepared(snapshot("root", &["child"]))))
+            .complete(&first, Some(1), Ok(prepared(snapshot("root", &["child"]))))
             .unwrap();
         assert!(initial.update.is_some());
         assert!(observer.deadline().is_some());
@@ -358,7 +442,7 @@ mod tests {
         let next = observer
             .complete(
                 &second,
-                2,
+                Some(2),
                 Ok(prepared(snapshot("root", &["child", "new-child"]))),
             )
             .unwrap();
@@ -372,7 +456,11 @@ mod tests {
         let mut observer = Observer::default();
         observer.observe(1, vec!["root".into()]).unwrap();
         let initial = observer.take(now).unwrap();
-        observer.complete(&initial, 1, Ok(prepared(snapshot("root", &["child"]))));
+        observer.complete(
+            &initial,
+            Some(1),
+            Ok(prepared(snapshot("root", &["child"]))),
+        );
         for n in 0..129 {
             observer.changed(&format!("c{n}"));
         }
@@ -381,7 +469,7 @@ mod tests {
         let completion = observer
             .complete(
                 &failed,
-                2,
+                Some(2),
                 Err(ApiError::new(ErrorCode::InvalidState, "busy")),
             )
             .unwrap();

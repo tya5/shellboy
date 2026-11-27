@@ -1,84 +1,25 @@
 //! Visible Watch metadata and bounded witnesses in the caller's read snapshot.
-use crate::{
-    control::db::thread_summary,
-    protocol::{ApiError, ErrorCode},
-    storage::StorageError,
-    ui::{
-        live_work::{LiveWorkRow, LiveWorkSnapshot, LiveWorkTarget},
-        watch::{PreparedWatchDetail, WatchAge, WatchAgeOrigin, WatchDetail},
+use crate::ui::{
+    live_work::{LiveWorkRow, LiveWorkSnapshot, LiveWorkTarget},
+    watch::{PreparedWatchDetail, WatchAge, WatchAgeOrigin, WatchDetail},
+};
+#[cfg(test)]
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
+#[cfg(test)]
+use {
+    crate::{
+        control::db::thread_summary,
+        protocol::{ApiError, ErrorCode},
+        storage::StorageError,
     },
-};
-use rusqlite::Connection;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Instant,
+    rusqlite::Connection,
 };
 
-// Exact-ID seeks only. Raw JSON witnesses are copied after a global64KiB
-// budget, never by first collecting full bodies in the materialized facts.
-const DETAILS: &str = r"
-WITH requested AS MATERIALIZED (SELECT DISTINCT value AS id FROM json_each(?1)),
-facts AS MATERIALIZED (
- SELECT t.id,t.parent_thread_id,CASE WHEN octet_length(parent.title)<=4096 THEN parent.title END AS parent_title,parent.deleted_at AS parent_deleted,
-   latest.id AS run_id,u.id AS turn_id,u.answer_node_id,
-   shell.id AS execution,shell.turn_id AS shell_turn,shell.started_at AS shell_started,
-   octet_length(shell.shell_json) AS command_bytes,
-   (SELECT received_at FROM output_chunk WHERE execution_id=shell.id ORDER BY sequence DESC LIMIT 1) AS output_at,
-   (SELECT count(*) FROM shell_execution WHERE owner_run_id=latest.id AND state IN ('starting','running','stopping')) AS shells,
-   (SELECT count(*) FROM receipt r WHERE r.target_thread_id=t.id AND r.state IN ('accepted','held') AND r.path_admission<>'admitted'
-     AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id)) AS pending,
-   octet_length(u.recovery_reason_json) AS recovery_bytes,
-   (SELECT octet_length(payload_json) FROM node WHERE id=u.answer_node_id) AS answer_bytes
- FROM requested q CROSS JOIN thread t ON t.id=q.id
- LEFT JOIN thread parent ON parent.id=t.parent_thread_id
- LEFT JOIN run latest ON latest.id=(SELECT id FROM run WHERE thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1)
- LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=latest.id ORDER BY created_at DESC,id DESC LIMIT 1)
- LEFT JOIN shell_execution shell ON shell.id=(SELECT id FROM shell_execution WHERE owner_run_id=latest.id
-   AND state IN ('starting','running','stopping') ORDER BY julianday(started_at) IS NULL,julianday(started_at),id LIMIT 1)
- WHERE t.deleted_at IS NULL
-), sized AS MATERIALIZED (
- SELECT *,COALESCE(CASE WHEN recovery_bytes<=16384 THEN recovery_bytes ELSE 0 END,0)
-         +COALESCE(CASE WHEN answer_bytes<=16384 THEN answer_bytes ELSE 0 END,0)
-         +COALESCE(CASE WHEN command_bytes<=16384 THEN command_bytes ELSE 0 END,0) AS source_bytes FROM facts
-), budgeted AS MATERIALIZED (
- SELECT *,sum(CASE WHEN source_bytes<=16384 THEN source_bytes ELSE 0 END)
-   OVER(ORDER BY id ROWS UNBOUNDED PRECEDING) AS used FROM sized
-)
-SELECT id,parent_thread_id,parent_title,parent_deleted,run_id,execution,shell_turn,shell_started,
- CASE WHEN command_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN
-   (SELECT CASE WHEN json_valid(shell_json) THEN CASE WHEN json_type(shell_json,'$.command')='text'
-       THEN substr(json_extract(shell_json,'$.command'),1,512) END END FROM shell_execution WHERE id=budgeted.execution) END,
- output_at,shells,pending,
- CASE WHEN recovery_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN (SELECT recovery_reason_json FROM turn WHERE id=budgeted.turn_id) END,
- CASE WHEN answer_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN (SELECT payload_json FROM node WHERE id=budgeted.answer_node_id) END,
- recovery_bytes IS NOT NULL AND (recovery_bytes>16384 OR source_bytes>16384 OR used>65536),
- answer_bytes IS NOT NULL AND (answer_bytes>16384 OR source_bytes>16384 OR used>65536),
- (SELECT state FROM shell_execution WHERE id=budgeted.execution),
- command_bytes IS NOT NULL AND (command_bytes>16384 OR source_bytes>16384 OR used>65536)
-FROM budgeted ORDER BY id";
-
-struct Extra {
-    parent: Option<String>,
-    parent_title: Option<String>,
-    parent_deleted: bool,
-    run: Option<String>,
-    execution: Option<String>,
-    shell_state: Option<String>,
-    shell_turn: Option<String>,
-    shell_started: Option<String>,
-    command: Option<String>,
-    command_limited: bool,
-    output_at: Option<String>,
-    shells: u64,
-    pending: u64,
-    recovery: Option<String>,
-    answer: Option<String>,
-    recovery_limited: bool,
-    answer_limited: bool,
-}
+#[cfg(test)]
 pub(super) struct RawWatch {
     summaries: Vec<thread_summary::RawSummary>,
-    extras: BTreeMap<String, Extra>,
+    extras: BTreeMap<String, crate::control::db::thread_evidence::Extra>,
     parents: super::header::RawTitles,
     observed_at: Instant,
     wall_at: chrono::DateTime<chrono::Utc>,
@@ -90,6 +31,7 @@ pub(super) fn read_tx(db: &Connection, ids: &[String]) -> Result<RawWatch, Stora
 
 /// Reuse only facts observed by this caller in the same read transaction. The
 /// shared parent IDs are promises to supply their prepared E titles later.
+#[cfg(test)]
 pub(super) fn read_shared_tx(
     db: &Connection,
     ids: &[String],
@@ -135,34 +77,7 @@ pub(super) fn read_shared_tx(
             summaries.push(summary);
         }
     }
-    let encoded = serde_json::to_string(ids).expect("Thread IDs serialize");
-    let extras = db
-        .prepare(DETAILS)?
-        .query_map([encoded], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                Extra {
-                    parent: row.get(1)?,
-                    parent_title: row.get(2)?,
-                    parent_deleted: row.get::<_, Option<String>>(3)?.is_some(),
-                    run: row.get(4)?,
-                    execution: row.get(5)?,
-                    shell_turn: row.get(6)?,
-                    shell_started: row.get(7)?,
-                    command: row.get(8)?,
-                    command_limited: row.get(17)?,
-                    output_at: row.get(9)?,
-                    shells: row.get::<_, i64>(10)? as u64,
-                    pending: row.get::<_, i64>(11)? as u64,
-                    recovery: row.get(12)?,
-                    answer: row.get(13)?,
-                    recovery_limited: row.get(14)?,
-                    answer_limited: row.get(15)?,
-                    shell_state: row.get(16)?,
-                },
-            ))
-        })?
-        .collect::<rusqlite::Result<BTreeMap<_, _>>>()?;
+    let extras = crate::control::db::thread_evidence::read(db, ids)?;
     let parents = extras
         .values()
         .filter(|row| !row.parent_deleted)
@@ -196,6 +111,7 @@ pub(super) fn prepare_with_titles(
 ) -> Vec<PreparedWatchDetail> {
     prepare_with_language(raw, known, crate::config::UiLanguage::Ja)
 }
+#[cfg(test)]
 pub(super) fn prepare_with_language(
     raw: RawWatch,
     known: &BTreeMap<String, String>,
@@ -403,7 +319,7 @@ pub(super) fn prepare_with_language(
 mod tests {
     use super::*;
     use crate::frontend::sql_trace::Statements;
-    use rusqlite::{StatementStatus, params};
+    use rusqlite::params;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -623,33 +539,6 @@ mod tests {
         );
         assert!(read_tx(&db, &vec!["t".into(); 129]).is_err());
     }
-    #[test]
-    fn empty_scope_does_no_sql_and_detail_seeks_do_not_scale_with_unrelated_threads() {
-        let db = fixture();
-        let trace = Statements::new(&db);
-        assert!(read_tx(&db, &[]).unwrap().summaries.is_empty());
-        assert_eq!(trace.count(), 0);
-        drop(trace);
-        fn steps(db: &Connection) -> (i32, i32) {
-            let mut statement = db.prepare(DETAILS).unwrap();
-            statement
-                .query_map(["[\"t\"]"], |_| Ok(()))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            (
-                statement.get_status(StatementStatus::VmStep),
-                statement.get_status(StatementStatus::FullscanStep),
-            )
-        }
-        let before = steps(&db);
-        db.execute_batch("WITH RECURSIVE ids(i)AS(VALUES(1)UNION ALL SELECT i+1 FROM ids WHERE i<10000) INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) SELECT 'unrelated-'||i,'Other','/','','p','m','now' FROM ids;").unwrap();
-        let after = steps(&db);
-        assert_eq!(
-            after, before,
-            "actual detail query must seek only its visible IDs"
-        );
-    }
 }
 
 #[cfg(test)]
@@ -768,4 +657,167 @@ mod shared_consumer_tests {
             Some("削除済みの親")
         );
     }
+}
+
+pub(super) fn prepare_native(
+    row: &crate::protocol::ThreadSummary,
+    evidence: crate::protocol::ThreadActivityEvidence,
+    language: crate::config::UiLanguage,
+) -> PreparedWatchDetail {
+    use crate::activity::ActivityPhase;
+    use crate::ui::i18n::local;
+    let observed_at = Instant::now();
+    let now = chrono::Utc::now();
+    let age = |value: Option<&str>| {
+        super::live_work::age(value, now).map(|elapsed_base| WatchAge {
+            elapsed_base,
+            observed_at,
+            origin: WatchAgeOrigin::SavedTransition,
+            saved_at: value
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|t| t.with_timezone(&chrono::Utc)),
+        })
+    };
+    let activity = row.activity_detail.as_ref();
+    let turn = activity.and_then(|a| a.turn.as_ref());
+    let run = activity.map(|a| &a.run);
+    let completed = matches!(
+        row.activity,
+        ActivityPhase::Completed | ActivityPhase::Stopped | ActivityPhase::Failed
+    );
+    let state_at = if completed {
+        run.and_then(|r| r.ended_at.as_deref())
+    } else if row.activity == ActivityPhase::Recovery {
+        evidence
+            .recovery_error
+            .as_ref()
+            .and_then(|e| e.details.as_ref())
+            .and_then(|d| d.get("last_failure_at"))
+            .and_then(serde_json::Value::as_str)
+    } else {
+        None
+    };
+    let model_request_age = matches!(
+        row.activity,
+        ActivityPhase::AwaitingModel | ActivityPhase::Receiving
+    )
+    .then(|| {
+        age(activity
+            .and_then(|a| a.current_attempt.as_ref())
+            .and_then(|a| a.started_at.as_deref()))
+    })
+    .flatten();
+    let work = run.filter(|r| r.owned_shells > 0).map(|r| {
+        let rows: Vec<_> = evidence
+            .shell
+            .into_iter()
+            .map(|s| LiveWorkRow {
+                description: None,
+                target: LiveWorkTarget::Shell {
+                    execution_id: s.execution_id,
+                    turn_id: s.turn_id,
+                },
+                label: super::live_work::label(
+                    s.command_excerpt.as_deref(),
+                    if s.command_limited {
+                        local!(
+                            language,
+                            "shell（コマンドは取得範囲外・詳細で確認）",
+                            "shell (command outside retrieval limit; see details)"
+                        )
+                    } else {
+                        local!(
+                            language,
+                            "shell（コマンドは詳細で確認）",
+                            "shell (see details for command)"
+                        )
+                    },
+                ),
+                state: s.state,
+                elapsed_base: super::live_work::age(s.started_at.as_deref(), now),
+                started_at: s.started_at,
+                output_age_base: super::live_work::age(s.last_output_at.as_deref(), now),
+                last_output_at: s.last_output_at,
+                wait_info: None,
+            })
+            .collect();
+        LiveWorkSnapshot {
+            run_id: r.run_id.clone(),
+            overflow: r.owned_shells.saturating_sub(rows.len() as u64),
+            rows,
+            shells: r.owned_shells,
+            waits: None,
+            counts_capped: r.owned_shells >= 128,
+            observed_at,
+        }
+    });
+    let parent_title = row.parent_thread_id.as_ref().map(|_| {
+        if evidence.parent_deleted {
+            local!(language, "削除済みの親", "Deleted parent").into()
+        } else {
+            evidence.parent_title.unwrap_or_else(|| {
+                local!(
+                    language,
+                    "親の名称は取得範囲外",
+                    "Parent title outside retrieval limit"
+                )
+                .into()
+            })
+        }
+    });
+    let answer_id = turn.and_then(|t| t.answer_node_id.clone());
+    let answer_preview = if evidence.answer_limited {
+        Some(
+            local!(
+                language,
+                "回答本文は取得範囲外（会話を開いて確認）",
+                "Answer outside retrieval limit (open conversation)"
+            )
+            .into(),
+        )
+    } else {
+        evidence.answer_excerpt.or_else(|| {
+            answer_id.as_ref().map(|_| {
+                local!(
+                    language,
+                    "回答本文は未取得（会話を開いて確認）",
+                    "Answer not retrieved (open conversation)"
+                )
+                .into()
+            })
+        })
+    };
+    let state_age = age(state_at);
+    let recovery_reason = if evidence.recovery_limited {
+        Some(
+            local!(
+                language,
+                "復旧理由は取得範囲外（詳細で確認）",
+                "Recovery reason outside retrieval limit (see details)"
+            )
+            .into(),
+        )
+    } else {
+        evidence.recovery_error.map(|error| match language {
+            crate::config::UiLanguage::Ja => crate::config_setup::tui_error(&error),
+            crate::config::UiLanguage::En => error.message,
+        })
+    };
+    WatchDetail {
+        thread_id: row.thread_id.clone(),
+        latest_run_id: run.map(|r| r.run_id.clone()),
+        answer_id,
+        turn_id: turn.map(|t| t.turn_id.clone()),
+        turn_generation: turn.and_then(|t| u64::try_from(t.generation).ok()),
+        phase: row.activity,
+        parent_title,
+        state_age,
+        model_request_age,
+        work,
+        recovery_reason,
+        answer_preview,
+        pending_messages: evidence.pending_messages,
+        revisit: row.revisit.clone(),
+    }
+    .prepare()
 }

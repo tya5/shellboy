@@ -4,6 +4,9 @@ use crate::control::message_delivery::MessageHolds;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static READ_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+pub(super) fn next_read_sequence() -> u64 {
+    READ_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+}
 const PENDING_LIMIT: usize = 128;
 
 impl Store {
@@ -34,7 +37,7 @@ impl Store {
                 Some(if shell { "shell" } else { "external" }),
                 |db| {
                     let tx = db.transaction().map_err(sql_error)?;
-                    let sequence = READ_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+                    let sequence = next_read_sequence();
                     let mut window = history::window(&tx, &args)?;
                     window.observation = Some(observe(
                         &tx,
@@ -183,6 +186,9 @@ fn observe(
         .chain(window.items.iter().map(|item| &item.node_id))
         .cloned()
         .collect::<Vec<_>>();
+    let compactions =
+        crate::history::window_facts::compactions::facts(db, &window.thread_id, &items)
+            .map_err(StorageError::into_api_error)?;
     let ids = items.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
     let branches = crate::history::branches::markers(db, &window.thread_id, &ids)?
         .into_iter()
@@ -201,6 +207,7 @@ fn observe(
         .collect();
     Ok(HistoryWindowObservation {
         read_sequence,
+        observed_at: chrono::Utc::now().to_rfc3339(),
         pending: pending(db, &window.thread_id, holds).map_err(sql_error)?,
         committed_attempts,
         activity: activity(db, &window.thread_id)?,
@@ -210,6 +217,7 @@ fn observe(
         received,
         received_root_revision,
         branches,
+        compactions,
         pinned_sources: crate::history::window_facts::message_sources::pinned(
             db,
             &window.thread_id,

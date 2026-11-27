@@ -325,3 +325,15 @@ returns `operation_conflict` with reason `draft_revision_submitted`; neither
 row changes. The client drops that obsolete autosave without treating it as
 a shutdown failure. Newer, unconsumed snapshots still use the normal save
 fence. `draft.submit` keeps its separate selected-revision fence.
+
+Watch discovers recovery, failed, awaiting-you, active, and remaining Threads in
+that order, using updated-order `thread.list` cursors for each state group. A
+rooted Watch uses the same state filters with the selected root. Unread
+completion identities remain in the client and only promote loaded rows within
+their group; Watch does not claim a global unread order.
+
+Exact-ID `thread.list` with `include_activity` can also request
+`include_activity_evidence`. The same owner transaction observes the latest
+activity, parent label, bounded shell evidence, pending count, recovery
+error and answer excerpt. The terminal renders those facts; it never opens
+SQLite. The detail and row refreshes retain their own owner read sequences.

@@ -3,6 +3,9 @@ use shellboy::{config::Config, protocol::ThreadSummary, ui::*};
 
 fn item(id: &str, parent: Option<&str>) -> ThreadSummary {
     ThreadSummary {
+        descendants: None,
+        activity_detail: None,
+        latest_completion: None,
         awaiting_reply: 0,
         awaiting_thread_replies: 0,
         awaiting_named_count_exact: true,

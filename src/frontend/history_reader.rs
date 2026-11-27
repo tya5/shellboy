@@ -6,7 +6,8 @@ use super::*;
 use crate::protocol::{HistoryDisplayPosition, HistoryWindowArgs};
 
 pub(super) struct HistoryReader<'a> {
-    control: &'a Control,
+    owner: Owner<'a>,
+    language: UiLanguage,
     updates: &'a dyn UpdateTarget,
     width: u16,
     known: Vec<KnownSubmission>,
@@ -169,22 +170,14 @@ fn display_position(position: NodePosition) -> HistoryDisplayPosition {
     }
 }
 
-/// How a page reads its saved source metadata: the history worker's enrichment
-/// with branch and compaction markers, or facts from the selected observation.
-pub(super) enum Metadata {
-    Enriched,
-    Window,
-}
-
 /// Read and project one selected window. `wanted` names the node whose
 /// extent follows a source position; every other node shows its tail.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn read_page(
-    control: &Control,
+    language: UiLanguage,
     owner: &Owner<'_>,
     width: u16,
     known: &[KnownSubmission],
-    metadata: Metadata,
     args: HistoryWindowArgs,
     expected_revision: Option<u64>,
     keep: impl FnOnce(&[crate::protocol::HistorySnippet]) -> std::ops::Range<usize>,
@@ -196,19 +189,15 @@ pub(super) async fn read_page(
             wanted(source).map_or(HistoryDisplayPosition::Tail, display_position)
         })
         .await?;
-    project_page(
-        control, owner, width, known, metadata, &thread, window, wanted,
-    )
-    .await
+    project_page(language, owner, width, known, &thread, window, wanted).await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn project_page(
-    control: &Control,
+    language: UiLanguage,
     owner: &Owner<'_>,
     width: u16,
     known: &[KnownSubmission],
-    metadata: Metadata,
     thread: &str,
     window: SelectedWindow,
     wanted: impl Fn(&crate::protocol::HistorySnippet) -> Option<NodePosition>,
@@ -229,8 +218,7 @@ async fn project_page(
             char_offset: position.offset(node.display.total_chars as usize),
         })
     });
-    let language = control.store.config.ui.language;
-    let mut projected = presentation_work(move || {
+    let projected = presentation_work(move || {
         nodes
             .into_iter()
             .map(|node| {
@@ -240,15 +228,8 @@ async fn project_page(
             .collect::<Vec<_>>()
     })
     .await?;
-    match metadata {
-        Metadata::Enriched => {
-            message_metadata::enrich(control, Some(thread), &mut projected).await?
-        }
-        Metadata::Window => {
-            message_metadata::apply_pinned(&mut projected, &observation.pinned_sources)
-        }
-    }
     let (mut projected, observation) = presentation_work(move || {
+        let mut projected = projected;
         native_history::apply_observation(&mut projected, &observation, language);
         (projected, observation)
     })
@@ -332,9 +313,15 @@ fn not_on_path(error: &ApiError) -> bool {
 }
 
 impl<'a> HistoryReader<'a> {
-    pub(super) fn new(control: &'a Control, updates: &'a dyn UpdateTarget, width: u16) -> Self {
+    pub(super) fn new(
+        owner: Owner<'a>,
+        language: UiLanguage,
+        updates: &'a dyn UpdateTarget,
+        width: u16,
+    ) -> Self {
         Self {
-            control,
+            owner,
+            language,
             updates,
             width,
             known: Vec::new(),
@@ -346,12 +333,6 @@ impl<'a> HistoryReader<'a> {
         self.known = known;
         self
     }
-    fn owner(&self) -> Owner<'_> {
-        Owner {
-            data_dir: compose_data_dir(self.control),
-            instance: &self.control.store.instance_id,
-        }
-    }
     async fn page_at(
         &self,
         args: HistoryWindowArgs,
@@ -359,11 +340,10 @@ impl<'a> HistoryReader<'a> {
         wanted: impl Fn(&crate::protocol::HistorySnippet) -> Option<NodePosition>,
     ) -> Result<Page, ApiError> {
         read_page(
-            self.control,
-            &self.owner(),
+            self.language,
+            &self.owner,
             self.width,
             &self.known,
-            Metadata::Enriched,
             args,
             expected_revision,
             |items| 0..items.len(),
@@ -373,28 +353,24 @@ impl<'a> HistoryReader<'a> {
         .map_err(unavailable)
     }
     pub(super) async fn saved(
-        control: &Control,
+        owner: &Owner<'_>,
+        language: UiLanguage,
         width: u16,
         known: Vec<KnownSubmission>,
-        draft_id: String,
-        revision: u64,
+        draft: (String, u64),
         generation: u64,
         value: &Value,
     ) -> Result<UiUpdate, ApiError> {
+        let (draft_id, revision) = draft;
         let thread = value["thread_id"]
             .as_str()
             .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Accepted input has no Thread"))?
             .to_owned();
-        let owner = Owner {
-            data_dir: compose_data_dir(control),
-            instance: &control.store.instance_id,
-        };
         let page = read_page(
-            control,
-            &owner,
+            language,
+            owner,
             width,
             &known,
-            Metadata::Enriched,
             window_args(&thread, Anchor::Tail, PAGE_NODES - 1, 0, Vec::new()),
             None,
             |items| 0..items.len(),
@@ -478,13 +454,7 @@ impl<'a> HistoryReader<'a> {
             }
         };
         let anchor = page.anchor.clone().unwrap_or_default();
-        let received = received::read_native(
-            &self.owner(),
-            &page,
-            self.width,
-            self.control.store.config.ui.language,
-        )
-        .await?;
+        let received = received::read_native(&self.owner, &page, self.width, self.language).await?;
         reply.deliver(self.updates, page, anchor).await;
         update(
             self.updates,
@@ -553,13 +523,7 @@ impl<'a> HistoryReader<'a> {
                 "Requested history ordinal is no longer selected",
             )
         })?;
-        let received = received::read_native(
-            &self.owner(),
-            &page,
-            self.width,
-            self.control.store.config.ui.language,
-        )
-        .await?;
+        let received = received::read_native(&self.owner, &page, self.width, self.language).await?;
         reply.deliver(self.updates, page, anchor).await;
         update(
             self.updates,
@@ -588,7 +552,7 @@ impl<'a> HistoryReader<'a> {
                 Ok(cursor) => cursor,
                 // An unavailable Thread outranks a continuation it cannot own.
                 Err(expired) => {
-                    self.owner()
+                    self.owner
                         .window(window_args(thread, Anchor::Tail, 0, 0, Vec::new()))
                         .await
                         .map_err(unavailable)?;
@@ -607,11 +571,10 @@ impl<'a> HistoryReader<'a> {
                 // The page is the last 50 nodes ending at most 49 after a
                 // saved reading anchor.
                 Some(node) => match read_page(
-                    self.control,
-                    &self.owner(),
+                    self.language,
+                    &self.owner,
                     self.width,
                     &self.known,
-                    Metadata::Enriched,
                     window_args(
                         thread,
                         Anchor::Node(node.clone()),
@@ -650,13 +613,7 @@ impl<'a> HistoryReader<'a> {
             }
         };
         let before_cursor = before_cursor(thread, page.info.first, page.info.revision)?;
-        let received = received::read_native(
-            &self.owner(),
-            &page,
-            self.width,
-            self.control.store.config.ui.language,
-        )
-        .await?;
+        let received = received::read_native(&self.owner, &page, self.width, self.language).await?;
         let Page { nodes, info, .. } = page;
         let selection_revision = info.revision;
         stream_commits(self.updates, thread, reply.generation, info.committed).await;
@@ -695,6 +652,7 @@ impl<'a> HistoryReader<'a> {
     /// display extent at offset 0; current execution facts are one saved read.
     pub(super) async fn links(
         &self,
+        thread_id: &str,
         node_ids: Vec<String>,
     ) -> Result<DetailSourceSnapshot, ApiError> {
         if node_ids.is_empty()
@@ -706,8 +664,8 @@ impl<'a> HistoryReader<'a> {
                 "Detail source requires one or two bounded node IDs",
             ));
         }
-        let result = async {
-            let owner = self.owner();
+        async {
+            let owner = self.owner;
             let mut displays = Vec::with_capacity(node_ids.len());
             for id in &node_ids {
                 use crate::protocol::HistoryDisplayNode as Node;
@@ -723,45 +681,28 @@ impl<'a> HistoryReader<'a> {
                 };
                 displays.push(display);
             }
-            let available = node_ids
-                .iter()
-                .zip(&displays)
-                .map(|(id, display)| (id.clone(), display.is_some()))
-                .collect::<Vec<_>>();
-            let (current, read_revision, observed_at) = self.control.store.database.call(move |db| {
-                let tx = db.transaction()?;
-                // Node/group identity constrains every call; a matching call ID
-                // elsewhere can never supply current lifecycle facts.
-                let mut tools = tx.prepare(r"
-                    SELECT CASE WHEN length(CAST(c.call_id AS BLOB))<=512 THEN c.call_id END,s.id,s.state,s.exit_code,s.output_complete,
-                           s.retention_generation,
-                           EXISTS(SELECT 1 FROM output_chunk o WHERE o.execution_id=s.id)
-                    FROM tool_call c JOIN tool_group g ON g.id=c.group_id
-                    LEFT JOIN shell_execution s ON s.id=c.operation_id AND s.turn_id=g.turn_id
-                    WHERE c.group_id IN (
-                      SELECT CASE WHEN json_valid(n.payload_json) THEN json_extract(n.payload_json,'$.group_id') END
-                      FROM node n WHERE n.id=?1 AND n.kind='assistant_response'
-                      UNION SELECT r.group_id FROM tool_result r WHERE r.node_id=?1)
-                    AND (EXISTS(SELECT 1 FROM node n WHERE n.id=?1 AND n.kind='assistant_response'
-                         AND json_valid(n.payload_json) AND json_extract(n.payload_json,'$.group_id')=c.group_id)
-                         OR EXISTS(SELECT 1 FROM tool_result r WHERE r.node_id=?1
-                            AND r.group_id=c.group_id AND r.call_id=c.call_id))
-                    ORDER BY c.ordinal,c.call_id LIMIT 17")?;
-                let mut current = Vec::with_capacity(available.len());
-                for (id, available) in available {
-                    current.push(if available { tools.query_map([&id], |row| Ok((
-                        row.get::<_,Option<String>>(0)?,row.get::<_,Option<String>>(1)?,
-                        row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,
-                        row.get::<_,Option<bool>>(4)?,row.get::<_,Option<i64>>(5)?,
-                        row.get::<_,bool>(6)?,
-                    )))?.collect::<Result<Vec<_>,_>>()? } else {Vec::new()});
-                }
-                drop(tools);
-                let read_revision=message_queue::read_revision();
-                let observed_at=chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
-                tx.commit()?;
-                Ok((current,read_revision,observed_at))
-            }).await.map_err(storage_error)?;
+            let observation = owner.window(HistoryWindowArgs {
+                thread_id: thread_id.to_owned(), include_observation: true,
+                observe_node_ids: node_ids.clone(), items: false, ordinal: None,
+                node_id: None, expect_node_id: None, before: 0, after: 0, excerpt_chars: 0,
+            }).await?.observation.ok_or_else(|| ApiError::new(ErrorCode::IoFailed, "Missing detail observation"))?;
+            let read_revision = observation.read_sequence;
+            let observed_at = chrono::DateTime::parse_from_rfc3339(&observation.observed_at)
+                .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Invalid detail observation time"))?
+                .with_timezone(&chrono::Utc).format("%Y-%m-%d %H:%M:%S UTC").to_string();
+            let current = node_ids.iter().map(|id| {
+                let mut calls = observation.tools.calls.iter().filter(|call| &call.node_id == id).collect::<Vec<_>>();
+                calls.sort_by_key(|call| (call.ordinal, &call.call_id));
+                let truncated = calls.len() > 16 || observation.tools.limited_node_ids.contains(id);
+                let fields = calls.into_iter().take(16).map(|call| (
+                    (call.call_id.len() <= 512).then(|| call.call_id.clone()),
+                    call.shell_state.as_ref().and(call.execution_id.clone()),
+                    call.shell_state.clone(), call.shell_exit_code,
+                    call.output_revision.map(|(_, complete)| complete),
+                    call.retention_generation, call.has_output,
+                )).collect::<Vec<_>>();
+                (fields, truncated)
+            }).collect::<Vec<_>>();
             let rows = node_ids
                 .into_iter()
                 .zip(displays)
@@ -769,11 +710,11 @@ impl<'a> HistoryReader<'a> {
                 .map(|((id, display), current)| (id, display, current))
                 .collect::<Vec<_>>();
             let width=self.width;
-            let language = self.control.store.config.ui.language;
+            let language = self.language;
             presentation_work(move || {
                 use crate::ui::i18n::local;
                 let mut sources=Vec::with_capacity(rows.len());
-                for (node_id,row,current) in rows {
+                for (node_id,row,(current,truncated)) in rows {
                     let unavailable = |reason: &str| DetailSourceFacts {
                         node_id:node_id.clone(),kind:Default::default(),fields:vec![],links:vec![],
                         unavailable_reason:Some(reason.into()),
@@ -788,7 +729,7 @@ impl<'a> HistoryReader<'a> {
                         key,label:label.into(),value,display:None,value_omitted:false,
                     };
                     fields.push(field("/ui/detail_preview_bounds".into(),local!(language, "詳細の取得範囲", "Detail retrieval limits"),crate::ui::text_width::glyphs::select(local!(language, "最大16呼出し・128項目・128リンク、既存metadata上限内 · O原文で確認", "Up to 16 calls, 128 fields and 128 links within metadata limits · O for original"), local!(language, "最大16呼出し・128項目・128リンク、既存metadata上限内 | O原文で確認", "Up to 16 calls, 128 fields and 128 links within metadata limits | O for original")).into()));
-                    if current.len()>16 {
+                    if truncated {
                         fields.push(field("/current_tools/truncated".into(),local!(language, "現在の実行情報", "Current execution details"),crate::ui::text_width::glyphs::select(local!(language, "先頭16呼出しまで · 詳細はCLIで確認", "First 16 calls · use CLI for details"), local!(language, "先頭16呼出しまで | 詳細はCLIで確認", "First 16 calls | use CLI for details")).into()));
                     }
                     for (index,(call,execution,state,code,complete,retention,has_output)) in current.into_iter().take(16).enumerate() {
@@ -813,8 +754,7 @@ impl<'a> HistoryReader<'a> {
                 }
                 Ok(DetailSourceSnapshot {read_revision,observed_at,sources})
             }).await?
-        }.await;
-        checked_storage(self.control, result).await
+        }.await
     }
 
     /// Hydrate one node at a source offset from the owner: its extent by ID and
@@ -825,9 +765,9 @@ impl<'a> HistoryReader<'a> {
         offset: usize,
         viewed_thread: &str,
     ) -> Result<UiNode, ApiError> {
-        let result = async {
+        async {
             let (display, observation) = self
-                .owner()
+                .owner
                 .node(
                     viewed_thread,
                     &node_id,
@@ -838,16 +778,11 @@ impl<'a> HistoryReader<'a> {
                 .await
                 .map_err(unavailable)?;
             let width = self.width;
-            let language = self.control.store.config.ui.language;
-            let mut node =
+            let language = self.language;
+            let node =
                 presentation_work(move || display.into_ui_node(node_id, width, language)).await?;
-            message_metadata::enrich(
-                self.control,
-                Some(viewed_thread),
-                std::slice::from_mut(&mut node),
-            )
-            .await?;
             let (mut node, read_sequence) = presentation_work(move || {
+                let mut node = node;
                 native_history::apply_observation(
                     std::slice::from_mut(&mut node),
                     &observation,
@@ -860,8 +795,7 @@ impl<'a> HistoryReader<'a> {
             stamp_source(&mut node, read_sequence);
             Ok(node)
         }
-        .await;
-        checked_storage(self.control, result).await
+        .await
     }
 }
 // Enrichment can rebuild a presentation; freshness and eviction remain source facts.
@@ -905,9 +839,14 @@ mod detail_link_tests {
             Ok(())
         }).await.unwrap();
         let (updates, _) = std::sync::mpsc::sync_channel(8);
-        let reader = HistoryReader::new(&control, &updates, 80);
+        let reader = HistoryReader::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            &updates,
+            80,
+        );
         let first = reader
-            .links(vec!["call-g".into(), "call-other".into()])
+            .links("t", vec!["call-g".into(), "call-other".into()])
             .await
             .unwrap();
         let get = |source: &DetailSourceFacts, key: &str| {
@@ -944,7 +883,7 @@ mod detail_link_tests {
             db.execute_batch("UPDATE shell_execution SET state='exited',exit_code=7,output_complete=1,retention_generation=1 WHERE id='exec'; DELETE FROM output_chunk WHERE execution_id='exec'; UPDATE node SET deleted_reason='gc',payload_json=NULL WHERE id='call-other';")?; Ok(())
         }).await.unwrap();
         let second = reader
-            .links(vec!["call-g".into(), "call-other".into()])
+            .links("t", vec!["call-g".into(), "call-other".into()])
             .await
             .unwrap();
         assert!(second.read_revision > first.read_revision);
@@ -982,6 +921,7 @@ mod detail_link_tests {
         let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
         tokio::spawn(control.clone().serve(receive));
         owner.db.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/a','p','m','now')", [])?;
             let call=json!({"text":"[call source](https://example.test/call)"}).to_string();
             let result=json!({"item":{"type":"function_call_output","call_id":"call","output":json!({"status":"exited","exit_code":0,"output":"https://example.test/result"}).to_string()}}).to_string();
             for (id,kind,payload) in [("call","assistant_response",call),("result","tool_result",result),("large","assistant_response",json!({"text":"x".repeat(100_000)}).to_string())] {
@@ -991,12 +931,16 @@ mod detail_link_tests {
             Ok(())
         }).await.unwrap();
         let (updates, _incoming) = std::sync::mpsc::sync_channel(8);
-        let reader = HistoryReader::new(&control, &updates, 80);
+        let reader = HistoryReader::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            &updates,
+            80,
+        );
         let snapshot = reader
-            .links(vec!["call".into(), "result".into()])
+            .links("t", vec!["call".into(), "result".into()])
             .await
             .unwrap();
-        assert!(snapshot.observed_at.ends_with(" UTC"));
         assert_eq!(snapshot.sources.len(), 2);
         let links = snapshot
             .sources
@@ -1015,19 +959,22 @@ mod detail_link_tests {
         );
         for ids in [vec![], vec!["call".into(); 3], vec!["x".repeat(257)]] {
             assert_eq!(
-                reader.links(ids).await.unwrap_err().code,
+                reader.links("t", ids).await.unwrap_err().code,
                 ErrorCode::InvalidArgument
             );
         }
         // Positioned display pages have no whole-payload limit: a large source
         // is available; reclaimed and absent sources are not.
         let large = reader
-            .links(vec!["call".into(), "large".into()])
+            .links("t", vec!["call".into(), "large".into()])
             .await
             .unwrap();
         assert!(large.sources[1].unavailable_reason.is_none());
         for id in ["deleted", "absent"] {
-            let snapshot = reader.links(vec!["call".into(), id.into()]).await.unwrap();
+            let snapshot = reader
+                .links("t", vec!["call".into(), id.into()])
+                .await
+                .unwrap();
             assert_eq!(snapshot.sources[0].node_id, "call");
             assert!(snapshot.sources[0].unavailable_reason.is_none());
             let unavailable = &snapshot.sources[1];
@@ -1083,7 +1030,12 @@ mod read_stamping_tests {
             Ok(())
         }).await.unwrap();
         let (updates, incoming) = std::sync::mpsc::sync_channel(32);
-        let reader = HistoryReader::new(&control, &updates, 80);
+        let reader = HistoryReader::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            &updates,
+            80,
+        );
         reader
             .page(&Reply::new("thread", 1), None, None)
             .await
@@ -1187,7 +1139,12 @@ mod read_stamping_tests {
             .await
             .unwrap();
         let (updates, incoming) = std::sync::mpsc::sync_channel(32);
-        let reader = HistoryReader::new(&control, &updates, 80);
+        let reader = HistoryReader::new(
+            selected_owner(&control),
+            control.store.config.ui.language,
+            &updates,
+            80,
+        );
         reader
             .page(&Reply::new("thread", 1), None, None)
             .await

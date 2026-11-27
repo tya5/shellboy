@@ -1,22 +1,21 @@
 //! Bounded saved source facts for presentation, never inferred from rendered roles.
+use crate::ui::UiNode;
+#[cfg(test)]
 use crate::{
-    control::Control,
-    protocol::{ApiError, ErrorCode},
-    ui::UiNode,
+    history::window_facts::message_sources::{RawSource, SourceFacts, read_tx},
+    storage::StorageError,
 };
-
-pub(super) use crate::history::window_facts::message_sources::read_tx;
-use crate::history::window_facts::message_sources::{MAX_NODES, RawSource, SourceFacts};
-use crate::storage::StorageError;
 #[cfg(test)]
 use rusqlite::{Connection, params};
 
+#[cfg(test)]
 struct Metadata {
     created_at: Option<String>,
     source: crate::presentation::InputSource,
     sender_label: Option<String>,
 }
-pub(super) fn apply(nodes: &mut [UiNode], facts: &SourceFacts) {
+#[cfg(test)]
+fn apply(nodes: &mut [UiNode], facts: &SourceFacts) {
     let keyed = facts
         .rows
         .iter()
@@ -79,41 +78,7 @@ pub(super) fn apply_pinned(nodes: &mut [UiNode], facts: &[crate::protocol::Histo
     }
 }
 
-pub(super) async fn enrich(
-    control: &Control,
-    viewed_thread: Option<&str>,
-    nodes: &mut [UiNode],
-) -> Result<(), ApiError> {
-    if nodes.len() > MAX_NODES {
-        return Err(ApiError::new(
-            ErrorCode::InputLimit,
-            "Display source metadata exceeds its node bound",
-        ));
-    }
-    let ids = nodes
-        .iter()
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    let viewed = viewed_thread.map(str::to_owned);
-    let facts = control
-        .store
-        .database
-        .call(move |db| read_tx(db, viewed.as_deref(), &ids))
-        .await
-        .map_err(StorageError::into_api_error)?;
-    let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();
-    let projected = super::presentation_work(move || {
-        let mut owned = owned;
-        apply(&mut owned, &facts);
-        owned
-    })
-    .await?;
-    for (target, node) in nodes.iter_mut().zip(projected) {
-        *target = node;
-    }
-    super::compaction_markers::enrich(control, viewed_thread, nodes).await
-}
-
+#[cfg(test)]
 fn project(raw: &RawSource, viewed: Option<&str>, parent: Option<&str>) -> Metadata {
     let source = crate::history::window_facts::message_sources::relationship(raw, viewed, parent);
     Metadata {
@@ -143,6 +108,7 @@ mod tests {
         COMMON_SOURCES, RECEIPTS_AT_STAMP, STAMP_CANDIDATES,
     };
     use crate::presentation::InputSource;
+    use crate::protocol::ErrorCode;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();

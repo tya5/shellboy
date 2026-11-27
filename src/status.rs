@@ -80,6 +80,8 @@ pub struct StatusFilters {
     pub thread_id: Option<String>,
     pub run_id: Option<String>,
     pub since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_after: Option<String>,
     pub state: Vec<String>,
     pub all: bool,
     #[serde(default, flatten)]
@@ -100,6 +102,45 @@ pub struct IpcAdmissionClass {
     pub limit: usize,
     pub refused: u64,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CappedActivityCount {
+    pub count: u32,
+    pub capped: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ActivityCounts {
+    pub running: CappedActivityCount,
+    pub awaiting_you: CappedActivityCount,
+}
+
+impl ActivityCounts {
+    fn read(db: &Connection) -> Result<Self> {
+        fn capped(observed: u32) -> CappedActivityCount {
+            CappedActivityCount {
+                count: observed.min(MAX_LIST_LIMIT),
+                capped: observed > MAX_LIST_LIMIT,
+            }
+        }
+        let (running, awaiting_you) = db
+            .query_row(
+                "SELECT
+                 (SELECT count(*) FROM (SELECT 1 FROM run INDEXED BY one_live_run
+                    WHERE state IN ('live','stopping') LIMIT ?1)),
+                 (SELECT count(*) FROM (SELECT 1 FROM receipt INDEXED BY receipt_pending_to
+                    WHERE json_extract(result_json,'$.reply.state')='pending'
+                      AND json_extract(result_json,'$.ask_name')='human' LIMIT ?1))",
+                [MAX_LIST_LIMIT + 1],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(sql)?;
+        Ok(Self {
+            running: capped(running),
+            awaiting_you: capped(awaiting_you),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatusSnapshot {
     pub instance_id: String,
@@ -110,6 +151,8 @@ pub struct StatusSnapshot {
     #[serde(flatten)]
     pub page: RecordPage<WorkItem, StatusFilters>,
     pub receipt_budget: crate::protocol::ReceiptBudget,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_counts: Option<ActivityCounts>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ipc_admission: Option<IpcAdmissionStatus>,
     #[serde(default, flatten)]
@@ -295,6 +338,7 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
 
 struct Scope {
     since: Option<DateTime<FixedOffset>>,
+    ended_after: Option<DateTime<FixedOffset>>,
     states: Vec<String>,
     filter: String,
 }
@@ -334,6 +378,7 @@ fn check_scope(db: &Connection, args: &StatusArgs) -> Result<Scope> {
         }
     }
     let since = args.since.as_deref().map(stamp).transpose()?;
+    let ended_after = args.ended_after.as_deref().map(stamp).transpose()?;
     let mut states = args.state.clone();
     states.sort();
     states.dedup();
@@ -343,6 +388,7 @@ fn check_scope(db: &Connection, args: &StatusArgs) -> Result<Scope> {
         since.map(|t| t.with_timezone(&chrono::Utc).to_rfc3339()),
         states.clone(),
         args.all,
+        ended_after.map(|t| t.with_timezone(&chrono::Utc).to_rfc3339()),
     ))
     .expect("status filters");
     // Bind conditions without embedding up to 32 JSON-escaped state strings
@@ -353,6 +399,7 @@ fn check_scope(db: &Connection, args: &StatusArgs) -> Result<Scope> {
         .collect();
     Ok(Scope {
         since,
+        ended_after,
         states,
         filter,
     })
@@ -607,12 +654,18 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
             "NULL",
         ),
     ];
-    let pending_only = scope.states.is_empty() && !args.all;
+    let pending_only = scope.states.is_empty() && !args.all && scope.ended_after.is_none();
     let mut sources_sql = Vec::new();
     for (kind, (alias, id, from, thread, run, created, ended, updated)) in
         kinds.into_iter().zip(sources)
     {
         let mut predicate = String::new();
+        if scope.ended_after.is_some() {
+            if kind != WorkKind::Run {
+                continue;
+            }
+            predicate.push_str(" AND r.ended_at IS NOT NULL AND status_time_key(r.ended_at) > :ended_after AND EXISTS (SELECT 1 FROM thread WHERE id=r.thread_id AND deleted_at IS NULL)");
+        }
         if args.thread_id.is_some() {
             predicate.push_str(&format!(" AND {thread}=:thread"));
         }
@@ -655,8 +708,8 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     let sources_sql = sources_sql.join(" UNION ALL ");
     let turn_recovery = turn_recovery_fields("t");
     let query = format!(
-        r#"WITH input(thread,run,states,since,after,key_kind,key_id,watermark,lim) AS (
-        VALUES (:thread,:run,:states,:since,:after,:kind,:id,:watermark,:lim)
+        r#"WITH input(thread,run,states,since,after,key_kind,key_id,watermark,lim,ended_after) AS (
+        VALUES (:thread,:run,:states,:since,:after,:kind,:id,:watermark,:lim,:ended_after)
     ), candidates AS NOT MATERIALIZED ({sources_sql}),
     page_keys AS MATERIALIZED (
         SELECT c.kind,c.id,c.rid,c.activity,
@@ -681,6 +734,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
             ":thread": args.thread_id, ":run": args.run_id,
             ":states": serde_json::to_string(&scope.states).expect("status states"),
             ":since": scope.since.map(time_key).unwrap_or_default(),
+            ":ended_after": scope.ended_after.map(time_key),
             ":after": cursor.as_ref().map(|cursor| &cursor.activity),
             ":kind": cursor.as_ref().map(|cursor| cursor.kind.as_str()),
             ":id": cursor.as_ref().map(|cursor| &cursor.id),
@@ -783,6 +837,9 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         since: scope
             .since
             .map(|time| time.with_timezone(&chrono::Utc).to_rfc3339()),
+        ended_after: scope
+            .ended_after
+            .map(|time| time.with_timezone(&chrono::Utc).to_rfc3339()),
         state: scope.states.clone(),
         all: args.all,
         additional_properties: Default::default(),
@@ -801,6 +858,11 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     }
     Ok(StatusSnapshot {
         ipc_admission: None,
+        activity_counts: if args.thread_id.is_none() && args.run_id.is_none() {
+            Some(ActivityCounts::read(db)?)
+        } else {
+            None
+        },
         receipt_budget: serde_json::from_value(crate::control::receipt::summary(db, instance)?)
             .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid receipt summary"))?,
         page: RecordPage::new(args.limit, filters, selected, next_cursor),
@@ -816,6 +878,96 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
 #[cfg(test)]
 mod response_node_tests {
     use super::*;
+
+    #[test]
+    fn activity_counts_are_independent_of_the_work_page_and_disclose_caps() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(&format!(r#"
+            WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<{})
+            INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)
+                SELECT 't'||i,'Title','/','','p','m','2026-11-24T00:00:00Z' FROM n;
+            INSERT INTO run(id,thread_id,state,created_at)
+                SELECT id,id,'live','2026-11-24T00:00:00Z' FROM thread;
+            INSERT INTO node(id,kind,created_at)
+                SELECT id,'message','2026-11-24T00:00:00Z' FROM thread;
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
+                SELECT id,id,'null',id,id,'applied','2026-11-24T00:00:00Z',
+                    json_object('ask_name','human','reply',json_object('state','pending')) FROM thread;
+        "#, MAX_LIST_LIMIT + 1)).unwrap();
+        let args = StatusArgs {
+            limit: 1,
+            ..Default::default()
+        };
+        let capped = CappedActivityCount {
+            count: MAX_LIST_LIMIT,
+            capped: true,
+        };
+        let counts = snapshot(&db, &args, "fixture")
+            .unwrap()
+            .activity_counts
+            .unwrap();
+        assert_eq!(counts.running, capped);
+        assert_eq!(counts.awaiting_you, capped);
+
+        db.execute("UPDATE run SET state='completed' WHERE id='t1'", [])
+            .unwrap();
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','replied') WHERE id='t1'", []).unwrap();
+        let exact = CappedActivityCount {
+            count: MAX_LIST_LIMIT,
+            capped: false,
+        };
+        let counts = snapshot(&db, &args, "fixture")
+            .unwrap()
+            .activity_counts
+            .unwrap();
+        assert_eq!(counts.running, exact);
+        assert_eq!(counts.awaiting_you, exact);
+    }
+
+    #[test]
+    fn ended_after_only_pages_runs_strictly_after_the_cutoff() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(
+            "INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)
+            VALUES('t','Title','/','','p','m','2026-11-24T00:00:00Z');
+            INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES
+              ('same','t','completed','2026-11-23T00:00:00Z','2026-11-24T01:00:00+01:00'),
+              ('new','t','completed','2026-11-23T00:00:00Z','2026-11-24T00:00:00.1Z'),
+              ('newer','t','failed','2026-11-23T00:00:00Z','2026-11-24T00:00:00.2Z'),
+              ('live','t','live','2026-11-24T00:01:00Z',NULL);",
+        )
+        .unwrap();
+        let args = StatusArgs {
+            ended_after: Some("2026-11-24T00:00:00Z".into()),
+            limit: 1,
+            ..Default::default()
+        };
+        let first = snapshot(&db, &args, "fixture").unwrap();
+        assert_eq!(first.page.items[0].id, "newer");
+        let cursor = Some(first.page.next_cursor.unwrap());
+        let next = snapshot(
+            &db,
+            &StatusArgs {
+                cursor: cursor.clone(),
+                ..args.clone()
+            },
+            "fixture",
+        )
+        .unwrap();
+        assert_eq!(next.page.items[0].id, "new");
+        assert!(next.page.next_cursor.is_none());
+        let changed = StatusArgs {
+            ended_after: Some("2026-11-23T00:00:00Z".into()),
+            cursor,
+            ..args
+        };
+        assert_eq!(
+            snapshot(&db, &changed, "fixture").unwrap_err().code,
+            ErrorCode::CursorExpired
+        );
+    }
 
     #[test]
     fn status_projects_only_the_returned_page_and_ignores_terminal_work_by_default() {

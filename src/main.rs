@@ -588,24 +588,33 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // A cached width is only the first-frame baseline; fresh queries never wait.
-    // Owner startup revalidates the cache destination before installing a writer.
-    let width_config = std::env::current_dir().ok().and_then(|cwd| {
-        shellboy::config::Config::load_with_overrides(
-            cli.config.as_deref(),
-            cli.data_dir.as_deref(),
-            &cwd,
-            &shellboy::config::PathEnvironment::current(),
-        )
-        .ok()
-    });
-    let identity = shellboy::width_cache::current_identity();
-    let width = width_config.as_ref().and_then(|c| {
-        identity
-            .as_deref()
-            .and_then(|id| shellboy::width_cache::read(&c.data_dir, id))
-    });
-    let mut session = match shellboy::ui::TerminalSession::enter_with_width(width) {
+    let cwd = match std::env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(error) => {
+            return print_error(
+                ApiError::new(
+                    ErrorCode::IoFailed,
+                    format!("Cannot read startup directory: {error}"),
+                ),
+                None,
+            );
+        }
+    };
+    let loaded = match shellboy::config::Config::load_with_overrides(
+        cli.config.as_deref(),
+        cli.data_dir.as_deref(),
+        &cwd,
+        &shellboy::config::PathEnvironment::current(),
+    ) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            return print_error(
+                ApiError::new(ErrorCode::InvalidArgument, error.to_string()),
+                None,
+            );
+        }
+    };
+    let mut session = match shellboy::ui::TerminalSession::enter() {
         Ok(session) => session,
         Err(error) => {
             eprintln!("Terminal error: {error}");
@@ -613,112 +622,61 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         }
     };
     let cancel = tokio_util::sync::CancellationToken::new();
-    let (progress, stages) = tokio::sync::watch::channel(shellboy::app::StartupProgress::default());
-    let (send, mut pending) = std::sync::mpsc::sync_channel(1);
-    let token = cancel.clone();
-    let observations = progress.clone();
-    let startup_started = std::time::Instant::now();
-    let mut initializer = runtime.spawn(async move {
-        let result = shellboy::owner_session::initialize_localized(
-            cli.config,
-            cli.data_dir,
-            token,
-            observations,
-        )
-        .await;
-        shellboy::owner_session::deliver(result, send).await;
+    let (_progress, stages) = tokio::sync::watch::channel(shellboy::app::StartupProgress {
+        stage: shellboy::app::StartupStage::Endpoint,
+        language: loaded.config.ui.language,
+        ..Default::default()
     });
-    let prepared = loop {
-        match shellboy::ui::startup::wait_with_termination(
-            &mut session,
-            &stages,
-            &pending,
-            &cancel,
-            &termination,
-            startup_started,
-        ) {
-            Ok(Ok(Some(prepared))) if cancel.is_cancelled() => {
-                // Cancellation may race the single ready delivery. Never
-                // hand that owner to the conversation UI; keep drawing cleanup.
-                progress.send_modify(|state| state.stage = shellboy::app::StartupStage::Closing);
-                let (send, receive) = std::sync::mpsc::sync_channel(1);
-                pending = receive;
-                initializer = runtime.spawn(async move {
-                    let result = prepared.shutdown().await.map(|_| None);
-                    shellboy::owner_session::deliver(result, send).await;
-                });
-            }
-            Ok(result) => break result,
-            Err(error) => {
-                // The terminal UI has ended before waiting for finalization.
-                drop(session);
-                cancel.cancel();
-                runtime.block_on(async {
-                    let _ = initializer.await;
-                    if let Ok(Ok(Some(prepared))) = pending.try_recv() {
-                        let _ = prepared.shutdown().await;
-                    }
-                });
-                eprintln!("{}", shellboy::ui::startup::terminal_error(error));
-                runtime.shutdown_background();
-                return ExitCode::FAILURE;
-            }
-        }
-    };
-    let prepared = match prepared {
-        Ok(Some(prepared)) => prepared,
-        Ok(None) => {
+    let (send, pending) = std::sync::mpsc::sync_channel(1);
+    let token = cancel.clone();
+    let startup_started = std::time::Instant::now();
+    let initializer = runtime.spawn(async move {
+        let result = shellboy::serve::attach_or_start(&loaded, &token)
+            .await
+            .map(|welcome| welcome.map(|welcome| (loaded, welcome)));
+        let _ = send.try_send(result);
+    });
+    let ready = shellboy::ui::startup::wait_with_termination(
+        &mut session,
+        &stages,
+        &pending,
+        &cancel,
+        &termination,
+        startup_started,
+    );
+    let (loaded, welcome) = match ready {
+        Ok(Ok(Some(ready))) if !cancel.is_cancelled() => ready,
+        Ok(Ok(_)) => {
             drop(session);
+            cancel.cancel();
+            let _ = runtime.block_on(initializer);
             runtime.shutdown_background();
             return ExitCode::SUCCESS;
         }
-        Err(error) => {
+        Ok(Err(error)) => {
             drop(session);
             runtime.shutdown_background();
             return print_error(error, None);
         }
+        Err(error) => {
+            drop(session);
+            cancel.cancel();
+            let _ = runtime.block_on(initializer);
+            eprintln!("{}", shellboy::ui::startup::terminal_error(error));
+            runtime.shutdown_background();
+            return ExitCode::FAILURE;
+        }
     };
-    let shellboy::owner_session::Prepared {
-        owner,
-        control,
-        server,
-        requests: rpc_receive,
-        cwd,
-    } = prepared;
-    // Only the active owner writes successful new measurements. Keep file I/O
-    // off the UI thread, including observations arriving after startup readiness.
-    if width_config
-        .as_ref()
-        .is_some_and(|c| c.data_dir == owner.loaded.data_dir)
-        && let Some(id) = identity
-    {
-        let data = owner.loaded.data_dir.clone();
-        let guard = owner.width_cache_guard();
-        let handle = runtime.handle().clone();
-        session.on_width_observation(move |observed| {
-            let (data, id, guard) = (data.clone(), id.clone(), guard.clone());
-            handle.spawn_blocking(move || {
-                let _guard = guard;
-                let _ = shellboy::width_cache::write(&data, &id, observed);
-            });
-        });
-    }
-    termination.bind_diagnostics(owner.diagnostics.clone());
-    session.set_diagnostics(owner.diagnostics.clone());
-    termination.bind_shell(control.shell_shutdown_handle());
-    termination.configure_shutdown(&owner.loaded.config);
-    let config = owner.loaded.config.clone();
-    runtime.spawn(control.clone().serve(rpc_receive));
+    termination.configure_shutdown(&loaded.config);
+    let config = loaded.config.clone();
     let (actions_send, actions_receive) = shellboy::ui::actions::channel(128);
-    actions_send.close_tool_starts_on_quit(&control);
     let (updates_send, updates_receive) = std::sync::mpsc::sync_channel(128);
-    let bridge = runtime.spawn(shellboy::frontend::run(
-        control,
+    let bridge = runtime.spawn(shellboy::frontend::run_attached(
+        loaded,
+        welcome.instance_id,
+        cwd,
         actions_receive,
         updates_send,
-        cwd,
-        owner,
-        server,
     ));
     let terminal_result = shellboy::ui::run_in_session_with_termination(
         &mut session,
@@ -729,13 +687,13 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     );
     drop(session);
     if matches!(&terminal_result, Ok(shellboy::ui::UiExitReason::Forced)) {
-        termination.force_cleanup();
         eprintln!("{}", shellboy::ui::startup::forced_exit_notice());
         std::process::exit(1);
     }
     if terminal_result.is_err() {
         let _ = actions_send.try_send(shellboy::ui::UiAction::Quit);
     }
+    drop(actions_send);
     let result = runtime.block_on(bridge);
     termination.complete();
     if let Err(error) = terminal_result {

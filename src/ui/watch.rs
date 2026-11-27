@@ -374,7 +374,6 @@ pub struct PreparedWatchDetail {
     pub parent_label: String,
     pub secondary: String,
     execution_id: Option<String>,
-    stale_output: Option<u64>,
     initial_state_clock: String,
     initial_secondary_clock: String,
     work_clocks: Option<WorkClocks>,
@@ -431,20 +430,6 @@ impl WatchDetail {
                 _ => None,
             })
         });
-        let stale_output = self
-            .work
-            .as_ref()
-            .and_then(|work| {
-                work.rows
-                    .iter()
-                    .filter_map(|row| {
-                        matches!(row.target, LiveWorkTarget::Shell { .. })
-                            .then_some(row.output_age_base)
-                            .flatten()
-                    })
-                    .max()
-            })
-            .map(|age| age.as_secs());
         let work_clocks = self.work.as_ref().map(|work| WorkClocks {
             oldest: work.rows.iter().filter_map(|row| row.elapsed_base).max(),
             latest_output: work
@@ -528,7 +513,6 @@ impl WatchDetail {
             facts: self,
             secondary,
             execution_id,
-            stale_output,
             initial_state_clock,
             initial_secondary_clock,
             work_clocks,
@@ -548,6 +532,7 @@ pub struct WatchSummary {
     pub updated_at: String,
     pub latest_run_id: Option<String>,
     pub answer_id: Option<String>,
+    pub awaiting_you: bool,
     /// The saved stop reason names an app exit/owner restart (never inferred).
     pub interrupted: bool,
 }
@@ -561,6 +546,7 @@ impl WatchSummary {
             updated_at: summary.updated_at.clone(),
             latest_run_id: None,
             answer_id: None,
+            awaiting_you: summary.awaiting_named_count > 0,
             interrupted: matches!(
                 summary.latest_run_stop_reason.as_deref(),
                 Some("previous_instance_interrupted" | "app_shutdown")
@@ -600,9 +586,6 @@ struct Entry {
     detail: Option<PreparedWatchDetail>,
     read_sequence: u64,
     category: WatchCategory,
-    ordinal: u64,
-    stale_rank: Option<u64>,
-    rank_initialized: bool,
     observed_in_session: bool,
     known_new_completion: bool,
     state_clock: String,
@@ -646,6 +629,15 @@ pub struct WatchRow<'a> {
 pub struct VisibleWatchScope {
     pub ids: Vec<String>,
     pub limited: bool,
+}
+fn priority_group(category: WatchCategory, awaiting_you: bool) -> u8 {
+    match category {
+        WatchCategory::Recovery => 0,
+        WatchCategory::Failed => 1,
+        _ if awaiting_you => 2,
+        WatchCategory::Active | WatchCategory::Background => 3,
+        _ => 4,
+    }
 }
 fn ordinary_category(phase: ActivityPhase) -> WatchCategory {
     match phase {
@@ -733,9 +725,11 @@ impl WatchState {
     pub fn retains(&self, id: &str) -> bool {
         self.retained.contains(id)
     }
+    #[cfg(test)]
     pub fn seen_completions(&self) -> Vec<CompletionIdentity> {
         self.seen.keys().cloned().collect()
     }
+    #[cfg(test)]
     pub fn seen_history_limited(&self) -> bool {
         self.seen_overflow
     }
@@ -819,9 +813,6 @@ impl WatchState {
                         summary,
                         detail: None,
                         read_sequence: sequence,
-                        ordinal: self.clock,
-                        stale_rank: None,
-                        rank_initialized: false,
                         observed_in_session: false,
                         known_new_completion: false,
                         state_clock: String::new(),
@@ -943,20 +934,7 @@ impl WatchState {
             } else {
                 ordinary_category(entry.summary.phase)
             };
-            if category != entry.category {
-                self.clock = self.clock.wrapping_add(1);
-                entry.ordinal = self.clock;
-                entry.category = category;
-                entry.rank_initialized = false;
-                entry.stale_rank = None;
-            }
-            if category == WatchCategory::Active
-                && !entry.rank_initialized
-                && let Some(detail) = &entry.detail
-            {
-                entry.stale_rank = detail.stale_output;
-                entry.rank_initialized = true;
-            }
+            entry.category = category;
         }
     }
     fn rebuild(&mut self) {
@@ -964,17 +942,14 @@ impl WatchState {
         self.order.sort_by(|a, b| {
             let a = &self.entries[a];
             let b = &self.entries[b];
-            a.category
-                .cmp(&b.category)
+            priority_group(a.category, a.summary.awaiting_you)
+                .cmp(&priority_group(b.category, b.summary.awaiting_you))
                 .then_with(|| {
-                    if a.category == WatchCategory::Active {
-                        b.stale_rank.cmp(&a.stale_rank)
-                    } else {
-                        std::cmp::Ordering::Equal
-                    }
+                    (b.category == WatchCategory::Unread)
+                        .cmp(&(a.category == WatchCategory::Unread))
                 })
-                .then_with(|| a.ordinal.cmp(&b.ordinal))
-                .then_with(|| a.summary.thread_id.cmp(&b.summary.thread_id))
+                .then_with(|| b.summary.updated_at.cmp(&a.summary.updated_at))
+                .then_with(|| b.summary.thread_id.cmp(&a.summary.thread_id))
         });
     }
     pub fn ordered_ids(&self) -> &[String] {
@@ -1392,6 +1367,7 @@ mod tests {
             updated_at: "saved".into(),
             latest_run_id: None,
             answer_id: None,
+            awaiting_you: false,
             interrupted: false,
         }
     }
@@ -1551,16 +1527,28 @@ mod tests {
         );
     }
     #[test]
-    fn active_order_is_fixed_at_entry_and_category_transitions_reprioritize_but_clocks_do_not() {
+    fn unread_promotion_does_not_jump_another_priority_group() {
         let mut state = japanese_watch();
+        let unread = summary("unread", ActivityPhase::Completed)
+            .with_identity(Some("run".into()), Some("answer".into()));
+        let mut awaiting = summary("awaiting", ActivityPhase::Idle);
+        awaiting.awaiting_you = true;
         state.open(
             1,
-            vec![
-                summary("a", ActivityPhase::Tools),
-                summary("b", ActivityPhase::Tools),
-            ],
+            vec![unread, awaiting, summary("working", ActivityPhase::Tools)],
         );
-        state.apply_details(1, 1, vec![output_detail("a", 5), output_detail("b", 20)]);
+        assert_eq!(state.ordered_ids(), ["awaiting", "working", "unread"]);
+        assert_eq!(state.row("unread").unwrap().category, WatchCategory::Unread);
+    }
+    #[test]
+    fn active_order_follows_saved_update_and_category_transitions_but_not_output_age() {
+        let mut state = japanese_watch();
+        let mut older = summary("a", ActivityPhase::Tools);
+        older.updated_at = "2026-11-27T09:00:00Z".into();
+        let mut newer = summary("b", ActivityPhase::Tools);
+        newer.updated_at = "2026-11-27T09:00:01Z".into();
+        state.open(1, vec![older, newer]);
+        state.apply_details(1, 1, vec![output_detail("a", 20), output_detail("b", 5)]);
         assert_eq!(state.ordered_ids(), ["b", "a"]);
         state.apply_detail(1, 2, output_detail("a", 100));
         assert_eq!(
@@ -1832,11 +1820,6 @@ mod tests {
             1,
             1,
             vec![facts.prepare_in(UiLanguage::Ja), output_detail("b", 10)],
-        );
-        assert_eq!(
-            state.ordered_ids(),
-            ["t", "b"],
-            "stalled-shell priority uses maximum known silent age, not most recent output"
         );
         let ids = state.visible_scope(0, 1).ids;
         assert!(

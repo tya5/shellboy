@@ -1,16 +1,16 @@
 //! UI-only source correlation. No model/core state or canonical node is changed.
 use crate::{
-    control::Control,
     presentation::{BlockKind, ToolReasonKind},
-    protocol::ApiError,
     ui::UiNode,
 };
 
+pub(super) use crate::history::window_facts::tools::CallSource;
 #[cfg(test)]
 pub(super) use crate::history::window_facts::tools::*;
-pub(super) use crate::history::window_facts::tools::{CallSource, SOURCE_SQL};
 #[cfg(test)]
 use crate::protocol::ErrorCode;
+#[cfg(test)]
+use crate::{control::Control, protocol::ApiError};
 #[cfg(test)]
 use rusqlite::Connection;
 
@@ -154,6 +154,7 @@ fn apply_calls(
 }
 
 /// Resolve a saved source relation, never an execution borrowed by call ID alone.
+#[cfg(test)]
 pub(super) async fn preview_source(
     control: &Control,
     node: &str,

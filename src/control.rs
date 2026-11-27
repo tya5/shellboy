@@ -390,32 +390,6 @@ async fn maintenance_loop(
     }
 }
 
-pub(crate) fn native_draft_input(
-    draft: &crate::draft::DraftSnapshot,
-) -> Result<
-    (
-        crate::attachments::DraftContent,
-        Vec<crate::attachments::AttachmentInput>,
-    ),
-    ApiError,
-> {
-    let (content, ordered) = crate::draft::decode(&draft.text, draft.attachments.clone())?;
-    let files = ordered
-        .into_iter()
-        .map(|attachment| {
-            let kind =
-                crate::protocol::AttachmentKind::parse(&attachment.kind).ok_or_else(|| {
-                    ApiError::new(ErrorCode::InvalidArgument, "Unknown draft attachment kind")
-                })?;
-            Ok(crate::attachments::AttachmentInput {
-                path: attachment.path,
-                kind,
-            })
-        })
-        .collect::<Result<Vec<_>, ApiError>>()?;
-    Ok((content, files))
-}
-
 impl Control {
     pub fn new(owner: &DataOwner, startup_cwd: PathBuf) -> Arc<Self> {
         let config = Arc::new(owner.loaded.config.clone());
@@ -1057,7 +1031,7 @@ impl Control {
         let draft = args.draft;
         crate::draft::validate_positions(&draft, self.store.config.limits.draft_bytes)?;
         let edit = draft.edit.clone();
-        let (content, files) = native_draft_input(&draft)?;
+        let (content, files) = crate::draft::submission_input(&draft)?;
         let submission = db::DraftSubmission {
             draft_id: db::DraftSubmission::id_for_operation(&operation_id),
             source_draft_id: draft.draft_id.clone(),
@@ -1626,6 +1600,7 @@ impl Control {
     pub fn shell_shutdown_handle(&self) -> crate::shell::ShellSupervisor {
         self.shell.clone()
     }
+    #[cfg(test)]
     pub(crate) fn close_tool_start_admission(&self) {
         self.shell.close_start_admission();
     }
