@@ -394,4 +394,3 @@ mod output_admission_tests {
         ));
     }
 }
-

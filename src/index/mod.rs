@@ -7,8 +7,8 @@ use crate::{
     history,
     model::ModelError,
     protocol::{
-        ApiError, ErrorCode, HistorySearchArgs, IndexArgs, IndexScope, IndexStatus, IndexStatusArgs,
-        NodeProvenance, SearchMatch,
+        ApiError, ErrorCode, HistorySearchArgs, IndexArgs, IndexScope, IndexStatus,
+        IndexStatusArgs, NodeProvenance, SearchMatch,
     },
     storage::{DbWorker, StorageError},
 };
@@ -1775,8 +1775,8 @@ mod display_pause_tests {
         config.indexing.auto_history = auto_history;
         config
     }
-    async fn shown(index: &IndexService) -> Option<PauseReason> {
-        index.status(IndexArgs::default()).await.unwrap().pause_kind
+    async fn shown(index: &Arc<IndexService>) -> Option<PauseReason> {
+        index.status(Default::default()).await.unwrap().pause_kind
     }
     async fn save_pause(db: &DbWorker, key: String, value: &'static str) {
         db.call(move |db| {
@@ -1850,7 +1850,7 @@ mod display_pause_tests {
         })
         .await
         .unwrap();
-        let status = service.status(IndexArgs::default()).await.unwrap();
+        let status = service.status(Default::default()).await.unwrap();
         assert_ne!(
             status.reason.as_deref(),
             Some(r#"{"kind":"provider","status":401}"#)

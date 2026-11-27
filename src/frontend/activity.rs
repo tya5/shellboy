@@ -342,7 +342,7 @@ pub(super) async fn project_native(
     activity: Option<ThreadActivity>,
     stop: tokio_util::sync::CancellationToken,
 ) -> Result<Projection, ApiError> {
-    use crate::protocol::{Command, IndexArgs, IndexStatus};
+    use crate::protocol::{Command, IndexStatus};
     let live_work = match &activity {
         Some(activity) if has_live_work(activity) => Some(
             super::live_work::read(
@@ -357,9 +357,7 @@ pub(super) async fn project_native(
         ),
         _ => None,
     };
-    let index: IndexStatus = owner
-        .call(Command::IndexStatus(IndexArgs::default()))
-        .await?;
+    let index: IndexStatus = owner.call(Command::IndexStatus(Default::default())).await?;
     if stop.is_cancelled() {
         return Err(ApiError::new(
             crate::protocol::ErrorCode::InvalidState,

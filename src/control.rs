@@ -551,13 +551,6 @@ impl Control {
         self.replay.stats()
     }
     #[cfg(test)]
-    pub(crate) fn emit_test_event(&self, event: EngineEvent) {
-        if let EngineEvent::Changed { thread_id, .. } = &event {
-            self.change_clock.record(thread_id);
-        }
-        self.publish_event(event);
-    }
-    #[cfg(test)]
     pub(crate) fn fixture_live_text<'a>(
         &'a self,
         thread: &'a str,

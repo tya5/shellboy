@@ -970,7 +970,7 @@ async fn run_client(
                     instance: &instance,
                 };
                 let result = owner
-                    .call(Command::IndexStatus(IndexArgs::default()))
+                    .call(Command::IndexStatus(Default::default()))
                     .await
                     .map(|status: IndexStatus| status.pause_kind);
                 let _ = sender.send(BackgroundResult::DraftIndexPause(result)).await;
@@ -3403,29 +3403,21 @@ async fn run_client(
                                 dirty_threads.insert(thread.clone());
                             }
                         }
-                        // A gap can hide a mark, so a reload rereads what the marks cover.
-                        if resync || page.config_changed || page.index_changed || page.retention_changed {
-                            management.inspection.owner_mark();
-                        }
                         if resync || page.index_changed {
-                            management.inspection.index_changed();
                             draft_pause_dirty = true;
                             selection.note_pause_notification();
                             if let Some(thread) = selection.active_thread.clone() {
                                 dirty_threads.insert(thread);
                             }
                         }
-                        if resync || page.retention_changed {
-                            management.inspection.availability_changed();
-                            if let Some(thread)=selection.active_thread.as_ref()
-                                && let Some(generation)=selection.generations.get(thread).copied()
-                            {
-                                update(&updates,UiUpdate::DetailSourcesChanged {thread_id:thread.clone(),generation}).await;
-                            }
+                        if (resync || page.retention_changed)
+                            && let Some(thread)=selection.active_thread.as_ref()
+                            && let Some(generation)=selection.generations.get(thread).copied()
+                        {
+                            update(&updates,UiUpdate::DetailSourcesChanged {thread_id:thread.clone(),generation}).await;
                         }
                         if let Some(output) = page.output.as_deref().filter(|output| !output.is_empty()) {
                             browser.output(output);
-                            management.inspection.output(output);
                             if let Some(value) = live_output.output(output, std::time::Instant::now(), chrono::Utc::now()) {
                                 update(&updates, value).await;
                             }

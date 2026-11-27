@@ -650,14 +650,20 @@ impl IndexService {
 pub(crate) fn prepare_coverage_window(
     mut raw: RawCoverageWindow,
 ) -> Result<IndexCoverageWindow, ApiError> {
-    let next = raw.next.as_ref().map(|position| {
-        let cursor = encode_json(position).map_err(db_error)?;
-        if cursor.len() > 4096 {
-            return Err(err(ErrorCode::InputLimit,
-                "Coverage continuation exceeds 4096 bytes; narrow the selection"));
-        }
-        Ok(cursor)
-    }).transpose()?;
+    let next = raw
+        .next
+        .as_ref()
+        .map(|position| {
+            let cursor = encode_json(position).map_err(db_error)?;
+            if cursor.len() > 4096 {
+                return Err(err(
+                    ErrorCode::InputLimit,
+                    "Coverage continuation exceeds 4096 bytes; narrow the selection",
+                ));
+            }
+            Ok(cursor)
+        })
+        .transpose()?;
     let scalar_limited = raw.jobs.iter().any(|j| j.scalar_limited)
         || raw
             .paths
@@ -759,7 +765,10 @@ pub(crate) fn prepare_coverage_window(
         let payload = match serde_json::from_str::<Value>(&body) {
             Ok(value) => value,
             Err(_) => {
-                unknown.push(unverified(source.id, IndexUnverifiedReason::MalformedSource));
+                unknown.push(unverified(
+                    source.id,
+                    IndexUnverifiedReason::MalformedSource,
+                ));
                 continue;
             }
         };
@@ -806,11 +815,8 @@ pub(crate) fn prepare_coverage_window(
         );
         evaluated += 1;
     }
-    let window_complete = !scalar_limited
-        && !raw.jobs_more
-        && !raw.paths_more
-        && !raw.raw_more
-        && unknown.is_empty();
+    let window_complete =
+        !scalar_limited && !raw.jobs_more && !raw.paths_more && !raw.raw_more && unknown.is_empty();
     Ok(IndexCoverageWindow {
         read_at: raw.read_at,
         selection: (*raw.args).clone(),
@@ -1449,7 +1455,10 @@ mod tests {
             .coverage_window
             .unwrap();
         assert!(!first.scope_exhausted);
-        assert_eq!(first.coverage.fully_indexed_sources, first.evaluated_sources);
+        assert_eq!(
+            first.coverage.fully_indexed_sources,
+            first.evaluated_sources
+        );
         let next = IndexStatusArgs {
             coverage: true,
             coverage_cursor: first.next_cursor.clone(),
@@ -1478,5 +1487,4 @@ mod tests {
         );
         db.shutdown().await.unwrap();
     }
-
 }

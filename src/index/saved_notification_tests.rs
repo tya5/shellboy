@@ -150,7 +150,10 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
             take_mark(&service, &mut seen),
             "claim is observable before HTTP completes"
         );
-        assert_eq!(service.status(args.clone().into()).await.unwrap().running, 1);
+        assert_eq!(
+            service.status(args.clone().into()).await.unwrap().running,
+            1
+        );
         assert!(
             !take_mark(&service, &mut seen),
             "status is a simple saved read"
@@ -186,10 +189,7 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
                 take_mark(&service, &mut seen),
                 "paused discard is saved progress"
             );
-            assert_eq!(
-                service.status(Default::default()).await.unwrap().failed,
-                0
-            );
+            assert_eq!(service.status(Default::default()).await.unwrap().failed, 0);
         }
         assert!(!service.process_one(CancellationToken::new()).await.unwrap());
         assert!(!take_mark(&service, &mut seen), "idle work is quiet");

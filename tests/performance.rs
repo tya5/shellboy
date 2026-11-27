@@ -496,14 +496,17 @@ async fn performance_index_service_search_1000_sources() {
         "finite source preparation/embedding queue did not settle"
     );
     let status = service
-        .status(IndexArgs {
-            kinds: Vec::new(),
-            dimensions: None,
-            scope: None,
-            space_id: None,
-            thread_ids: vec![],
-            source_ids: vec![],
-        }.into())
+        .status(
+            IndexArgs {
+                kinds: Vec::new(),
+                dimensions: None,
+                scope: None,
+                space_id: None,
+                thread_ids: vec![],
+                source_ids: vec![],
+            }
+            .into(),
+        )
         .await
         .unwrap();
     assert_eq!(status.done, SOURCES as u64);

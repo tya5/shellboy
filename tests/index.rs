@@ -451,7 +451,13 @@ async fn explicit_length_error_splits_finitely_and_rebuild_failure_preserves_old
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.proxy.push(Reply::Error(400, "input_too_long"));
     f.drain().await;
-    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let old = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     assert_eq!(f.proxy.count(), 3);
     assert_eq!(f.service.status(args().into()).await.unwrap().done, 2);
     f.proxy.push(Reply::Error(400, "unknown_provider_failure"));
@@ -466,7 +472,12 @@ async fn explicit_length_error_splits_finitely_and_rebuild_failure_preserves_old
         .unwrap();
     f.drain().await;
     assert_eq!(
-        f.service.status(args().into()).await.unwrap().space_id.as_deref(),
+        f.service
+            .status(args().into())
+            .await
+            .unwrap()
+            .space_id
+            .as_deref(),
         Some(old.as_str())
     );
     assert_eq!(f.service.search("cat", 10).await.unwrap().len(), 1);
@@ -478,7 +489,13 @@ async fn rebuild_switches_and_source_retirement_hides_paid_vectors() {
     f.node("source", "cat").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.drain().await;
-    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let old = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     f.service
         .rebuild(IndexArgs {
             kinds: Vec::new(),
@@ -489,7 +506,13 @@ async fn rebuild_switches_and_source_retirement_hides_paid_vectors() {
         .await
         .unwrap();
     f.drain().await;
-    let new = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let new = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     assert_ne!(old, new);
     let counts=f.db.call(|db|{let tx=db.transaction()?;retire_index_source_tx(&tx,"source",false).unwrap();tx.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1 WHERE id='source'",[])?;tx.rollback()?;let chunks=db.query_row("SELECT COUNT(*) FROM embedding_chunk WHERE source_node_id='source'",[],|r|r.get::<_,i64>(0))?;let mut statement=db.prepare("SELECT state FROM index_space ORDER BY state")?;let states=statement.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;Ok((chunks,states))}).await.unwrap();
     assert_eq!(counts.0, 2);
@@ -644,7 +667,10 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
         .await
         .unwrap();
     f.drain().await;
-    assert_ne!(f.service.status(args().into()).await.unwrap().space_id, old_space);
+    assert_ne!(
+        f.service.status(args().into()).await.unwrap().space_id,
+        old_space
+    );
     // Old visible jobs carried the same raw witness as tool_raw jobs. Their
     // already-paid canonical chunks must remain usable without re-embedding.
     f.db.call(|db| {
@@ -972,7 +998,13 @@ async fn partially_failed_candidate_is_visible_and_retry_completes_before_switch
         .await
         .unwrap();
     f.drain().await;
-    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let old = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     f.proxy.push(Reply::Embed(3));
     f.proxy.push(Reply::Error(400, "unknown_failure"));
     f.service
@@ -1111,7 +1143,13 @@ async fn new_finalized_sources_during_rebuild_are_caught_up_before_switch() {
     f.node("old", "cat old").await;
     f.service.enqueue_new(&["old".into()]).await.unwrap();
     f.drain().await;
-    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let old = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     f.service
         .rebuild(IndexArgs {
             kinds: Vec::new(),
@@ -1255,7 +1293,13 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
     raw_source(&f, b"cat retained output".to_vec()).await;
     f.service.enqueue_tool_raw("raw-node").await.unwrap();
     f.drain().await;
-    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let old = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     let before = f.db.call(|db| Ok(db.total_changes())).await.unwrap();
     let calls = f.proxy.count();
     let status = f.service.management_status(args()).await.unwrap();
@@ -1343,7 +1387,13 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
     f.node("source", "cat").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.drain().await;
-    let active = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let active = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     f.service
         .rebuild(IndexArgs {
             kinds: Vec::new(),
@@ -1356,7 +1406,12 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
     f.db.call(|db|{db.execute("INSERT INTO app_meta(key,value) SELECT replace(key,'index.rebuild.','index.enqueueing.')||'.'||value,'1' FROM app_meta WHERE key LIKE 'index.rebuild.%'",[])?;Ok(())}).await.unwrap();
     f.drain().await;
     assert_eq!(
-        f.service.status(args().into()).await.unwrap().space_id.as_deref(),
+        f.service
+            .status(args().into())
+            .await
+            .unwrap()
+            .space_id
+            .as_deref(),
         Some(active.as_str())
     );
     let view = f.service.management_status(args()).await.unwrap();
@@ -1391,7 +1446,12 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
         true
     );
     assert_eq!(
-        restarted.status(args().into()).await.unwrap().space_id.as_deref(),
+        restarted
+            .status(args().into())
+            .await
+            .unwrap()
+            .space_id
+            .as_deref(),
         Some(active.as_str())
     );
     workers.shutdown().await;
@@ -2128,7 +2188,13 @@ async fn changing_split_chars_changes_space_and_fee_preview_without_implicit_bac
     f.node("not-approved", "another historical body").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
     f.drain().await;
-    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let old = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     assert_eq!(f.proxy.count(), 3);
     let changed = configured_service(&f, 12);
     assert!(!changed.process_one(CancellationToken::new()).await.unwrap());
@@ -2153,7 +2219,12 @@ async fn changing_split_chars_changes_space_and_fee_preview_without_implicit_bac
     let queued = changed.backfill(selected.clone()).await.unwrap();
     assert_eq!((queued.segments, queued.already_indexed), (2, 0));
     drain_service(&changed).await;
-    let current = changed.status(args().into()).await.unwrap().space_id.unwrap();
+    let current = changed
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     assert_ne!(old, current);
     assert_eq!(f.proxy.count(), 5);
     let old_copy = old.clone();
@@ -2197,7 +2268,12 @@ async fn changing_split_chars_changes_space_and_fee_preview_without_implicit_bac
     let original = configured_service(&f, 8);
     original.select_space(&old).await.unwrap();
     assert_eq!(
-        original.status(args().into()).await.unwrap().space_id.as_deref(),
+        original
+            .status(args().into())
+            .await
+            .unwrap()
+            .space_id
+            .as_deref(),
         Some(old.as_str())
     );
     f.close().await;
@@ -2212,7 +2288,13 @@ async fn model_switch_selects_only_successful_new_work_and_keeps_old_space_resto
         .await
         .unwrap();
     f.drain().await;
-    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let old = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     f.node(
         "not-approved",
         "historical input not approved for the new model",
@@ -2243,7 +2325,12 @@ async fn model_switch_selects_only_successful_new_work_and_keeps_old_space_resto
         .unwrap();
     drain_service(&changed).await;
     assert_eq!(
-        changed.status(args().into()).await.unwrap().space_id.as_deref(),
+        changed
+            .status(args().into())
+            .await
+            .unwrap()
+            .space_id
+            .as_deref(),
         Some(old.as_str())
     );
     f.db.call(|db| {
@@ -2261,7 +2348,12 @@ async fn model_switch_selects_only_successful_new_work_and_keeps_old_space_resto
     assert_eq!(old_hits[0].node_id, "old-model-source");
     changed.retry(args()).await.unwrap();
     drain_service(&changed).await;
-    let current = changed.status(args().into()).await.unwrap().space_id.unwrap();
+    let current = changed
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     assert_ne!(current, old);
     let hits = changed.search("new", 10).await.unwrap();
     assert_eq!(hits.len(), 1);
@@ -2594,7 +2686,13 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         f.node("seed", "cat seed").await;
         f.service.enqueue_new(&["seed".into()]).await.unwrap();
         f.drain().await;
-        let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+        let old = f
+            .service
+            .status(args().into())
+            .await
+            .unwrap()
+            .space_id
+            .unwrap();
         let alternate = if inactive {
             f.service
                 .rebuild(IndexArgs {
@@ -2606,7 +2704,13 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
                 .await
                 .unwrap();
             f.drain().await;
-            let newer = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+            let newer = f
+                .service
+                .status(args().into())
+                .await
+                .unwrap()
+                .space_id
+                .unwrap();
             f.service.select_space(&old).await.unwrap();
             Some(newer)
         } else {
@@ -2680,7 +2784,12 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         f.drain().await;
         assert_eq!(f.proxy.count(), before + 2);
         assert_eq!(
-            f.service.status(args().into()).await.unwrap().space_id.as_deref(),
+            f.service
+                .status(args().into())
+                .await
+                .unwrap()
+                .space_id
+                .as_deref(),
             Some(old.as_str())
         );
         f.db.call(|db| {
@@ -2708,7 +2817,13 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     f.node("seed", "cat").await;
     f.service.enqueue_new(&["seed".into()]).await.unwrap();
     f.drain().await;
-    let old = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let old = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     f.node("rebuild", "abcdefghijklmnop").await;
     f.service
         .rebuild(IndexArgs {
@@ -2777,7 +2892,12 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     f.drain().await;
     assert_eq!(f.proxy.count(), before + 2);
     assert_eq!(
-        f.service.status(args().into()).await.unwrap().space_id.as_deref(),
+        f.service
+            .status(args().into())
+            .await
+            .unwrap()
+            .space_id
+            .as_deref(),
         Some(candidate.as_str())
     );
     f.db.call(|db| {
@@ -2817,7 +2937,10 @@ async fn changing_uncoded_400_details_do_not_bypass_the_terminal_failure_breaker
                 .await
                 .unwrap()
         );
-        assert_eq!(f.service.status(args().into()).await.unwrap().paused, i == 2);
+        assert_eq!(
+            f.service.status(args().into()).await.unwrap().paused,
+            i == 2
+        );
     }
     f.drain().await;
     assert_eq!(
@@ -2839,7 +2962,13 @@ async fn query_identity_survives_split_changes_and_never_silently_rebinds_endpoi
         .await
         .unwrap();
     f.drain().await;
-    let space = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let space = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     let marker_key = format!("index.query_profile.{space}");
     let marker_copy = marker_key.clone();
     let marker =
@@ -2921,7 +3050,13 @@ async fn missing_query_marker_is_rejected_without_http_or_read_repair() {
         .await
         .unwrap();
     f.drain().await;
-    let space = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let space = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     f.db.call(|db| {
         db.execute(
             "DELETE FROM app_meta WHERE key LIKE 'index.query_profile.%'",
@@ -3444,11 +3579,14 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
         let on = f.service.status(args().into()).await.unwrap();
         assert_eq!((on.pending, on.held_auto_history), (3, 0));
         let selected_space = off
-            .status(IndexArgs {
-                kinds: Vec::new(),
-                space_id: mixed.space_id,
-                ..args()
-            }.into())
+            .status(
+                IndexArgs {
+                    kinds: Vec::new(),
+                    space_id: mixed.space_id,
+                    ..args()
+                }
+                .into(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -3857,7 +3995,13 @@ async fn queued_authorization_of_a_now_excluded_kind_is_consumed_without_blockin
         .await
         .unwrap();
     f.drain().await;
-    let before = f.service.status(args().into()).await.unwrap().space_id.unwrap();
+    let before = f
+        .service
+        .status(args().into())
+        .await
+        .unwrap()
+        .space_id
+        .unwrap();
     assert_eq!(authorize(&f, &["t"]).await, ["t"]);
     let mut restart = (*f.config).clone();
     restart.indexing.auto_kinds = vec!["user".into(), "summary".into()];
