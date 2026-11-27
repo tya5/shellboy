@@ -3680,6 +3680,9 @@
         "execution_id": {
           "type": "string"
         },
+        "output_at": {
+          "type": "string"
+        },
         "seq": {
           "format": "uint64",
           "minimum": 0,
@@ -3692,6 +3695,7 @@
       "required": [
         "thread_id",
         "execution_id",
+        "output_at",
         "seq"
       ],
       "type": "object"

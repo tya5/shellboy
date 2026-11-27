@@ -937,7 +937,10 @@ mod tests {
         let ids: Vec<_> = output.iter().map(|o| o.execution_id.as_str()).collect();
         assert_eq!(ids, ["y", "x"]);
         assert!(output[0].seq < output[1].seq);
-        assert_eq!(output[1].output_at, "2026-11-27T00:00:01Z", "the latest batch's saved time");
+        assert_eq!(
+            output[1].output_at, "2026-11-27T00:00:01Z",
+            "the latest batch's saved time"
+        );
         let Some(Poll::Ready { output, .. }) = clock.poll(0, &["t".into()], false, false, true)
         else {
             panic!("expected ready");

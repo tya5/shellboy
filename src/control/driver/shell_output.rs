@@ -341,9 +341,11 @@ pub(in crate::control) async fn collect_shell(
                 }
                 if let Some(output_at) = output_at {
                     // The last saved chunk's time: what `shell.get` reports as last_output_at.
-                    control
-                        .change_clock
-                        .record_output(owner.thread(), &marker_execution, &output_at);
+                    control.change_clock.record_output(
+                        owner.thread(),
+                        &marker_execution,
+                        &output_at,
+                    );
                 }
             }
             Err(error) => {

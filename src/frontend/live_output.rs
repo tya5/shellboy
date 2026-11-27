@@ -111,11 +111,18 @@ impl Observation {
                 continue;
             };
             // A saved time at or after the sample is no older than the sample.
-            let age = wall.signed_duration_since(saved).to_std().unwrap_or_default();
+            let age = wall
+                .signed_duration_since(saved)
+                .to_std()
+                .unwrap_or_default();
             let Some(at) = instant.checked_sub(age) else {
                 continue;
             };
-            if self.seen.get(&entry.execution_id).is_none_or(|old| *old < at) {
+            if self
+                .seen
+                .get(&entry.execution_id)
+                .is_none_or(|old| *old < at)
+            {
                 self.seen.insert(entry.execution_id.clone(), at);
                 observed = true;
             }
@@ -254,13 +261,22 @@ mod tests {
         };
         let three = std::time::Duration::from_secs(3);
         let one = std::time::Duration::from_secs(1);
-        assert_eq!(markers, vec![("a".into(), sample - three), ("b".into(), sample - one)]);
+        assert_eq!(
+            markers,
+            vec![("a".into(), sample - three), ("b".into(), sample - one)]
+        );
         assert!(
             view.output(&[entry("t", "a")], sample, wall()).is_none(),
             "an output time already shown changes nothing"
         );
-        assert!(view.output(&[entry("other", "a")], sample, wall()).is_none());
-        assert!(view.output(&[entry_at("t", "a", "not a time")], sample, wall()).is_none());
+        assert!(
+            view.output(&[entry("other", "a")], sample, wall())
+                .is_none()
+        );
+        assert!(
+            view.output(&[entry_at("t", "a", "not a time")], sample, wall())
+                .is_none()
+        );
         let Some(UiUpdate::LiveWorkObserved { markers, .. }) = view.output(
             &[entry_at("t", "a", "2026-11-27T00:00:11Z")],
             sample,
@@ -268,7 +284,11 @@ mod tests {
         ) else {
             panic!()
         };
-        assert_eq!(markers[0], ("a".into(), sample), "a later saved time is not older than now");
+        assert_eq!(
+            markers[0],
+            ("a".into(), sample),
+            "a later saved time is not older than now"
+        );
     }
     #[test]
     fn scope_rate_limit_markers_and_cancellation_do_not_leak_into_another_execution() {
