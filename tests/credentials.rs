@@ -1574,14 +1574,20 @@ async fn a_stored_key_change_wakes_a_config_wait_and_a_refused_one_does_not() {
         .unwrap();
         assert_eq!(refused["config_changed"], false);
 
-        call(&control, set("proxy", KEY)).await.unwrap();
-        let woken = call(
-            &control,
-            wait(refused["cursor"].as_str().map(str::to_owned)),
-        )
-        .await
-        .unwrap();
-        assert_eq!(woken["config_changed"], true);
+        let mut cursor = refused["cursor"].as_str().map(str::to_owned);
+        let steps = [
+            (set("proxy", KEY), true),
+            (set("proxy", KEY), false),
+            (set("proxy", "sk-replacement-key"), false),
+            (clear("proxy"), true),
+            (clear("proxy"), false),
+        ];
+        for (command, marks) in steps {
+            call(&control, command).await.unwrap();
+            let seen = call(&control, wait(cursor.take())).await.unwrap();
+            assert_eq!(seen["config_changed"], marks);
+            cursor = seen["cursor"].as_str().map(str::to_owned);
+        }
     })
     .await
     .unwrap();

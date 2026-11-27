@@ -96,8 +96,11 @@ impl Control {
                 let path = credential_store::path_beside(config_path);
                 let outcome = credential_store::set(&path, &args.connection, &args.value)?;
                 config.stored_keys.set(&args.connection, true);
-                // Publish under the write guard even if the caller has stopped waiting.
-                change_clock.record_config_changed();
+                // config.get reports only whether a key is stored, so only a newly stored key
+                // marks. Publish under the write guard even if the caller has stopped waiting.
+                if !outcome.existed {
+                    change_clock.record_config_changed();
+                }
                 let source = known.key_source(env_value, true);
                 Ok(crate::protocol::CredentialsSetResult {
                     connection: args.connection,

@@ -189,7 +189,11 @@ Baseline and resync return false; timeout returns false only after the caller's
 cursor has passed the retained mark. The `config.set` write worker marks and
 wakes waiters after every successful file write (`applied.written`), including
 restart-required changes, before releasing the write guard. This does not depend
-on the caller receiving a reply. Refused and no-op writes do not mark. Clients
+on the caller receiving a reply. The credential writer marks the same way, but
+only when what `config.get` reports changes: `credentials.set` that newly stores
+a key for a connection that had none, and `credentials.clear` that removed a
+stored key. Replacing or re-setting a stored key does not mark. Refused and
+no-op writes do not mark. Clients
 reread with `config.get`, which reports the file and loaded values; the hint
 carries neither a diff nor config values. This is memory-only and adds no event
 path, table, cache, or polling.
