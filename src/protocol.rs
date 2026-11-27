@@ -3625,6 +3625,7 @@ mod message_acknowledgement_tests {
             "attachment.add",
             "attachment.list",
             "attachment.remove",
+            "attachment.reload",
             "compact.preview",
             "compact",
             "context.edit",
