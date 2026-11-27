@@ -250,6 +250,14 @@ fn accepted_deletion_cleans_active_and_descendant_views_even_after_the_dialog_is
     accept(&mut ui, id, &args, true);
     let (id, args) = request(key(&mut ui, KeyCode::Char('y')), true);
     key(&mut ui, KeyCode::Esc);
+    ui.take_deferred_actions();
+    ui.apply(UiUpdate::StructuredManagement {
+        work_status: false,
+        request_id: 1,
+        title: "Config".into(),
+        fields: Vec::new(),
+        omitted: false,
+    });
     ui.apply(UiUpdate::ThreadDeletion {
         request_id: id,
         args,
@@ -273,7 +281,15 @@ fn accepted_deletion_cleans_active_and_descendant_views_even_after_the_dialog_is
             .values()
             .any(|view| view.thread_id.as_deref() == Some("unrelated"))
     );
-    assert!(ui.take_deferred_actions().iter().all(|action|!matches!(action,UiAction::SaveDraft {thread_id,..} if thread_id=="parent"||thread_id=="child")&&!matches!(action,UiAction::DraftAttachments {draft_id,..} if draft_id==&deleted_draft)));
+    let deferred = ui.take_deferred_actions();
+    assert_eq!(
+        deferred
+            .iter()
+            .filter(|action| matches!(action, UiAction::ManagementClosed))
+            .count(),
+        1,
+    );
+    assert!(deferred.iter().all(|action|!matches!(action,UiAction::SaveDraft {thread_id,..} if thread_id=="parent"||thread_id=="child")&&!matches!(action,UiAction::DraftAttachments {draft_id,..} if draft_id==&deleted_draft)));
     ui.insert("new editable draft", false);
     assert_eq!(ui.view().draft.text, "new editable draft");
 }

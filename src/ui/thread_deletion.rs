@@ -422,7 +422,7 @@ impl UiState {
             self.operations = None;
             self.models = None;
             self.details = None;
-            self.management.close();
+            self.invalidate_management();
             self.thread_browser.close();
             self.deferred_actions.push(UiAction::ActivateDraft {
                 draft_id: self.view().draft.draft_id.clone(),

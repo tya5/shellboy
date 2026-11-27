@@ -3460,16 +3460,10 @@ async fn run_client(
                                 dirty_threads.insert(thread);
                             }
                         }
-                        if management.wants_refresh(&page, resync) {
-                            // The shown F8 result is read again with the command that made it.
-                            match command_slots.clone().try_acquire_owned() {
-                                Ok(permit) => dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language),
-                                Err(_) => {
-                                    management.defer_refresh();
-                                    #[cfg(test)]
-                                    saved_events::tests::observe(saved_events::tests::Observed::RefreshDeferred);
-                                }
-                            }
+                        management.mark(&page, resync);
+                        #[cfg(test)]
+                        if management.refresh_ready() && command_slots.available_permits() == 0 {
+                            saved_events::tests::observe(saved_events::tests::Observed::RefreshDeferred);
                         }
                         if (resync || page.retention_changed)
                             && let Some(thread)=selection.active_thread.as_ref()
@@ -3602,11 +3596,9 @@ async fn run_client(
                 }
             },
             _=read_workers.join_next(),if !read_workers.is_empty()=> {},
-            _=workers.join_next(),if !workers.is_empty()=> {
-                // The slot a stale shown result waited for is free again.
-                if management.refresh_ready()
-                    && let Ok(permit) = command_slots.clone().try_acquire_owned()
-                {
+            _=workers.join_next(),if !workers.is_empty()=> {},
+            permit=command_slots.clone().acquire_owned(),if management.refresh_ready()=> {
+                if let Ok(permit) = permit {
                     dispatch_shown_refresh(&mut management, &mut workers, permit, &control, &background_tx, &client_context.data_dir, language);
                 }
             },

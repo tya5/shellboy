@@ -205,17 +205,6 @@ async fn shown_config_result_is_read_again_when_a_saved_credential_change_wakes_
             Some(Observed::RefreshDeferred)
         ));
         drop(held);
-        // Any other command worker finishing frees the slot for the refresh.
-        send.try_send(UiAction::CancelMessages {
-            message_ids: vec!["unknown".into()],
-            target: crate::ui::DraftRecoveryTarget {
-                draft_id: "draft".into(),
-                revision: 0,
-                generation: 0,
-                thread_id: None,
-            },
-        })
-        .unwrap();
         loop {
             while let Ok(update) = incoming.try_recv() {
                 if matches!(
