@@ -267,10 +267,18 @@ No protocol read or wake fact exists for these:
   and `message.get` carry sender and reply state but not the delivery reason.
 - Branch markers for the visible nodes. `thread.branches` pages the family at
   most 200 Threads per page, so a marker for one visible node can need every page.
-- Management inspections answered in process with client-only payloads
-  (index coverage window, storage physical sample, lifecycle, saved, operation,
-  attachment and deletion inspections). The protocol records lack, for
-  example, the index coverage window.
+
+Management (slice 4, done): F8 shows the result of the command it ran, read
+once from the owner, as the CLI prints it. The in-process substitutions and
+the saved-inspection observation (its readers, refresh tickets, retained and
+list re-observations, and the Storage physical sample) are deleted; there is
+no F8 refresh on saved changes, so F8 no longer consumes the index
+saved-change or management owner-state wakes. The index coverage window is
+the owner's `index.status` `coverage` opt-in (`IndexStatus.coverage_window`,
+`selection` echo and `next_cursor`). F8 Storage shows `storage.status`; the
+UI-only history/raw/index byte split, temporary-directory bytes, per-figure
+completeness labels and separate sample time are retired (user decision,
+2026-11-26).
 
 ### Live work and header facts (4d slice 2)
 

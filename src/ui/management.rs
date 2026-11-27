@@ -10,9 +10,17 @@ pub(super) enum ManagementMode {
     Index,
     Attachments,
 }
+/// The field that carries `index.status --coverage` continuation.
+const COVERAGE_CURSOR: &str = "/coverage_window/next_cursor";
+/// The Index view reads status together with one coverage window.
+pub(super) fn index_status(args: IndexArgs) -> Command {
+    Command::IndexStatus(crate::protocol::IndexStatusArgs {
+        coverage: true,
+        ..args.into()
+    })
+}
 pub(super) struct ManagementPage {
     pub(super) source_request_id: u64,
-    pub(super) observed_at: String,
     pub(super) stale: Option<String>,
     pub(super) pointer: String,
     pub(super) text: String,
@@ -54,8 +62,6 @@ impl IndexPreviewState {
 }
 pub struct ManagementPopup {
     language: UiLanguage,
-    pub(super) inspection: Option<inspection::State>,
-    inspection_detail: Option<UiAction>,
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     reader_cache: std::cell::RefCell<popup::ReaderCache>,
     reader_revision: u64,
@@ -75,8 +81,6 @@ impl Default for ManagementPopup {
     fn default() -> Self {
         Self {
             language: UiLanguage::Ja,
-            inspection: None,
-            inspection_detail: None,
             paint: Default::default(),
             reader_cache: Default::default(),
             reader_revision: 0,
@@ -121,341 +125,6 @@ impl ManagementPopup {
             "Esc Back | ^v/PgUp/PgDn Scroll\nN Next page | P First page | C Copy this page"
         ))
     }
-    pub(super) fn start_inspection(&mut self, target: InspectionTarget, title: String) {
-        // Pending cost intents belong to their exact Index selection. Admitted
-        // operations are tracked elsewhere and are never cancelled here.
-        let same_index_scope = matches!(&target,InspectionTarget::Index(args) if self.mode==ManagementMode::Index && self.scope.as_ref().map_or_else(||args==&IndexArgs::default(),|current|current==args));
-        if !same_index_scope {
-            self.pending = None;
-            self.reset_preview();
-            self.scope = None;
-        }
-        self.open_structured(title, 0, vec![], false, false);
-        if let InspectionTarget::Index(args) = &target {
-            self.mode = ManagementMode::Index;
-            self.scope = Some(args.clone());
-        } else if matches!(target, InspectionTarget::Attachments { .. }) {
-            self.mode = ManagementMode::Attachments;
-        } else {
-            self.mode = ManagementMode::General;
-        }
-        let desired = match &target {
-            InspectionTarget::Attachments {
-                thread_id,
-                attachment_id: Some(id),
-            } => Some(InspectionFieldAnchor {
-                pointer: String::new(),
-                entity: Some(("attachment_selection".into(), format!("{thread_id}/{id}"))),
-                relative_pointer: "/attachment_id".into(),
-                stable: true,
-            }),
-            _ => None,
-        };
-        let mut state = inspection::State::new(target);
-        state.unavailable_selection = desired;
-        self.inspection = Some(state);
-        self.inspection_detail = None;
-    }
-    pub(super) fn start_retained_inspection(
-        &mut self,
-        request_id: u64,
-        target: InspectionTarget,
-    ) -> bool {
-        let Some(state) = self
-            .frame
-            .as_mut()
-            .and_then(|frame| frame.structured.as_mut())
-            .filter(|state| state.request_id == request_id)
-        else {
-            return false;
-        };
-        if !target.retains_history() {
-            return false;
-        }
-        let mut inspection = inspection::State::new(target);
-        let mut fields = state.fields.clone();
-        fields.truncate(256);
-        let sep = crate::ui::text_width::glyphs::separator();
-        for field in &mut fields {
-            field.label = match self.language {
-                UiLanguage::En => format!("At capture{sep}{}", field.label),
-                UiLanguage::Ja => format!("取得時{sep}{}", field.label),
-            };
-        }
-        inspection.anchors = fields
-            .iter()
-            .map(|field| InspectionFieldAnchor {
-                pointer: field.key.clone(),
-                entity: None,
-                relative_pointer: field.key.clone(),
-                stable: true,
-            })
-            .collect();
-        state.fields = fields.clone();
-        inspection.retained_fields = Some(fields);
-        inspection.retained_omitted = state.omitted;
-        self.inspection = Some(inspection);
-        true
-    }
-    pub(super) fn patch_inspection(
-        &mut self,
-        request_id: u64,
-        mut snapshot: InspectionSnapshot,
-    ) -> bool {
-        let language = self.language;
-        let Some(inspection) = self.inspection.as_ref() else {
-            return false;
-        };
-        if (inspection.has_snapshot
-            && self
-                .structured()
-                .is_some_and(|state| request_id <= state.request_id))
-            || inspection.target != snapshot.target
-            || snapshot.metadata_sequence < inspection.metadata_sequence
-            || inspection
-                .usage_sequence
-                .is_some_and(|old| snapshot.usage_sequence.is_none_or(|new| new < old))
-            || snapshot.fields.len() > 256
-            || snapshot.anchors.len() > 256
-        {
-            return false;
-        }
-        if let Some(retained) = &inspection.retained_fields {
-            let available = 256usize.saturating_sub(snapshot.fields.len());
-            snapshot.omitted |= inspection.retained_omitted || retained.len() > available;
-            for field in retained.iter().take(available) {
-                snapshot.fields.push(field.clone());
-                snapshot.anchors.push(InspectionFieldAnchor {
-                    pointer: field.key.clone(),
-                    entity: None,
-                    relative_pointer: field.key.clone(),
-                    stable: true,
-                });
-            }
-        }
-        let selected = if inspection.reset_selection {
-            None
-        } else {
-            inspection.unavailable_selection.clone().or_else(|| {
-                self.structured()
-                    .and_then(|state| state.fields.get(state.selected))
-                    .and_then(|field| {
-                        inspection
-                            .anchors
-                            .iter()
-                            .find(|anchor| anchor.pointer == field.key)
-                    })
-                    .cloned()
-            })
-        };
-        let selected_index = selected
-            .as_ref()
-            .and_then(|old| snapshot.anchors.iter().find(|new| old.same_source(new)))
-            .and_then(|anchor| {
-                snapshot
-                    .fields
-                    .iter()
-                    .position(|field| field.key == anchor.pointer)
-            });
-        let detail_anchor = inspection.detail_anchor.clone();
-        let retained_pointer = detail_anchor.as_ref().and_then(|anchor| {
-            inspection
-                .retained_fields
-                .as_ref()?
-                .iter()
-                .find(|field| field.key == anchor.pointer)
-                .map(|field| field.key.clone())
-        });
-        let mapped = retained_pointer.clone().or_else(|| {
-            detail_anchor
-                .as_ref()
-                .and_then(|old| snapshot.anchors.iter().find(|new| old.same_source(new)))
-                .map(|anchor| anchor.pointer.clone())
-        });
-        let Some(frame) = self.frame.as_mut() else {
-            return false;
-        };
-        let Some(state) = frame.structured.as_mut() else {
-            return false;
-        };
-        // The visible original page may coexist with an in-flight next/first
-        // page request. Keep that exact intent before the metadata fence moves.
-        let pending_original = state.pending_pointer.as_ref().and_then(|pointer| {
-            inspection
-                .retained_fields
-                .as_ref()?
-                .iter()
-                .any(|field| &field.key == pointer)
-                .then(|| {
-                    (
-                        pointer.clone(),
-                        state.pending_cursor.clone(),
-                        state.preserve_detail_scroll,
-                    )
-                })
-        });
-        let keep_original_page = retained_pointer.as_ref().is_some_and(|pointer| {
-            state
-                .detail
-                .as_ref()
-                .is_some_and(|page| &page.pointer == pointer)
-        });
-        let detail_consumer = inspection.detail_requested
-            || state.detail.is_some()
-            || state.pending_pointer.is_some()
-            || self.inspection_detail.is_some();
-        state.selected = selected_index
-            .unwrap_or_else(|| state.selected.min(snapshot.fields.len().saturating_sub(1)));
-        state.fields = snapshot.fields;
-        state.omitted = snapshot.omitted;
-        state.request_id = request_id;
-        state.detail_request_id = state.detail_request_id.wrapping_add(1);
-        state.pending_pointer = None;
-        state.pending_cursor = None;
-        self.inspection_detail = None;
-        let inspection = self.inspection.as_mut().unwrap();
-        inspection.reset_selection = false;
-        inspection.selection_unavailable = selected.is_some() && selected_index.is_none();
-        inspection.unavailable_selection = inspection
-            .selection_unavailable
-            .then(|| selected.clone())
-            .flatten();
-        inspection.metadata_sequence = snapshot.metadata_sequence;
-        inspection.usage_sequence = snapshot.usage_sequence;
-        inspection.metadata_observed_at = snapshot.metadata_observed_at;
-        inspection.usage_observed_at = snapshot.usage_observed_at;
-        inspection.anchors = snapshot.anchors;
-        inspection.has_snapshot = true;
-        if inspection
-            .metadata_error
-            .as_ref()
-            .is_some_and(|(seq, _)| *seq < snapshot.metadata_sequence)
-        {
-            inspection.metadata_error = None;
-        }
-        if inspection
-            .usage_error
-            .as_ref()
-            .is_some_and(|(seq, _)| snapshot.usage_sequence.is_some_and(|new| new > *seq))
-        {
-            inspection.usage_error = None;
-        }
-        inspection.detail_pointer = mapped.clone();
-        if keep_original_page {
-            let page = state
-                .detail
-                .as_mut()
-                .expect("retained page identity checked above");
-            page.source_request_id = request_id;
-            page.stale = None;
-        } else if let Some(detail) = state.detail.as_mut() {
-            detail.stale = Some(
-                if mapped.is_some() {
-                    local!(
-                        language,
-                        "新しい保存状態の詳細を取得中",
-                        "Retrieving details for the latest saved state"
-                    )
-                } else {
-                    local!(
-                        language,
-                        "参照元が消失・一意に確認できません",
-                        "The source is missing or cannot be identified uniquely"
-                    )
-                }
-                .into(),
-            );
-        }
-        if let Some((pointer, cursor, preserve_scroll)) = pending_original {
-            state.pending_pointer = Some(pointer.clone());
-            state.pending_cursor = cursor.clone();
-            state.preserve_detail_scroll = preserve_scroll;
-            self.inspection_detail = Some(UiAction::LoadManagementDetail {
-                request_id,
-                detail_request_id: state.detail_request_id,
-                pointer,
-                cursor,
-            });
-        } else if detail_consumer
-            && !keep_original_page
-            && let Some(pointer) = mapped
-        {
-            state.pending_pointer = Some(pointer.clone());
-            state.pending_cursor = None;
-            state.preserve_detail_scroll = state.detail.is_some();
-            self.inspection_detail = Some(UiAction::LoadManagementDetail {
-                request_id,
-                detail_request_id: state.detail_request_id,
-                pointer,
-                cursor: None,
-            });
-        }
-        self.paint.set(None);
-        true
-    }
-    pub(super) fn fail_inspection(
-        &mut self,
-        target: InspectionTarget,
-        part: InspectionPart,
-        sequence: u64,
-        observed_at: String,
-        error: String,
-    ) -> bool {
-        let Some(state) = self
-            .inspection
-            .as_mut()
-            .filter(|state| state.target == target)
-        else {
-            return false;
-        };
-        let prefix = error.chars().take(512).collect::<String>();
-        let message = crate::ui::text_width::glyphs::formatted!(
-            "{} · {}",
-            "{} | {}",
-            observed_at,
-            crate::presentation::sanitize_plain(&prefix, 0).0
-        );
-        match part {
-            InspectionPart::Metadata => {
-                if sequence < state.metadata_sequence
-                    || state
-                        .metadata_error
-                        .as_ref()
-                        .is_some_and(|(old, _)| sequence < *old)
-                {
-                    return false;
-                }
-                state.metadata_error = Some((sequence, message));
-            }
-            InspectionPart::Usage => {
-                if state.usage_sequence.is_some_and(|old| sequence < old)
-                    || state
-                        .usage_error
-                        .as_ref()
-                        .is_some_and(|(old, _)| sequence < *old)
-                {
-                    return false;
-                }
-                state.usage_error = Some((sequence, message));
-            }
-        }
-        if let Some(page) = self
-            .frame
-            .as_mut()
-            .and_then(|frame| frame.structured.as_mut())
-            .and_then(|state| state.detail.as_mut())
-        {
-            page.stale = Some(
-                local!(
-                    self.language,
-                    "更新に失敗・以前の取得内容",
-                    "Refresh failed; showing the previous capture"
-                )
-                .into(),
-            );
-        }
-        true
-    }
     pub(super) fn fail_detail(
         &mut self,
         request_id: u64,
@@ -486,19 +155,6 @@ impl ManagementPopup {
         }
         true
     }
-    pub(super) fn take_inspection_detail(&mut self) -> Option<UiAction> {
-        self.inspection_detail.take()
-    }
-    pub(super) fn detail_rejected(&mut self, reason: &str) {
-        if let Some(state) = self.structured_mut() {
-            state.pending_pointer = None;
-            state.pending_cursor = None;
-            if let Some(page) = &mut state.detail {
-                page.stale = Some(reason.into());
-            }
-        }
-        self.inspection_detail = None;
-    }
     pub(super) fn paint_bounds(&self) -> Option<popup::PaintBounds> {
         self.paint.get()
     }
@@ -508,12 +164,7 @@ impl ManagementPopup {
         {
             let old = state.selected;
             state.selected = popup::move_selection(old, delta, state.fields.len());
-            let changed = old != state.selected;
-            if changed && let Some(inspection) = self.inspection.as_mut() {
-                inspection.selection_unavailable = false;
-                inspection.unavailable_selection = None;
-            }
-            return changed;
+            return old != state.selected;
         }
         let maximum = self.reader_cache.borrow().bounds().maximum;
         if let Some(view) = self.view_mut() {
@@ -547,8 +198,6 @@ impl ManagementPopup {
         self.frame.as_mut()?.structured.as_mut()
     }
     pub(super) fn open_text(&mut self, view: ManagementView) {
-        self.inspection = None;
-        self.inspection_detail = None;
         self.reset_reader();
         self.frame = Some(ManagementFrame {
             view,
@@ -563,8 +212,6 @@ impl ManagementPopup {
         omitted: bool,
         work_status: bool,
     ) {
-        self.inspection = None;
-        self.inspection_detail = None;
         self.reset_reader();
         if work_status {
             self.mode = ManagementMode::Status;
@@ -610,25 +257,6 @@ impl ManagementPopup {
             self.reader_revision = self.reader_revision.wrapping_add(1);
             state.detail = Some(ManagementPage {
                 source_request_id: request_id,
-                observed_at: self
-                    .inspection
-                    .as_ref()
-                    .map(|state| match &state.target {
-                        InspectionTarget::HistorySources(scope)
-                            if pointer != "/current_source"
-                                && !pointer.starts_with("/current_source/") =>
-                        {
-                            scope.captured_at.clone()
-                        }
-                        InspectionTarget::RetainedSources(scope)
-                            if pointer != "/current_source"
-                                && !pointer.starts_with("/current_source/") =>
-                        {
-                            scope.captured_at.to_string()
-                        }
-                        _ => state.metadata_observed_at.clone(),
-                    })
-                    .unwrap_or_default(),
                 stale: None,
                 pointer,
                 text,
@@ -664,8 +292,6 @@ impl ManagementPopup {
         self.reset_reader();
         self.epoch = self.epoch.wrapping_add(1);
         self.frame = None;
-        self.inspection = None;
-        self.inspection_detail = None;
         self.paint.set(None);
         self.reader_cache.get_mut().clear();
         self.owner = None;
@@ -905,16 +531,13 @@ impl ManagementPopup {
             }
         }
     }
-    fn has_next_inspection_window(&self) -> bool {
-        self.inspection
-            .as_ref()
-            .is_some_and(|inspection| matches!(inspection.target, InspectionTarget::Index(_)))
+    fn has_next_coverage_window(&self) -> bool {
+        self.mode == ManagementMode::Index
             && self.structured().is_some_and(|state| {
-                state.fields.iter().any(|field| {
-                    field.key == "/management/coverage_window/next_cursor"
-                        && !field.value.is_empty()
-                        && field.value != "null"
-                })
+                state
+                    .fields
+                    .iter()
+                    .any(|field| field.key == COVERAGE_CURSOR && !field.value.is_empty())
             })
     }
     fn hints(&self) -> String {
@@ -923,15 +546,15 @@ impl ManagementPopup {
             .structured()
             .is_some_and(|value| value.detail.is_none());
         crate::ui::text_width::glyphs::controls(match self.mode {
-            ManagementMode::Index if self.has_next_inspection_window() => local!(
+            ManagementMode::Index if self.has_next_coverage_window() => local!(
                 self.language,
-                "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新 | N 次window\nS 状態 | P 費用preview | B backfill | T retry | R rebuild",
-                "Esc Back | ^v/PgUp/PgDn Scroll | Ctrl+R Refresh | N Next window\nS Status | P Cost preview | B Backfill | T Retry | R Rebuild"
+                "Esc 戻る | ^v/PgUp/PgDn 閲覧 | N 次window\nS 状態 | P 費用preview | B backfill | T retry | R rebuild",
+                "Esc Back | ^v/PgUp/PgDn Scroll | N Next window\nS Status | P Cost preview | B Backfill | T Retry | R Rebuild"
             ),
             ManagementMode::Index => local!(
                 self.language,
-                "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新\nS 状態 | P 費用preview | B backfill | T retry | R rebuild",
-                "Esc Back | ^v/PgUp/PgDn Scroll | Ctrl+R Refresh\nS Status | P Cost preview | B Backfill | T Retry | R Rebuild"
+                "Esc 戻る | ^v/PgUp/PgDn 閲覧\nS 状態 | P 費用preview | B backfill | T retry | R rebuild",
+                "Esc Back | ^v/PgUp/PgDn Scroll\nS Status | P Cost preview | B Backfill | T Retry | R Rebuild"
             ),
             ManagementMode::Attachments if list_mode => local!(
                 self.language,
@@ -987,57 +610,18 @@ impl ManagementPopup {
     }
     pub(super) fn key(&mut self, key: KeyEvent, page: u16, thread_id: Option<String>) -> Outcome {
         let key = key_hints::readonly_key(key);
-        let refresh = matches!(key.code, KeyCode::Char('r' | 'R'))
-            && (key.modifiers.contains(KeyModifiers::CONTROL)
-                || (!matches!(
-                    self.mode,
-                    ManagementMode::Index | ManagementMode::Attachments
-                ) && !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)));
-        if refresh && let (Some(inspection), Some(context)) = (&self.inspection, &self.owner) {
-            return Outcome::Actions(vec![UiAction::ObserveInspection {
-                context: context.clone(),
-                target: inspection.target.clone(),
-                visible: true,
-                revision: 0,
-            }]);
-        }
         if key.code == KeyCode::Char('n')
             && key.modifiers.is_empty()
-            && self.mode == ManagementMode::Index
             && self
                 .structured()
                 .is_some_and(|state| state.detail.is_none())
-            && self.has_next_inspection_window()
+            && self.has_next_coverage_window()
+            && let Some(state) = self.structured()
         {
-            let (Some(context), Some(inspection), Some(state)) = (
-                self.owner.clone(),
-                self.inspection.as_mut(),
-                self.frame
-                    .as_mut()
-                    .and_then(|frame| frame.structured.as_mut()),
-            ) else {
-                return Outcome::Actions(vec![]);
-            };
-            let target = inspection.target.clone();
-            let request_id = state.request_id;
-            inspection.reset_selection = true;
-            inspection.selection_unavailable = false;
-            inspection.unavailable_selection = None;
-            inspection.detail_anchor = None;
-            inspection.detail_pointer = None;
-            inspection.detail_requested = false;
-            state.selected = 0;
-            state.pending_pointer = None;
-            state.pending_cursor = None;
-            state.detail_request_id = state.detail_request_id.wrapping_add(1);
-            self.inspection_detail = None;
-            self.paint.set(None);
-            return Outcome::Actions(vec![UiAction::NextInspectionWindow {
-                context,
-                request_id,
-                target,
+            return Outcome::Actions(vec![UiAction::FollowManagement {
+                request_id: state.request_id,
+                pointer: COVERAGE_CURSOR.into(),
+                mode: ManagementFollow::Next,
             }]);
         }
         if self.mode == ManagementMode::Received
@@ -1144,66 +728,6 @@ impl ManagementPopup {
         }
     }
     fn navigate(&mut self, key: KeyEvent, page: u16, thread_id: Option<String>) -> Vec<UiAction> {
-        let has_detail = self
-            .structured()
-            .is_some_and(|state| state.detail.is_some());
-        if let Some(inspection) = self.inspection.as_mut() {
-            if has_detail && key.code == KeyCode::Esc {
-                inspection.detail_requested = false;
-                inspection.detail_anchor = None;
-                inspection.detail_pointer = None;
-            }
-            if !has_detail
-                && matches!(
-                    key.code,
-                    KeyCode::Up
-                        | KeyCode::Down
-                        | KeyCode::PageUp
-                        | KeyCode::PageDown
-                        | KeyCode::Tab
-                        | KeyCode::BackTab
-                )
-            {
-                inspection.selection_unavailable = false;
-                inspection.unavailable_selection = None;
-            }
-            if inspection.selection_unavailable
-                && (matches!(key.code, KeyCode::Enter | KeyCode::Char('o' | 's'))
-                    || (!has_detail && key.code == KeyCode::Char('c')))
-            {
-                return vec![];
-            }
-        }
-        let starts_field_detail = !has_detail
-            && (key.code == KeyCode::Enter
-                || (key.code == KeyCode::Char('c')
-                    && self
-                        .structured()
-                        .and_then(|state| state.fields.get(state.selected))
-                        .is_some_and(|field| field.value_omitted)));
-        if starts_field_detail {
-            let anchor = self
-                .structured()
-                .and_then(|state| state.fields.get(state.selected))
-                .and_then(|field| {
-                    self.inspection.as_ref().and_then(|inspection| {
-                        inspection
-                            .anchors
-                            .iter()
-                            .find(|anchor| anchor.pointer == field.key)
-                    })
-                })
-                .cloned();
-            if let Some(inspection) = self.inspection.as_mut() {
-                inspection.detail_requested = true;
-                inspection.detail_pointer = anchor.as_ref().map(|anchor| anchor.pointer.clone());
-                inspection.detail_anchor = anchor;
-            }
-        }
-        let inspection_pointer = self
-            .inspection
-            .as_ref()
-            .and_then(|state| state.detail_pointer.clone());
         let is_status = self.mode == ManagementMode::Status;
         let is_index = self.mode == ManagementMode::Index;
         let is_attachments = self.mode == ManagementMode::Attachments;
@@ -1322,10 +846,8 @@ impl ManagementPopup {
                 }
                 KeyCode::Char('p') => {
                     if let Some(page) = &structured.detail {
-                        let pointer = inspection_pointer.clone().or_else(|| {
-                            (page.source_request_id == structured.request_id)
-                                .then(|| page.pointer.clone())
-                        });
+                        let pointer = (page.source_request_id == structured.request_id)
+                            .then(|| page.pointer.clone());
                         let Some(pointer) = pointer else {
                             return vec![];
                         };
@@ -1357,14 +879,7 @@ impl ManagementPopup {
         ) && self.mode != management::ManagementMode::Index
         {
             if self.mode == management::ManagementMode::Attachments
-                && let Some(thread_id) = self
-                    .inspection
-                    .as_ref()
-                    .and_then(|inspection| match &inspection.target {
-                        InspectionTarget::Attachments { thread_id, .. } => Some(thread_id.clone()),
-                        _ => None,
-                    })
-                    .or_else(|| thread_id.clone())
+                && let Some(thread_id) = thread_id
             {
                 return match key.code {
                     KeyCode::Char('s') => {
@@ -1391,8 +906,9 @@ impl ManagementPopup {
                 vec![]
             }
             KeyCode::Char('s') => {
-                let args = self.scope.clone().unwrap_or_default();
-                vec![UiAction::Manage(Command::IndexStatus(args))]
+                vec![UiAction::Manage(index_status(
+                    self.scope.clone().unwrap_or_default(),
+                ))]
             }
             KeyCode::Char('p') => {
                 let Some(args) = self.scope.clone().filter(explicit_index_targets) else {
@@ -1426,18 +942,15 @@ impl ManagementPopup {
                         UiLanguage::Ja => format!("{}{sep}詳細", view.title),
                     };
                     let pointer = &page.pointer;
-                    let observed_at = &page.observed_at;
                     let context = match (self.language, &page.stale) {
-                        (UiLanguage::En, Some(reason)) => format!(
-                            "Reference {pointer}{sep}Captured {observed_at}{sep}Stale: {reason}"
-                        ),
-                        (UiLanguage::En, None) => {
-                            format!("Reference {pointer}{sep}Captured {observed_at}")
+                        (UiLanguage::En, Some(reason)) => {
+                            format!("Reference {pointer}{sep}Stale: {reason}")
                         }
+                        (UiLanguage::En, None) => format!("Reference {pointer}"),
                         (UiLanguage::Ja, Some(reason)) => {
-                            format!("参照 {pointer}{sep}取得 {observed_at}{sep}旧内容: {reason}")
+                            format!("参照 {pointer}{sep}旧内容: {reason}")
                         }
-                        (UiLanguage::Ja, None) => format!("参照 {pointer}{sep}取得 {observed_at}"),
+                        (UiLanguage::Ja, None) => format!("参照 {pointer}"),
                     };
                     let body = popup::panel_recorded(
                         frame,
@@ -1488,11 +1001,6 @@ impl ManagementPopup {
                         (UiLanguage::Ja, false, _) => {
                             format!("{selected} / {count}項目{sep}{status}")
                         }
-                    };
-                    let context = if let Some(inspection) = &self.inspection {
-                        format!("{}{sep}{context}", inspection.label_for(self.language))
-                    } else {
-                        context
                     };
                     let context = if let Some(error) = &structured.detail_error {
                         match self.language {

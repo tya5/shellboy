@@ -285,7 +285,7 @@ async fn same_snapshot_has_same_unicode_bounded_batches_and_fewer_requests() {
         &requests[1..],
         "saved IDs/order and settings define the batch"
     );
-    let status = service.status(IndexArgs::default()).await.unwrap();
+    let status = service.status(Default::default()).await.unwrap();
     assert_eq!(status.done, 5);
     db.shutdown().await.unwrap();
     f.close().await;
@@ -353,7 +353,7 @@ async fn rejected_batch_records_every_member_then_retries_singly_even_without_re
     })
     .await
     .unwrap();
-    assert!(!f.service.status(IndexArgs::default()).await.unwrap().paused);
+    assert!(!f.service.status(Default::default()).await.unwrap().paused);
     f.drain().await;
     let requests = f.proxy.requests();
     assert_eq!(
@@ -364,7 +364,7 @@ async fn rejected_batch_records_every_member_then_retries_singly_even_without_re
         vec![1, 3, 1, 1, 1]
     );
     assert_eq!(
-        f.service.status(IndexArgs::default()).await.unwrap().done,
+        f.service.status(Default::default()).await.unwrap().done,
         4
     );
     f.close().await;
@@ -401,7 +401,7 @@ async fn malformed_batch_adopts_nothing_and_individual_length_children_stay_sing
             .iter()
             .all(|request| request["input"].as_array().unwrap().len() == 1)
     );
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     assert_eq!(status.failed, 0);
     assert!(!status.paused);
     f.close().await;
@@ -419,11 +419,11 @@ async fn common_auth_failure_pauses_and_transaction_failure_never_leaves_partial
             .await
             .unwrap()
     );
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     assert!(status.paused);
     assert_eq!(status.failed, 3);
     f.drain().await;
-    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    let status = f.service.status(Default::default()).await.unwrap();
     assert_eq!((status.failed, status.pending), (0, 0));
     assert_eq!(f.proxy.requests().len(), 2);
     f.close().await;

@@ -503,7 +503,7 @@ async fn performance_index_service_search_1000_sources() {
             space_id: None,
             thread_ids: vec![],
             source_ids: vec![],
-        })
+        }.into())
         .await
         .unwrap();
     assert_eq!(status.done, SOURCES as u64);

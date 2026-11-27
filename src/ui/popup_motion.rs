@@ -211,7 +211,7 @@ mod tests {
         assert!(!ui.dirty, "empty list is not scrollable");
         ui.thread_browser.close();
         ui.confirmation = Some(Confirmation::Index {
-            command: Command::IndexStatus(IndexArgs::default()),
+            command: Command::IndexStatus(Default::default()),
             attempt: 1,
             detail: "long detail\n".repeat(100),
         });
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(ui.help_cache.build_count(), 1);
         ui.help_visible = false;
         ui.set_confirmation(Confirmation::Index {
-            command: Command::IndexStatus(IndexArgs::default()),
+            command: Command::IndexStatus(Default::default()),
             attempt: 1,
             detail: "cost facts\n".repeat(4000),
         });
@@ -311,7 +311,7 @@ mod tests {
     fn confirmation_replacement_retires_the_prior_paint_and_prior_source_cache() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.set_confirmation(Confirmation::Index {
-            command: Command::IndexStatus(IndexArgs::default()),
+            command: Command::IndexStatus(Default::default()),
             attempt: 1,
             detail: "old source\n".repeat(100),
         });

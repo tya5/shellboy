@@ -1123,14 +1123,7 @@ mod frame_delivery_tests {
                 thread_id: Some("t".into()),
                 display: false,
             }),
-            Command::IndexStatus(crate::protocol::IndexArgs {
-                kinds: Vec::new(),
-                dimensions: None,
-                scope: None,
-                space_id: None,
-                thread_ids: Vec::new(),
-                source_ids: Vec::new(),
-            }),
+            Command::IndexStatus(Default::default()),
             Command::DraftImage(crate::protocol::DraftImageArgs {
                 instance_id: "instance".into(),
                 draft_id: "draft".into(),

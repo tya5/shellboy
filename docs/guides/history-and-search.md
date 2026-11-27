@@ -202,11 +202,12 @@ Specify a target in the TUI:
 /index space SPACE_ID thread
 ```
 
-`/index status` displays state. `thread` selects the current Thread, `threads` specified Threads, and `all` all retained sources. Specifying only `space` does not select a historical-processing scope. The management screen shows spaces, active/selected state, model/dimensions, and coverage definitions. A job's done count is not equivalent to "every source fully indexed." Interpret partial indexing and unverified raw coverage according to the displayed definitions.
+`/index status` displays state. `thread` selects the current Thread, `threads` specified Threads, and `all` all retained sources. Specifying only `space` does not select a historical-processing scope. The management screen shows the result of `index status --coverage` for that selection, as the CLI prints it: spaces, active/selected state, model/dimensions, job counts and `coverage_window`, the per-source coverage of one bounded window. When the window has a `next_cursor`, lowercase `n` reads the next window. A job's done count is not equivalent to "every source fully indexed"; see [coverage windows](#coverage-windows).
 
 | Lowercase key | Purpose |
 | --- | --- |
 | `s` | Refresh status |
+| `n` | Next coverage window, when there is one |
 | `p` | Preview source/segment/character counts and already indexed content for the selected scope |
 | `b` | Backfill history |
 | `t` | Retry failures / explicitly resume from pause |
@@ -225,6 +226,26 @@ shellboy index rebuild --scope all --kind all
 ```
 
 Select targets with `--scope all`, `--scope threads --thread ID`, `--source NODE_ID`, and `--space SPACE_ID`. A space alone does not substitute for historical scope selection in backfill/rebuild. CLI `index retry` also accepts omitted targets, resuming failed jobs and similar work in that connection's active/candidate spaces. To limit targets, explicitly provide Thread/source as above. Omitting the scope on CLI `index preview` previews that retry-eligible work without sending an API request. The TUI performs this read before its retry confirmation. See [CLI reference](cli-reference.md) for detailed conditions.
+
+### Coverage windows
+
+`shellboy index status --coverage` (with `--scope all`, `--thread ID` or `--source NODE_ID`) adds `coverage_window`. It classifies the current sources of one bounded window (at most 32 explicit sources per window) in the selected space:
+
+| Count | Meaning |
+| --- | --- |
+| `not_indexed_sources` | No done job backed by matching chunks; queued or failed work does not count as indexed |
+| `partially_indexed_sources` | Some current chunks exist, but visible coverage is missing or pending/running/failed work remains |
+| `fully_indexed_sources` | Every current visible body segment is covered by matching done chunks |
+| `coverage_unverified_sources` | Chunks exist with no known gap, but raw output coverage cannot be proved without decoding it |
+| `unavailable_sources` / `not_indexable_sources` | The source is missing or deleted / has no indexable text |
+| `done_segments` / `pending_segments` / `failed_segments` / `stale_segments` | Segment states; stale means the source changed after indexing |
+
+`window_complete: false` means some evidence exceeded the window's budget: counts are lower bounds, and `unverified_sources` names the sources left out with a `reason` (`body_over_budget`, `malformed_source`, `unprovable`). `scope_exhausted: false` means more memberships remain: repeat the same selection with `--coverage-cursor` set to `next_cursor`; `selection` echoes the normalized selection to repeat. Each window is its own read with its own `read_at`, not one snapshot: do not add windows up into a global total. The read calls no API and admits no sources.
+
+```sh
+shellboy index status --coverage --scope threads --thread THREAD_ID
+shellboy index status --coverage --scope threads --thread THREAD_ID --coverage-cursor NEXT_CURSOR
+```
 
 `pending/running/done/failed` are job states; `held_auto_history` separately counts pending automatic entries held by `auto_history=false` (source authorizations or segment inputs, not unique unindexed nodes). Such entries are excluded from `pending`; explicit pending work remains eligible, while re-enabling or explicitly reauthorizing work moves it back into pending. An explicit space selection excludes pre-space source authorizations/bootstrap from both counts, as before. `paused` and reason describe why a space stopped. Individual temporary failures receive bounded retries. Shared failures such as authentication pause indexing without halting new conversations. Explicitly retry after fixing the cause. Already successful portions are not processed again.
 

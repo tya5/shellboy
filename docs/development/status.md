@@ -61,6 +61,11 @@ The private index, GC availability, owner-state and display-output wakes and
 the in-process output markers are deleted. Runtime receipts settle through the
 matching mark or their target's Thread.
 
+Slice 4 (management) is implemented on `task/core311-4d-s4-management`: F8
+shows the owner's result of the command it ran, with no in-process reads or
+refresh; `index status --coverage` carries the coverage window; F8 Storage
+shows `storage status`. Continue with slice 5 once slices 1-3 land.
+
 ## Core #311 selected history client (4e/4f)
 
 The TUI's selected view, history pages, windows, rebases, saved-message

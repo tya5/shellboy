@@ -99,7 +99,6 @@ fn leaving_a_detail_page_drops_its_late_page_without_invalidating_the_whole_fram
     ui.apply(report(owner.clone(), "current"));
     let state = ui.management.structured_mut().unwrap();
     state.detail = Some(management::ManagementPage {
-        observed_at: "synthetic".into(),
         source_request_id: 1,
         stale: None,
         pointer: "/run_id".into(),
@@ -510,7 +509,7 @@ fn index_status_key_refreshes_the_index_after_a_structured_retry_receipt() {
             panic!("index refresh must retain its management epoch");
         };
         assert!(
-            matches!(action.as_ref(), UiAction::Manage(Command::IndexStatus(args)) if args == &expected),
+            matches!(action.as_ref(), UiAction::Manage(Command::IndexStatus(args)) if args.selection() == expected && args.coverage),
             "{input}: {actions:?}"
         );
     }
@@ -806,4 +805,38 @@ fn failed_index_preview_retains_only_stale_same_scope_evidence() {
         management::IndexPreviewState::Failed(_, _)
     ));
     assert!(ui.event(key(KeyCode::Char('b'))).is_empty());
+}
+
+#[test]
+fn next_key_follows_the_shown_coverage_cursor_only_in_the_index_view() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.insert("/index all", false);
+    let actions = ui.event(key(KeyCode::Enter));
+    let owner = context(&actions[0]);
+    let report = |key: &str| UiUpdate::ScopedManagement {
+        context: owner.clone(),
+        update: Box::new(UiUpdate::StructuredManagement {
+            work_status: false,
+            request_id: 7,
+            title: "index".into(),
+            fields: vec![PresentationField {
+                value_omitted: false,
+                key: key.into(),
+                label: "next".into(),
+                value: "CURSOR".into(),
+                display: None,
+            }],
+            omitted: false,
+        }),
+    };
+    ui.apply(report("/coverage_window/read_at"));
+    assert!(ui.event(key(KeyCode::Char('n'))).is_empty());
+    ui.apply(report("/coverage_window/next_cursor"));
+    let actions = ui.event(key(KeyCode::Char('n')));
+    assert!(
+        actions.iter().any(|action| matches!(action,
+            UiAction::ManagementIntent { action, .. }
+                if matches!(action.as_ref(), UiAction::FollowManagement { request_id: 7, mode: ManagementFollow::Next, .. }))),
+        "{actions:?}"
+    );
 }

@@ -117,7 +117,7 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
         let mut seen = 0;
         let args = IndexArgs::default();
         assert!(!take_mark(&service, &mut seen));
-        service.status(args.clone()).await.unwrap();
+        service.status(args.clone().into()).await.unwrap();
         service.wake();
         assert!(take_signal(&service.notify));
         assert!(
@@ -150,7 +150,7 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
             take_mark(&service, &mut seen),
             "claim is observable before HTTP completes"
         );
-        assert_eq!(service.status(args.clone()).await.unwrap().running, 1);
+        assert_eq!(service.status(args.clone().into()).await.unwrap().running, 1);
         assert!(
             !take_mark(&service, &mut seen),
             "status is a simple saved read"
@@ -167,7 +167,7 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
             .await
             .unwrap()
             .unwrap();
-        let status = service.status(args).await.unwrap();
+        let status = service.status(args.into()).await.unwrap();
         assert_eq!(status.running, 0);
         assert_eq!(status.done, u64::from(success));
         assert_eq!(status.failed, u64::from(!success));
@@ -187,7 +187,7 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
                 "paused discard is saved progress"
             );
             assert_eq!(
-                service.status(IndexArgs::default()).await.unwrap().failed,
+                service.status(Default::default()).await.unwrap().failed,
                 0
             );
         }
@@ -195,7 +195,7 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
         assert!(!take_mark(&service, &mut seen), "idle work is quiet");
         if success {
             let space = service
-                .status(IndexArgs::default())
+                .status(Default::default())
                 .await
                 .unwrap()
                 .space_id
@@ -586,14 +586,14 @@ async fn low_disk_holds_indexing_without_a_pause_or_discarding_the_queue() {
     assert!(!service.process_one(CancellationToken::new()).await.unwrap());
     assert!(service.capacity_allowed("k").await.unwrap() == Gate::DiskLow);
     assert!(service.disk_held.load(Ordering::Relaxed));
-    let held = service.status(IndexArgs::default()).await.unwrap();
+    let held = service.status(Default::default()).await.unwrap();
     assert!(!held.paused, "a transient hold saves no pause");
     assert_eq!((held.pending, held.running, held.failed), (1, 0, 0));
     // Space returns: the gate opens, the queue is intact and nothing was discarded.
     crate::gc::force_free_for_test(root.path(), Some(100 << 30));
     assert!(service.capacity_allowed("k").await.unwrap() == Gate::Open);
     assert!(!service.disk_held.load(Ordering::Relaxed));
-    let after = service.status(IndexArgs::default()).await.unwrap();
+    let after = service.status(Default::default()).await.unwrap();
     assert!(!after.paused);
     assert_eq!((after.pending, after.failed), (1, 0));
     db.shutdown().await.unwrap();

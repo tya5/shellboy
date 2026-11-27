@@ -45,20 +45,16 @@ Conversation, Run and Turn detail results also include these saved totals. Missi
 usage is marked unknown and unrecorded summary/embedding coverage is explicit.
 These values are not a bill, provider-receipt proof or a sum of effective work.
 
-Explicit F8 usage/get detail forms query the existing DB worker on open.
-For those forms, Changed bursts become one pending
-refresh, eligible three seconds after the previous result and checked by the
-existing500ms UI tick (normally within3.5s plus worker/DB backlog). There is one
-in-flight refresh; displayed values are snapshots. Rendering uses cached fields only. Esc, a new
-operation or conversation selection stops that refresh; stale generations cannot
-replace another view. A refreshed result changes its detail identity, so links
-selected from an older result must be selected again. F6 field pages inspect the
-cached response, not a new query. Reference navigation from a result
-(`FollowManagement`) performs one query and opens a one-shot snapshot; it does
-not subscribe to Changed or inherit the previous form's refresh. To obtain newer
-values, explicitly submit the F8 usage/get form again or follow the reference
-again from a current result. F6 paging alone does not refresh that snapshot.
-No freshness deadline is promised for either surface. Ordinary conversation
+Every F8 inspection form (usage, get, storage, index, deletion impact,
+attachments, history, lists) shows the result of the command it ran, read once
+from the owner, as the CLI prints it. The result does not refresh after saved
+changes; displayed values are snapshots. Rendering uses cached fields only, and
+F6 field pages inspect the cached response, not a new query. Reference
+navigation from a result (`FollowManagement`) performs one query and opens a
+one-shot snapshot. To obtain newer values, submit the F8 form again or follow
+the reference again from a current result. A result opened from an older one
+is a new read, so select its links again.
+No freshness deadline is promised. Ordinary conversation
 selection reads lightweight metadata only, without usage aggregation.
 No per-frame database read or permanent footer total is added.
 

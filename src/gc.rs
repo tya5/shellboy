@@ -18,7 +18,6 @@ use tokio_util::sync::CancellationToken;
 mod disk;
 mod event_retention;
 mod history;
-pub(crate) mod observation;
 mod usage;
 #[cfg(test)]
 pub(crate) use disk::tests::force_free as force_free_for_test;

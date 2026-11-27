@@ -6652,19 +6652,6 @@ mod driverless_child_stop_notification_tests {
                     }),
                 ))
             };
-            let inspect = || {
-                owner
-                    .db
-                    .call(|db| crate::frontend::inspect_run_fields_for_test(db, "run-3"))
-            };
-            let fields = inspect().await.unwrap();
-            assert_eq!(
-                fields
-                    .iter()
-                    .find(|field| field.key == "/stop_settlement_failure")
-                    .map(|field| field.displayed()),
-                fail_drain.then_some("storage")
-            );
             let after = get().await.result.unwrap();
             if fail_drain {
                 assert_eq!(after["state"], "stopping");
@@ -6698,13 +6685,6 @@ mod driverless_child_stop_notification_tests {
                 let settled = get().await.result.unwrap();
                 assert_eq!(settled["state"], "stopped");
                 assert!(settled.get("stop_settlement_failure").is_none());
-                assert!(
-                    !inspect()
-                        .await
-                        .unwrap()
-                        .iter()
-                        .any(|field| field.key == "/stop_settlement_failure")
-                );
             }
             control.live.test_drivers().lock().await.clear();
             control.shutdown().await.unwrap();

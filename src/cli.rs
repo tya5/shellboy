@@ -937,7 +937,10 @@ pub enum AttachmentCommand {
 #[derive(Debug, Clone, Subcommand)]
 pub enum IndexCommand {
     /// Job counts, spaces and pause state; takes no --kind.
-    Status(IndexTargetOptions),
+    #[command(
+        after_help = "--coverage adds `coverage_window`: per-source coverage for one bounded window of the selected Threads, sources or --scope all. Continue with --coverage-cursor set to the window's `next_cursor` and the same selection. Windows are separate reads; do not add them up into a total."
+    )]
+    Status(IndexStatusOptions),
     /// Inspect candidate counts without embedding requests or starting jobs.
     Preview(IndexOptions),
     /// Start paid indexing of explicitly selected history. Check preview first.
@@ -1658,6 +1661,29 @@ pub struct IndexTargetOptions {
     pub thread_ids: Vec<String>,
     #[arg(long = "source")]
     pub source_ids: Vec<String>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct IndexStatusOptions {
+    #[command(flatten)]
+    pub target: IndexTargetOptions,
+    /// Also report the current coverage of one bounded window of the selection.
+    #[arg(long)]
+    pub coverage: bool,
+    /// Continue coverage from the previous window's `next_cursor`.
+    #[arg(long, requires = "coverage")]
+    pub coverage_cursor: Option<String>,
+}
+impl From<IndexStatusOptions> for wire::IndexStatusArgs {
+    fn from(value: IndexStatusOptions) -> Self {
+        Self {
+            scope: value.target.scope,
+            space_id: value.target.space_id,
+            thread_ids: value.target.thread_ids,
+            source_ids: value.target.source_ids,
+            coverage: value.coverage,
+            coverage_cursor: value.coverage_cursor,
+        }
+    }
 }
 impl From<IndexTargetOptions> for wire::IndexArgs {
     fn from(value: IndexTargetOptions) -> Self {

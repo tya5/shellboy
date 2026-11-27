@@ -447,7 +447,6 @@ async fn terminal_public_case(case: &str) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn all_canonical_guard_causes_share_one_public_projection_without_requests() {
     use crate::compaction::discard::{Outcome, RejectionReason as R};
-    use crate::status::observation::{self, Key, Kind, TextBudget};
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, _heads, server) = proxy().await;
     let owner = proactive_owner(root.path(), &url, "").await;
@@ -534,22 +533,6 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
             }),
         )
         .await;
-        let point_id = id.clone();
-        let point = control
-            .store
-            .database
-            .call(move |db| {
-                Ok(observation::prepare(observation::read_status_tx(
-                    db,
-                    &[Key {
-                        kind: Kind::Attempt,
-                        id: point_id,
-                    }],
-                    &mut TextBudget::default(),
-                )?))
-            })
-            .await
-            .unwrap();
         let item = page["items"]
             .as_array()
             .unwrap()
@@ -558,7 +541,6 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
             .unwrap();
         let fact = &item["compaction_outcome"];
         assert_eq!(fact["outcome"], json!({"kind":"rejected","reason":reason}));
-        assert_eq!(point["items"][0]["current"]["compaction_outcome"], *fact);
         let listed = list["items"]
             .as_array()
             .unwrap()

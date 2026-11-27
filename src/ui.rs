@@ -43,14 +43,9 @@ pub(crate) mod i18n;
 pub(crate) use history_items::ItemState as PreviewItemState;
 pub use history_items::{ItemKey, Preview as ToolPreview};
 mod input;
-pub mod inspection;
 mod key_hints;
 mod lifecycle;
 mod management;
-pub use inspection::{
-    HistorySourceScope, InspectionFieldAnchor, InspectionPart, InspectionSnapshot,
-    InspectionTarget, ListInspectionScope,
-};
 mod awaiting_human;
 mod branches;
 mod held_input;
@@ -588,20 +583,6 @@ pub enum UiAction {
         execute: bool,
         known_thread_ids: Vec<String>,
     },
-    NextInspectionWindow {
-        context: ManagementContext,
-        request_id: u64,
-        target: InspectionTarget,
-    },
-    HideInspection {
-        revision: u64,
-    },
-    ObserveInspection {
-        context: ManagementContext,
-        target: InspectionTarget,
-        visible: bool,
-        revision: u64,
-    },
     ManagementIntent {
         context: ManagementContext,
         action: Box<UiAction>,
@@ -1051,25 +1032,6 @@ pub enum UiUpdate {
         title: String,
         fields: Vec<PresentationField>,
         omitted: bool,
-    },
-    RetainedInspectionStarted {
-        request_id: u64,
-        target: InspectionTarget,
-    },
-    InspectionStarted {
-        target: InspectionTarget,
-        title: String,
-    },
-    InspectionSnapshot {
-        request_id: u64,
-        snapshot: InspectionSnapshot,
-    },
-    InspectionFailure {
-        target: InspectionTarget,
-        part: InspectionPart,
-        read_sequence: u64,
-        observed_at: String,
-        error: String,
     },
     ManagementDetailFailure {
         request_id: u64,
@@ -1823,8 +1785,6 @@ impl Confirmation {
     }
 }
 pub struct UiState {
-    inspection_observation: Option<(ManagementContext, InspectionTarget)>,
-    inspection_revision: u64,
     popup_epoch: u64,
     popup_paint: Option<(overlay::Overlay, u64, popup::PaintBounds)>,
     aux_popup_paint: std::cell::Cell<Option<popup::PaintBounds>>,
@@ -1970,8 +1930,6 @@ impl UiState {
         let mut management = management::ManagementPopup::default();
         management.set_language(config.ui.language);
         Self {
-            inspection_observation: None,
-            inspection_revision: 0,
             popup_epoch: 0,
             popup_paint: None,
             aux_popup_paint: Default::default(),
@@ -2341,16 +2299,6 @@ impl UiState {
                 .and_then(|root| self.descendants.label_in(root, self.config.ui.language));
             self.thread_browser.set_descendant_count(count);
             self.thread_browser.set_descendant_status(status);
-        }
-        self.observe_inspection();
-        if self.top_overlay() == Some(overlay::Overlay::Management)
-            && let Some(action) = self.management.take_inspection_detail()
-            && let Some(context) = self.management.owner.clone()
-        {
-            self.deferred_actions.push(UiAction::ManagementIntent {
-                context,
-                action: Box::new(action),
-            });
         }
         std::mem::take(&mut self.deferred_actions)
     }
@@ -3087,56 +3035,15 @@ impl UiState {
                 self.management
                     .open_structured(title, request_id, fields, omitted, work_status);
             }
-            UiUpdate::RetainedInspectionStarted { request_id, target } => {
-                self.dirty |= self
-                    .management
-                    .start_retained_inspection(request_id, target);
-            }
-            UiUpdate::InspectionStarted { target, title } => {
-                self.management.start_inspection(target, title);
-                self.dirty = true;
-            }
-            UiUpdate::InspectionSnapshot {
-                request_id,
-                snapshot,
-            } => {
-                if self.top_overlay() == Some(overlay::Overlay::Management) {
-                    self.dirty |= self.management.patch_inspection(request_id, snapshot);
-                }
-            }
-            UiUpdate::InspectionFailure {
-                target,
-                part,
-                read_sequence,
-                observed_at,
-                error,
-            } => {
-                if self.top_overlay() == Some(overlay::Overlay::Management) {
-                    self.dirty |= self.management.fail_inspection(
-                        target,
-                        part,
-                        read_sequence,
-                        observed_at,
-                        error,
-                    );
-                }
-            }
             UiUpdate::ManagementDetailFailure {
                 request_id,
                 detail_request_id,
                 pointer,
                 error,
             } => {
-                if self.management.inspection.is_none()
-                    || self.top_overlay() == Some(overlay::Overlay::Management)
-                {
-                    self.dirty |= self.management.fail_detail(
-                        request_id,
-                        detail_request_id,
-                        &pointer,
-                        &error,
-                    );
-                }
+                self.dirty |=
+                    self.management
+                        .fail_detail(request_id, detail_request_id, &pointer, &error);
             }
             UiUpdate::ManagementDetail {
                 request_id,
@@ -3145,17 +3052,13 @@ impl UiState {
                 text,
                 next_cursor,
             } => {
-                if self.management.inspection.is_none()
-                    || self.top_overlay() == Some(overlay::Overlay::Management)
-                {
-                    self.management.accept_detail(
-                        request_id,
-                        detail_request_id,
-                        pointer,
-                        text,
-                        next_cursor,
-                    );
-                }
+                self.management.accept_detail(
+                    request_id,
+                    detail_request_id,
+                    pointer,
+                    text,
+                    next_cursor,
+                );
             }
             UiUpdate::DraftIndexPause { pause } => {
                 let view = self.active_view_mut();
@@ -4107,38 +4010,6 @@ impl UiState {
             {
                 return;
             }
-        }
-        if let UiAction::ObserveInspection {
-            context,
-            target,
-            visible,
-            revision,
-        } = action
-        {
-            if *revision != self.inspection_revision {
-                return;
-            }
-            let current = self
-                .inspection_observation
-                .as_ref()
-                .is_some_and(|(c, t)| c == context && t == target);
-            if *visible != current {
-                return;
-            }
-            if !self.deferred_actions.iter().any(|queued|matches!(queued,UiAction::ObserveInspection {context:c,target:t,visible:v,..} if c==context && t==target && v==visible)) {self.deferred_actions.push(action.clone());}
-            return;
-        }
-        if let UiAction::ManagementIntent { action: inner, .. } = action
-            && matches!(inner.as_ref(), UiAction::LoadManagementDetail { .. })
-            && self.management.inspection.is_some()
-        {
-            self.management.detail_rejected(i18n::local!(
-                self.config.ui.language,
-                "詳細の取得は未受付です。R/Pで再取得できます",
-                "Details read was not accepted. R/P retries"
-            ));
-            self.dirty = true;
-            return;
         }
         let rejected_agents = self.reject_agents_selection(action);
 
@@ -5727,7 +5598,7 @@ cursor: None,
             scroll: 0,
         });
         let args = selection.clone().unwrap_or_default();
-        let mut actions = vec![UiAction::Manage(Command::IndexStatus(args))];
+        let mut actions = vec![UiAction::Manage(management::index_status(args))];
         if let Some(selection) = selection.filter(management::explicit_index_targets) {
             let attempt = self.management.begin_preview(selection.clone());
             actions.push(UiAction::IndexPreview {
@@ -5922,7 +5793,7 @@ cursor: None,
                     scroll: 0,
                 });
                 return vec![
-                    UiAction::Manage(Command::IndexStatus(args.clone())),
+                    UiAction::Manage(management::index_status(args.clone())),
                     UiAction::IndexPreview {
                         args: args.clone(),
                         attempt,

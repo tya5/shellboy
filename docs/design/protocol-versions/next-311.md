@@ -191,3 +191,19 @@ entries for it. A runtime receipt's reservation and settlement are announced
 through the matching mark (`storage.collect`: retention; `config.set` and
 credentials: config; index operations: index) or through its target's Thread.
 No operation, field or capability is added for owner state.
+
+## Index coverage window (unit 4d slice 4)
+
+`index.status` takes its own `IndexStatusArgs` (`scope`, `space_id`,
+`thread_ids`, `source_ids`) instead of the shared index selection; it never
+accepted `kinds` or `dimensions`. The opt-in `coverage: true` adds
+`IndexStatus.coverage_window`: the owner's per-source coverage of one bounded
+window of the selection (at most 32 explicit sources per window), with
+`coverage` counts, `evaluated_sources`, `inspected_memberships`,
+`unverified_sources[{source_id, reason}]` (`body_over_budget`,
+`malformed_source`, `unprovable`), `window_complete`, `scope_exhausted`, the
+normalized `selection` and `read_at`. `next_cursor` continues through
+`coverage_cursor`, which requires `coverage` and the same selection and
+embedding profile (otherwise `invalid_argument`). Windows are separate reads,
+not one snapshot, and are never summed. CLI: `index status --coverage
+[--coverage-cursor CURSOR]`. Without `coverage` the result is unchanged.

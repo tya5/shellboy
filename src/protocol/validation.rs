@@ -1142,8 +1142,14 @@ impl Command {
                 Ok(())
             }
             Self::IndexRemove(a) => nonempty(&a.space_id, "space_id"),
-            Self::IndexStatus(a)
-            | Self::IndexPreview(a)
+            Self::IndexStatus(a) => {
+                a.selection().validate_targets()?;
+                if a.coverage_cursor.is_some() && !a.coverage {
+                    return Err(invalid("coverage_cursor requires coverage"));
+                }
+                Ok(())
+            }
+            Self::IndexPreview(a)
             | Self::IndexBackfill(a)
             | Self::IndexRetry(a)
             | Self::IndexRebuild(a) => {

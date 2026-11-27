@@ -3354,11 +3354,10 @@ async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reco
     let thread_id = snapshot.thread.clone();
     let run_id = snapshot.run.clone();
     let instance = owner.instance_id.clone();
-    let (thread, status, point) = control
+    let (thread, status) = control
         .store
         .database
         .call(move |db| {
-            use crate::status::observation::{self, Key, Kind, TextBudget};
             let thread = super::super::db::thread_details(db, &thread_id).unwrap();
             let status = crate::status::snapshot(
                 db,
@@ -3370,15 +3369,7 @@ async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reco
                 &instance,
             )
             .unwrap();
-            let raw = observation::read_status_tx(
-                db,
-                &[Key {
-                    kind: Kind::Run,
-                    id: run_id,
-                }],
-                &mut TextBudget::default(),
-            )?;
-            Ok((thread, status, observation::prepare(raw)))
+            Ok((thread, status))
         })
         .await
         .unwrap();
@@ -3396,9 +3387,5 @@ async fn extra_instruction_warning_survives_snapshot_replay_and_live_config_reco
         .unwrap();
     assert_eq!(run.instruction_warnings, thread.instruction_warnings);
     assert!(thread.recovery_reason.is_none());
-    assert_eq!(
-        point["items"][0]["current"]["instruction_warnings"],
-        json!(run.instruction_warnings)
-    );
     close(control, owner).await;
 }
