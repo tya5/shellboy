@@ -69,10 +69,7 @@ fn model_list_error(error: crate::model::ModelError) -> ApiError {
     }
     reported.details(details)
 }
-pub(super) enum Settlement {
-    Mark(super::ChangeMark),
-    Threads(Vec<String>),
-}
+pub(super) struct Settlement(Vec<String>);
 #[derive(Clone)]
 pub(super) struct RuntimeOperation {
     pub(super) fingerprint: Value,
@@ -160,9 +157,7 @@ impl Control {
                     Err(error) => Err(error),
                     Ok(db::RuntimeReservation::New) => {
                         // The pending receipt is durable before external work.
-                        let target = control
-                            .settlement(&request.command, caller.as_ref())
-                            .await;
+                        let target = control.settlement(&request.command, caller.as_ref()).await;
                         control.announce(&target);
                         settlement = Some(target);
                         // Saved results never create a new reply-grace effect.
@@ -268,11 +263,9 @@ impl Control {
         }
     }
 
-    /// Where a runtime receipt's reservation and settlement are announced: an
-    /// owner-level operation through its existing mark, the rest through the
-    /// Thread its saved target belongs to.
+    /// Where a runtime receipt's reservation and settlement are announced: the
+    /// Thread its saved target belongs to. State marks come from their owners.
     async fn settlement(&self, command: &Command, caller: Option<&Origin>) -> Settlement {
-        use super::ChangeMark;
         let lookup = |sql: String, id: String| async move {
             use rusqlite::OptionalExtension;
             self.store
@@ -303,18 +296,8 @@ impl Control {
             )
         };
         let thread = match command {
-            Command::StorageCollect(_) => return Settlement::Mark(ChangeMark::Retention),
-            Command::ConfigSet(_) | Command::CredentialsSet(_) | Command::CredentialsClear(_) => {
-                return Settlement::Mark(ChangeMark::Config);
-            }
-            Command::IndexBackfill(_)
-            | Command::IndexRetry(_)
-            | Command::IndexRebuild(_)
-            | Command::IndexProbe(_)
-            | Command::IndexShrink(_)
-            | Command::IndexRemove(_) => return Settlement::Mark(ChangeMark::Index),
-            Command::ThreadDelete(args) => return Settlement::Threads(vec![args.thread_id.clone()]),
-            Command::ThreadDeleteSet(args) => return Settlement::Threads(args.thread_ids.clone()),
+            Command::ThreadDelete(args) => return Settlement(vec![args.thread_id.clone()]),
+            Command::ThreadDeleteSet(args) => return Settlement(args.thread_ids.clone()),
             Command::ShellWrite(args) => shell(&args.execution_id).await,
             Command::ShellEof(args) | Command::ShellStop(args) | Command::ShellBackground(args) => {
                 shell(&args.execution_id).await
@@ -334,27 +317,21 @@ impl Control {
             _ => Ok(caller.map(|origin| origin.thread_id.clone())),
         };
         match thread {
-            Ok(thread) => Settlement::Threads(thread.into_iter().collect()),
+            Ok(thread) => Settlement(thread.into_iter().collect()),
             Err(error) => {
                 if error.is_storage_failure() {
                     self.fail_storage().await;
                 }
-                Settlement::Threads(Vec::new())
+                Settlement(Vec::new())
             }
         }
     }
     fn announce(&self, settlement: &Settlement) {
-        match settlement {
-            Settlement::Mark(mark) => {
-                self.change_clock.record_mark(*mark);
-                self.changed.notify_waiters();
-            }
-            Settlement::Threads(threads) if threads.is_empty() => self.changed.notify_waiters(),
-            Settlement::Threads(threads) => {
-                for thread in threads {
-                    self.changed(thread);
-                }
-            }
+        if settlement.0.is_empty() {
+            self.changed.notify_waiters();
+        }
+        for thread in &settlement.0 {
+            self.changed(thread);
         }
     }
 
