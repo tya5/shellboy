@@ -30,6 +30,32 @@ fn args(cursor: Option<String>, encoding: &str, limit: u32) -> ShellReadArgs {
         limit_bytes: limit,
     }
 }
+/// A finished read leaves its pin row to the maintenance Pins pass: run that
+/// pass until the lease's row is gone.
+async fn pins_released(dir: &TempDir, db: &DbWorker) {
+    let config = shellboy::config::Config::default();
+    let data = dir.path().to_owned();
+    let gc = shellboy::gc::GcService::new(
+        db.clone(),
+        std::sync::Arc::new(config.clone()),
+        data.clone(),
+        std::sync::Arc::new(shellboy::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            data,
+            "instance".into(),
+        )),
+    );
+    let mut pins = shellboy::maintenance::WorkSet::default();
+    pins.insert(shellboy::maintenance::Work::Pins);
+    crate::test_watchdog::watchdog("tests/output.rs: released read pin", async {
+        while pin_count(db).await != 0 {
+            gc.collect_kinds(pins, chrono::Utc::now()).await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+}
 async fn pin_count(db: &DbWorker) -> i64 {
     db.call(|db| {
         Ok(db.query_row(
@@ -224,7 +250,7 @@ async fn utf8_split_bytes_live_pages_wait_and_terminal_flush_preserve_positions(
     assert!(OutputCursor::decode(&end.cursor).unwrap().eof_flushed);
     assert!(end.text.is_empty());
     assert!(end.output_complete);
-    assert_eq!(pin_count(&db).await, 0);
+    pins_released(&_dir, &db).await;
 }
 #[tokio::test]
 async fn incomplete_character_is_replaced_only_at_true_eof_and_exactly_once() {
@@ -398,34 +424,12 @@ async fn streaming_snapshot_pins_raw_and_drops_pin_at_end_or_session_drop() {
     assert_eq!(b.text, "cdef");
     assert!(b.done);
     assert!(stream.next_page(64).await.unwrap().is_none());
-    assert_eq!(pin_count(&db).await, 0);
+    pins_released(&_dir, &db).await;
     let stream = reader.stream("x").await.unwrap();
     assert_eq!(pin_count(&db).await, 1);
     drop(stream);
     // The dropped lease marks pin maintenance; that pass releases the pin.
-    let config = shellboy::config::Config::default();
-    let data = _dir.path().to_owned();
-    let gc = shellboy::gc::GcService::new(
-        db.clone(),
-        std::sync::Arc::new(config.clone()),
-        data.clone(),
-        std::sync::Arc::new(shellboy::attachments::AttachmentService::new(
-            db.clone(),
-            &config,
-            data,
-            "instance".into(),
-        )),
-    );
-    let mut pins = shellboy::maintenance::WorkSet::default();
-    pins.insert(shellboy::maintenance::Work::Pins);
-    crate::test_watchdog::watchdog("tests/output.rs: dropped stream pin", async {
-        while pin_count(&db).await != 0 {
-            db.signals().changed().await;
-            gc.collect_kinds(pins, chrono::Utc::now()).await.unwrap();
-        }
-    })
-    .await
-    .unwrap();
+    pins_released(&_dir, &db).await;
 }
 #[tokio::test]
 async fn expiry_scope_and_encoding_are_errors_instead_of_empty_success() {
@@ -471,7 +475,7 @@ async fn expiry_scope_and_encoding_are_errors_instead_of_empty_success() {
             .unwrap(),
         ErrorCode::OutputExpired
     );
-    assert_eq!(pin_count(&db).await, 0);
+    pins_released(&_dir, &db).await;
 }
 #[tokio::test]
 async fn bounded_excerpt_uses_stored_encoding_and_unicode_safe_head_tail() {
@@ -495,7 +499,7 @@ async fn bounded_excerpt_uses_stored_encoding_and_unicode_safe_head_tail() {
         assert!(!page.decode_errors);
     }
     assert_eq!(decoded, text);
-    assert_eq!(pin_count(&db).await, 0);
+    pins_released(&_dir, &db).await;
 }
 
 #[tokio::test]
@@ -532,7 +536,7 @@ async fn streaming_reader_uses_fixed_watermark_and_missing_middle_raw_is_explici
     let error = reader.read(args(None, "UTF-8", 64)).await.unwrap_err();
     assert_eq!(error.code, ErrorCode::OutputExpired);
     assert_eq!(error.details.unwrap()["oldest_sequence"], 0);
-    assert_eq!(pin_count(&db).await, 0);
+    pins_released(&_dir, &db).await;
 }
 
 #[tokio::test]
@@ -559,5 +563,5 @@ async fn raw_deletion_marker_blocks_remaining_chunks_and_excerpt_reports_expiry(
     let excerpt = reader.excerpt("x", 128).await.unwrap();
     assert!(excerpt.contains("expired") && excerpt.contains("raw_retention_capacity"));
     assert!(!excerpt.contains("remaining"));
-    assert_eq!(pin_count(&db).await, 0);
+    pins_released(&_dir, &db).await;
 }

@@ -226,6 +226,16 @@ impl Fixture {
             .collect::<String>();
         self.db.call(move |db| { db.execute("UPDATE node SET payload_json=?1,payload_bytes=?2,body_hash=?3 WHERE id='raw-node'", params![body,body.len() as i64,body_hash])?; Ok(()) }).await.unwrap();
     }
+    /// Reads leave their pin rows to the maintenance Pins pass; run it so raw
+    /// retention sees only pins of reads still in flight.
+    async fn release_pins(&self) {
+        let mut pins = shellboy::maintenance::WorkSet::default();
+        pins.insert(shellboy::maintenance::Work::Pins);
+        self.raw_gc()
+            .collect_kinds(pins, chrono::Utc::now())
+            .await
+            .unwrap();
+    }
     fn raw_gc(&self) -> shellboy::gc::GcService {
         let mut config = Config::default();
         config.retention.tool_raw_bytes = 0;
@@ -682,6 +692,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
         f._temp.path().to_owned(),
         attachments,
     );
+    f.release_pins().await;
     f.db.call(|db| { db.execute_batch("CREATE TRIGGER reject_raw_marker BEFORE INSERT ON app_meta WHEN NEW.key='raw_tombstone.execution' BEGIN SELECT RAISE(ABORT,'fixture raw deletion failure'); END;")?; Ok(()) }).await.unwrap();
     assert!(
         gc.collect(StorageCategory::Raw, chrono::Utc::now())
@@ -932,6 +943,7 @@ async fn raw_retention_during_inflight_embedding_does_not_resurrect_vectors() {
     let task =
         tokio::spawn(async move { service.process_one(CancellationToken::new()).await.unwrap() });
     started.await.unwrap();
+    f.release_pins().await;
     f.raw_gc()
         .collect(shellboy::protocol::StorageCategory::Raw, chrono::Utc::now())
         .await
