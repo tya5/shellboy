@@ -772,9 +772,13 @@ async fn overflow_without_any_target_in_an_open_tool_loop_recovers_without_resen
     }
     let outcome = overflow_compaction(&control, &thread).await;
     assert_eq!(outcome["state"], "no_safe_reduction");
-    let turn = request(&control, Command::TurnGet(TurnTarget {
-        turn_id: outcome["turn_id"].as_str().unwrap().to_owned(),
-    })).await;
+    let turn = request(
+        &control,
+        Command::TurnGet(TurnTarget {
+            turn_id: outcome["turn_id"].as_str().unwrap().to_owned(),
+        }),
+    )
+    .await;
     assert_eq!(turn["state"], "recovery_wait");
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
@@ -782,23 +786,44 @@ async fn overflow_without_any_target_in_an_open_tool_loop_recovers_without_resen
 }
 
 async fn overflow_compaction(control: &Arc<Control>, thread: &str) -> Value {
-    let page = request(control, Command::CompactList(CompactListArgs {
-        thread_id: Some(thread.to_owned()), since: None, until: None, limit: 20,
-    })).await;
-    let mut items = page["items"].as_array().unwrap().iter()
+    let page = request(
+        control,
+        Command::CompactList(CompactListArgs {
+            thread_id: Some(thread.to_owned()),
+            since: None,
+            until: None,
+            limit: 20,
+        }),
+    )
+    .await;
+    let mut items = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
         .filter(|item| item["kind"] == "automatic_reduction");
     let outcome = items.next().expect("the overflow attempt is listed");
     assert!(items.next().is_none(), "one overflow attempt: {page}");
     outcome.clone()
 }
 
-async fn selected_compaction_nodes(control: &Arc<Control>, thread: &str, kind: &str) -> Vec<String> {
-    selected_history(control, thread).await.items.into_iter()
-        .filter(|node| node.kind == kind).map(|node| node.node_id).collect()
+async fn selected_compaction_nodes(
+    control: &Arc<Control>,
+    thread: &str,
+    kind: &str,
+) -> Vec<String> {
+    selected_history(control, thread)
+        .await
+        .items
+        .into_iter()
+        .filter(|node| node.kind == kind)
+        .map(|node| node.node_id)
+        .collect()
 }
 
 async fn read_summary(control: &Arc<Control>, event: &Value) {
-    let id = event["metrics"]["summary_node_id"].as_str().expect("reported Summary ID");
+    let id = event["metrics"]["summary_node_id"]
+        .as_str()
+        .expect("reported Summary ID");
     let args = serde_json::from_value(json!({"node_id": id})).unwrap();
     let body = request(control, Command::HistoryRead(args)).await;
     assert_eq!(body["node_id"], id);
@@ -809,11 +834,15 @@ async fn read_summary(control: &Arc<Control>, event: &Value) {
 async fn selected_history(control: &Arc<Control>, thread: &str) -> HistoryWindow {
     let args = serde_json::from_value(json!({
         "thread_id": thread, "before": 199, "after": 0, "excerpt_chars": 0,
-    })).unwrap();
-    let window: HistoryWindow = serde_json::from_value(
-        request(control, Command::HistoryWindow(args)).await,
-    ).unwrap();
-    assert_eq!(window.items.len() as u64, window.total, "fixture fits one window");
+    }))
+    .unwrap();
+    let window: HistoryWindow =
+        serde_json::from_value(request(control, Command::HistoryWindow(args)).await).unwrap();
+    assert_eq!(
+        window.items.len() as u64,
+        window.total,
+        "fixture fits one window"
+    );
     window
 }
 
@@ -4842,7 +4871,10 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
         assert!(outcome.get("http_status").is_none());
         assert!(record["error"].get("details").is_none());
     }
-    assert!(result.selected_summaries.is_empty(), "no Summary joins the selected path");
+    assert!(
+        result.selected_summaries.is_empty(),
+        "no Summary joins the selected path"
+    );
 }
 
 /// S2b retires the former per-report HTTP401 oracle: the veto remains a
@@ -6162,7 +6194,10 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
             "{events:?}"
         );
     }
-    let adopted = events.iter().find(|event| event["state"] == "adopted").unwrap();
+    let adopted = events
+        .iter()
+        .find(|event| event["state"] == "adopted")
+        .unwrap();
     read_summary(&control, adopted).await;
     // Both Summary ledger `begin` calls commit before POST.
     // Summary witness changes to model_attempt with #328.
@@ -6407,14 +6442,24 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         automatic_attempt_record(&control, active_boundary.report.attempt_id.clone()).await;
     let spills = selected_compaction_nodes(&control, &thread, "spill").await;
     let summaries = selected_compaction_nodes(&control, &thread, "summary").await;
-    assert_eq!(summaries.len(), usize::from(summary_includes_call1.is_some()));
-    let expected_outcome = if !summaries.is_empty() || !spills.is_empty() { "adopted" } else { "no_target" };
+    assert_eq!(
+        summaries.len(),
+        usize::from(summary_includes_call1.is_some())
+    );
+    let expected_outcome = if !summaries.is_empty() || !spills.is_empty() {
+        "adopted"
+    } else {
+        "no_target"
+    };
     assert!(spills.len() <= 3, "only older groups may spill");
     for id in &spills {
         let args = serde_json::from_value(json!({"node_id": id})).unwrap();
         let spill = request(&control, Command::HistoryRead(args)).await;
-        assert_eq!(spill["source_node_ids"].as_array().unwrap().len(), 2,
-            "a selected spill retains an entire call/result pair");
+        assert_eq!(
+            spill["source_node_ids"].as_array().unwrap().len(),
+            2,
+            "a selected spill retains an entire call/result pair"
+        );
     }
     let active_finished = active_boundary.finish(&active_terminal[0], &active_record);
     assert_eq!(active_finished.outcome, expected_outcome);
@@ -6544,8 +6589,16 @@ async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
     assert_eq!(attempts[0]["outcome"], "no_target");
     assert_eq!(attempts[0]["trigger"]["input_tokens"], 150);
     assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 150);
-    assert!(selected_compaction_nodes(&control, &thread, "spill").await.is_empty());
-    assert!(selected_compaction_nodes(&control, &thread, "summary").await.is_empty());
+    assert!(
+        selected_compaction_nodes(&control, &thread, "spill")
+            .await
+            .is_empty()
+    );
+    assert!(
+        selected_compaction_nodes(&control, &thread, "summary")
+            .await
+            .is_empty()
+    );
     // The Summary ledger `begin` commits before POST; no-target admits no Summary.
     // Summary witness changes to model_attempt with #328.
     assert_eq!(summary_request_count_for_thread(&control, &thread).await, 0);
@@ -6623,8 +6676,16 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
     assert_eq!(attempts[0]["trigger"]["input_tokens"], 9999);
     assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 10);
     assert_eq!(attempts[0]["trigger"]["target_tokens"], 20);
-    assert!(selected_compaction_nodes(&control, &thread, "spill").await.is_empty());
-    assert!(selected_compaction_nodes(&control, &thread, "summary").await.is_empty());
+    assert!(
+        selected_compaction_nodes(&control, &thread, "spill")
+            .await
+            .is_empty()
+    );
+    assert!(
+        selected_compaction_nodes(&control, &thread, "summary")
+            .await
+            .is_empty()
+    );
     assert_eq!(bx_failure_slots(&control, &thread).await, (None, None));
     // The Summary ledger `begin` commits before POST; this spill-only branch admits none.
     // Summary witness changes to model_attempt with #328.
@@ -7273,8 +7334,17 @@ async fn issue_271_spill_shortfall_waits_until_threshold_recrossing() {
         assert_eq!(attempts[0]["outcome"], "adopted");
         assert_eq!(attempts[0]["trigger"]["input_tokens"], 200_001);
         assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 100);
-        assert_eq!(selected_compaction_nodes(&control, &target, "spill").await.len(), 6);
-        assert!(selected_compaction_nodes(&control, &target, "summary").await.is_empty());
+        assert_eq!(
+            selected_compaction_nodes(&control, &target, "spill")
+                .await
+                .len(),
+            6
+        );
+        assert!(
+            selected_compaction_nodes(&control, &target, "summary")
+                .await
+                .is_empty()
+        );
         // This spill branch admits no Summary POST; `begin` commits before send.
         // Summary witness changes to model_attempt with #328.
         assert_eq!(summary_request_count_for_thread(&control, &target).await, 0);

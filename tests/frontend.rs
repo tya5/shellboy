@@ -198,9 +198,23 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
                 |row| row.get(0),
             )?;
             assert_eq!(correlated, saved_message);
-            assert_eq!(db.query_row("SELECT count(*) FROM draft WHERE thread_id=?1 AND state='submitted'",[&thread],|r|r.get::<_,i64>(0))?,0);
-            let body:String=db.query_row("SELECT payload_json FROM node WHERE id=?1",[saved_message],|r|r.get(0))?;
-            assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["content"][0]["text"],"saved message");
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM draft WHERE thread_id=?1 AND state='submitted'",
+                    [&thread],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            let body: String = db.query_row(
+                "SELECT payload_json FROM node WHERE id=?1",
+                [saved_message],
+                |r| r.get(0),
+            )?;
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&body).unwrap()["content"][0]["text"],
+                "saved message"
+            );
             Ok((
                 db.query_row("SELECT count(*) FROM thread", [], |r| r.get::<_, i64>(0))?,
                 db.query_row(

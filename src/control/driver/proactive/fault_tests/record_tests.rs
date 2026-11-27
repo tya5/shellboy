@@ -27,12 +27,14 @@ async fn active_summary_adoption_survives_a_later_storage_failure() {
 
     assert_eq!(
         rejected.terminal["outcome"], "failed",
-        "pre-FINISH rollback: {}", rejected.terminal
+        "pre-FINISH rollback: {}",
+        rejected.terminal
     );
     assert!(rejected.selected_summaries.is_empty());
     assert_eq!(
         committed.terminal["outcome"], "failed",
-        "the aggregate fails after its active summary stage committed: {}", committed.terminal
+        "the aggregate fails after its active summary stage committed: {}",
+        committed.terminal
     );
     assert!(committed.selected_summaries.len() == 1);
     assert_eq!(
@@ -386,12 +388,20 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     );
     assert!(reached.load(Ordering::SeqCst));
     drop(boundary);
-    let facts = listed_compaction(&control, &target, &attempt).await.unwrap();
+    let facts = listed_compaction(&control, &target, &attempt)
+        .await
+        .unwrap();
     assert_eq!(facts["state"], "unknown", "adoption precedes FINISH");
     let selected = selected_window(&control, &target).await;
     let summaries = selected_replacements(&selected, "summary");
-    let [summary] = summaries.as_slice() else { panic!("one selected Summary: {summaries:?}") };
-    let body = request(&control, Command::HistoryRead(serde_json::from_value(json!({"node_id": summary})).unwrap())).await;
+    let [summary] = summaries.as_slice() else {
+        panic!("one selected Summary: {summaries:?}")
+    };
+    let body = request(
+        &control,
+        Command::HistoryRead(serde_json::from_value(json!({"node_id": summary})).unwrap()),
+    )
+    .await;
     assert_eq!(body["kind"], "summary");
     assert!(!body["source_node_ids"].as_array().unwrap().is_empty());
     // Uncalibrated: there is no target plan, so no provisional target either.
