@@ -3242,7 +3242,8 @@ async fn run_client(
                 }
                 Some(BackgroundResult::Copied {
                     result: Err(error), ..
-                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command { external,
+                }) => status(&updates, None, error).await,
+                Some(BackgroundResult::Command { external,
                     work_status,
                     context,
                     generation,
