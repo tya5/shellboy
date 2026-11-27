@@ -1851,9 +1851,8 @@ async fn quit_before_initial_draft_restore_cannot_mask_an_existing_saved_draft()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results() {
+async fn f8_usage_shows_the_wire_result_once_and_a_resubmission_reads_again() {
     use crate::{
-        control::EngineEvent,
         protocol::{Command, UsageGetArgs},
         ui::{ManagementContext, UiUpdate},
     };
@@ -1876,40 +1875,35 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
         owner_draft: "usage-ui".into(),
         owner_thread: Some("thread".into()),
     };
-    send.try_send(UiAction::ManagementIntent {
+    let request = UiAction::ManagementIntent {
         context: context.clone(),
         action: Box::new(UiAction::Command(Command::UsageGet(UsageGetArgs {
             thread_id: Some("thread".into()),
             ..Default::default()
         }))),
-    })
-    .unwrap();
-    send.try_send(UiAction::ObserveInspection {
-        context: context.clone(),
-        target: crate::ui::InspectionTarget::Usage(UsageGetArgs {
-            thread_id: Some("thread".into()),
-            ..Default::default()
-        }),
-        visible: true,
-        revision: 1,
-    })
-    .unwrap();
-    async fn number(incoming: &std::sync::mpsc::Receiver<UiUpdate>, expected: &str) -> u64 {
-        crate::test_watchdog::watchdog("saved usage update", async {
+    };
+    let expected: serde_json::Value = control
+        .request(crate::protocol::Request::new(
+            "usage-wire",
+            Command::UsageGet(UsageGetArgs {
+                thread_id: Some("thread".into()),
+                ..Default::default()
+            }),
+        ))
+        .await
+        .result
+        .unwrap();
+    let known = "/model_attempts/completed/input_tokens/known_sum";
+    assert_eq!(expected.pointer(known), Some(&serde_json::json!(10)));
+    async fn shown(incoming: &std::sync::mpsc::Receiver<UiUpdate>) -> Vec<crate::presentation::PresentationField> {
+        crate::test_watchdog::watchdog("usage result", async {
             loop {
                 while let Ok(update) = incoming.try_recv() {
                     if let UiUpdate::ScopedManagement { context, update } = update
-                        && let UiUpdate::InspectionSnapshot {
-                            request_id,
-                            snapshot,
-                        } = *update
-                        && snapshot.fields.iter().any(|f| {
-                            f.key == "/model_attempts/completed/input_tokens/known_sum"
-                                && f.value == expected
-                        })
+                        && let UiUpdate::StructuredManagement { fields, .. } = *update
                     {
                         assert_eq!(context.epoch, 1);
-                        return request_id;
+                        return fields;
                     }
                 }
                 tokio::task::yield_now().await;
@@ -1918,7 +1912,14 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
         .await
         .unwrap()
     }
-    let first = number(&incoming, "10").await;
+    let value = |fields: &[crate::presentation::PresentationField]| {
+        fields
+            .iter()
+            .find(|field| field.key == known)
+            .map(|field| field.value.clone())
+    };
+    send.try_send(request.clone()).unwrap();
+    assert_eq!(value(&shown(&incoming).await).as_deref(), Some("10"));
     control
         .store
         .database
@@ -1931,24 +1932,15 @@ async fn saved_usage_detail_open_and_changed_refresh_use_scoped_worker_results()
         })
         .await
         .unwrap();
-    control.emit_test_event(EngineEvent::Changed {
-        thread_id: "thread".into(),
-        recovery: false,
-    });
-    let next = number(&incoming, "20").await;
-    assert_ne!(first, next, "refresh invalidates old field-follow identity");
-    send.try_send(UiAction::HideInspection { revision: 2 })
-        .unwrap();
+    send.try_send(request).unwrap();
+    assert_eq!(value(&shown(&incoming).await).as_deref(), Some("20"));
     send.try_send(UiAction::Quit).unwrap();
     finish_bridge(bridge, &incoming).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_without_content() {
-    use crate::{
-        diagnostics::UsageTrigger,
-        protocol::{Command, RunTarget, TurnTarget, UsageGetArgs},
-    };
+    use crate::protocol::{Command, RunTarget, TurnTarget, UsageGetArgs};
     let (_root, owner, control, server) = fixture().await;
     let logfile = owner.loaded.data_dir.join("logs").join("shellboy.log");
     owner
@@ -2014,27 +2006,14 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
     )
     .await
     .unwrap();
-    crate::usage_totals::with_test_elapsed(
-        std::time::Duration::from_millis(100),
-        super::management_request_trigger(
-            &control,
-            &owner.loaded.data_dir,
-            command.clone(),
-            tokio_util::sync::CancellationToken::new(),
-            UsageTrigger::Changed,
-        ),
-    )
-    .await
-    .unwrap();
     for _ in 0..20 {
         crate::usage_totals::with_test_elapsed(
             std::time::Duration::from_micros(99_999),
-            super::management_request_trigger(
+            super::management_request(
                 &control,
                 &owner.loaded.data_dir,
                 command.clone(),
                 tokio_util::sync::CancellationToken::new(),
-                UsageTrigger::Changed,
             ),
         )
         .await
@@ -2050,7 +2029,7 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .filter(|row| row["event"] == "usage_totals_slow")
         .collect::<Vec<_>>();
-    assert_eq!(entries.len(), 8, "ThreadGet does not aggregate exact usage");
+    assert_eq!(entries.len(), 7, "ThreadGet does not aggregate exact usage");
     assert_eq!(
         entries
             .iter()
@@ -2059,7 +2038,6 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
         6
     );
     assert_eq!(entries[6]["usage_slow"]["trigger"], "open");
-    assert_eq!(entries[7]["usage_slow"]["trigger"], "changed");
     for scope in ["turn", "run", "thread", "thread_children"] {
         assert!(
             entries

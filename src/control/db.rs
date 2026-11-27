@@ -6866,11 +6866,6 @@ mod driverless_child_stop_notification_tests {
                     }),
                 ))
             };
-            let inspect = || {
-                owner
-                    .db
-                    .call(|db| crate::frontend::inspect_run_fields_for_test(db, "run-3"))
-            };
             // The Run row of the work projection carries the same saved fact.
             let work_row = || async {
                 let status = control
@@ -6893,14 +6888,6 @@ mod driverless_child_stop_notification_tests {
                     .cloned()
                     .unwrap()
             };
-            let fields = inspect().await.unwrap();
-            assert_eq!(
-                fields
-                    .iter()
-                    .find(|field| field.key == "/stop_settlement_failure")
-                    .map(|field| field.displayed()),
-                fail_drain.then_some("storage")
-            );
             let after = get().await.result.unwrap();
             let row = work_row().await;
             assert_eq!(row["state"], after["state"]);
@@ -6943,13 +6930,6 @@ mod driverless_child_stop_notification_tests {
                 let row = work_row().await;
                 assert_eq!(row["state"], "stopped");
                 assert!(row.get("stop_settlement_failure").is_none());
-                assert!(
-                    !inspect()
-                        .await
-                        .unwrap()
-                        .iter()
-                        .any(|field| field.key == "/stop_settlement_failure")
-                );
             }
             control.live.test_drivers().lock().await.clear();
             control.shutdown().await.unwrap();

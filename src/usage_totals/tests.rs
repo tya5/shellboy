@@ -472,27 +472,6 @@ fn saved_request_bytes_are_read_beside_reported_tokens_and_invalid_is_unknown() 
     assert_eq!(attempt["usage"]["input_tokens"], 100);
     // Recorded before #186 (or not measured): unknown, not zero.
     assert!(read_attempt(&db, "a1-98").unwrap()["input_bytes"].is_null());
-    for scope in [
-        Scope::Thread {
-            id: "t0".into(),
-            children: true,
-        },
-        Scope::Run("r1".into()),
-        Scope::Turn("u1".into()),
-    ] {
-        let latest = read_latest_request(&db, &scope).unwrap();
-        assert_eq!(latest["attempt_id"], "a1-99", "{scope:?}");
-        assert_eq!(latest["input_bytes"], bytes.to_value());
-        assert_eq!(latest["usage"]["input_tokens_details"]["cached_tokens"], 75);
-    }
-    let older = read_latest_request(&db, &Scope::Turn("u0".into())).unwrap();
-    assert_eq!(older["attempt_id"], "a0-99");
-    assert!(older["input_bytes"].is_null());
-    assert!(
-        read_latest_request(&db, &Scope::Turn("missing".into()))
-            .unwrap()
-            .is_null()
-    );
     assert_eq!(db.total_changes(), before);
     let mut wrong = bytes.to_value();
     wrong["categories"]["user"] = json!(1);

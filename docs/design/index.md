@@ -308,10 +308,10 @@ only new setting. It is applied at three points and nowhere else:
    with a different list; the record is consumed through the normal path, so it
    neither leaves a pending record nor blocks `maybe_activate_candidate`.
 3. Thread and `--scope all` selections of preview/backfill/rebuild, and the
-   TUI index panel's coverage window (`read_coverage_inner`, applied to Thread
+   `index status --coverage` window (`read_coverage_inner`, applied to Thread
    and full-history members only), use `node.kind IN (auto_kinds + --kind words)`,
-   so kinds left out on purpose are not reported as not indexed. CLI `index status`
-   reports job state only and takes no `--kind`.
+   so kinds left out on purpose are not reported as not indexed. `index status`
+   takes no `--kind`; its coverage window uses `auto_kinds`.
    Explicit `--source` IDs and `retry` are never filtered. The skipped count is
    `excluded_sources` in the result, computed from the kind index without
    reading payloads.

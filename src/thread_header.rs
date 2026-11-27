@@ -803,26 +803,6 @@ pub(crate) fn read_titles_tx(
 ) -> Result<RawTitles, StorageError> {
     read_titles_with_limits_tx(db, requests, SOURCE_BYTES, WITNESS_BYTES)
 }
-/// Same canonical title discovery with a smaller caller-owned copy channel.
-pub(crate) fn read_titles_bounded_tx(
-    db: &Connection,
-    requests: &[(String, String)],
-    bytes: usize,
-) -> Result<(RawTitles, usize), StorageError> {
-    let raw = read_titles_with_limits_tx(
-        db,
-        requests,
-        SOURCE_BYTES.min(bytes),
-        WITNESS_BYTES.min(bytes),
-    )?;
-    let copied = raw
-        .entries
-        .values()
-        .filter_map(|(_, witness)| witness.as_ref())
-        .map(|w| w.path.copied + w.pending.copied)
-        .sum();
-    Ok((raw, copied))
-}
 fn read_titles_with_limits_tx(
     db: &Connection,
     requests: &[(String, String)],

@@ -38,14 +38,14 @@ async fn pause_time_and_identity_survive_reads_service_restart_and_turn_observat
             .await
             .unwrap()
     );
-    let first = f.service.status(args()).await.unwrap();
+    let first = f.service.status(args().into()).await.unwrap();
     assert!(first.paused);
     assert!(chrono::DateTime::parse_from_rfc3339(first.paused_at.as_deref().unwrap()).is_ok());
     assert!(first.pause_id.as_deref().is_some_and(|id| !id.is_empty()));
     observe(&f, f.service.clone(), "2026-10-30T00:00:00Z").await;
     let restarted = IndexService::new(f.db.clone(), f.config.clone());
     for at in ["2026-10-30T01:00:00Z", "2026-10-30T02:00:00Z"] {
-        let status = restarted.status(args()).await.unwrap();
+        let status = restarted.status(args().into()).await.unwrap();
         assert_eq!(status.paused_at, first.paused_at);
         assert_eq!(status.pause_id, first.pause_id);
         observe(&f, restarted.clone(), at).await;
@@ -82,7 +82,7 @@ async fn pause_time_and_identity_survive_reads_service_restart_and_turn_observat
             .await
             .unwrap()
     );
-    let resumed = restarted.status(args()).await.unwrap();
+    let resumed = restarted.status(args().into()).await.unwrap();
     assert!(!resumed.paused);
     assert!(resumed.paused_at.is_none() && resumed.pause_id.is_none());
     observe(&f, restarted, "2026-10-30T03:00:00Z").await;
@@ -114,9 +114,9 @@ async fn historical_pause_without_saved_time_stays_unknown_and_stable() {
         db.execute("UPDATE app_meta SET value=json_remove(value,'$.paused_at') WHERE key LIKE 'index.pause.%'", [])?;
         Ok(())
     }).await.unwrap();
-    let before = f.service.status(args()).await.unwrap();
+    let before = f.service.status(args().into()).await.unwrap();
     let after = IndexService::new(f.db.clone(), f.config.clone())
-        .status(args())
+        .status(args().into())
         .await
         .unwrap();
     assert!(before.paused && after.paused);

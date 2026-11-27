@@ -14,23 +14,8 @@ mod draft_saver;
 use crate::thread_header as header;
 mod history_reader;
 mod input_history;
-mod inspection_attachments;
-mod inspection_deletion;
 pub(crate) mod inspection_external;
 mod inspection_history;
-mod inspection_index;
-mod inspection_lifecycle;
-#[cfg(test)]
-pub(crate) use inspection_lifecycle::inspect_run_fields_for_test;
-mod inspection_lists;
-mod inspection_operation;
-mod inspection_physical;
-mod inspection_presentation;
-mod inspection_read;
-pub(crate) mod inspection_retained;
-mod inspection_saved;
-mod inspection_state;
-mod inspection_storage;
 mod lineage;
 mod lineage_observer;
 mod live_output;
@@ -237,76 +222,6 @@ async fn management_request(
     command: Command,
     cancel: CancellationToken,
 ) -> Result<Value, ApiError> {
-    management_request_trigger(
-        control,
-        data_dir,
-        command,
-        cancel,
-        crate::usage_totals::UsageTrigger::Open,
-    )
-    .await
-}
-async fn management_request_trigger(
-    control: &Arc<Control>,
-    data_dir: &Path,
-    command: Command,
-    cancel: CancellationToken,
-    trigger: crate::usage_totals::UsageTrigger,
-) -> Result<Value, ApiError> {
-    if let Command::IndexStatus(args) = command {
-        return match inspection_index::request(control, args, cancel).await {
-            Ok(value) => Ok(value),
-            Err(error) => Ok(serde_json::json!({"error":error})),
-        };
-    }
-    if let Command::ThreadDeletePreview(args) = command {
-        return match inspection_deletion::request(control, args, cancel).await {
-            Ok(value) => Ok(value),
-            Err(error) => Ok(serde_json::json!({"error":error})),
-        };
-    }
-    if matches!(command, Command::StorageStatus(_)) {
-        return match inspection_storage::request(control, cancel).await {
-            Ok(value) => Ok(value),
-            Err(error) => Ok(serde_json::json!({"error":error})),
-        };
-    }
-    if inspection_attachments::supports(&command)
-        && let Command::AttachmentList(args) = &command
-        && let Some(thread) = &args.thread_id
-    {
-        return match inspection_attachments::request(control, thread.clone(), None, cancel).await {
-            Ok(value) => Ok(value),
-            Err(error) => Ok(serde_json::json!({"error":error})),
-        };
-    }
-    if let Command::OperationGet(args) = command {
-        return match inspection_operation::request(control, args.operation_id, cancel).await {
-            Ok(value) => Ok(value),
-            Err(error) => Ok(serde_json::json!({"error":error})),
-        };
-    }
-    if inspection_lifecycle::supports(&command) {
-        return match inspection_lifecycle::request(control, command, cancel, trigger).await {
-            Ok(value) => Ok(value),
-            Err(error) => Ok(serde_json::json!({"error":error})),
-        };
-    }
-    if inspection_saved::supports(&command) {
-        return match inspection_saved::request(control, command, cancel).await {
-            Ok(value) => Ok(value),
-            Err(error) => Ok(serde_json::json!({"error":error})),
-        };
-    }
-    if matches!(
-        command,
-        Command::HistoryRead(_) | Command::HistoryList(_) | Command::HistoryWindow(_)
-    ) {
-        return match inspection_history::request(data_dir, command, cancel).await {
-            Ok(value) => Ok(value),
-            Err(error) => Ok(serde_json::json!({"error":error})),
-        };
-    }
     let is_read_projection = !command.requires_receipt();
     let response = if matches!(command, Command::ScheduleList(_) | Command::ServiceList(_)) {
         match tokio::select! { biased;
@@ -336,7 +251,7 @@ async fn management_request_trigger(
         }
     } else {
         crate::usage_totals::with_trigger(
-            trigger,
+            crate::usage_totals::UsageTrigger::Open,
             control.request_cancellable(operation(control, command), cancel),
         )
         .await
@@ -395,50 +310,6 @@ async fn management_status(
     .await;
 }
 
-fn inspection_target(command: &Command) -> Option<InspectionTarget> {
-    match command {
-        Command::UsageGet(args) => Some(InspectionTarget::Usage(args.clone())),
-        Command::OperationGet(args) => Some(InspectionTarget::Operation(args.operation_id.clone())),
-        Command::ThreadGet(args) => args.thread_id.clone().map(InspectionTarget::Thread),
-        Command::AttachmentList(args) => {
-            args.thread_id
-                .clone()
-                .map(|thread_id| InspectionTarget::Attachments {
-                    thread_id,
-                    attachment_id: None,
-                })
-        }
-        Command::RunGet(args) => Some(InspectionTarget::Run(args.run_id.clone())),
-        Command::TurnGet(args) => Some(InspectionTarget::Turn(args.turn_id.clone())),
-        Command::ShellGet(args) => Some(InspectionTarget::Shell(args.execution_id.clone())),
-        Command::MessageGet(args) => Some(InspectionTarget::Message(args.message_id.clone())),
-        Command::StorageStatus(_) => Some(InspectionTarget::Storage),
-        Command::ThreadDeletePreview(args) => Some(InspectionTarget::Deletion(args.clone())),
-        Command::IndexStatus(args) => Some(InspectionTarget::Index(args.clone())),
-        _ => None,
-    }
-}
-
-async fn start_inspection(
-    management: &mut management_state::Management,
-    updates: &(impl UpdateTarget + ?Sized),
-    context: ManagementContext,
-    generation: u64,
-    target: InspectionTarget,
-    title: String,
-    submission: Option<CommandSubmission>,
-) {
-    management.begin_result();
-    management
-        .inspection
-        .install(generation, context.clone(), target.clone(), submission);
-    management_update(
-        updates,
-        Some(context),
-        UiUpdate::InspectionStarted { target, title },
-    )
-    .await;
-}
 async fn status(
     sender: &(impl UpdateTarget + ?Sized),
     thread_id: Option<String>,
@@ -498,20 +369,6 @@ enum UnknownCompose {
 
 enum BackgroundResult {
     DraftIndexPause(Result<Option<crate::index::PauseReason>, ApiError>),
-    InspectionPhysical {
-        ticket: inspection_physical::Ticket,
-        result: Result<Value, ApiError>,
-    },
-    InspectionResolved {
-        generation: u64,
-        context: ManagementContext,
-        target: InspectionTarget,
-        title: String,
-    },
-    InspectionPresented {
-        ticket: inspection_state::Presentation,
-        result: Result<inspection_presentation::Prepared, ApiError>,
-    },
     ProgramStatus {
         epoch: u64,
         result: Result<program_status::Projected, ApiError>,
@@ -582,8 +439,6 @@ enum BackgroundResult {
     },
     Command {
         external: Option<inspection_external::ExternalReply>,
-        retained: Option<InspectionTarget>,
-        list_command: Option<Command>,
         work_status: bool,
         context: Option<ManagementContext>,
         generation: u64,
@@ -1098,44 +953,6 @@ async fn run_client(
                 status(&updates, None, error).await;
             }
         }
-        if let Some(submission) = management.inspection.take_retired_submission() {
-            command_outcome::<()>(
-                &updates,
-                Some(submission),
-                &Err(ApiError::new(
-                    ErrorCode::InvalidState,
-                    "Inspection was closed before read admission",
-                )),
-            )
-            .await;
-        }
-        if let Some(ticket) = management.inspection.take_presentation() {
-            let language = control.store.config.ui.language;
-            let present = ticket.clone();
-            let sender = background_tx.clone();
-            let budget = control
-                .store
-                .config
-                .cache
-                .body_bytes
-                .min(MAX_FRAME_BYTES as u64) as usize;
-            if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
-                let prepare = present.clone();
-                let result = presentation_work(move || {
-                    inspection_presentation::prepare_in(language, &prepare, budget)
-                })
-                .await
-                .and_then(|value| value);
-                let _ = sender
-                    .send(BackgroundResult::InspectionPresented {
-                        ticket: present,
-                        result,
-                    })
-                    .await;
-            }) {
-                management.inspection.presentation_refused(&ticket);
-            }
-        }
         if selection.active_thread.is_none()
             && draft_pause_dirty
             && !draft_pause_running
@@ -1287,12 +1104,10 @@ async fn run_client(
         actions.enable_cancel(control_tasks.is_empty());
         let refresh_deadline = selection.refresh_deadline(&dirty_threads, &refreshing);
         let live_deadline = live_output.deadline();
-        let physical_deadline = management.inspection.physical_deadline();
         let browser_deadline = browser
             .deadline()
             .into_iter()
             .chain(descendants.deadline())
-            .chain(management.inspection.deadline())
             .min()
             .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         tokio::select! {
@@ -1300,7 +1115,7 @@ async fn run_client(
                 if browser_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
                 if let Ok(permit)=read_slots.clone().try_acquire_owned() {
                     let at=tokio::time::Instant::now();
-                    let tickets=view_read::Tickets {coverage_request:None,inspection_services:Some(inspection_read::Services::new(&control)),browser:browser.take(at),descendants:descendants.take(at),inspection:management.inspection.take_metadata(at),inspection_usage:management.inspection.take_usage(at,control.diagnostics().clone())};
+                    let tickets=view_read::Tickets {browser:browser.take(at),descendants:descendants.take(at)};
                     if !tickets.is_empty() {
                         view_read_next=Some(at+Duration::from_millis(500));
                         let control=control.clone();let results=background_tx.clone();
@@ -1311,18 +1126,6 @@ async fn run_client(
                             let _=results.send(BackgroundResult::ViewFacts {tickets,result:result.map(Box::new)}).await;
                         });
                     }
-                }
-            },
-            _=tokio::time::sleep_until(physical_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
-                if physical_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
-                if let Ok(permit)=read_slots.clone().try_acquire_owned()
-                    && let Some(ticket)=management.inspection.take_physical(tokio::time::Instant::now()) {
-                    let source=control.clone();let sender=background_tx.clone();
-                    read_workers.spawn(async move {
-                        let _permit=permit;
-                        let result=inspection_physical::read(&source,&ticket).await;
-                        let _=sender.send(BackgroundResult::InspectionPhysical {ticket,result}).await;
-                    });
                 }
             },
             _=tokio::time::sleep_until(live_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
@@ -1461,16 +1264,6 @@ async fn run_client(
                     UiAction::CopySelected { .. } | UiAction::ConfirmedIndex { .. } => unreachable!("selection normalized before dispatch"),
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
-                    }
-                    UiAction::HideInspection {revision} => management.inspection.hide_at(revision),
-                    UiAction::ObserveInspection {context,target,visible,revision} => {
-                        management.inspection.observe_at(&context,&target,visible,revision);
-                    }
-                    UiAction::NextInspectionWindow {context,request_id,target} => {
-                        let result=if request_id==management.request_id {
-                            management.inspection.next_index_window(&context,&target)
-                        } else {Err(ApiError::new(ErrorCode::InvalidState,"Index observation changed; use the currently displayed window"))};
-                        if let Err(error)=result {management_status(&updates,Some(context),error).await;}
                     }
                     UiAction::Quit => {
                         // Also covers ordinary Tokio action receivers used by
@@ -1897,33 +1690,10 @@ async fn run_client(
                                 update(&outcomes, owner.update(format!("{title}{}{}", crate::ui::text_width::glyphs::separator(), if success {i18n::local!(language, "処理結果を受信", "Result received")} else {crate::ui::text_width::glyphs::select(i18n::local!(language, "失敗 · 詳細を確認してください", "Failed · Check details"), i18n::local!(language, "失敗 | 詳細を確認してください", "Failed | Check details"))}))).await;
                             }
                             let (external, result) = prepare_external(language,response, control.store.config.cache.body_bytes, external).await;
-                            let _ = sender.send(BackgroundResult::Command { external, retained:None,list_command:None, work_status: false, context, generation, title, result }).await;
+                            let _ = sender.send(BackgroundResult::Command { external, work_status: false, context, generation, title, result }).await;
                         });
                     }
                     UiAction::Command(command) | UiAction::Manage(command) => {
-                        if let Some(scope) = context.clone() && let Some(target) = inspection_target(&command) {
-                            let generation = management.next_generation();
-                            start_inspection(&mut management,&updates,scope,generation,target,command_title(&command, language),submission).await;
-                            // A submitted slash read owns one admitted result and
-                            // input acknowledgment even if its display is covered.
-                            // Subsequent observation still follows visible scope.
-                            if has_submission && let Ok(permit)=read_slots.clone().try_acquire_owned() {
-                                let at=tokio::time::Instant::now();
-                                let tickets=view_read::Tickets {
-                                    inspection_services:Some(inspection_read::Services::new(&control)),
-                                    inspection:management.inspection.take_initial_metadata(at),
-                                    inspection_usage:management.inspection.take_initial_usage(at,control.diagnostics().clone()),
-                                    ..Default::default()
-                                };
-                                let source=control.clone();let sender=background_tx.clone();let snapshot_slots=progress_slots.clone();let stop=read_cancel.clone();
-                                read_workers.spawn(async move {
-                                    let _permit=permit;
-                                    let result=view_read::read(&source,&tickets,snapshot_slots,stop).await;
-                                    let _=sender.send(BackgroundResult::ViewFacts {tickets,result:result.map(Box::new)}).await;
-                                });
-                            }
-                            continue;
-                        }
                         let title = command_title(&command, language);
                         let mutation = !command.is_read_only();
                         let notice_owner = management::NoticeOwner::capture(
@@ -1968,8 +1738,6 @@ async fn run_client(
                             })).flatten();
                         let data_dir = client_context.data_dir.clone();
                         spawn_work(&mut workers, permit, async move {
-                            let retained_command=inspection_history::capture_command(&command);
-                            let list_command=inspection_lists::capture_command(&command);
                             let mut response = management_request(&control, &data_dir, command, observe).await;
                             if memory_observation && let Ok(value) = &mut response {
                                 value["client_observation"] = serde_json::json!({
@@ -1978,8 +1746,6 @@ async fn run_client(
                                     "refresh": "Repeat status --memory explicitly to observe again",
                                 });
                             }
-                            let retained=response.as_ref().ok().and_then(|value|retained_command.as_ref().and_then(|command|inspection_history::capture_saved(command,value)));
-                            if let Ok(value)=&mut response { inspection_retained::decorate_original(value,&retained); }
                             command_outcome(&outcomes, submission, &management_outcome(&response))
                                 .await;
                             if mutation && let Some(owner) = notice_owner {
@@ -1992,7 +1758,7 @@ async fn run_client(
                             let (external, result) =
                                 prepare_external(language,response, control.store.config.cache.body_bytes, external).await;
                             let _ = sender
-                                .send(BackgroundResult::Command { external, retained,list_command,
+                                .send(BackgroundResult::Command { external,
                                     work_status,
                                     context,
                                     generation,
@@ -2049,7 +1815,7 @@ async fn run_client(
                                 prepare_management(language,response, control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command { external:None, retained:None,list_command:None,
+                                .send(BackgroundResult::Command { external:None,
                                     work_status: false,
                                     context,
                                     generation,
@@ -2370,7 +2136,7 @@ async fn run_client(
                             let response=watch_action::execute(&control,target).await;
                             if output {
                                 let result=prepare_management(language,response,control.store.config.cache.body_bytes).await;
-                                let _=results.send(BackgroundResult::Command { external:None,retained:None,list_command:None,work_status:false,context:None,generation,title,result}).await;
+                                let _=results.send(BackgroundResult::Command { external:None,work_status:false,context:None,generation,title,result}).await;
                             } else {match response {Ok(_)=>status(&outcomes,selected,ui_diagnostics::accepted(language, &title)).await,Err(error)=>status(&outcomes,selected,ui_diagnostics::not_applied(language, &title, error)).await,}}
                         });
                     },
@@ -2979,35 +2745,16 @@ async fn run_client(
                                     language,
                                 ))
                                     .await;
-                            let target = match result {
-                                Ok(Ok(target)) => target,
+                            let command = match result {
+                                Ok(Ok(command)) => command,
                                 Ok(Err(error)) | Err(error) => {
                                     management_status(&follow_updates, context.clone(), error).await;
                                     return;
                                 }
                             };
-                            if let Some(scope)=context.clone() {
-                                let resolved=match &target {
-                                    management::FollowTarget::Command(command)=>inspection_target(command).map(|target|(target,command_title(command, language))),
-                                    management::FollowTarget::Attachment {thread_id,attachment_id}=>Some((InspectionTarget::Attachments {thread_id:thread_id.clone(),attachment_id:Some(attachment_id.clone())},i18n::local!(language, "添付の参照", "Attachment references").into())),
-                                };
-                                if let Some((target,title))=resolved {
-                                    let _=sender.send(BackgroundResult::InspectionResolved {generation,context:scope,target,title}).await;
-                                    return;
-                                }
-                            }
-                            let retained_command=match &target {management::FollowTarget::Command(command)=>inspection_history::capture_command(command),_=>None};
-                            let list_command=match &target {management::FollowTarget::Command(command)=>inspection_lists::capture_command(command),_=>None};
-                            let (title,work_status,response)=match target {
-                                management::FollowTarget::Command(command)=> {
-                                    let title=command_title(&command, language);
-                                    let work_status=management::work_status(&command);
-                                    (title,work_status,management_request(&control, &data_dir,*command,CancellationToken::new()).await)
-                                },
-                                management::FollowTarget::Attachment {thread_id,attachment_id}=> {
-                                    (i18n::local!(language, "添付の参照", "Attachment references").into(),false,inspection_attachments::request(&control,thread_id,Some(attachment_id),CancellationToken::new()).await)
-                                },
-                            };
+                            let title=command_title(&command, language);
+                            let work_status=management::work_status(&command);
+                            let response=management_request(&control, &data_dir,command,CancellationToken::new()).await;
                             let observed=match response {
                                 Ok(value)=>value,
                                 Err(error)=> {
@@ -3027,14 +2774,11 @@ async fn run_client(
                                 .await;
                                 return;
                             }
-                            let retained=retained_command.as_ref().and_then(|command|inspection_history::capture_saved(command,&observed));
-                            let mut observed=observed;
-                            inspection_retained::decorate_original(&mut observed,&retained);
                             let result =
                                 prepare_management(language,Ok(observed), control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command { external:None, retained,list_command,
+                                .send(BackgroundResult::Command { external:None,
                                     work_status,
                                     context,
                                     generation,
@@ -3339,27 +3083,7 @@ async fn run_client(
                     }
                 }
                 Some(BackgroundResult::ViewFacts {tickets,result})=>{
-                    view_read::complete(control.diagnostics(),&mut browser,&mut descendants,&mut management.inspection,&updates,tickets,result.map(|value|*value)).await;
-                },
-                Some(BackgroundResult::InspectionPhysical {ticket,result})=>{
-                    management.inspection.complete_physical(&ticket,result);
-                },
-                Some(BackgroundResult::InspectionResolved {generation,context,target,title})=>{
-                    if management.accepts(generation) {start_inspection(&mut management,&updates,context,generation,target,title,None).await;}
-                },
-                Some(BackgroundResult::InspectionPresented {ticket,result})=>{
-                    if !management.accepts(ticket.generation) || !management.inspection.presentation_finished(&ticket) {continue;}
-                    match result {
-                        Ok(prepared)=>{
-                            let request_id=if ticket.target.retains_history(){management.current_history_detail=prepared.report.detail.map(Arc::new);management.begin_retained_update()}else{
-                                let id=management.begin_result();
-                                management.detail=prepared.report.detail.map(Arc::new);
-                                id
-                            };
-                            management_update(&updates,Some(ticket.context),UiUpdate::InspectionSnapshot {request_id,snapshot:prepared.snapshot}).await;
-                        },
-                        Err(error)=>management_status(&updates,Some(ticket.context),error).await,
-                    }
+                    view_read::complete(control.diagnostics(),&mut browser,&mut descendants,&updates,tickets,result.map(|value|*value)).await;
                 },
                 Some(BackgroundResult::ThreadPage {generation,requested_cursor,stop,result})=>{
                     if !stop.is_cancelled()&&browser.generation()==Some(generation) {
@@ -3518,7 +3242,7 @@ async fn run_client(
                 }
                 Some(BackgroundResult::Copied {
                     result: Err(error), ..
-                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command { external, retained,list_command,
+                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command { external,
                     work_status,
                     context,
                     generation,
@@ -3549,15 +3273,6 @@ async fn run_client(
                                 report.fields.insert(0, crate::presentation::PresentationField { key: "/observation_notice".into(), label: i18n::local!(language, "観測", "Observation").into(), value: notice, display: None, value_omitted: false });
                             }
                             management.detail = report.detail.map(Arc::new);
-                            let retained = if let Some(command) = list_command {
-                                match management.detail.as_ref() {
-                                    Some(original) => match inspection_lists::capture_target(&command, Arc::clone(original)) {
-                                        Ok(target) => Some(target),
-                                        Err(error) => { management_status(&updates,context.clone(),error).await; None },
-                                    },
-                                    None => { management_status(&updates,context.clone(),i18n::local!(language, "一覧の保持予算を超えました。現在状態は未確認です", "The list-retention budget was exceeded. Current state is unverified")).await; None },
-                                }
-                            } else { retained };
                             let structured = UiUpdate::StructuredManagement {
                                 work_status, request_id: management_id, title,
                                 fields: report.fields, omitted: report.omitted,
@@ -3566,11 +3281,7 @@ async fn run_client(
                                 Some(owner) => UiUpdate::ExternalManagement { generation, owner, update: Box::new(structured) },
                                 None => structured,
                             };
-                            management_update(&updates, context.clone(), displayed).await;
-                            if let (Some(target),Some(context))=(retained,context) {
-                                management.inspection.install(generation,context.clone(),target.clone(),None);
-                                management_update(&updates,Some(context),UiUpdate::RetainedInspectionStarted{request_id:management_id,target}).await;
-                            }
+                            management_update(&updates, context, displayed).await;
                         }
                         Err(error) => {
                             management_update(
@@ -3664,7 +3375,6 @@ async fn run_client(
                         let resync = saved_events::schedule_reload(&page, &mut browser);
                         if resync {
                             status_dirty |= status_enabled;
-                            management.inspection.resync();
                             descendants.resync();
                             live_output.resync();
                             for receipt in pending.values_mut() { receipt.repeat = true; }
@@ -3710,7 +3420,6 @@ async fn run_client(
                             status_dirty |= status_enabled;
                             browser.changed(&thread_id);
                             descendants.changed(&thread_id);
-                            management.inspection.changed(&thread_id);
                             selection.changed(&thread_id);
                             receipt_delivery::changed(&mut pending, &thread_id);
                             if selection.active_thread.as_deref() == Some(&thread_id)
@@ -3830,18 +3539,6 @@ async fn run_client(
     drop(live_output);
     drop(browser);
     drop(descendants);
-    management.inspection.close();
-    if let Some(submission) = management.inspection.take_retired_submission() {
-        command_outcome(
-            &updates,
-            Some(submission),
-            &Err::<(), _>(ApiError::new(
-                ErrorCode::InvalidState,
-                "Inspection closed before its read was admitted",
-            )),
-        )
-        .await;
-    }
     selection.cancel.cancel();
     cancel.cancel();
     drop(background_rx);
@@ -4716,8 +4413,6 @@ mod stream_tests {
 
 #[cfg(test)]
 pub(crate) mod control_tests;
-#[cfg(test)]
-mod inspection_tests;
 
 #[cfg(test)]
 mod notice_tests {

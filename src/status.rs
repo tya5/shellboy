@@ -1,5 +1,4 @@
 //! Bounded projections of recorded work, made in one owner read transaction.
-pub(crate) mod observation;
 use crate::protocol::*;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, FixedOffset};

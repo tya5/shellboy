@@ -179,12 +179,25 @@ impl IndexService {
     }
 
     /// One read-only owner snapshot; it does not wait behind index writes.
-    pub async fn status(&self, args: IndexArgs) -> Result<IndexStatus, ApiError> {
+    pub async fn status(self: &Arc<Self>, args: IndexStatusArgs) -> Result<IndexStatus, ApiError> {
+        let selection = args.selection();
+        // Untrusted cursor JSON and large explicit scopes are decoded here,
+        // never on the DB worker.
+        let coverage = args
+            .coverage
+            .then(|| {
+                self.prepare_coverage_request(
+                    &selection,
+                    args.coverage_cursor.as_deref(),
+                    super::saved_view::SavedReadLimits::default(),
+                )
+            })
+            .transpose()?;
         let keys = self.identity_keys();
         let family = self.endpoint_family_key.clone();
         let auto_history = self.config.indexing.auto_history;
         let mut status = crate::control::db::read_only(&self.database, "IndexStatus", move |db| {
-            let mut status = read_status(db, args, keys.clone(), family.clone(), auto_history)?;
+            let mut status = read_status(db, selection, keys.clone(), family.clone(), auto_history)?;
             observations::enrich(db, &mut status, &keys, family.as_deref())?;
             Ok(status)
         })
@@ -196,6 +209,9 @@ impl IndexService {
                 Some(saved) => format!("{saved}; {reason}"),
                 None => reason,
             });
+        }
+        if let Some(request) = coverage {
+            status.coverage_window = Some(self.coverage_window(request).await?);
         }
         Ok(status)
     }
@@ -462,6 +478,7 @@ fn read_status(
         probes: Vec::new(),
         shrink: None,
         retained_vector_payload_bytes: None,
+        coverage_window: None,
     };
     let mut spaces = HashSet::new();
     if let Some(space) = &selected {

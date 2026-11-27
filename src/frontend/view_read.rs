@@ -1,28 +1,17 @@
 //! Fixed collection of visible browser/count facts in one caller-owned snapshot.
 //! Admission, task ownership and cancellation remain in the existing frontend.
-use super::{
-    ApiError, Control, browser, checked_storage, inspection_read, inspection_state,
-    lineage_observer, presentation_work,
-};
+use super::{ApiError, Control, browser, checked_storage, lineage_observer, presentation_work};
 use crate::storage::StorageError;
 use rusqlite::Connection;
 
 #[derive(Clone, Default)]
 pub(super) struct Tickets {
-    pub coverage_request:
-        Option<Result<std::sync::Arc<crate::index::saved_view::PreparedCoverageRequest>, ApiError>>,
-    pub inspection_services: Option<inspection_read::Services>,
     pub browser: Option<browser::Ticket>,
     pub descendants: Option<lineage_observer::Ticket>,
-    pub inspection: Option<inspection_state::Ticket>,
-    pub inspection_usage: Option<inspection_state::UsageTicket>,
 }
 impl Tickets {
     pub fn is_empty(&self) -> bool {
-        self.browser.is_none()
-            && self.descendants.is_none()
-            && self.inspection.is_none()
-            && self.inspection_usage.is_none()
+        self.browser.is_none() && self.descendants.is_none()
     }
     fn active(&self) -> bool {
         self.browser
@@ -32,14 +21,6 @@ impl Tickets {
                 .descendants
                 .as_ref()
                 .is_some_and(|ticket| !ticket.stop.is_cancelled())
-            || self
-                .inspection
-                .as_ref()
-                .is_some_and(|ticket| !ticket.stop.is_cancelled())
-            || self
-                .inspection_usage
-                .as_ref()
-                .is_some_and(|ticket| !ticket.identity.stop.is_cancelled())
     }
     async fn closed(&self) {
         async fn closed(stop: Option<&tokio_util::sync::CancellationToken>) {
@@ -50,64 +31,18 @@ impl Tickets {
         tokio::join!(
             closed(self.browser.as_ref().map(|ticket| &ticket.stop)),
             closed(self.descendants.as_ref().map(|ticket| &ticket.stop)),
-            closed(self.inspection.as_ref().map(|ticket| &ticket.stop)),
-            closed(
-                self.inspection_usage
-                    .as_ref()
-                    .map(|ticket| &ticket.identity.stop)
-            ),
         );
     }
-}
-/// Request-only JSON/cursor work uses the existing finite presentation pool,
-/// before admission to the caller's shared database snapshot.
-pub(super) async fn prepare_requests(tickets: &Tickets) -> Tickets {
-    let mut read = tickets.clone();
-    let Some(ticket) = tickets
-        .inspection
-        .as_ref()
-        .filter(|ticket| !ticket.stop.is_cancelled())
-    else {
-        return read;
-    };
-    let crate::ui::InspectionTarget::Index(args) = &ticket.target else {
-        return read;
-    };
-    let result = if let Some(services) = &tickets.inspection_services {
-        let service = services.index.clone();
-        let args = args.clone();
-        let cursor = ticket.cursor.clone();
-        presentation_work(move || {
-            service.prepare_coverage_request(
-                &args,
-                cursor.as_deref(),
-                crate::index::saved_view::SavedReadLimits::default(),
-            )
-        })
-        .await
-        .and_then(|result| result)
-    } else {
-        Err(ApiError::new(
-            crate::protocol::ErrorCode::InvalidState,
-            "Index request context is unavailable",
-        ))
-    };
-    read.coverage_request = Some(result.map(std::sync::Arc::new));
-    read
 }
 pub(super) struct RawBatch {
     browser: Option<Result<browser::RawObservation, ApiError>>,
     descendants: Option<Result<lineage_observer::RawBatch, ApiError>>,
     cold_lineage: Option<(std::time::Duration, usize, bool)>,
-    inspection: Option<Result<inspection_read::RawInspection, ApiError>>,
-    usage: Option<Result<inspection_state::RawUsage, ApiError>>,
 }
 pub(super) struct Prepared {
     pub browser: Option<Result<browser::Observation, ApiError>>,
     pub descendants: Option<Result<lineage_observer::Prepared, ApiError>>,
     cold_lineage: Option<(std::time::Duration, usize, bool)>,
-    inspection: Option<Result<inspection_read::PreparedInspection, ApiError>>,
-    usage: Option<Result<inspection_state::PreparedUsage, ApiError>>,
 }
 fn observed<T>(result: Result<T, StorageError>) -> Result<Result<T, ApiError>, StorageError> {
     match result {
@@ -121,13 +56,6 @@ fn observed<T>(result: Result<T, StorageError>) -> Result<Result<T, ApiError>, S
     }
 }
 pub(super) fn read_tx(db: &Connection, tickets: &Tickets) -> Result<RawBatch, StorageError> {
-    read_shared_tx(db, tickets, None)
-}
-pub(super) fn read_shared_tx(
-    db: &Connection,
-    tickets: &Tickets,
-    header: Option<&std::sync::Arc<super::header::RawHeader>>,
-) -> Result<RawBatch, StorageError> {
     let mut cold_lineage = None;
     let descendants = tickets
         .descendants
@@ -168,35 +96,6 @@ pub(super) fn read_shared_tx(
         browser,
         descendants,
         cold_lineage,
-        inspection: tickets
-            .inspection
-            .as_ref()
-            .filter(|ticket| !ticket.stop.is_cancelled())
-            .map(|ticket| {
-                observed(inspection_read::read_scoped_tx(
-                    db,
-                    &ticket.target,
-                    header,
-                    tickets.inspection_services.as_ref(),
-                    tickets.coverage_request.as_ref(),
-                ))
-            })
-            .transpose()?,
-        usage: tickets
-            .inspection_usage
-            .as_ref()
-            .filter(|ticket| !ticket.identity.stop.is_cancelled())
-            .map(|ticket| {
-                observed(inspection_state::read_usage_tx(
-                    db,
-                    ticket,
-                    tickets
-                        .inspection_services
-                        .as_ref()
-                        .map(|s| s.instance_id.as_str()),
-                ))
-            })
-            .transpose()?,
     })
 }
 
@@ -204,7 +103,6 @@ pub(super) async fn complete(
     diagnostics: &crate::diagnostics::Diagnostics,
     browser: &mut browser::Browser,
     descendants: &mut lineage_observer::Observer,
-    inspection: &mut inspection_state::Observation,
     updates: &(impl super::UpdateTarget + ?Sized),
     tickets: Tickets,
     result: Result<(Prepared, u64), ApiError>,
@@ -214,71 +112,12 @@ pub(super) async fn complete(
         Err(error) => (
             Prepared {
                 cold_lineage: None,
-                inspection: tickets.inspection.as_ref().map(|_| Err(error.clone())),
-                usage: tickets
-                    .inspection_usage
-                    .as_ref()
-                    .map(|_| Err(error.clone())),
                 browser: tickets.browser.as_ref().map(|_| Err(error.clone())),
                 descendants: tickets.descendants.as_ref().map(|_| Err(error)),
             },
             super::message_queue::read_revision(),
         ),
     };
-    if let Some(ticket) = tickets.inspection {
-        let result = prepared.inspection.take().unwrap_or_else(|| {
-            Err(ApiError::new(
-                crate::protocol::ErrorCode::InvalidState,
-                "Inspection observation closed before reading",
-            ))
-        });
-        let outcome = result.as_ref().map(|_| ()).map_err(Clone::clone);
-        super::command_outcome(updates, ticket.submission.clone(), &outcome).await;
-        if let inspection_state::Completion::Failed(failure) =
-            inspection.complete_metadata(&ticket, sequence, result)
-        {
-            let failure = *failure;
-            super::management_update(
-                updates,
-                Some(ticket.context),
-                crate::ui::UiUpdate::InspectionFailure {
-                    target: failure.target,
-                    part: failure.part,
-                    read_sequence: failure.read_sequence,
-                    observed_at: failure.observed_at,
-                    error: failure.error,
-                },
-            )
-            .await;
-        }
-    }
-    if let Some(ticket) = tickets.inspection_usage {
-        let result = prepared.usage.take().unwrap_or_else(|| {
-            Err(ApiError::new(
-                crate::protocol::ErrorCode::InvalidState,
-                "Usage observation closed before reading",
-            ))
-        });
-        let outcome = result.as_ref().map(|_| ()).map_err(Clone::clone);
-        super::command_outcome(updates, ticket.identity.submission.clone(), &outcome).await;
-        if let inspection_state::Completion::Failed(failure) =
-            inspection.complete_usage(&ticket, sequence, result)
-        {
-            let failure = *failure;
-            super::management_update(
-                updates,
-                Some(ticket.identity.context),
-                crate::ui::UiUpdate::InspectionFailure {
-                    target: failure.target,
-                    part: failure.part,
-                    read_sequence: failure.read_sequence,
-                    observed_at: failure.observed_at,
-                    error: failure.error,
-                },
-            )
-            .await;
-        }
-    }
     if let Some((elapsed, discovered, truncated)) = prepared.cold_lineage {
         diagnostics.record_lineage_query(
             crate::diagnostics::DiagnosticIds::default(),
@@ -391,12 +230,6 @@ pub(super) fn prepare(
     language: crate::config::UiLanguage,
 ) -> Prepared {
     Prepared {
-        inspection: raw
-            .inspection
-            .map(|result| result.and_then(inspection_read::prepare)),
-        usage: raw
-            .usage
-            .map(|result| result.map(inspection_state::prepare_usage)),
         cold_lineage: raw.cold_lineage,
         browser: raw.browser.map(|result| {
             result.map(|raw| {
@@ -456,7 +289,7 @@ pub(super) async fn read(
         _=tickets.closed()=>return Err(ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read closed")),
         permit=progress_slots.acquire_owned()=>permit.map_err(|_|ApiError::new(crate::protocol::ErrorCode::InvalidState,"Visible read admission closed"))?,
     };
-    let collect = prepare_requests(tickets).await;
+    let collect = tickets.clone();
     let active = tickets.clone();
     let read_stop = stop.child_token();
     let cancel_on_drop = read_stop.clone().drop_guard();

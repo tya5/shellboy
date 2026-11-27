@@ -807,7 +807,7 @@ fn optional_operation_defaults_keep_empty_wire_and_explicit_index_target_semanti
         json!({"scope":null,"space_id":null,"thread_ids":[],"source_ids":[]})
     );
     assert!(
-        Command::IndexStatus(IndexArgs::default())
+        Command::IndexStatus(Default::default())
             .validate()
             .is_ok()
     );
@@ -1048,7 +1048,6 @@ fn index_dimensions_are_explicit_bounded_and_rebuild_only() {
         assert!(Command::IndexRebuild(args.clone()).validate().is_ok());
         assert!(Command::IndexBackfill(args.clone()).validate().is_err());
         assert!(Command::IndexRetry(args.clone()).validate().is_err());
-        assert!(Command::IndexStatus(args.clone()).validate().is_err());
         assert!(Command::IndexPreview(args).validate().is_err());
     }
 }

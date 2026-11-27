@@ -1,5 +1,10 @@
 # Bounded Saved Inspection Reads (#115)
 
+Since #311 unit 4d slice 4 the F8 Thread/Run/Turn/usage inspections show the
+wire result of the command they ran (`thread.get`, `run.get`, `turn.get`,
+`usage.get`) and no longer use the frontend readers below; the bounds still
+apply where the owner and the remaining selection reads use them.
+
 The notification-driven Thread inspector reads finite indexed native prefixes,
 not lifetime-sized canonical queries stopped by a SQLite progress callback.
 There is no new index, migration, persisted counter/cache, worker or queue. G

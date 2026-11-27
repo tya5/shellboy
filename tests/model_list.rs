@@ -554,7 +554,7 @@ async fn runtime_observations_keep_receipts_constant_and_release_raw_output_pins
     let commands = [
         list(None, None),
         Command::StorageStatus(StorageArgs { category: None }),
-        Command::IndexStatus(IndexArgs::default()),
+        Command::IndexStatus(Default::default()),
         Command::IndexPreview(IndexArgs {
             kinds: Vec::new(),
             dimensions: None,
@@ -704,7 +704,7 @@ async fn history_search_ipc_disconnect_closes_embedding_http_and_next_observatio
     assert_eq!(
         control
             .index
-            .status(IndexArgs::default())
+            .status(Default::default())
             .await
             .unwrap()
             .done,

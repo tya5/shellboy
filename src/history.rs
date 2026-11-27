@@ -25,7 +25,6 @@ mod body_page;
 #[doc(hidden)]
 pub mod display_source;
 mod node_row;
-pub(crate) mod observation;
 mod window_links;
 pub use list::list_nodes;
 pub(crate) mod payload;
@@ -50,7 +49,7 @@ mod relations;
 pub(crate) mod rpc;
 mod thread;
 pub(crate) mod thread_overrides;
-pub(crate) use raw_witness::{RawWitness, RetainedExecutionFacts, RetainedExecutionRequest};
+pub(crate) use raw_witness::RawWitness;
 pub(crate) use thread::{ThreadScope, selection_revision};
 mod search_bodies;
 pub(crate) mod search_scope;
