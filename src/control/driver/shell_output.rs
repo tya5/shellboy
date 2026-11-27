@@ -441,8 +441,6 @@ mod output_batch_tests {
             (5, 8, vec![5, 7], Duration::from_millis(u64::MAX)),
         ] {
             let directory = tempfile::tempdir().unwrap();
-            #[cfg(unix)]
-            crate::app::set_owner_fd_limit();
             let mut config = Config::default();
             config.io.output_batch_bytes = read_bound;
             config.io.output_buffer_bytes = 16;
@@ -495,8 +493,6 @@ mod output_batch_tests {
     #[tokio::test]
     async fn sparse_live_output_flushes_at_the_configured_time_bound() {
         let directory = tempfile::tempdir().unwrap();
-        #[cfg(unix)]
-        crate::app::set_owner_fd_limit();
         let config = Config::default();
         let args = serde_json::from_value(
             json!({"command":"printf timer; read -r done","stdin_open":true}),

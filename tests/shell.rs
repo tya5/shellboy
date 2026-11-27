@@ -11,7 +11,6 @@ use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 #[cfg(unix)]
 fn config() -> Config {
-    shellboy::app::set_owner_fd_limit();
     let mut config = Config::default();
     config.shell.kind = ShellKind::Bash;
     config.io.term_grace_ms = 120;
