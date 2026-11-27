@@ -91,6 +91,11 @@ fn operation_result_schemas(
     opaque!("schedule.enable");
     opaque!("schedule.disable");
     opaque!("schedule.remove");
+    opaque!("service.add");
+    opaque!("service.list");
+    opaque!("service.start");
+    opaque!("service.stop");
+    opaque!("service.remove");
 
     result!("thread.cwds", RecordPage<String, NoListFilters>);
     result!("thread.set", ThreadDetails);
@@ -3553,107 +3558,20 @@ mod message_acknowledgement_tests {
 
     #[test]
     fn operation_result_schema_has_every_wire_operation() {
-        let settings = schemars::generate::SchemaSettings::draft2020_12();
-        let mut generator = settings.into_generator();
-        let schema = operation_result_schemas(&mut generator);
-        let results = schema.as_object().unwrap();
-        let expected = [
-            "artifact.add",
-            "artifact.update",
-            "artifact.list",
-            "artifact.get",
-            "artifact.remove",
-            "artifact.read",
-            "draft.image",
-            "owner.shutdown",
-            "draft.save",
-            "draft.get",
-            "draft.list",
-            "draft.restore",
-            "draft.submit",
-            "status",
-            "model.list",
-            "thread.list",
-            "thread.get",
-            "thread.branches",
-            "usage.get",
-            "compact.list",
-            "shell.list",
-            "thread.create",
-            "thread.fork",
-            "thread.delete",
-            "thread.delete_preview",
-            "thread.delete_set",
-            "thread.delete_set_preview",
-            "thread.prune",
-            "thread.rewind",
-            "thread.archive",
-            "thread.unarchive",
-            "thread.tag",
-            "thread.tags",
-            "thread.cwds",
-            "thread.set",
-            "message.ask",
-            "message.reply",
-            "message.send",
-            "message.get",
-            "message.list",
-            "message.cancel",
-            "operation.get",
-            "run.get",
-            "run.retry",
-            "run.stop",
-            "turn.get",
-            "turn.interrupt",
-            "wait",
-            "events.wait",
-            "history.list",
-            "history.window",
-            "history.recall",
-            "history.received",
-            "history.read",
-            "history.search",
-            "history.relations",
-            "history.export",
-            "thread.import",
-            "shell.get",
-            "shell.read",
-            "shell.write",
-            "shell.eof",
-            "shell.background",
-            "shell.stop",
-            "attachment.add",
-            "attachment.list",
-            "attachment.remove",
-            "attachment.reload",
-            "compact.preview",
-            "compact",
-            "context.edit",
-            "index.status",
-            "index.preview",
-            "index.backfill",
-            "index.retry",
-            "index.rebuild",
-            "index.probe",
-            "index.shrink",
-            "index.remove",
-            "storage.status",
-            "storage.collect",
-            "config.get",
-            "config.set",
-            "credentials.set",
-            "credentials.clear",
-            "connection.test",
-            "id.resolve",
-            "schedule.add",
-            "schedule.list",
-            "schedule.set",
-            "schedule.enable",
-            "schedule.disable",
-            "schedule.remove",
-        ];
+        let public: Value = serde_json::from_str(&schema_json()).unwrap();
+        let results = public["operation_results"].as_object().unwrap();
+        let requests = public["definitions"]["Request"]["oneOf"]
+            .as_array()
+            .unwrap();
+        let expected: std::collections::BTreeSet<_> = requests
+            .iter()
+            .map(|variant| variant["properties"]["command"]["const"].as_str().unwrap())
+            .collect();
         let actual: std::collections::BTreeSet<_> = results.keys().map(String::as_str).collect();
-        assert_eq!(actual, expected.into_iter().collect());
+        assert_eq!(
+            expected, actual,
+            "document precisely the wire result operations"
+        );
         for name in ["thread.create", "connection.test"] {
             assert_eq!(
                 results[name],
@@ -3682,7 +3600,7 @@ mod message_acknowledgement_tests {
         );
         assert_eq!(
             results["config.get"]["properties"]["loaded"]["$ref"],
-            "#/$defs/ConfigLoadedView"
+            "#/definitions/ConfigLoadedView"
         );
         let recall_states = results["history.recall"]["oneOf"]
             .as_array()
