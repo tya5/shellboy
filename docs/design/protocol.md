@@ -184,7 +184,7 @@ by explicit `thread_id` and `name`. The caller’s own Thread does not restrict
 local reads; Studio AppHost separately limits pages to their owning Thread. This read
 returns `{port, token}` only for the current running execution; do not persist or
 log it. The endpoint is not included in `service.list` or `service.get` and does
-not create an operation receipt. See [#462](protocol-versions/next-462.md) for
+not create an operation receipt. See [#462](protocol-versions/49.md) for
 arguments and typed refusals.
 
 ## Originの認証と保存境界（P3/W6）

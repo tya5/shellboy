@@ -374,7 +374,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 71,
-        sql: include_str!("../../migrations/next_service_name.sql"),
+        sql: include_str!("../../migrations/0071_service_name.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
 ];
