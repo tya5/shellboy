@@ -1186,7 +1186,7 @@ mod tests {
                         .reserve_runtime(request.clone(), None)
                         .await
                         .unwrap(),
-                    super::super::db::RuntimeReservation::New
+                    super::super::db::RuntimeReservation::New(_)
                 ));
             }
             if point >= 2 {

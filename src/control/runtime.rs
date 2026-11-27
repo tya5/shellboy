@@ -153,7 +153,7 @@ impl Control {
                         "This operation was accepted but its result is uncertain; inspect its receipt without replaying it",
                     )),
                     Err(error) => Err(error),
-                    Ok(db::RuntimeReservation::New) => {
+                    Ok(db::RuntimeReservation::New(_)) => {
                         // The pending receipt is durable before external work.
                         control.changed.notify_waiters();
                         // Saved results never create a new reply-grace effect.

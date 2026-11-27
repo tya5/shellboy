@@ -125,9 +125,16 @@ impl MutationResult {
 
 #[derive(Debug)]
 pub enum RuntimeReservation {
-    New,
+    New(ReservedIntent),
     Pending,
     Saved(std::result::Result<Value, ApiError>),
+}
+
+/// Minted only after the exact request fingerprint has been reserved and committed.
+#[derive(Debug)]
+pub struct ReservedIntent {
+    operation_id: String,
+    fingerprint: String,
 }
 
 /// Facts a completed reclamation pass hands to its final admission job.
@@ -737,6 +744,7 @@ impl Store {
         operation_id: &str,
         thread_id: Option<&str>,
         submission: &DraftSubmission,
+        continuation: Option<ReservedIntent>,
     ) -> Result<()> {
         let epoch = self.operation_epoch.clone();
         let operation = operation_id.to_owned();
@@ -745,17 +753,20 @@ impl Store {
         let config = self.config.clone();
         self.database
             .call(move |db| {
-                // Epoch expiry fences unknown work only: an operation that
-                // already holds a pending reservation (an admitted edit) is
-                // authorized by it and is never refused after a roll.
-                let admitted: bool = db
-                    .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM operation_receipt WHERE operation_id=?1 AND state='pending')",
-                        [&operation],
-                        |row| row.get(0),
-                    )
-                    .map_err(StorageError::from)?;
-                if !admitted && !epoch.admits(&operation) {
+                if let Some(token) = continuation {
+                    let matches = token.operation_id == operation && db
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM operation_receipt WHERE operation_id=?1 AND request_hash=?2 AND state='pending')",
+                            params![operation, token.fingerprint],
+                            |row| row.get::<_, bool>(0),
+                        )?;
+                    if !matches {
+                        return Err(StorageError::from(error(
+                            ErrorCode::OperationConflict,
+                            "Draft continuation does not match its reserved edit intent",
+                        )));
+                    }
+                } else if !epoch.admits(&operation) {
                     return Err(StorageError::from(error(
                         ErrorCode::OperationExpired,
                         "Draft submission has no active owner operation identity",
@@ -986,7 +997,7 @@ impl Store {
                 return Ok(Err(error));
             }
             tx.commit()?;
-            Ok(Ok(RuntimeReservation::New))
+            Ok(Ok(RuntimeReservation::New(ReservedIntent { operation_id, fingerprint })))
         }).await
     }
 
@@ -4358,21 +4369,7 @@ mod receipt_wait_tests {
         db.shutdown().await.unwrap();
     }
 
-    const FILL_FINISHED: &str = "INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,result_ref_json)VALUES(?1,'current','\"'||hex(zeroblob(4194304))||'\"','hash','completed','2000-01-01',0,'0')";
-
-    fn create_request(id: &str) -> Request {
-        Request::new(
-            id,
-            Command::ThreadCreate(ThreadCreateArgs {
-                connection: None,
-                cwd: None,
-                agents: None,
-                model: None,
-                effort: None,
-                parent_thread_id: None,
-            }),
-        )
-    }
+    const FILL_FINISHED: &str = "INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,result_ref_json)VALUES(?1,?2,'\"'||hex(zeroblob(4194304))||'\"','hash','completed','2000-01-01',0,'0')";
 
     async fn thread_count(db: &DbWorker) -> i64 {
         db.call(|db| Ok(db.query_row("SELECT count(*) FROM thread", [], |r| r.get(0))?))
@@ -4381,63 +4378,95 @@ mod receipt_wait_tests {
     }
 
     #[tokio::test]
-    async fn duplicate_admitted_before_the_final_decision_is_never_answered_not_applied() {
-        let (_root, db, store) = fixture().await;
-        db.call(|db| {
+    async fn ipc_duplicate_admitted_during_a_roll_is_never_answered_not_applied() {
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let db = &owner.db;
+        let initial_count = thread_count(db).await;
+        let epoch = control.store.operation_epoch.current();
+        let instance = owner.instance_id.clone();
+        let filler = format!("{epoch}:filler-1");
+        let seed_epoch = epoch.clone();
+        let seed_instance = instance.clone();
+        db.call(move |db| {
             for n in 1..=31 {
-                db.execute(FILL_FINISHED, [format!("current.0:filler-{n}")])?;
+                db.execute(
+                    FILL_FINISHED,
+                    params![format!("{seed_epoch}:filler-{n}"), seed_instance],
+                )?;
             }
             Ok(())
         })
         .await
         .unwrap();
+        let data = owner.loaded.data_dir.clone();
+        let same = format!("{epoch}:same");
+        let call = |id: String| {
+            let data = data.clone();
+            let instance = instance.clone();
+            async move {
+                crate::ipc::call_selected_operation(
+                    &data,
+                    &instance,
+                    Command::ThreadCreate(ThreadCreateArgs {
+                        connection: None,
+                        cwd: None,
+                        agents: None,
+                        model: None,
+                        effort: None,
+                        parent_thread_id: None,
+                    }),
+                    Some(id),
+                )
+                .await
+                .unwrap()
+            }
+        };
         let (reached_tx, reached_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel();
-        *store.pass_gate.lock().unwrap() = Some((reached_tx, release_rx));
-        let first = {
-            let store = store.clone();
-            tokio::spawn(async move { store.execute(create_request("current.0:same"), None).await })
-        };
-        // The first call completed its pass over a full budget and is parked
-        // before its final admission job.
-        crate::test_watchdog::watchdog("first call reaches its pass end", reached_rx)
+        *control.store.pass_gate.lock().unwrap() = Some((reached_tx, release_rx));
+        let first = tokio::spawn(call(same.clone()));
+        crate::test_watchdog::watchdog("first IPC call reaches its pass end", reached_rx)
             .await
             .unwrap()
             .unwrap();
-        db.call(|db| {
+        let freed = filler.clone();
+        db.call(move |db| {
             db.execute(
-                "DELETE FROM operation_receipt WHERE operation_id='current.0:filler-1'",
-                [],
+                "DELETE FROM operation_receipt WHERE operation_id=?1",
+                [freed],
             )?;
             Ok(())
         })
         .await
         .unwrap();
-        let second = store
-            .execute(create_request("current.0:same"), None)
-            .await
-            .unwrap();
-        release_tx.send(()).unwrap();
-        let first = first.await.unwrap().unwrap();
-        assert_eq!(first.result["thread_id"], second.result["thread_id"]);
-        assert_eq!(thread_count(&db).await, 1);
-        // Restore the full budget; a never-admitted ID now rolls the epoch.
-        db.call(|db| {
-            db.execute(FILL_FINISHED, ["current.0:filler-1"])?;
+        let second = call(same.clone()).await;
+        assert!(second.ok, "{:?}", second.error);
+
+        // Restore pressure and roll while the first request is still parked.
+        let restore_instance = instance.clone();
+        db.call(move |db| {
+            db.execute(FILL_FINISHED, params![filler, restore_instance])?;
             Ok(())
         })
         .await
         .unwrap();
-        let other = store
-            .execute(create_request("current.0:other"), None)
-            .await
-            .unwrap_err();
-        let details = other.details.unwrap();
+        let refused = call(format!("{epoch}:never-admitted")).await;
+        let details = refused.error.unwrap().details.unwrap();
         assert_eq!(details["reason"], "operation_epoch_rolled");
         assert_eq!(details["request_may_have_been_applied"], false);
-        assert_eq!(store.operation_epoch.current(), "current.1");
-        assert_eq!(thread_count(&db).await, 1);
-        db.shutdown().await.unwrap();
+        assert_ne!(control.store.operation_epoch.current(), epoch);
+        release_tx.send(()).unwrap();
+        let first = first.await.unwrap();
+        assert!(first.ok, "admitted ID answered with {:?}", first.error);
+        assert_eq!(first.operation_id, same);
+        assert_eq!(second.operation_id, same);
+        assert_eq!(
+            first.result.unwrap()["thread_id"],
+            second.result.unwrap()["thread_id"]
+        );
+        assert_eq!(thread_count(db).await, initial_count + 1);
+        server.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     async fn seed_pending(db: &DbWorker, old_rows: u32, last_reserved: u64) {
@@ -4530,7 +4559,7 @@ mod receipt_wait_tests {
             .unwrap()
             .unwrap()
             .unwrap();
-        assert!(matches!(result, RuntimeReservation::New));
+        assert!(matches!(result, RuntimeReservation::New(_)));
         assert!(matches!(
             store
                 .reserve_internal("current.0:new".into(), json!({"test":1}))
@@ -4796,7 +4825,7 @@ mod receipt_wait_tests {
         .await
         .unwrap()
         .unwrap();
-        assert!(matches!(result, RuntimeReservation::New));
+        assert!(matches!(result, RuntimeReservation::New(_)));
         let expired = db.call(|db| Ok(db.query_row("SELECT count(*) FROM operation_receipt WHERE operation_id LIKE 'current.0:done:%' AND result_ref_json='0'", [], |row| row.get::<_, i64>(0))?)).await.unwrap();
         assert_eq!(
             expired, 2,

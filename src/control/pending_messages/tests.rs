@@ -872,21 +872,27 @@ fn submission(op: &str, source: &str, revision: u64, text: &str) -> DraftSubmiss
 async fn epoch_roll_refuses_new_draft_work_but_not_an_admitted_edit() {
     let (_root, store) = store().await;
     let admitted = "fixture.0:edit";
-    assert!(matches!(
-        store
-            .reserve_internal(admitted.into(), json!({"test":"edit"}))
-            .await
-            .unwrap(),
-        crate::control::db::RuntimeReservation::New
-    ));
+    let crate::control::db::RuntimeReservation::New(token) = store
+        .reserve_internal(admitted.into(), json!({"test":"edit"}))
+        .await
+        .unwrap()
+    else {
+        panic!("edit was not admitted")
+    };
     store.operation_epoch.roll();
+    let frozen = submission(admitted, "e", 1, "x");
+    let refused = store
+        .prepare_draft_submission(admitted, Some("t"), &frozen, None)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::OperationExpired);
     store
-        .prepare_draft_submission(admitted, Some("t"), &submission(admitted, "e", 1, "x"))
+        .prepare_draft_submission(admitted, Some("t"), &frozen, Some(token))
         .await
         .unwrap();
     let fresh = "fixture.0:new";
     let refused = store
-        .prepare_draft_submission(fresh, Some("t"), &submission(fresh, "e", 1, "x"))
+        .prepare_draft_submission(fresh, Some("t"), &submission(fresh, "e", 1, "x"), None)
         .await
         .unwrap_err();
     assert_eq!(refused.code, ErrorCode::OperationExpired);
@@ -897,17 +903,17 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
     let (root, store) = store().await;
     let frozen = submission("fixture.0:frozen", "editable", 7, "frozen send");
     store
-        .prepare_draft_submission("fixture.0:frozen", Some("t"), &frozen)
+        .prepare_draft_submission("fixture.0:frozen", Some("t"), &frozen, None)
         .await
         .unwrap();
     store
-        .prepare_draft_submission("fixture.0:frozen", Some("t"), &frozen)
+        .prepare_draft_submission("fixture.0:frozen", Some("t"), &frozen, None)
         .await
         .unwrap();
     let conflicting = submission("fixture.0:frozen", "editable", 7, "changed content");
     assert_eq!(
         store
-            .prepare_draft_submission("fixture.0:frozen", Some("t"), &conflicting)
+            .prepare_draft_submission("fixture.0:frozen", Some("t"), &conflicting, None)
             .await
             .unwrap_err()
             .code,
@@ -967,7 +973,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
     // A different operation has a different frozen identity; the failed operation remains immutable.
     let frozen = submission("fixture.0:accepted", "editable", 7, "frozen send");
     store
-        .prepare_draft_submission("fixture.0:accepted", Some("t"), &frozen)
+        .prepare_draft_submission("fixture.0:accepted", Some("t"), &frozen, None)
         .await
         .unwrap();
     let options = DraftSendOptions {
@@ -1055,7 +1061,7 @@ async fn frozen_first_send_survives_without_thread_and_binds_only_at_acceptance(
     let (_root, store) = store().await;
     let frozen = submission("fixture.0:first-thread", "new-composer", 3, "first request");
     store
-        .prepare_draft_submission("fixture.0:first-thread", None, &frozen)
+        .prepare_draft_submission("fixture.0:first-thread", None, &frozen, None)
         .await
         .unwrap();
     store
@@ -1394,7 +1400,7 @@ async fn frozen_budget_preserves_tiny_raw_text_limits_and_json_escaping_with_sep
         let operation = format!("fixture.0:raw-budget-{n}");
         let frozen = submission(&operation, &format!("source-{n}"), 1, &text);
         store
-            .prepare_draft_submission(&operation, Some("t"), &frozen)
+            .prepare_draft_submission(&operation, Some("t"), &frozen, None)
             .await
             .unwrap();
         let accepted = store
@@ -1440,7 +1446,7 @@ async fn frozen_budget_preserves_tiny_raw_text_limits_and_json_escaping_with_sep
     }
     let too_much_text = submission("fixture.0:raw-too-long", "source-long", 1, &"a".repeat(129));
     let error = store
-        .prepare_draft_submission("fixture.0:raw-too-long", Some("t"), &too_much_text)
+        .prepare_draft_submission("fixture.0:raw-too-long", Some("t"), &too_much_text, None)
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InputLimit);
@@ -1449,7 +1455,12 @@ async fn frozen_budget_preserves_tiny_raw_text_limits_and_json_escaping_with_sep
         submission("fixture.0:metadata-too-long", "source-metadata", 1, "a");
     too_much_metadata.snapshot["extra_metadata"] = json!("z".repeat(MAX_FRAME_BYTES + 4096));
     let error = store
-        .prepare_draft_submission("fixture.0:metadata-too-long", Some("t"), &too_much_metadata)
+        .prepare_draft_submission(
+            "fixture.0:metadata-too-long",
+            Some("t"),
+            &too_much_metadata,
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InputLimit);
@@ -1507,7 +1518,7 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
         let text = format!("submitted text {n} {}", "x".repeat(8192));
         let frozen = submission(&operation, "composer", n, &text);
         store
-            .prepare_draft_submission(&operation, Some("t"), &frozen)
+            .prepare_draft_submission(&operation, Some("t"), &frozen, None)
             .await
             .unwrap();
         let args = ThreadCreateArgs {
@@ -1575,7 +1586,7 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
         assert_eq!(replay.result, accepted.result);
         // Preparation replay itself must not recreate a retired copy.
         store
-            .prepare_draft_submission(&operation, Some("t"), &frozen)
+            .prepare_draft_submission(&operation, Some("t"), &frozen, None)
             .await
             .unwrap();
         store
@@ -1624,7 +1635,7 @@ async fn submitting_and_unknown_copies_survive_collection_and_database_reopen() 
         "recover this unsent text",
     );
     store
-        .prepare_draft_submission("fixture.0:uncommitted-copy", Some("t"), &frozen)
+        .prepare_draft_submission("fixture.0:uncommitted-copy", Some("t"), &frozen, None)
         .await
         .unwrap();
     store.database.call(|db| {

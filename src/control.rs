@@ -845,10 +845,14 @@ impl Control {
             let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"text":content.text,"files":references,"args":args,"deliver":options.deliver,"selection_revision":options.expected_selection_revision,"submission":options.submission});
             content.fingerprint_positions(&mut intent);
             let reservation=control.store.reserve_internal(operation_id.clone(),intent).await?;
-            match reservation{db::RuntimeReservation::Saved(result)=>return result,db::RuntimeReservation::Pending=>return Err(ApiError::new(ErrorCode::InvalidState,"This edit was accepted but its result is uncertain; inspect its operation receipt")),db::RuntimeReservation::New=>{control.changed.notify_waiters();}}
+            let admission = match reservation {
+                db::RuntimeReservation::Saved(result) => return result,
+                db::RuntimeReservation::Pending => return Err(ApiError::new(ErrorCode::InvalidState,"This edit was accepted but its result is uncertain; inspect its operation receipt")),
+                db::RuntimeReservation::New(token) => { control.changed.notify_waiters(); token }
+            };
             let outcome=async{
                 if let Some(submission)=&options.submission {
-                    control.store.prepare_draft_submission(&operation_id,Some(&thread),submission).await?;
+                    control.store.prepare_draft_submission(&operation_id,Some(&thread),submission,Some(admission)).await?;
                 }
                 let check=thread.clone();
                 let active=control.store.database.call(move|db|{use rusqlite::OptionalExtension;db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[check],|r|r.get::<_,String>(0)).optional().map_err(Into::into)}).await.map_err(storage_error)?;
@@ -1017,7 +1021,7 @@ impl Control {
         self.start().await?;
         if let Some(submission) = &options.submission {
             self.store
-                .prepare_draft_submission(&operation_id, thread_id.as_deref(), submission)
+                .prepare_draft_submission(&operation_id, thread_id.as_deref(), submission, None)
                 .await?;
         }
         let (files, revision) = if let Some(thread) = &thread_id {
@@ -1228,7 +1232,7 @@ impl Control {
                                 ErrorCode::InvalidState,
                                 "Image commit is pending; inspect its operation receipt",
                             )),
-                            db::RuntimeReservation::New => {
+                            db::RuntimeReservation::New(_) => {
                                 let result = self
                                     .attachments
                                     .draft_image(args.clone(), self.stop.clone())

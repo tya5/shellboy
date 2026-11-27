@@ -795,7 +795,7 @@ async fn saved_self_stop_replay_does_not_create_a_new_grace_owner_or_stop_effect
             .reserve_runtime(request.clone(), Some(origin))
             .await
             .unwrap(),
-        db::RuntimeReservation::New
+        db::RuntimeReservation::New(_)
     ));
     control
         .store
