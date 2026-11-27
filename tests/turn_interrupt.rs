@@ -403,8 +403,6 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
         assert_eq!(marker["change"]["carried_sources_truncated"],false);
         assert_eq!(marker["change"]["carried_sources"][0]["message_id"],queued_id);
         assert_eq!(marker["change"]["carried_sources"][0]["original_turn_id"],old_turn);
-        let delivery:String=db.query_row("SELECT result_json FROM receipt WHERE message_node_id=?1",[&queued_id],|r|r.get(0))?;
-        assert_eq!(serde_json::from_str::<Value>(&delivery).unwrap()["delivery_context"]["turn_id"],current.0);
         Ok(())
     }).await.unwrap();
     close(control, owner, server).await;

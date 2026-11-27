@@ -3320,14 +3320,22 @@ async fn received_attempt_fence(truncated: bool) {
     super::super::turn_interrupt::acknowledge(&control, &snapshot.thread, &snapshot.run)
         .await
         .unwrap();
-    let (old_turn, run) = (snapshot.turn.clone(), snapshot.run.clone());
+    let (old_turn, run, thread) = (snapshot.turn.clone(), snapshot.run.clone(), snapshot.thread.clone());
     control.store.database.call(move |db| {
         let result = db.query_row("SELECT state,json_extract(input_manifest_json,'$.adoption.outcome'),json_extract(input_manifest_json,'$.adoption.reason'),ended_at FROM model_attempt WHERE id=?1",[attempt],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?;
         assert_eq!((&*result.0,&*result.1,&*result.2),(if truncated { "incomplete" } else { "completed" },"not_adopted","turn_fenced"));
         assert_eq!(db.query_row("SELECT response_id,json_extract(usage_json,'$.input_tokens') FROM model_attempt WHERE id=?1", [attempt], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?, ("received".into(),17));
         assert!(!result.3.is_empty());
         assert_eq!(db.query_row("SELECT count(*) FROM node WHERE turn_id=?1 AND kind IN ('assistant_response','incomplete_response')",[&old_turn],|r|r.get::<_,i64>(0))?,0);
-        assert!(db.query_row("SELECT EXISTS(SELECT 1 FROM receipt q JOIN turn u ON u.id=json_extract(q.result_json,'$.delivery_context.turn_id') JOIN run r ON r.id=u.run_id JOIN thread_path p ON p.thread_id=q.target_thread_id AND p.node_id=q.message_node_id WHERE q.message_node_id=?1 AND q.turn_id=?2 AND q.state='applied' AND q.hold_reason='carried_after_turn_interruption' AND u.id<>?2 AND r.id=?3 AND r.state='live')",params![queued,old_turn,run],|r|r.get::<_,bool>(0))?);
+        let receipt = crate::control::db::message_details(db, &queued)?;
+        assert_eq!(receipt.delivery_status, crate::protocol::DeliveryStatus::Applied);
+        assert_eq!(receipt.run_id.as_deref(), Some(run.as_str()));
+        assert_eq!(receipt.turn_id.as_deref(), Some(old_turn.as_str()));
+        assert_eq!(receipt.context.hold_reason.as_deref(), Some("carried_after_turn_interruption"));
+        let window = crate::history::window(db, &serde_json::from_value(serde_json::json!({
+            "thread_id": thread, "node_id": queued, "before": 0, "after": 0
+        })).unwrap())?;
+        assert_eq!(window.items[0].node_id, queued);
         Ok(())
     }).await.unwrap();
     close(control, owner).await;

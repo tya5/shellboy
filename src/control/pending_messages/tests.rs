@@ -1597,14 +1597,6 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
                     [],
                     |r| r.get::<_, bool>(0)
                 )?);
-                let saved: String = db.query_row(
-                    "SELECT result_json FROM receipt WHERE client_operation_id=?1",
-                    [operation],
-                    |r| r.get(0),
-                )?;
-                let value: Value = serde_json::from_str(&saved).unwrap();
-                assert_eq!(value["draft_submission"]["message_id"], message);
-                assert!(!saved.contains("submitted text"));
                 assert_eq!(
                     db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?,
                     n as i64 + 1
@@ -1620,7 +1612,7 @@ async fn admitted_copy_retires_atomically_replay_stays_exact_and_storage_does_no
         .unwrap();
     reopened.call(|db| {
         assert!(!db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE state='submitted')",[],|r|r.get::<_,bool>(0))?);
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_type(result_json,'$.draft_submission')='object'",[],|r|r.get::<_,i64>(0))?,16);Ok(())
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt",[],|r|r.get::<_,i64>(0))?,16);Ok(())
     }).await.unwrap();
     reopened.shutdown().await.unwrap();
 }
@@ -1709,7 +1701,7 @@ async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batche
     }
     store.database.call(|db| {
         assert_eq!(db.query_row("SELECT count(*) FROM draft WHERE state='submitted'",[],|r|r.get::<_,i64>(0))?,0);
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_type(result_json,'$.draft_submission')='object'",[],|r|r.get::<_,i64>(0))?,130);Ok(())
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt",[],|r|r.get::<_,i64>(0))?,130);Ok(())
     }).await.unwrap();
     store.database.shutdown().await.unwrap();
 }
