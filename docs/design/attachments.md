@@ -160,3 +160,9 @@ what fits the aggregate budget. Only live placements count; only admitted
 paths are encoded. A cold admitted path can be read again to encode it, and
 the second read must match its classified observation or preparation fails
 without adoption. Omitted paths keep only observation metadata.
+
+Spill keeps its existing saved JSON shape (#470). Its conceptual mapping to the
+shared fact is `reason: spilled`, `ref: original_node_id`, no recorded
+`fingerprint`, and `retained: true` until history prune reclaims the original.
+The `read` action is `shellboy history read --node ORIGINAL_NODE_ID`. This is a
+documentation mapping, not a change to serialization or a migration.
