@@ -42,39 +42,89 @@ impl Shown {
             }
     }
 }
+/// What the one management command slot of the client is waiting for.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Flight {
+    #[default]
+    Idle,
+    /// A command the user ran; its result is shown as a new view.
+    User,
+    /// A read of the shown result; its result replaces the fields in place.
+    Refresh,
+}
+/// How an accepted result is applied.
+pub(super) enum Arrival {
+    /// A new view with this request id.
+    Replace(u64),
+    /// The shown result read again: update it where it stands.
+    Refresh,
+}
+/// Owner of the F8 refresh state. A saved-change mark reads the shown result
+/// again; the table of when that may start is this type's methods:
+/// a mark starts the read only when nothing is in flight and otherwise sets
+/// one pending flag; the flag is cleared only when a refresh read starts, and
+/// a refresh never discards a user command result.
 #[derive(Default)]
 pub(super) struct Management {
     pub(super) request_id: u64,
     pub(super) detail: Option<Arc<Value>>,
     generation: u64,
     wait_cancel: CancellationToken,
+    flight: Flight,
     /// The command dispatched under `generation`, shown once its result is accepted.
     pending_shown: Option<(u64, Shown)>,
     shown: Option<Shown>,
-    /// A saved change reached `shown` while every command slot was taken.
+    /// A saved change reached `shown` while the slot or a read was busy.
     refresh_pending: bool,
 }
 impl Management {
     pub(super) fn dispatched(&mut self, generation: u64, shown: Option<Shown>) {
         self.pending_shown = shown.map(|shown| (generation, shown));
     }
+    /// A matching mark for the shown result. True when the read may start now;
+    /// otherwise the mark is kept as the one pending refresh.
+    pub(super) fn wants_refresh(&mut self, page: &EventsWaitResult, resync: bool) -> bool {
+        let Some(shown) = &self.shown else {
+            return false;
+        };
+        if !shown.is_stale_after(page, resync) {
+            return false;
+        }
+        if self.flight != Flight::Idle {
+            self.refresh_pending = true;
+            return false;
+        }
+        true
+    }
+    /// Every command slot was taken when the read was due.
     pub(super) fn defer_refresh(&mut self) {
         self.refresh_pending = true;
     }
-    pub(super) fn refresh_pending(&self) -> bool {
-        self.refresh_pending
+    /// A pending refresh can start: nothing is in flight.
+    pub(super) fn refresh_ready(&self) -> bool {
+        self.refresh_pending && self.flight == Flight::Idle && self.shown.is_some()
     }
-    /// The shown result to read again, consuming its one pending refresh.
-    pub(super) fn take_refresh(&mut self) -> Option<Shown> {
-        std::mem::take(&mut self.refresh_pending)
-            .then(|| self.shown.clone())
-            .flatten()
+    /// Start the read of the shown result, consuming the pending flag.
+    pub(super) fn start_refresh(&mut self) -> Option<(u64, Shown)> {
+        let shown = self.shown.clone()?;
+        self.refresh_pending = false;
+        self.generation = self.generation.wrapping_add(1);
+        self.flight = Flight::Refresh;
+        Some((self.generation, shown))
     }
-    pub(super) fn shown(&self) -> Option<&Shown> {
-        self.shown.as_ref()
+    /// F8 closed: no refresh is read for it any more.
+    pub(super) fn close(&mut self) {
+        self.shown = None;
+        self.pending_shown = None;
+        self.refresh_pending = false;
+        if self.flight == Flight::Refresh {
+            self.generation = self.generation.wrapping_add(1);
+            self.flight = Flight::Idle;
+        }
     }
     pub(super) fn next_generation(&mut self) -> u64 {
         self.generation = self.generation.wrapping_add(1);
+        self.flight = Flight::User;
         self.generation
     }
     pub(super) fn accepts(&self, generation: u64) -> bool {
@@ -85,15 +135,19 @@ impl Management {
             .as_ref()
             .map(|value| (Arc::clone(value), pointer.into()))
     }
-    pub(super) fn begin_result(&mut self) -> u64 {
+    /// Apply an accepted result. A user result starts a new view and the shown
+    /// command it carries; pending is left for the slot-free check.
+    pub(super) fn begin_result(&mut self) -> Arrival {
+        if std::mem::take(&mut self.flight) == Flight::Refresh {
+            return Arrival::Refresh;
+        }
         self.request_id = self.request_id.wrapping_add(1);
         self.detail = None;
-        self.refresh_pending = false;
         self.shown = match self.pending_shown.take() {
             Some((generation, shown)) if generation == self.generation => Some(shown),
             _ => None,
         };
-        self.request_id
+        Arrival::Replace(self.request_id)
     }
     pub(super) fn observe(&self, command: &Command) -> CancellationToken {
         if matches!(command, Command::Wait(_)) {
@@ -105,5 +159,90 @@ impl Management {
     pub(super) fn cancel_wait(&mut self) {
         self.wait_cancel.cancel();
         self.wait_cancel = CancellationToken::new();
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{Command, ConfigGetArgs, IndexStatusArgs};
+
+    fn index_changed() -> EventsWaitResult {
+        serde_json::from_value(serde_json::json!({
+            "status": "changed", "cursor": "c", "changes": [], "more": false,
+            "config_changed": false, "index_changed": true, "retention_changed": false,
+        }))
+        .unwrap()
+    }
+    /// Run `command` as the user and accept its result, so it is the shown one.
+    fn show(management: &mut Management, command: Command) {
+        let generation = management.next_generation();
+        management.dispatched(generation, Shown::of(&command, "t", &None, false));
+        assert!(management.accepts(generation));
+        assert!(matches!(management.begin_result(), Arrival::Replace(_)));
+    }
+    fn index() -> Command {
+        Command::IndexStatus(IndexStatusArgs::default())
+    }
+
+    #[test]
+    fn user_command_result_survives_a_mark_that_arrives_before_it() {
+        let mut management = Management::default();
+        show(&mut management, index());
+        let generation = management.next_generation();
+        management.dispatched(
+            generation,
+            Shown::of(&Command::ConfigGet(ConfigGetArgs {}), "c", &None, false),
+        );
+        assert!(!management.wants_refresh(&index_changed(), false));
+        assert!(
+            management.accepts(generation),
+            "the mark did not supersede the command the user ran"
+        );
+        assert!(matches!(management.begin_result(), Arrival::Replace(_)));
+    }
+
+    #[test]
+    fn deferred_mark_after_an_older_read_is_not_lost() {
+        let mut management = Management::default();
+        show(&mut management, index());
+        let (generation, _) = management.start_refresh().unwrap();
+        // A second mark finds the first read in flight and is kept as pending.
+        assert!(!management.wants_refresh(&index_changed(), false));
+        assert!(management.accepts(generation));
+        assert!(matches!(management.begin_result(), Arrival::Refresh));
+        assert!(
+            management.refresh_ready(),
+            "the older read's result did not consume it"
+        );
+        assert!(management.start_refresh().is_some());
+        assert!(!management.refresh_ready());
+    }
+
+    #[test]
+    fn pending_mark_before_a_user_result_is_read_after_it() {
+        let mut management = Management::default();
+        show(&mut management, index());
+        let generation = management.next_generation();
+        management.dispatched(generation, Shown::of(&index(), "t", &None, false));
+        assert!(!management.wants_refresh(&index_changed(), false));
+        assert!(!management.refresh_ready());
+        assert!(matches!(management.begin_result(), Arrival::Replace(_)));
+        assert!(management.refresh_ready());
+    }
+
+    #[test]
+    fn closing_f8_stops_refreshes() {
+        let mut management = Management::default();
+        show(&mut management, index());
+        let (generation, _) = management.start_refresh().unwrap();
+        management.defer_refresh();
+        management.close();
+        assert!(
+            !management.accepts(generation),
+            "the refresh in flight is dropped"
+        );
+        assert!(!management.refresh_ready());
+        assert!(!management.wants_refresh(&index_changed(), false));
+        assert!(management.start_refresh().is_none());
     }
 }
