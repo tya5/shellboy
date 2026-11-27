@@ -95,6 +95,7 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
     actions
         .send(UiAction::Manage(Command::AttachmentList(
             AttachmentListArgs {
+                attachment_id: None,
                 thread_id: Some("actual".into()),
                 limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
                 cursor: None,
@@ -103,10 +104,13 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
         .await
         .unwrap();
     let (_, list) = report(&mut incoming, |fields| {
-        field(fields, "/scope/kind") == Some("thread")
+        field(fields, "/items/0/thread_id") == Some("actual")
     })
     .await;
-    assert_eq!(field(&list, "/count/relation"), Some("lower_bound"));
+    assert!(
+        field(&list, "/next_cursor").is_some(),
+        "first owner page is not the whole list"
+    );
     assert!(
         !list
             .iter()
@@ -131,18 +135,16 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
         .await
         .unwrap();
     let (request, exact) = report(&mut incoming, |fields| {
-        field(fields, "/scope/kind") == Some("attachment")
+        field(fields, "/items/0/attachment_id") == Some("late")
     })
     .await;
-    assert_eq!(field(&exact, "/thread_id"), Some("actual"));
-    assert_eq!(field(&exact, "/scope/attachment_id"), Some("late"));
-    assert_eq!(field(&exact, "/scope/selection_found"), Some("true"));
-    assert_eq!(field(&exact, "/count/value"), Some("1"));
-    assert_eq!(field(&exact, "/attachments/0/selected"), Some("false"));
+    assert_eq!(field(&exact, "/items/0/thread_id"), Some("actual"));
+    assert_eq!(field(&exact, "/items/0/selected"), Some("false"));
+    assert!(field(&exact, "/items/1/attachment_id").is_none());
     actions
         .send(UiAction::FollowManagement {
             request_id: request,
-            pointer: "/attachments/0/attachment_id".into(),
+            pointer: "/items/0/attachment_id".into(),
             mode: ManagementFollow::Read,
         })
         .await

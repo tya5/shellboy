@@ -931,15 +931,16 @@ async fn stalled_permanent_error_body_is_not_retried() {
             hold_open:true,
         }).ok().unwrap();
         crate::test_watchdog::watchdog("permanent response headers observed", async {
-            let mut after = None;
+            // Receive-only progress is sampled, not a text-wait completion.
+            // Virtual time is deliberately frozen until headers are observed.
             loop {
                 let page: EventsWaitResult = serde_json::from_value(
                     request(
                         &fixture.control,
                         Command::EventsWait(EventsWaitArgs {
-                            after,
+                            after: None,
                             thread_ids: vec![fixture.accepted.thread_id.clone()],
-                            timeout_ms: 1_000,
+                            timeout_ms: 0,
                             include_text: true,
                             include_reasoning_activity: false,
                             include_output: false,
@@ -956,7 +957,7 @@ async fn stalled_permanent_error_body_is_not_retried() {
                 {
                     break;
                 }
-                after = Some(page.cursor);
+                tokio::task::yield_now().await;
             }
         })
         .await
