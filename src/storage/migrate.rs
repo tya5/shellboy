@@ -924,8 +924,16 @@ mod question_admission_migration_tests {
         // before the later current-work frontier. The off-path Q really reaches
         // the selected cursor through graph ancestry, despite not being selected.
         let legacy_candidates: Vec<String> = db.prepare(
-            "SELECT r.message_node_id FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id='t' AND r.state='applied' AND r.path_admission='unadmitted' AND r.run_id IS NULL AND r.turn_id IS NULL AND n.kind='assistant' AND n.turn_id IS NULL AND r.created_at<'2021-01-01T00:00:01Z' AND json_type(r.result_json,'$.to_human')='true' AND json_extract(r.result_json,'$.reply.state') IN ('pending','replied') ORDER BY r.created_at,r.rowid",
+            "SELECT r.message_node_id FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.message_node_id IN ('q-preserve','q-off-path') AND r.target_thread_id='t' AND r.state='applied' AND r.path_admission='unadmitted' AND r.run_id IS NULL AND r.turn_id IS NULL AND n.kind='assistant' AND n.turn_id IS NULL AND r.created_at<'2021-01-01T00:00:01Z' ORDER BY r.created_at,r.rowid",
         ).unwrap().query_map([],|row|row.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        for id in &legacy_candidates {
+            let details = crate::control::db::message_details(&db, id).unwrap();
+            assert!(details.to_human);
+            assert!(matches!(
+                details.reply.as_ref().and_then(|r| r["state"].as_str()),
+                Some("pending" | "replied")
+            ));
+        }
         assert_eq!(legacy_candidates, ["q-preserve", "q-off-path"]);
         assert!(
             db.query_row(

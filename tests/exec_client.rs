@@ -400,7 +400,17 @@ impl Fixture {
         crate::test_watchdog::watchdog("tests/exec_client.rs: queued_chat", async {
             loop {
                 let id = target.clone();
-                let count = self.owner.db.call(move |db| Ok(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.kind')='external_cli'", [id], |r| r.get::<_, i64>(0))?)).await.unwrap();
+                let count = self
+                    .owner
+                    .db
+                    .call(move |db| {
+                        Ok(receipt_senders(db, Some(&id))
+                            .iter()
+                            .filter(|s| s.kind == shellboy::protocol::SenderKind::ExternalCli)
+                            .count())
+                    })
+                    .await
+                    .unwrap();
                 if count > 0 {
                     break;
                 }
@@ -413,7 +423,35 @@ impl Fixture {
     async fn queued_exec(&self, thread: &str) {
         let mut events = self.control.subscribe();
         let target = thread.to_owned();
-        crate::test_watchdog::watchdog("tests/exec_client.rs: queued_exec",async {loop {let id=target.clone();let count=self.owner.db.call(move|db|Ok(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.label')='shellboy exec'",[id],|r|r.get::<_,i64>(0))?)).await.unwrap();if count>0{break;}loop {match events.recv().await {Ok(EngineEvent::Changed{thread_id,..})if thread_id==target=>break,Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>break,Err(e)=>panic!("{e}"),_=>{}}}}}).await.unwrap();
+        crate::test_watchdog::watchdog("tests/exec_client.rs: queued_exec", async {
+            loop {
+                let id = target.clone();
+                let count = self
+                    .owner
+                    .db
+                    .call(move |db| {
+                        Ok(receipt_senders(db, Some(&id))
+                            .iter()
+                            .filter(|s| s.label.as_deref() == Some("shellboy exec"))
+                            .count())
+                    })
+                    .await
+                    .unwrap();
+                if count > 0 {
+                    break;
+                }
+                loop {
+                    match events.recv().await {
+                        Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == target => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => break,
+                        Err(e) => panic!("{e}"),
+                        _ => {}
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
     }
 }
 fn spawn(mut command: tokio::process::Command) -> JoinHandle<Output> {
@@ -499,14 +537,10 @@ async fn native_stdout_is_only_validated_utf8_final_json_and_sender_is_recorded(
         .owner
         .db
         .call(move |db| {
-            let sender: String = db.query_row(
-                "SELECT sender_json FROM receipt WHERE target_thread_id=?1",
-                [thread],
-                |r| r.get(0),
-            )?;
-            let sender: Value = serde_json::from_str(&sender).unwrap();
-            assert_eq!(sender["kind"], "external_cli");
-            assert_eq!(sender["label"], "shellboy exec");
+            let senders = receipt_senders(db, Some(&thread));
+            assert_eq!(senders.len(), 1);
+            assert_eq!(senders[0].kind, shellboy::protocol::SenderKind::ExternalCli);
+            assert_eq!(senders[0].label.as_deref(), Some("shellboy exec"));
             Ok(())
         })
         .await
@@ -1051,7 +1085,12 @@ async fn reply_mode_returns_explicit_reply_not_end_message() {
     first.reply.send(http(200,json!({"id":"boundary","status":"completed","output":[{"type":"function_call","call_id":"fixture-call","name":"shell","arguments":json!({"command":"echo fixture"}).to_string()}]}))).unwrap();
     let processing = fixture.next(&mut child).await;
     let thread = accepted.thread_id.clone();
-    let id: String = fixture.owner.db.call(move |db| Ok(db.query_row("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.label')='shellboy exec' ",[thread],|r|r.get(0))?)).await.unwrap();
+    let id: String = fixture
+        .owner
+        .db
+        .call(move |db| Ok(exec_message_id(db, &thread)))
+        .await
+        .unwrap();
     let admitted = id.clone();
     fixture.owner.db.call(move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&admitted])?; Ok(()) }).await.unwrap();
     let reply = fixture
@@ -1174,7 +1213,12 @@ async fn exec_waiting_on_an_ask_back(
     let mut child = spawn(command);
     fixture.queued_exec(&accepted.thread_id).await;
     let thread = accepted.thread_id.clone();
-    let duty: String = fixture.owner.db.call(move |db| Ok(db.query_row("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.label')='shellboy exec'",[thread],|r|r.get(0))?)).await.unwrap();
+    let duty: String = fixture
+        .owner
+        .db
+        .call(move |db| Ok(exec_message_id(db, &thread)))
+        .await
+        .unwrap();
     // The exec request is admitted at the next boundary; then the model asks back.
     first.reply.send(tool_call("echo boundary")).unwrap();
     fixture
@@ -1439,11 +1483,14 @@ async fn reply_mode_interruption_after_a_reopen_leaves_the_duty_open() {
         .owner
         .db
         .call(move |db| {
-            Ok(db.query_row(
-                "SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.expect_reply')=1",
-                [target],
-                |r| r.get(0),
-            )?)
+            Ok(receipt_ids(db, Some(&target))
+                .into_iter()
+                .find(|id| {
+                    shellboy::control::db::message_details(db, id)
+                        .unwrap()
+                        .expect_reply
+                })
+                .expect("fixture has no reply-expected message"))
         })
         .await
         .unwrap();
@@ -1651,15 +1698,55 @@ fn json_lines(output: &Output) -> Vec<Value> {
         .map(|l| serde_json::from_str(l).unwrap_or_else(|_| panic!("not JSON: {l}")))
         .collect()
 }
+fn receipt_ids(db: &rusqlite::Connection, thread: Option<&str>) -> Vec<String> {
+    db.prepare("SELECT message_node_id FROM receipt WHERE ?1 IS NULL OR target_thread_id=?1 ORDER BY rowid")
+        .unwrap()
+        .query_map([thread], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+fn receipt_senders(
+    db: &rusqlite::Connection,
+    thread: Option<&str>,
+) -> Vec<shellboy::protocol::MessageSender> {
+    receipt_ids(db, thread)
+        .iter()
+        .map(|id| {
+            shellboy::control::db::message_details(db, id)
+                .unwrap()
+                .sender
+        })
+        .collect()
+}
+fn exec_message_id(db: &rusqlite::Connection, thread: &str) -> String {
+    receipt_ids(db, Some(thread))
+        .into_iter()
+        .find(|id| {
+            shellboy::control::db::message_details(db, id)
+                .unwrap()
+                .sender
+                .label
+                .as_deref()
+                == Some("shellboy exec")
+        })
+        .expect("fixture has no exec message")
+}
 async fn senders(fixture: &Fixture) -> Vec<String> {
     fixture
         .owner
         .db
         .call(|db| {
-            let mut stmt = db
-                .prepare("SELECT json_extract(sender_json,'$.kind') FROM receipt ORDER BY rowid")?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+            Ok(receipt_senders(db, None)
+                .iter()
+                .map(|s| {
+                    serde_json::to_value(s.kind)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect())
         })
         .await
         .unwrap()

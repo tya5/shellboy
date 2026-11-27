@@ -114,12 +114,30 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
         next(&control, "t", "r").await.unwrap(),
         Next::Done
     ));
-    control.store.database.call(|db| {
-        assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_reminder'",[],|r|r.get::<_,i64>(0))?,0);
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0))?,16);
-        db.execute("UPDATE turn SET state='completed' WHERE id='u'",[])?;
-        Ok(())
-    }).await.unwrap();
+    control
+        .store
+        .database
+        .call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM event WHERE kind='reply_reminder'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            assert_eq!(
+                crate::control::db::named_reply_counts(db, "1=1")
+                    .get("pending")
+                    .copied()
+                    .unwrap_or(0),
+                16
+            );
+            db.execute("UPDATE turn SET state='completed' WHERE id='u'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let snapshot = match next(&control, "t", "r").await.unwrap() {
         Next::Ready(s) => s,
         _ => panic!("reminder must continue Run"),
@@ -174,11 +192,29 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
         next(&control, "t", "r").await.unwrap(),
         Next::Done
     ));
-    control.store.database.call(|db| {
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0))?,16);
-        assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_reminder'",[],|r|r.get::<_,i64>(0))?,1);
-        Ok(())
-    }).await.unwrap();
+    control
+        .store
+        .database
+        .call(|db| {
+            assert_eq!(
+                crate::control::db::named_reply_counts(db, "1=1")
+                    .get("ignored")
+                    .copied()
+                    .unwrap_or(0),
+                16
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM event WHERE kind='reply_reminder'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
