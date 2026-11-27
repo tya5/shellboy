@@ -2630,15 +2630,21 @@ fn artifact_path_from_cli(path: &str, cwd: &Path) -> Result<String, ApiError> {
     {
         return Ok(path.into());
     }
-    let joined: PathBuf = cwd
-        .join(path)
-        .components()
-        .filter(|component| *component != std::path::Component::CurDir)
-        .collect();
-    joined.into_os_string().into_string().map_err(|_| {
+    let joined = cwd.join(path).into_os_string().into_string().map_err(|_| {
         ApiError::new(
             ErrorCode::InvalidArgument,
             "The absolute artifact path is not valid UTF-8",
         )
-    })
+    })?;
+    let mut normalized = String::with_capacity(joined.len());
+    for segment in joined.split_inclusive(std::path::is_separator) {
+        if segment
+            .strip_suffix(std::path::is_separator)
+            .unwrap_or(segment)
+            != "."
+        {
+            normalized.push_str(segment);
+        }
+    }
+    Ok(normalized)
 }
