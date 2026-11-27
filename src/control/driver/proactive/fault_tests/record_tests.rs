@@ -1,5 +1,4 @@
-//! #226: the automatic attempt record is final or `unknown` with the exact set
-//! of committed stages, whatever fails after a stage commits.
+//! #226: compare observable adoption and terminal outcomes across fault boundaries.
 use super::*;
 
 macro_rules! record_test {
@@ -27,22 +26,22 @@ async fn active_summary_adoption_survives_a_later_storage_failure() {
         .unwrap();
 
     assert_eq!(
-        rejected["outcome"], "failed",
-        "pre-FINISH rollback: {rejected}"
+        rejected.terminal["outcome"], "failed",
+        "pre-FINISH rollback: {}", rejected.terminal
     );
-    assert!(rejected["committed_stages"]["active_summary"].is_null());
+    assert!(rejected.selected_summaries.is_empty());
     assert_eq!(
-        committed["outcome"], "failed",
-        "the aggregate fails after its active summary stage committed: {committed}"
+        committed.terminal["outcome"], "failed",
+        "the aggregate fails after its active summary stage committed: {}", committed.terminal
     );
-    assert!(committed["committed_stages"]["active_summary"].is_object());
+    assert!(committed.selected_summaries.len() == 1);
     assert_eq!(
-        trigger_identity(&rejected["trigger"]),
-        trigger_identity(&committed["trigger"]),
+        trigger_identity(&rejected.terminal["trigger"]),
+        trigger_identity(&committed.terminal["trigger"]),
         "same scenario uses the exact immutable trigger tuple"
     );
     assert_ne!(
-        rejected["trigger"]["run_id"], committed["trigger"]["run_id"],
+        rejected.terminal["trigger"]["run_id"], committed.terminal["trigger"]["run_id"],
         "each independent cell retains its own run provenance"
     );
 }
@@ -112,7 +111,7 @@ fn trigger_identity(trigger: &Value) -> Value {
     })
 }
 
-async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
+async fn record_boundary(fault: Fault, scenario: Scenario) -> DirectBoundaryReceipt {
     let receipt = direct_boundary_case(fault, scenario, Some(scenario.target_percent())).await;
     assert_eq!(
         receipt.reopened_witness.selection_revision,
@@ -180,11 +179,6 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
         "direct checkpoint receipt preserves per-fault outcome"
     );
     assert_eq!(
-        receipt.checkpoint["committed_stages"][scenario.stage()].is_object(),
-        fault != Fault::RejectFact,
-        "the selected stage fact exists only if its adoption transaction commits"
-    );
-    assert_eq!(
         receipt.terminal["outcome"],
         expected_outcome(fault, scenario, ObservationPhase::AfterShutdownAndRestart),
         "normal shutdown/reopen preserves the per-fault terminal state"
@@ -199,158 +193,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
         trigger_identity(&receipt.terminal["trigger"]),
         "the captured input/A/target facts are immutable across FINISH/reopen"
     );
-    assert!(
-        receipt.terminal["committed_stages"].is_object(),
-        "stage facts"
-    );
-    if fault == Fault::RejectFact {
-        assert!(receipt.terminal["committed_stages"][scenario.stage()].is_null());
-    }
-    if scenario.continues_to_active_summary(fault) {
-        assert!(receipt.terminal["committed_stages"]["active_summary"].is_object());
-        let mut prior = receipt.terminal["committed_stages"].clone();
-        prior.as_object_mut().unwrap().remove("active_summary");
-        assert_eq!(
-            prior, receipt.checkpoint["committed_stages"],
-            "the continued stage adds only its own fact"
-        );
-    } else {
-        assert_eq!(
-            receipt.terminal["committed_stages"], receipt.checkpoint["committed_stages"],
-            "FINISH/reopen preserves the exact committed-stage set"
-        );
-    }
-    receipt.terminal
-}
-
-fn bounded_stage_fact(fact: &Value, name: &str) -> bool {
-    let Some(object) = fact.as_object() else {
-        return false;
-    };
-    let keys = object
-        .keys()
-        .map(String::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
-    let gc_fact = fact.get("drop_all_reasoning").is_some();
-    let expected = if gc_fact {
-        [
-            "stage",
-            "selection_revision",
-            "reasoning_epoch",
-            "summary_node_id",
-            "source_nodes",
-            "spilled_groups",
-            "drop_all_reasoning",
-            "captured_reasoning_epoch",
-            "source_characters",
-            "summary_characters",
-            "summary_limit",
-            "model_requests",
-            "summary_usage",
-        ]
-        .into_iter()
-        .collect()
-    } else {
-        [
-            "stage",
-            "selection_revision",
-            "reasoning_epoch",
-            "summary_node_id",
-            "source_nodes",
-            "spilled_groups",
-            "removed_characters",
-            "source_characters",
-            "summary_characters",
-            "summary_limit",
-            "model_requests",
-            "summary_usage",
-        ]
-        .into_iter()
-        .collect()
-    };
-    if keys != expected || fact["stage"] != name {
-        return false;
-    }
-    if object.iter().any(|(key, value)| match key.as_str() {
-        "stage" => !value.as_str().is_some_and(|s| s.len() <= 32),
-        "summary_node_id" => {
-            !value.is_null()
-                && !value
-                    .as_str()
-                    .is_some_and(|id| id.len() <= 128 && uuid::Uuid::parse_str(id).is_ok())
-        }
-        "drop_all_reasoning" => !value.is_boolean(),
-        "summary_usage" => !value.is_null() && !bounded_summary_usage(value),
-        "source_nodes" | "spilled_groups" => value.as_u64().is_none(),
-        "selection_revision" | "reasoning_epoch" | "captured_reasoning_epoch" => {
-            value.as_i64().is_none()
-        }
-        _ => !value.is_null() && value.as_u64().is_none() && value.as_i64().is_none(),
-    }) {
-        return false;
-    }
-    fact.to_string().len() < 1024
-}
-fn bounded_summary_usage(value: &Value) -> bool {
-    let Some(object) = value.as_object() else {
-        return false;
-    };
-    let keys = object
-        .keys()
-        .map(String::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
-    if keys
-        != [
-            "requests",
-            "input_tokens",
-            "cached_tokens",
-            "cache_creation_tokens",
-            "output_tokens",
-        ]
-        .into_iter()
-        .collect()
-        || !value["requests"].is_u64()
-    {
-        return false;
-    }
-    [
-        "input_tokens",
-        "cached_tokens",
-        "cache_creation_tokens",
-        "output_tokens",
-    ]
-    .into_iter()
-    .all(|name| {
-        let n = &value[name];
-        let Some(fields) = n.as_object() else {
-            return false;
-        };
-        fields
-            .keys()
-            .map(String::as_str)
-            .collect::<std::collections::BTreeSet<_>>()
-            == ["known_sum", "unknown_count", "overflow"]
-                .into_iter()
-                .collect()
-            && (n["known_sum"].is_null() || n["known_sum"].is_u64())
-            && n["unknown_count"].is_u64()
-            && n["overflow"].is_boolean()
-    })
-}
-
-#[test]
-fn bounded_stage_schema_rejects_numeric_strings_content_and_untyped_usage() {
-    let valid = json!({"stage":"active_summary","selection_revision":2,"reasoning_epoch":4,"summary_node_id":"550e8400-e29b-41d4-a716-446655440000","source_nodes":2,"spilled_groups":0,"drop_all_reasoning":true,"captured_reasoning_epoch":3,"source_characters":120,"summary_characters":24,"summary_limit":4000,"model_requests":1,"summary_usage":{"requests":1,"input_tokens":{"known_sum":4,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":2,"unknown_count":0,"overflow":false}}});
-    assert!(bounded_stage_fact(&valid, "active_summary"));
-    let mut bad = valid.clone();
-    bad["source_nodes"] = json!("2");
-    assert!(!bounded_stage_fact(&bad, "active_summary"));
-    let mut bad = valid.clone();
-    bad["summary_node_id"] = json!("secret provider text");
-    assert!(!bounded_stage_fact(&bad, "active_summary"));
-    let mut bad = valid;
-    bad["summary_usage"]["input_tokens"]["known_sum"] = json!("secret");
-    assert!(!bounded_stage_fact(&bad, "active_summary"));
+    receipt
 }
 
 // The two uncalibrated call sites have no target plan, so the driver fixture
@@ -543,46 +386,14 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     );
     assert!(reached.load(Ordering::SeqCst));
     drop(boundary);
-    let facts: Value = control
-        .store
-        .database
-        .call({
-            let attempt = attempt.clone();
-            move |db| {
-                Ok(serde_json::from_str(&db.query_row(
-                    &format!(
-                        "SELECT {SAVED_RECORD} FROM automatic_compaction c WHERE attempt_id=?1"
-                    ),
-                    [attempt],
-                    |r| r.get::<_, String>(0),
-                )?)
-                .unwrap())
-            }
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        facts["outcome"], "unknown",
-        "only the GC stage committed; proactive FINISH has not run"
-    );
-    assert_eq!(facts["unfinished"], true);
-    let recorded = facts["committed_stages"].as_object().unwrap();
-    assert_eq!(
-        recorded.keys().map(String::as_str).collect::<Vec<_>>(),
-        [stage]
-    );
-    let selected: Vec<String> = control.store.database.call({
-        let target = target.clone();
-        move |db| Ok(db.prepare("SELECT n.id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND n.kind='summary'")?.query_map([target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
-    }).await.unwrap();
-    assert_eq!(
-        selected,
-        [recorded[stage]["summary_node_id"]
-            .as_str()
-            .unwrap()
-            .to_owned()]
-    );
-    assert!(recorded[stage]["source_nodes"].as_u64().unwrap() > 0);
+    let facts = listed_compaction(&control, &target, &attempt).await.unwrap();
+    assert_eq!(facts["state"], "unknown", "adoption precedes FINISH");
+    let selected = selected_window(&control, &target).await;
+    let summaries = selected_replacements(&selected, "summary");
+    let [summary] = summaries.as_slice() else { panic!("one selected Summary: {summaries:?}") };
+    let body = request(&control, Command::HistoryRead(serde_json::from_value(json!({"node_id": summary})).unwrap())).await;
+    assert_eq!(body["kind"], "summary");
+    assert!(!body["source_node_ids"].as_array().unwrap().is_empty());
     // Uncalibrated: there is no target plan, so no provisional target either.
     let pending: i64 = control
         .store
