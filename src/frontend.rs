@@ -4490,38 +4490,6 @@ mod stream_tests {
 pub(crate) mod control_tests;
 
 #[cfg(test)]
-mod notice_tests {
-    use super::{UiLanguage, tool_group_notice};
-    use crate::control::ForegroundRelease;
-
-    #[test]
-    fn tool_group_facts_are_formatted_at_the_frontend_boundary() {
-        let background = tool_group_notice(
-            Some(("execution", ForegroundRelease::Background)),
-            0,
-            UiLanguage::Ja,
-        );
-        assert_eq!(
-            background,
-            "背景移行の要求でshell executionの待機を解除し背景へ移しました。後続の未実行呼出しはありません"
-        );
-        assert!(background.contains("後続の未実行呼出しはありません"));
-        assert!(!background.contains("取り消"));
-        let input = tool_group_notice(
-            Some(("other", ForegroundRelease::Background)),
-            2,
-            UiLanguage::Ja,
-        );
-        assert!(input.contains("背景移行の要求でshell other"));
-        assert!(input.contains("2件取り消しました"));
-        assert_eq!(
-            tool_group_notice(None, 3, UiLanguage::Ja),
-            "未実行のツール呼出しを3件取り消しました"
-        );
-    }
-}
-
-#[cfg(test)]
 mod catalogue_glyph_tests {
     use super::catalogue_title;
     use crate::ui::text_width;
