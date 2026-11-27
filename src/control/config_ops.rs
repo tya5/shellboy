@@ -82,7 +82,7 @@ impl Control {
                 // A timed-out caller stops waiting, but the next change must not start
                 // until this one has really ended, so the closure owns the guard.
                 let _guard = guard;
-                let applied = crate::config_edit::apply_live(&path, &args.expected_hash, &args.changes, &config, &clients)?;
+                let applied = crate::config_edit::apply_live(&path, args.expected_hash.as_deref(), &args.changes, &config, &clients)?;
                 // Publish under the write guard even if the caller has stopped waiting.
                 if applied.written || applied.applied_to_running_owner {
                     change_clock.record_config_changed();

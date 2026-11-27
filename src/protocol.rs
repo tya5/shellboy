@@ -533,6 +533,23 @@ impl ApiError {
             compaction_cause: None,
         }
     }
+    pub(crate) fn precondition_changed(
+        fact: &'static str,
+        current: Option<Value>,
+        message: &'static str,
+    ) -> Self {
+        let mut details = serde_json::json!({
+            "reason": format!("expected_{fact}_changed"),
+            "request_may_have_been_applied": false,
+        });
+        if let Some(current) = current {
+            details["current"] = current;
+        }
+        Self::new(ErrorCode::OperationConflict, message)
+            .hint("Read the current value, review the change, and use a new operation ID if you still want to act")
+            .details(details)
+    }
+
     /// Conservative recovery guidance. Specific, state-aware hints take precedence.
     pub fn with_recovery_hint(mut self) -> Self {
         if self.hint.is_some() {
@@ -1756,7 +1773,11 @@ impl Default for StatusArgs {
 }
 // Receipt-free long-poll over the owner's in-memory change clock (#243).
 args!(ConfigGetArgs {});
-args!(ConfigSetArgs { expected_hash: String, changes: Vec<ConfigChange> });
+args!(ConfigSetArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_hash: Option<String>,
+    changes: Vec<ConfigChange>
+});
 /// One named change to the configuration file. `field` is a TOML dotted key;
 /// a missing or null `value` removes the key so its default applies again.
 #[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1956,7 +1977,10 @@ pub enum WaitCondition {
 
 args!(DraftSubmitArgs {
     thread_id: Option<String>,
-    selection_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_thread_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_source_message: Option<String>,
     create: ThreadCreateArgs,
     draft: Box<crate::draft::DraftSnapshot>,
     #[serde(default)] #[schemars(with = "NewDelivery")] deliver: Deliver,
@@ -2054,14 +2078,12 @@ record!(DraftView {
     anchor: crate::draft::ViewAnchor,
     follow_tail: bool
 });
-args!(DraftSourceFence {
-    message_id: String,
-    selection_revision: u64,
-});
 args!(DraftSaveArgs {
     thread_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    expected_source: Option<DraftSourceFence>,
+    expected_source_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_thread_revision: Option<u64>,
     draft: Box<crate::draft::DraftSnapshot>,
     anchor: crate::draft::ViewAnchor,
     follow_tail: bool,

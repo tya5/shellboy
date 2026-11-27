@@ -586,12 +586,12 @@ pub fn apply_with_replace(
     before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
     replace: impl FnOnce(&Path, &Path, bool) -> std::io::Result<()>,
 ) -> Result<Applied, ApiError> {
-    apply_runtime(path, expected_hash, changes, before_replace, replace, None)
+    apply_runtime(path, Some(expected_hash), changes, before_replace, replace, None)
 }
 
 pub(crate) fn apply_live(
     path: &Path,
-    expected_hash: &str,
+    expected_hash: Option<&str>,
     changes: &[ConfigChange],
     loaded: &Config,
     clients: &crate::model::http::HttpClients,
@@ -608,15 +608,15 @@ pub(crate) fn apply_live(
 
 fn apply_runtime(
     path: &Path,
-    expected_hash: &str,
+    expected_hash: Option<&str>,
     changes: &[ConfigChange],
     before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
     replace: impl FnOnce(&Path, &Path, bool) -> std::io::Result<()>,
     runtime: Option<(&Config, &crate::model::http::HttpClients)>,
 ) -> Result<Applied, ApiError> {
     let state = read_state(path)?;
-    if state.hash != expected_hash {
-        return Err(conflict(expected_hash, &state.hash));
+    if expected_hash.is_some_and(|expected| state.hash != expected) {
+        return Err(conflict(&state.hash));
     }
     let text = std::str::from_utf8(&state.bytes).map_err(|_| {
         ApiError::new(
@@ -764,7 +764,7 @@ fn apply_runtime(
         if !written {
             let current = read_state(path)?;
             if current.hash != state.hash {
-                return Err(conflict(&state.hash, &current.hash));
+                return Err(conflict(&current.hash));
             }
         }
         clients.adopt(&after, loaded.embedding.connection.as_deref());
@@ -832,13 +832,10 @@ fn change_entry(name: &str, before: Option<Option<&Leaf>>, after: Option<&Leaf>)
     }
     entry
 }
-fn conflict(expected: &str, current: &str) -> ApiError {
-    ApiError::new(
-        ErrorCode::OperationConflict,
-        "The configuration file changed since it was read; nothing was written",
-    )
-    .hint("Read shellboy config get again, review the current values, and repeat the change with its content_hash and a new operation ID")
-    .details(json!({"reason":"config_changed","expected_hash":expected,"current_hash":current,"written":false}))
+fn conflict(current: &str) -> ApiError {
+    ApiError::precondition_changed("hash", Some(json!(current)),
+        "The configuration file changed since it was read; nothing was written")
+        .hint("Read shellboy config get again, review the current values, and repeat the change with its content_hash and a new operation ID")
 }
 
 fn change_error(index: usize, message: impl Into<String>) -> ApiError {
@@ -1244,7 +1241,7 @@ pub(crate) fn replace_atomically(
             // The last look shrinks the race with another editor to this one step.
             let again = read_state(path)?;
             if again.hash != state.hash {
-                return Err(conflict(&state.hash, &again.hash));
+                return Err(conflict(&again.hash));
             }
             Ok(())
         });

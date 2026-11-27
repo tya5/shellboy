@@ -411,9 +411,9 @@ fn a_changed_file_is_a_conflict_and_is_left_alone() {
     let error = apply(&path, &hash, &[change("ui.bell", json!(false))]).unwrap_err();
     assert_eq!(error.code, ErrorCode::OperationConflict);
     let details = error.details.as_ref().unwrap();
-    assert_eq!(details["reason"], "config_changed");
-    assert_eq!(details["expected_hash"], hash.as_str());
-    assert_eq!(details["current_hash"], hash_of(&path).as_str());
+    assert_eq!(details["reason"], "expected_hash_changed");
+    assert_eq!(details["request_may_have_been_applied"], false);
+    assert_eq!(details["current"], hash_of(&path).as_str());
     assert!(error.hint.as_deref().unwrap().contains("config get"));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), outside);
 }
@@ -925,7 +925,7 @@ fn request_validation_bounds_changes_before_the_owner_sees_them() {
     let hash = "a".repeat(64);
     let valid = |changes: Vec<ConfigChange>, hash: &str| {
         Command::ConfigSet(ConfigSetArgs {
-            expected_hash: hash.into(),
+            expected_hash: Some(hash.into()),
             changes,
         })
         .validate()
@@ -977,7 +977,7 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
         let hash = got["file"]["content_hash"].as_str().unwrap().to_owned();
 
         let args = ConfigSetArgs {
-            expected_hash: hash.clone(),
+            expected_hash: Some(hash.clone()),
             changes: vec![
                 change("default_model", json!("changed")),
                 change("shell.env.OWNER_VAR", json!("owner-secret-value")),
@@ -1025,7 +1025,7 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
         std::fs::write(&path, &moved).unwrap();
         let error = set(&control, &operation, args.clone()).await.unwrap_err();
         assert_eq!(error.code, ErrorCode::OperationConflict);
-        assert_eq!(error.details.unwrap()["reason"], "config_changed");
+        assert_eq!(error.details.unwrap()["reason"], "expected_hash_changed");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), moved);
 
         // The receipt records the outcome and holds no sensitive value.
@@ -1048,6 +1048,22 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
             assert!(!row.contains("owner-secret-value"), "{row}");
         }
         // Reads create no receipt: both rows above are the two set operations.
+
+        // Omitting the fence uses the current file, preserving the external edit.
+        let unfenced = set(
+            &control,
+            &format!("{}:config-unfenced", control.store.instance_id),
+            ConfigSetArgs {
+                expected_hash: None,
+                changes: vec![change("default_model", json!("unfenced"))],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(unfenced["written"], true);
+        let updated = std::fs::read_to_string(&path).unwrap();
+        assert!(updated.contains("# Edited elsewhere"));
+        assert_eq!(Config::parse(&updated).unwrap().default_model.as_deref(), Some("unfenced"));
 
         control.shutdown().await.unwrap();
     })
@@ -1083,7 +1099,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
                 control.store.operation_epoch.current()
             ),
             ConfigSetArgs {
-                expected_hash: hash.clone(),
+                expected_hash: Some(hash.clone()),
                 changes: vec![change("shell.env.CONFIG_MARK_TEST", json!("set"))],
             },
         )
@@ -1112,7 +1128,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
             &control,
             &format!("{}:no-op", control.store.operation_epoch.current()),
             ConfigSetArgs {
-                expected_hash: written["content_hash"].as_str().unwrap().to_owned(),
+                expected_hash: Some(written["content_hash"].as_str().unwrap().to_owned()),
                 changes: vec![change("default_model", json!("fixture"))],
             },
         )
@@ -1137,7 +1153,7 @@ async fn restart_required_config_write_publishes_events_wait_mark() {
             &control,
             &format!("{}:refused", control.store.operation_epoch.current()),
             ConfigSetArgs {
-                expected_hash: hash,
+                expected_hash: Some(hash),
                 changes: vec![change("default_model", json!("stale"))],
             },
         )
@@ -1205,7 +1221,7 @@ async fn removing_a_connection_a_thread_uses_stops_it_until_it_is_moved() {
         // config.set doesn't consult the database: this is accepted.
         let operation = format!("{}:remove", control.store.operation_epoch.current());
         let args = ConfigSetArgs {
-            expected_hash: hash,
+            expected_hash: Some(hash),
             changes: vec![removal("connections.p")],
         };
         assert_eq!(set(&control, &operation, args).await.unwrap()["written"], true);
@@ -1271,7 +1287,7 @@ async fn concurrent_sets_with_one_hash_leave_one_winner() {
         for n in 0..4 {
             let control = control.clone();
             let args = ConfigSetArgs {
-                expected_hash: hash.clone(),
+                expected_hash: Some(hash.clone()),
                 changes: vec![change("default_model", json!(format!("winner-{n}")))],
             };
             let operation = format!("{}:race-{n}", control.store.operation_epoch.current());
@@ -1539,7 +1555,7 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
             control,
             op,
             ConfigSetArgs {
-                expected_hash: hash,
+                expected_hash: Some(hash),
                 changes: vec![change("connections.fixture.spill", json!(value))],
             },
         )

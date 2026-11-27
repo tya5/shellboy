@@ -1057,7 +1057,8 @@ mod frame_delivery_tests {
         let operation = format!("{}:lost-draft", control.store.operation_epoch.current());
         let submit = Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
             thread_id: None,
-            selection_revision: None,
+            expected_thread_revision: None,
+            expected_source_message: None,
             create: crate::protocol::ThreadCreateArgs {
                 agents: None,
                 connection: None,

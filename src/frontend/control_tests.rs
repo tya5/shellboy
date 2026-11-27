@@ -2504,7 +2504,8 @@ async fn refused_native_send_restores_the_exact_frozen_draft() {
         &control,
         Command::DraftSubmit(Box::new(DraftSubmitArgs {
             thread_id: Some("thread".into()),
-            selection_revision: Some(99),
+            expected_thread_revision: Some(99),
+            expected_source_message: None,
             create: ThreadCreateArgs {
                 agents: None,
                 connection: None,
@@ -2520,7 +2521,7 @@ async fn refused_native_send_restores_the_exact_frozen_draft() {
     )
     .await
     .unwrap_err();
-    assert_eq!(refused.code, ErrorCode::InvalidState);
+    assert_eq!(refused.code, ErrorCode::OperationConflict);
     let archive = crate::control::db::DraftSubmission::id_for_operation(&operation);
     assert_eq!(
         super::message_queue::restore_archive(&control, archive)

@@ -812,7 +812,7 @@ impl Control {
         let outcome=tokio::spawn(async move{
             let _guard=control.admit(true)?;
             let references:Vec<Value>=files.iter().map(|file|json!({"path":file.path,"kind":file.kind})).collect();
-            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"text":content.text,"files":references,"args":args,"deliver":options.deliver,"selection_revision":options.expected_selection_revision,"submission":options.submission});
+            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"text":content.text,"files":references,"args":args,"deliver":options.deliver,"selection_revision":options.expected_selection_revision,"expected_source_message":options.expected_source_message,"submission":options.submission});
             content.fingerprint_positions(&mut intent);
             let reservation=control.store.reserve_internal(operation_id.clone(),intent).await?;
             let admission = match reservation {
@@ -1055,7 +1055,7 @@ impl Control {
         args: crate::protocol::DraftSubmitArgs,
     ) -> Result<Value, ApiError> {
         let expected_selection_revision = args
-            .selection_revision
+            .expected_thread_revision
             .map(i64::try_from)
             .transpose()
             .map_err(|_| {
@@ -1080,6 +1080,7 @@ impl Control {
             deliver: args.deliver,
             submission: Some(submission),
             expected_selection_revision,
+            expected_source_message: args.expected_source_message,
             request_fingerprint: None,
         };
         if let Some(edit) = edit {

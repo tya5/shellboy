@@ -1031,6 +1031,25 @@ Listing does not change settings. Do not infer capabilities from model names; em
 
 Once the conversation's purpose is clear, edit your own title with `shellboy thread set --title 'Investigation and fixes'`. Supply `--thread THREAD` for another Thread. `--title ''` clears a manual title and restores the automatic conversation-derived display. Omitting it preserves the title. Use a single line of at most 512 characters; this does not change message text or model settings.
 
+
+## Preconditions for observed state
+
+When acting on a value you read, pass the operation's optional `expected_<fact>`
+field (`--expected-<fact>` where exposed by the CLI). A changed fact returns
+`operation_conflict` with `details.reason = "expected_<fact>_changed"`,
+`details.request_may_have_been_applied = false`, and `details.current` when
+readable (`null` if the readable fact is absent). Reread and review the new
+state. Use a new operation ID only for a newly intended action; do not replay
+the action automatically.
+
+| Operation | Precondition | Read it from |
+| --- | --- | --- |
+| `config.set` | `expected_hash` (`--expected-hash`) | `config.get` → `file.content_hash` |
+| `run.stop` by Thread, `run.retry` | `expected_turn` | The selected Run's current Turn ID and generation |
+| `draft.save`, `draft.submit` | `expected_thread_revision` | Selected history or `message.get` source `selection_revision` |
+| `draft.save`, edited `draft.submit` | `expected_source_message` | The original user message ID returned by `message.get` on the selected path |
+| `shell.read` | `expected_owner` | The shell's Run and Thread IDs |
+
 ## Change settings only when asked
 
 Read settings with `shellboy config get`; it never returns a credential value. Change them with
