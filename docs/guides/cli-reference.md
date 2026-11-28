@@ -12,10 +12,13 @@ shellboy docs search --query 'subagent'
 shellboy docs get --id shellboy/delegation
 shellboy startup --last 5
 shellboy rag --help
-shellboy rag search --scope docs --scope history --query 'recovery' --mode keyword
+shellboy docs source add --name team --path ./handbook
+shellboy docs search --source team --query 'recovery'
+shellboy docs index --source shellboy --dry-run
+shellboy rag search --scope history --query 'recovery' --mode keyword
 ```
 
-`startup` reads only allowlisted stage fields from the owner log, bounded to 16 MiB across at most 64 current/rotated files; its `records_may_be_missing` warning means absent records are not zero. `docs` reads same-version English guides embedded in the executable without an API; the offline catalogue is English only. `rag` searches registered documents, guides, and explicitly selected history scopes without starting a generative model. Standalone JSON has no owner operation_id; combining with `--operation-id` is rejected. RAG partial failures return `ok:false` alongside partial results; inspect per-scope errors.
+`startup` reads only allowlisted stage fields from the owner log, bounded to 16 MiB across at most 64 current/rotated files; its `records_may_be_missing` warning means absent records are not zero. `docs` reads same-version English guides embedded in the executable without an API; configured folders add their own Markdown without translation. `rag` searches registered documents, guides, and explicitly selected history scopes without starting a generative model. Standalone JSON has no owner operation_id; combining with `--operation-id` is rejected. RAG partial failures return `ok:false` alongside partial results; inspect per-scope errors.
 
 ## Common syntax and connection
 

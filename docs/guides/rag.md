@@ -59,19 +59,19 @@ Ordinary synchronization can retire a revision from search, but does not delete 
 
 ```bash
 shellboy rag index --source notes --mode semantic
-shellboy rag index --source docs --dry-run --mode semantic
-shellboy rag index --source docs --mode semantic
-shellboy rag search --query 'recover after restarting' --scope docs --scope source:notes --mode hybrid
+shellboy docs index --source shellboy --dry-run
+shellboy docs index --source shellboy
+shellboy rag search --query 'recover after restarting' --scope source:shellboy --scope source:notes --mode hybrid
 shellboy rag search --query 'earlier decisions' --scope history:THREAD_ID --mode keyword
 # Search every conversation only when that is intended:
 shellboy rag search --query 'earlier decisions' --scope history --mode keyword
 ```
 
-semantic/hybrid use the existing `[embedding]` and connection settings. Select configuration with `--config PATH`. A missing required API connection produces an explicit error rather than silently switching to keyword search. Repeat scopes to select `docs`, `history:THREAD_ID`, global `history`, or `source:REGISTERED_ID_OR_NAME`. Without scopes, bundled guides and registered documents are searched. Conversation history is included only when explicitly selected. History access is read-only: it neither starts/recovers the conversation application nor reindexes it.
+semantic/hybrid use the existing `[embedding]` and connection settings. Select configuration with `--config PATH`. A missing required API connection produces an explicit error rather than silently switching to keyword search. Repeat scopes to select `history:THREAD_ID`, global `history`, or `source:REGISTERED_ID_OR_NAME`. Without scopes, registered material is searched. Conversation history is included only when explicitly selected. History access is read-only: it neither starts/recovers the conversation application nor reindexes it.
 
-Semantic search of bundled guides also requires `rag init` and explicit `rag index --source docs --mode semantic` beforehand. Dry-run reports document counts, text bytes, segment counts, and whether charges may occur. Search does not automatically embed guides. If they are not ready, or their revision changed after a binary upgrade, it reports the next index operation. Index without `--source` processes registered documents without implicitly adding bundled guides. The query embedding for semantic/hybrid search can itself incur API cost.
+The old `--scope docs` is retired. Run `shellboy docs index --source shellboy`, then search `--scope source:shellboy`. The standalone store upgrade removes the old built-in source but keeps cached embeddings; identical chunks can reuse them. The docs dry-run previews guide counts and bytes without initializing the store or exporting material. Search does not automatically embed documents. Query embeddings for semantic or hybrid search may incur API costs.
 
-If hybrid keyword search succeeds and the only confirmed semantic issue is an uncreated index, unindexed current profile, or missing embeddings, it returns keyword results with `ok:true`, exit code 0, and `result.degraded:true`. `scope_status` reports each scope's keyword/semantic usage, reason, missing document/chunk counts, and recovery commands in `next.steps[].command` with explicit source selection. Repeated degradation reasons appear only in `warnings`; `scope_errors` is reserved for actual scope failures. Unknown missing counts are null. Invalid/missing configuration, authentication, communication, DB/identity mismatches, and similar faults remain actual errors. Explicit semantic searches do not fall back to keyword. `shellboy docs` and docs keyword search remain available without a DB or API.
+If hybrid keyword search succeeds and the only confirmed semantic issue is an uncreated index, unindexed current profile, or missing embeddings, it returns keyword results with `ok:true`, exit code 0, and `result.degraded:true`. `scope_status` reports each scope's keyword/semantic usage, reason, missing document/chunk counts, and recovery commands in `next.steps[].command` with explicit source selection. Repeated degradation reasons appear only in `warnings`; `scope_errors` is reserved for actual scope failures. Unknown missing counts are null. Invalid/missing configuration, authentication, communication, DB/identity mismatches, and similar faults remain actual errors. Explicit semantic searches do not fall back to keyword. `shellboy docs` keyword search remains available without a DB or API.
 
 Result excerpts are not full text. Retrieve originals through the returned reference:
 
