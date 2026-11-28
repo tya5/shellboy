@@ -490,3 +490,37 @@ fn configured_list_resumes_after_examining_non_guides_in_a_wide_folder() {
     assert!(!ok, "{stale}");
     assert_eq!(stale["error"]["code"], "cursor_expired");
 }
+
+#[test]
+fn configured_docs_project_metadata_and_preview_from_the_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    let folder = root.join("guides");
+    std::fs::create_dir(&folder).unwrap();
+    let title = "Guide ".repeat(200) + "heading marker";
+    let summary = "Reference ".repeat(120) + "summary marker";
+    let text = format!("# {title}\n\n{summary}\n");
+    std::fs::write(folder.join("guide.md"), &text).unwrap();
+    let (ok, registered) = call(
+        root,
+        &[
+            "docs", "source", "add", "--name", "local", "--path", "guides",
+        ],
+    );
+    assert!(ok, "{registered}");
+    let (ok, list) = call(root, &["docs", "list", "--parent", "local"]);
+    assert!(ok, "{list}");
+    assert_eq!(list["result"]["items"][0]["title"], title);
+    assert_eq!(list["result"]["items"][0]["summary"], summary);
+    // Include entries the projection ignores; the walker still has to pass them.
+    for i in 0..225 {
+        std::fs::write(folder.join(format!("{i:03}.txt")), "not a guide").unwrap();
+    }
+    let (ok, preview) = call(root, &["docs", "index", "--source", "local", "--dry-run"]);
+    assert!(ok, "{preview}");
+    let row = &preview["result"]["sources"][0];
+    assert_eq!(row["complete"], true);
+    assert_eq!(row["files"], 1);
+    assert_eq!(row["bytes"], text.len());
+    assert!(!root.join("uncreated").exists());
+}
