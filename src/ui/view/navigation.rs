@@ -67,6 +67,19 @@ enum FollowMode {
 type ReadTicket = (u64, Option<String>);
 
 impl Navigation {
+    pub(super) fn retained_bytes(&self) -> usize {
+        super::opt_string_bytes(&self.anchor.node_id)
+            + super::opt_string_bytes(&self.scroll.anchor.node_id)
+            + super::opt_string_bytes(&self.scroll.focus)
+            + self
+                .request()
+                .map_or(0, |(_, id)| super::opt_string_bytes(id))
+            + self
+                .committed_preview
+                .as_ref()
+                .map_or(0, |(attempt, saved)| attempt.capacity() + saved.capacity())
+    }
+
     pub(in crate::ui) fn pending(&self) -> isize {
         self.intent.pending()
     }

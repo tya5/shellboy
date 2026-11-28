@@ -34,6 +34,7 @@ pub struct ThreadView {
     pub state: String,
     pub draft: DraftSnapshot,
     pub generation: u64,
+    pub(super) cache_touch: u64,
     nodes: Vec<UiNode>,
     pub(super) provisional_nodes: BTreeSet<String>,
     // At most one saved correspondence per retained provisional node.
@@ -365,6 +366,7 @@ impl ThreadView {
             state: "idle".into(),
             draft: DraftSnapshot::default(),
             generation: 0,
+            cache_touch: 0,
             nodes: Vec::new(),
             provisional_nodes: BTreeSet::new(),
             committed_nodes: BTreeMap::new(),
@@ -1835,6 +1837,7 @@ impl ThreadView {
         }
         before.saturating_sub(self.retained_body_bytes(protected))
     }
+    #[cfg(test)]
     pub(super) fn discard_cached_history(&mut self) {
         self.nodes = Vec::new();
         self.committed_nodes.clear();
@@ -1888,6 +1891,87 @@ impl ThreadView {
                 .into_vec();
         }
     }
+    pub(super) fn retained_view_bytes(&self) -> usize {
+        use std::mem::size_of;
+        let strings = [
+            self.thread_id.as_ref(),
+            self.connection.as_ref(),
+            self.model.as_ref(),
+            self.effort.as_ref(),
+            self.before_cursor.as_ref(),
+            self.run_id.as_ref(),
+            self.turn_id.as_ref(),
+            self.selecting_agents.as_ref(),
+            self.saved_tail.as_ref().and_then(|(_, _, id)| id.as_ref()),
+            self.notice_anchor.as_ref().map(|(_, _, id)| id),
+            Some(&self.title),
+            Some(&self.state),
+            Some(&self.status),
+            Some(&self.agents_path),
+        ];
+        let mut bytes = size_of::<(String, Self)>()
+            + 4 * size_of::<usize>()
+            + self.cwd.capacity()
+            + strings
+                .into_iter()
+                .flatten()
+                .map(String::capacity)
+                .sum::<usize>()
+            + self.retained_body_bytes(&[])
+            + draft_storage(&self.draft)
+            + self.navigation.retained_bytes()
+            + self.composer.retained_bytes()
+            + self.activity.retained_bytes()
+            + self.live_work.retained_bytes()
+            + self.pending_messages.retained_bytes()
+            + self.held_input.retained_bytes(|key| match key {
+                held_input::HeldKey::Saved(id) => id.capacity(),
+                _ => 0,
+            })
+            + self.awaiting_human.retained_bytes(String::capacity);
+        for id in &self.provisional_nodes {
+            bytes += expanded_id_bytes(id);
+        }
+        if let Some(node) = &self.unconfirmed_preview {
+            bytes += node_storage_bytes(node) + size_of::<UiNode>();
+        }
+        if let Some(scope) = &self.tool_observation_scope {
+            bytes += string_vec_bytes(&scope.1);
+        }
+        if let Some(item) = &self.history_focus_item {
+            bytes += size_of::<history_items::ItemRegion>()
+                + 2 * size_of::<usize>()
+                + history_interaction::key_bytes(&item.key)
+                + string_vec_bytes(&item.source_node_ids)
+                + item.primary_node_id.capacity()
+                + item.outcome.capacity()
+                + opt_string_bytes(&item.execution_id);
+        }
+        if let Some(notice) = &self.operation_notice {
+            bytes += notice.text.capacity()
+                + notice.failure.as_ref().map_or(0, |failure| {
+                    let error = &failure.1;
+                    size_of::<(Option<u64>, ApiError)>()
+                        + error.message.capacity()
+                        + opt_string_bytes(&error.hint)
+                        + error
+                            .details
+                            .as_ref()
+                            .map_or(0, crate::memory::json_retained_bytes)
+                });
+        }
+        for pending in self.pending.values() {
+            bytes += size_of::<(u64, PendingSend)>()
+                + 4 * size_of::<usize>()
+                + draft_storage(&pending.snapshot)
+                + pending.cleared_draft.as_ref().map_or(0, draft_storage)
+                + opt_string_bytes(&pending.message)
+                + opt_string_bytes(&pending.source_node_id)
+                + opt_string_bytes(&pending.operation_id);
+        }
+        bytes
+    }
+
     pub(super) fn retained_body_bytes(&self, working: &[String]) -> usize {
         let mut bytes = self.items.retained_bytes();
         bytes = bytes.saturating_add(
@@ -3581,6 +3665,37 @@ mod evicted_committed_source_tests {
         assert!(view.committed_nodes.is_empty());
         assert!(view.provisional_nodes.is_empty());
     }
+}
+
+pub(super) fn opt_string_bytes(value: &Option<String>) -> usize {
+    value.as_ref().map_or(0, String::capacity)
+}
+pub(super) fn string_vec_bytes(value: &Vec<String>) -> usize {
+    value.capacity() * std::mem::size_of::<String>()
+        + value.iter().map(String::capacity).sum::<usize>()
+}
+pub(super) fn draft_storage(draft: &DraftSnapshot) -> usize {
+    draft.draft_id.capacity()
+        + draft.text.capacity()
+        + draft.attachments.capacity() * std::mem::size_of::<crate::draft::UiAttachment>()
+        + draft
+            .attachments
+            .iter()
+            .map(|item| {
+                item.id.capacity()
+                    + item.path.capacity()
+                    + item.kind.capacity()
+                    + item.state.capacity()
+            })
+            .sum::<usize>()
+        + draft.folds.capacity() * std::mem::size_of::<crate::draft::PasteFold>()
+        + draft
+            .restored_source
+            .as_ref()
+            .map_or(0, |source| source.message_id.capacity())
+        + draft.edit.as_ref().map_or(0, |edit| {
+            edit.thread_id.capacity() + edit.node_id.capacity() + opt_string_bytes(&edit.run_id)
+        })
 }
 
 fn node_storage_bytes(node: &UiNode) -> usize {

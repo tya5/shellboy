@@ -225,6 +225,12 @@ impl<K> Default for RegionState<K> {
 }
 
 impl<K> RegionState<K> {
+    pub(super) fn retained_bytes(&self, bytes: impl Fn(&K) -> usize) -> usize {
+        self.displayed_keys.capacity() * std::mem::size_of::<K>()
+            + self.displayed_keys.iter().map(&bytes).sum::<usize>()
+            + self.selected.as_ref().map_or(0, bytes)
+    }
+
     pub fn cap(&self) -> usize {
         if self.capacity == 0 {
             10

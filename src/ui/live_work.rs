@@ -235,6 +235,47 @@ impl PartialEq for LiveWorkSnapshot {
     }
 }
 impl Eq for LiveWorkSnapshot {}
+impl LiveWorkTarget {
+    fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Shell {
+                execution_id,
+                turn_id,
+            } => execution_id.capacity() + view::opt_string_bytes(turn_id),
+            Self::Wait {
+                operation_id,
+                execution_id,
+            } => operation_id.capacity() + execution_id.capacity(),
+        }
+    }
+}
+impl LiveWorkSnapshot {
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.run_id.capacity()
+            + self.rows.capacity() * std::mem::size_of::<LiveWorkRow>()
+            + self
+                .rows
+                .iter()
+                .map(|row| {
+                    row.target.retained_bytes()
+                        + row.label.capacity()
+                        + row.state.capacity()
+                        + view::opt_string_bytes(&row.description)
+                        + view::opt_string_bytes(&row.started_at)
+                        + view::opt_string_bytes(&row.last_output_at)
+                        + row
+                            .wait_info
+                            .as_ref()
+                            .and_then(|wait| wait.target.as_ref())
+                            .map_or(0, |target| match target {
+                                WaitTarget::Shell(id)
+                                | WaitTarget::Run(id)
+                                | WaitTarget::Thread(id) => id.capacity(),
+                            })
+                })
+                .sum::<usize>()
+    }
+}
 
 fn counts_text(snapshot: &LiveWorkSnapshot, language: UiLanguage) -> String {
     if !snapshot.counts_capped {
@@ -308,6 +349,28 @@ fn byte_boundary(text: &str, limit: usize) -> usize {
 }
 
 impl LiveWorkView {
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.region.retained_bytes(LiveWorkTarget::retained_bytes)
+            + self
+                .snapshot
+                .as_ref()
+                .map_or(0, LiveWorkSnapshot::retained_bytes)
+            + view::opt_string_bytes(&self.open)
+            + view::opt_string_bytes(&self.error)
+            + self.preview.as_ref().map_or(0, |preview| {
+                preview.stdout.capacity() + preview.stderr.capacity()
+            })
+            + self
+                .markers
+                .keys()
+                .map(|id| expanded_id_bytes(id) + std::mem::size_of::<Instant>())
+                .sum::<usize>()
+            + self.seconds.capacity() * std::mem::size_of::<(Option<u64>, Option<u64>)>()
+            + self.published.as_ref().map_or(0, |(ids, open)| {
+                view::string_vec_bytes(ids) + view::opt_string_bytes(open)
+            })
+    }
+
     pub fn set_language(&mut self, language: UiLanguage) {
         self.language = language;
     }

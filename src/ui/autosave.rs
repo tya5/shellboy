@@ -3,11 +3,11 @@ use super::*;
 use std::collections::{HashSet, VecDeque};
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct Signature {
-    draft_id: String,
-    revision: u64,
-    cursor: usize,
-    anchor: ViewAnchor,
-    follow: bool,
+    pub(super) draft_id: String,
+    pub(super) revision: u64,
+    pub(super) cursor: usize,
+    pub(super) anchor: ViewAnchor,
+    pub(super) follow: bool,
 }
 impl Signature {
     fn of(view: &ThreadView) -> Self {
@@ -25,6 +25,7 @@ pub(super) struct Autosave {
     dirty: VecDeque<String>,
     queued: HashSet<String>,
     admitted: BTreeMap<String, Signature>,
+    committed: BTreeMap<String, Signature>,
 }
 pub(super) struct Request {
     key: String,
@@ -36,6 +37,26 @@ impl Autosave {
         self.dirty.retain(|key| !keys.contains(key));
         self.queued.retain(|key| !keys.contains(key));
         self.admitted.retain(|key, _| !keys.contains(key));
+        self.committed.retain(|key, _| !keys.contains(key));
+    }
+    pub(super) fn committed(&mut self, key: String, stamp: Signature) {
+        self.committed.insert(key, stamp);
+    }
+    pub(super) fn reconstructible(&self, key: &str, view: &ThreadView) -> bool {
+        !saveable(view) || self.committed.get(key) == Some(&Signature::of(view))
+    }
+    pub(super) fn cache_bytes(&self, key: &str) -> usize {
+        [&self.admitted, &self.committed]
+            .iter()
+            .filter_map(|map| map.get(key))
+            .map(|stamp| {
+                std::mem::size_of::<(String, Signature)>()
+                    + 4 * std::mem::size_of::<usize>()
+                    + key.len()
+                    + stamp.draft_id.capacity()
+                    + stamp.anchor.node_id.as_ref().map_or(0, String::capacity)
+            })
+            .sum()
     }
     pub(super) fn pending(&self) -> bool {
         !self.dirty.is_empty()

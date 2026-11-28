@@ -335,6 +335,23 @@ enum RecallKey {
     Submit,
 }
 impl Composer {
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.reply
+            .as_ref()
+            .map_or(0, message_queue::ReplyTarget::retained_bytes)
+            + self
+                .reply_submission
+                .as_ref()
+                .map_or(0, |(_, id)| id.capacity())
+            + self.selection.as_ref().map_or(0, |(id, _)| id.capacity())
+            + view::opt_string_bytes(&self.dismissed)
+            + self.recall.as_ref().map_or(0, |recall| {
+                view::draft_storage(&recall.original)
+                    + view::opt_string_bytes(&recall.node_id)
+                    + recall.queued.capacity() * std::mem::size_of::<RecallKey>()
+            })
+    }
+
     pub(super) fn edited(&mut self) -> bool {
         let recalled = self.recall.take().is_some();
         self.selection = None;

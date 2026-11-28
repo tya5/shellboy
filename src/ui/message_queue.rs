@@ -1,6 +1,34 @@
 //! Current saved input, separate from immutable selected conversation history.
 use super::*;
 use crate::config::UiLanguage;
+impl PendingMessages {
+    pub(super) fn retained_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.items.capacity() * size_of::<PendingMessage>()
+            + self
+                .items
+                .iter()
+                .map(PendingMessage::retained_bytes)
+                .sum::<usize>()
+            + self.submitted.capacity() * size_of::<SubmittedMessage>()
+            + self
+                .submitted
+                .iter()
+                .map(|item| {
+                    item.operation_id.capacity()
+                        + item.source_draft_id.capacity()
+                        + item.message_id.capacity()
+                })
+                .sum::<usize>()
+            + self.awaiting_replies.capacity() * size_of::<ReplyTarget>()
+            + self
+                .awaiting_replies
+                .iter()
+                .map(ReplyTarget::retained_bytes)
+                .sum::<usize>()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PendingMessages {
     pub items: Vec<PendingMessage>,
@@ -20,6 +48,14 @@ pub struct ReplyTarget {
     pub elapsed_ms: u64,
 }
 impl ReplyTarget {
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.message_id.capacity()
+            + self.sender.capacity()
+            + self.created_at.capacity()
+            + self.excerpt.capacity()
+            + self.recipient_thread_id.capacity()
+    }
+
     pub(super) fn caption(&self, language: UiLanguage) -> String {
         let text =
             crate::presentation::sanitize_plain(&format!("{}: {}", self.sender, self.excerpt), 0)
@@ -55,6 +91,20 @@ pub struct PendingMessage {
     pub expect_reply: bool,
 }
 impl PendingMessage {
+    fn retained_bytes(&self) -> usize {
+        self.message_id.capacity()
+            + self.operation_id.capacity()
+            + self.created_at.capacity()
+            + self.excerpt.capacity()
+            + view::opt_string_bytes(&self.sender_thread)
+            + match &self.held_by {
+                Some(crate::protocol::MessageHeldBy::ForegroundShell { execution_id }) => {
+                    execution_id.capacity()
+                }
+                _ => 0,
+            }
+    }
+
     fn sender(&self, language: UiLanguage) -> String {
         match (&self.sender_thread, language) {
             (Some(id), UiLanguage::Ja) => {

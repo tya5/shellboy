@@ -889,7 +889,10 @@ fn decode_frame_checked(
         + stamp.preamble.as_ref().map_or(0, String::capacity)
         + group.as_ref().map_or(0, String::capacity)
         + items.capacity() * size_of::<Value>()
-        + items.iter().map(heap_bytes).sum::<usize>();
+        + items
+            .iter()
+            .map(crate::memory::json_retained_bytes)
+            .sum::<usize>();
     ledger.live.fetch_add(bytes, Ordering::AcqRel);
     Ok(Frame {
         #[cfg(test)]
@@ -995,24 +998,6 @@ fn load_uncached_mode(
         return ReplayLease::new(&frames, None).map_err(|_| inspection::unassociated_fault());
     }
     ReplayLease::new(&frames, None)
-}
-// serde_json::Value owns nested strings, Vec capacity and map allocations. The
-// per-map-entry allowance conservatively covers tree-node pointers/alignment.
-fn heap_bytes(value: &Value) -> usize {
-    match value {
-        Value::String(text) => text.capacity(),
-        Value::Array(values) => {
-            values.capacity() * size_of::<Value>() + values.iter().map(heap_bytes).sum::<usize>()
-        }
-        Value::Object(values) => {
-            values.len() * (size_of::<(String, Value)>() + size_of::<[usize; 8]>())
-                + values
-                    .iter()
-                    .map(|(key, value)| key.capacity() + heap_bytes(value))
-                    .sum::<usize>()
-        }
-        _ => 0,
-    }
 }
 
 #[cfg(test)]

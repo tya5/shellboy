@@ -588,32 +588,6 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(error) => {
-            return print_error(
-                ApiError::new(
-                    ErrorCode::IoFailed,
-                    format!("Cannot read startup directory: {error}"),
-                ),
-                None,
-            );
-        }
-    };
-    let loaded = match shellboy::config::Config::load_with_overrides(
-        cli.config.as_deref(),
-        cli.data_dir.as_deref(),
-        &cwd,
-        &shellboy::config::PathEnvironment::current(),
-    ) {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            return print_error(
-                ApiError::new(ErrorCode::InvalidArgument, error.to_string()),
-                None,
-            );
-        }
-    };
     let mut session = match shellboy::ui::TerminalSession::enter() {
         Ok(session) => session,
         Err(error) => {
@@ -622,18 +596,48 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         }
     };
     let cancel = tokio_util::sync::CancellationToken::new();
-    let (_progress, stages) = tokio::sync::watch::channel(shellboy::app::StartupProgress {
-        stage: shellboy::app::StartupStage::Endpoint,
-        language: loaded.config.ui.language,
+    let (progress, stages) = tokio::sync::watch::channel(shellboy::app::StartupProgress {
+        stage: shellboy::app::StartupStage::Configuration,
         ..Default::default()
     });
     let (send, pending) = std::sync::mpsc::sync_channel(1);
     let token = cancel.clone();
     let startup_started = std::time::Instant::now();
     let initializer = runtime.spawn(async move {
-        let result = shellboy::serve::attach_or_start(&loaded, &token)
-            .await
-            .map(|welcome| welcome.map(|welcome| (loaded, welcome)));
+        let result = async {
+            let configuration = tokio::task::spawn_blocking(move || {
+                let cwd = std::env::current_dir().map_err(|error| {
+                    ApiError::new(
+                        ErrorCode::IoFailed,
+                        format!("Cannot read startup directory: {error}"),
+                    )
+                })?;
+                let loaded = shellboy::config::Config::load_with_overrides(
+                    cli.config.as_deref(),
+                    cli.data_dir.as_deref(),
+                    &cwd,
+                    &shellboy::config::PathEnvironment::current(),
+                )
+                .map_err(|error| ApiError::new(ErrorCode::InvalidArgument, error.to_string()))?;
+                Ok::<_, ApiError>((cwd, loaded))
+            });
+            let (cwd, loaded) = tokio::select! {
+                biased;
+                _ = token.cancelled() => return Ok(None),
+                loaded = configuration => loaded
+                    .map_err(|_| ApiError::new(ErrorCode::IoFailed, "TUI configuration worker failed"))??,
+            };
+            progress.send_replace(shellboy::app::StartupProgress {
+                stage: shellboy::app::StartupStage::Endpoint,
+                language: loaded.config.ui.language,
+                motion: loaded.config.ui.motion,
+                ..Default::default()
+            });
+            shellboy::serve::attach_or_start(&loaded, &token)
+                .await
+                .map(|welcome| welcome.map(|welcome| (cwd, loaded, welcome)))
+        }
+        .await;
         let _ = send.try_send(result);
     });
     let ready = shellboy::ui::startup::wait_with_termination(
@@ -644,7 +648,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         &termination,
         startup_started,
     );
-    let (loaded, welcome) = match ready {
+    let (cwd, loaded, welcome) = match ready {
         Ok(Ok(Some(ready))) if !cancel.is_cancelled() => ready,
         Ok(Ok(_)) => {
             drop(session);

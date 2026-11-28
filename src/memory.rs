@@ -104,6 +104,27 @@ fn native(metrics: &mut Value) {
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn native(_: &mut Value) {}
 
+// serde_json::Value owns nested strings, Vec capacity and map allocations. The
+// per-map-entry allowance conservatively covers tree-node pointers/alignment.
+pub(crate) fn json_retained_bytes(value: &Value) -> usize {
+    match value {
+        Value::String(text) => text.capacity(),
+        Value::Array(values) => {
+            values.capacity() * std::mem::size_of::<Value>()
+                + values.iter().map(json_retained_bytes).sum::<usize>()
+        }
+        Value::Object(values) => {
+            values.len()
+                * (std::mem::size_of::<(String, Value)>() + std::mem::size_of::<[usize; 8]>())
+                + values
+                    .iter()
+                    .map(|(key, value)| key.capacity() + json_retained_bytes(value))
+                    .sum::<usize>()
+        }
+        _ => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

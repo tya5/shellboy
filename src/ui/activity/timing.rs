@@ -37,6 +37,14 @@ pub(super) struct PhaseClock {
     observed: bool,
 }
 impl PhaseClock {
+    pub(super) fn retained_bytes(&self) -> usize {
+        [&self.key.0, &self.key.1, &self.key.2]
+            .into_iter()
+            .flatten()
+            .map(String::capacity)
+            .sum()
+    }
+
     pub fn observe(view: &ActivityView, previous: Option<Self>, at: Instant) -> Option<Self> {
         Self::for_phase(view, view.phase(), previous, at)
     }

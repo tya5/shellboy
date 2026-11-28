@@ -153,6 +153,7 @@ pub(in crate::control) struct BackgroundJob {
     cancel: tokio_util::sync::CancellationToken,
     started: Option<tokio::sync::oneshot::Receiver<()>>,
     task: tokio::task::JoinHandle<Result<ProactiveOutcome, ApiError>>,
+    completed: Arc<std::sync::atomic::AtomicBool>,
 }
 impl BackgroundJob {
     #[cfg(test)]
@@ -164,7 +165,12 @@ impl BackgroundJob {
             cancel,
             started: None,
             task,
+            completed: Arc::default(),
         }
+    }
+
+    pub(in crate::control) fn completed_work(&self) -> bool {
+        self.completed.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub(in crate::control) fn is_finished(&self) -> bool {
@@ -843,6 +849,8 @@ pub(super) fn spawn_background(
     let (started_tx, started) = tokio::sync::oneshot::channel();
     let thread = snapshot.thread.clone();
     let control_for_cleanup = control.clone();
+    let completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let completed_by_task = completed.clone();
     let task = tokio::spawn(async move {
         let result = std::panic::AssertUnwindSafe(async {
             let guard = tokio::select! {
@@ -873,11 +881,13 @@ pub(super) fn spawn_background(
         if matches!(&result, Err(error) if error.is_storage_failure()) {
             control.fail_storage().await;
         }
-        // Keep the Thread slot until some Run or owner shutdown joins this handle.
+        // No compaction work remains. Publish before either cleanup path checks
+        // the slot; the JoinHandle itself is not yet finished at this point.
+        completed_by_task.store(true, std::sync::atomic::Ordering::Release);
         slot.nudge.notify_one();
         control_for_cleanup
             .live
-            .prune_idle_background(&thread, &slot.proactive_job)
+            .prune_completed_background(&thread, &slot.proactive_job)
             .await;
         control_for_cleanup.changed(&thread);
         result
@@ -887,5 +897,6 @@ pub(super) fn spawn_background(
         cancel,
         started: Some(started),
         task,
+        completed,
     }
 }

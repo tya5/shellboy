@@ -34,6 +34,7 @@ impl DraftSaver {
             let mut failure = None;
             let mut refused_anchors = HashMap::new();
             while let Some((thread, draft, anchor, follow)) = receiver.recv().await {
+                let stamp = (draft.draft_id.clone(), draft.revision, draft.cursor);
                 let restored = draft
                     .restored_source
                     .clone()
@@ -80,7 +81,9 @@ impl DraftSaver {
                     .send(BackgroundResult::DraftSaved {
                         thread_id: thread,
                         restored,
+                        stamp,
                         anchor,
+                        follow,
                         result,
                     })
                     .await;

@@ -373,6 +373,68 @@ pub(super) struct ActivityView {
     request_clock: Option<PhaseClock>,
 }
 impl ActivityView {
+    pub(super) fn retained_bytes(&self) -> usize {
+        use super::view::{opt_string_bytes, string_vec_bytes};
+        opt_string_bytes(&self.received_attempt)
+            + [&self.receive, &self.early_receive]
+                .into_iter()
+                .flatten()
+                .map(|observed| observed.attempt.capacity())
+                .sum::<usize>()
+            + self
+                .phase_clock
+                .as_ref()
+                .map_or(0, PhaseClock::retained_bytes)
+            + self
+                .request_clock
+                .as_ref()
+                .map_or(0, PhaseClock::retained_bytes)
+            + self.snapshot.as_ref().map_or(0, |s| {
+                [
+                    &s.revisit,
+                    &s.run_id,
+                    &s.turn_id,
+                    &s.attempt_id,
+                    &s.timing.attempt_started_at,
+                    &s.timing.tool_started_at,
+                ]
+                .into_iter()
+                .map(opt_string_bytes)
+                .sum::<usize>()
+                    + s.live_work
+                        .as_ref()
+                        .map_or(0, super::live_work::LiveWorkSnapshot::retained_bytes)
+                    + s.automatic_compaction
+                        .as_ref()
+                        .map_or(0, |c| c.started_at.capacity())
+                    + s.recovery.as_ref().map_or(0, |r| {
+                        r.stage.capacity()
+                            + r.message.capacity()
+                            + opt_string_bytes(&r.stop_reason)
+                            + r.content_filter.as_ref().map_or(0, |f| {
+                                f.reason
+                                    .as_ref()
+                                    .map_or(0, crate::memory::json_retained_bytes)
+                                    + string_vec_bytes(&f.next_actions)
+                                    + f.facts.capacity()
+                                        * std::mem::size_of::<
+                                            crate::model::content_filter::FilterFact,
+                                        >()
+                                    + f.facts
+                                        .iter()
+                                        .map(|fact| {
+                                            fact.path.capacity()
+                                                + fact
+                                                    .value
+                                                    .as_ref()
+                                                    .map_or(0, crate::memory::json_retained_bytes)
+                                        })
+                                        .sum::<usize>()
+                            })
+                    })
+            })
+    }
+
     #[cfg(test)]
     pub fn accept(&mut self, epoch: u64, snapshot: ActivitySnapshot) -> bool {
         self.accept_at(epoch, snapshot, Instant::now())

@@ -273,6 +273,50 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completed_background_summary_releases_inactive_thread_slot() {
+    let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
+    let HeldSummaryPhase { summary, normal } = fx.held_phase.take().unwrap();
+    let mut events = fx.control.subscribe();
+    let slot = fx.control.live.test_drivers().lock().await[&fx.target]
+        .id
+        .clone();
+    normal
+        .reply
+        .send((200, answer_with_usage("normal complete", 100)))
+        .unwrap();
+    crate::test_watchdog::watchdog(
+        "Run retires while summary held",
+        wait_for_driver_retired(&fx.control, &fx.target, &slot),
+    )
+    .await
+    .unwrap();
+    summary
+        .reply
+        .send((200, answer_with_usage("summary complete", 20)))
+        .unwrap();
+    crate::test_watchdog::watchdog("summary completion releases its inactive slot", async {
+        loop {
+            if !fx
+                .control
+                .live
+                .test_drivers()
+                .lock()
+                .await
+                .contains_key(&fx.target)
+            {
+                break;
+            }
+            let _ = events.recv().await;
+        }
+    })
+    .await
+    .unwrap();
+    fx.control.shutdown().await.unwrap();
+    fx.owner.shutdown().await.unwrap();
+    fx.server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_boundary() {
     let mut retained_fx: Option<DriverLifecycleFixture> = None;
     let mut retained_summary: Option<Incoming> = None;

@@ -1022,6 +1022,14 @@ pub enum UiUpdate {
         anchor: ViewAnchor,
         message: String,
     },
+    DraftViewSaved {
+        thread_id: String,
+        draft_id: String,
+        revision: u64,
+        cursor: usize,
+        anchor: ViewAnchor,
+        follow: bool,
+    },
     DraftSaveFailed {
         thread_id: String,
         message: String,
@@ -1746,6 +1754,7 @@ pub struct UiState {
     key_hints: key_hints::Cache,
     pub views: BTreeMap<String, ThreadView>,
     pub active: String,
+    view_cache_clock: u64,
     thread_browser: threads::ThreadBrowser,
     descendants: watch::DescendantView,
     pub selection_mode: bool,
@@ -1946,6 +1955,7 @@ impl UiState {
             queue_notifications: VecDeque::new(),
             next_model_request: 0,
             autosave: Default::default(),
+            view_cache_clock: 0,
             batching_updates: false,
             retention_pending: false,
             #[cfg(test)]
@@ -3462,6 +3472,29 @@ impl UiState {
                     });
                 }
             }
+            UiUpdate::DraftViewSaved {
+                thread_id,
+                draft_id,
+                revision,
+                cursor,
+                anchor,
+                follow,
+            } => {
+                if let Some((key, _)) = self.views.iter().find(|(_, view)| {
+                    view.thread_id.as_deref() == Some(&thread_id) && view.draft.draft_id == draft_id
+                }) {
+                    self.autosave.committed(
+                        key.clone(),
+                        autosave::Signature {
+                            draft_id,
+                            revision,
+                            cursor,
+                            anchor,
+                            follow,
+                        },
+                    );
+                }
+            }
             UiUpdate::DraftSaveFailed { thread_id, message } => {
                 self.retry_save(&thread_id, &message)
             }
@@ -3741,9 +3774,10 @@ impl UiState {
                 });
                 view.status = i18n::local!(language, "原依頼・元会話は変更しません。編集後Enterで新しい会話へ送信", "The original request and conversation stay unchanged. Edit, then Enter to send in a new conversation").into();
                 let key = view.draft.draft_id.clone();
+                self.deferred_actions.extend(self.persist_active());
                 self.views.insert(key.clone(), view);
                 self.active_view_mut().items.cancel_pending();
-                self.active = key;
+                self.adopt_view(key);
                 self.active_view_mut().items.cancel_pending();
                 self.deferred_actions.push(UiAction::ActivateDraft {
                     draft_id: self.view().draft.draft_id.clone(),
@@ -4385,6 +4419,12 @@ impl UiState {
             })
             .collect()
     }
+    fn adopt_view(&mut self, key: String) {
+        self.view_cache_clock = self.view_cache_clock.saturating_add(1);
+        self.views.get_mut(&key).expect("selected view").cache_touch = self.view_cache_clock;
+        self.active = key;
+    }
+
     pub fn select_thread(&mut self, thread_id: String) -> Vec<UiAction> {
         self.thread_browser.mark_opened(&thread_id);
         self.operations = None;
@@ -4412,7 +4452,7 @@ impl UiState {
             }
             let mut actions = self.persist_active();
             self.active_view_mut().items.cancel_pending();
-            self.active = key;
+            self.adopt_view(key);
             self.active_view_mut().items.cancel_pending();
             actions.push(UiAction::ActivateDraft {
                 draft_id: self.view().draft.draft_id.clone(),
@@ -4446,7 +4486,7 @@ impl UiState {
         };
         self.active_view_mut().items.cancel_pending();
         self.active_view_mut().clear_unconfirmed_preview();
-        self.active = key;
+        self.adopt_view(key);
         self.active_view_mut().items.cancel_pending();
         self.thread_browser.close();
         let generation = self.generation;
@@ -4488,7 +4528,7 @@ impl UiState {
         let key = view.draft.draft_id.clone();
         self.views.insert(key.clone(), view);
         self.active_view_mut().items.cancel_pending();
-        self.active = key;
+        self.adopt_view(key);
         self.active_view_mut().items.cancel_pending();
         actions.push(UiAction::ActivateDraft {
             draft_id: self.view().draft.draft_id.clone(),
@@ -6184,79 +6224,69 @@ cursor: None,
             self.retention_passes += 1;
         }
         let budget = usize::try_from(self.config.cache.body_bytes).unwrap_or(usize::MAX);
-        for view in self.views.values_mut() {
-            view.retain_source_ids();
-        }
-        // Determine the viewport working set once. These same nodes are exempt
-        // from both payload and metadata retention, including at either edge.
+        let mut inactive = Vec::new();
         let working = self.retained_working_node_ids();
-        let mut evicted_bodies = 0u64;
-        let mut retained = self
-            .views
-            .iter()
-            .map(|(key, view)| {
-                retained_body_bytes(view, if key == &self.active { &working } else { &[] })
-            })
-            .sum::<usize>();
+        let mut retained = retained_body_bytes(self.view(), &working);
+        for (key, view) in &mut self.views {
+            view.retain_source_ids();
+            if key == &self.active
+                || view.thread_id.is_none()
+                || view.selecting_agents.is_some()
+                || view.pending.values().any(|pending| {
+                    matches!(
+                        pending.status,
+                        ReceiptStatus::Accepting | ReceiptStatus::Unknown
+                    )
+                })
+                || !self.autosave.reconstructible(key, view)
+            {
+                continue;
+            }
+            let weight = view
+                .retained_view_bytes()
+                .saturating_add(key.capacity())
+                .saturating_add(self.autosave.cache_bytes(key));
+            retained = retained.saturating_add(weight);
+            inactive.push((view.cache_touch, key.clone(), weight));
+        }
         if retained <= budget {
             return;
         }
-        for (key, view) in &mut self.views {
-            let protected = if key == &self.active {
-                view.nodes()
-                    .iter()
-                    .filter(|node| working.contains(&node.node_id))
-                    .flat_map(|node| {
-                        node.presentation.blocks.iter().enumerate().filter_map(
-                            move |(index, block)| {
-                                block
-                                    .tool
-                                    .as_ref()
-                                    .map(|tool| ItemKey::tool(tool, &node.node_id, index))
-                            },
-                        )
-                    })
-                    .chain(view.items.focus.iter().cloned())
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            };
-            retained = retained.saturating_sub(view.items.evict_previews_except(&protected));
-        }
-        // Vec::clear/remove leave the allocation alive. Release spare slots
-        // before evicting useful content, and account for their actual capacity.
-        for view in self.views.values_mut() {
-            retained = retained.saturating_sub(view.compact_node_slots());
-        }
-        let mut inactive = self
-            .views
-            .iter()
-            .filter(|(key, _)| *key != &self.active)
-            .map(|(key, view)| (view.generation, key.clone()))
-            .collect::<Vec<_>>();
-        inactive.sort();
-        for (_, key) in inactive {
+        inactive.sort_unstable();
+        let mut evicted = BTreeSet::new();
+        for (_, key, weight) in inactive {
             if retained <= budget {
                 break;
             }
-            let view = self.views.get_mut(&key).expect("known inactive view");
-            let before = view.nodes().len();
-            retained = retained.saturating_sub(view.discard_committed_previews_except(&[]));
-            evicted_bodies += before.saturating_sub(view.nodes().len()) as u64;
-            for index in 0..view.nodes().len() {
-                if retained <= budget {
-                    break;
-                }
-                let freed = view.evict_node_body(index);
-                evicted_bodies += u64::from(freed > 0);
-                retained = retained.saturating_sub(freed);
-            }
-            if retained > budget {
-                retained = retained.saturating_sub(retained_body_bytes(view, &[]));
-                view.discard_cached_history();
-            }
+            self.views.remove(&key);
+            evicted.insert(key);
+            retained = retained.saturating_sub(weight);
         }
+        self.autosave.forget_views(&evicted);
+        let mut evicted_bodies = 0;
         let view = self.active_view_mut();
+        if retained > budget {
+            let protected = view
+                .nodes()
+                .iter()
+                .filter(|node| working.contains(&node.node_id))
+                .flat_map(|node| {
+                    node.presentation
+                        .blocks
+                        .iter()
+                        .enumerate()
+                        .filter_map(move |(i, block)| {
+                            block
+                                .tool
+                                .as_ref()
+                                .map(|tool| ItemKey::tool(tool, &node.node_id, i))
+                        })
+                })
+                .chain(view.items.focus.iter().cloned())
+                .collect::<Vec<_>>();
+            retained = retained.saturating_sub(view.items.evict_previews_except(&protected));
+            retained = retained.saturating_sub(view.compact_node_slots());
+        }
         if retained > budget {
             let before = view.nodes().len();
             retained = retained.saturating_sub(view.discard_committed_previews_except(&working));
@@ -8362,13 +8392,7 @@ mod layout_cache_tests {
             assert!(!value.presentation.body_evicted, "painted body lost: {id}");
             assert!(!value.text.is_empty(), "painted source lost: {id}");
         }
-        assert!(
-            ui.views[&inactive].nodes().is_empty()
-                || ui.views[&inactive]
-                    .nodes()
-                    .iter()
-                    .all(|node| node.text.is_empty())
-        );
+        assert!(!ui.views.contains_key(&inactive));
         // This is a viewport lease, never a growing Turn lease.
         ui.remember_painted_bodies(&BTreeSet::from([0]));
         assert_eq!(ui.painted_body_nodes.as_ref().unwrap().2.len(), 1);
@@ -8460,29 +8484,96 @@ mod layout_cache_tests {
         ui.select_thread("old".into());
         history(&mut ui, "old", &"a".repeat(512));
         let old = ui.active.clone();
+        ui.view_mut().navigation.select_reading();
+        let anchor = ViewAnchor {
+            node_id: Some("old".into()),
+            char_offset: 17,
+        };
+        ui.view_mut().navigation.anchor = anchor.clone();
         ui.select_thread("recent".into());
         history(&mut ui, "recent", &"b".repeat(512));
         let recent = ui.active.clone();
+        assert!(
+            matches!(ui.select_thread("old".into()).last(), Some(UiAction::SelectThread { known_view: Some((saved, false)), .. }) if saved == &anchor)
+        );
         ui.select_thread("active".into());
         *ui.view_mut().nodes_mut_for_test() = vec![
             node("x", &"x".repeat(8192)),
             node("y", &"y".repeat(8192)),
             node("z", &"z".repeat(8192)),
         ];
-        let retained = retained_body_bytes(&ui.views[&old], &[])
-            + retained_body_bytes(&ui.views[&recent], &[]);
-        ui.config.cache.body_bytes = retained as u64;
+        let fits = ui.views[&old].retained_view_bytes()
+            + old.capacity()
+            + ui.views[&recent].retained_view_bytes()
+            + recent.capacity();
+        ui.config.cache.body_bytes = fits as u64;
         ui.trim_bodies();
-        assert_eq!(
-            ui.views[&old].nodes()[0].text.len(),
-            512,
-            "active working bodies cannot evict budget-fitting history"
+        assert!(ui.views.contains_key(&old) && ui.views.contains_key(&recent));
+        ui.config.cache.body_bytes = (fits - 1) as u64;
+        ui.trim_bodies();
+        assert!(
+            !ui.views.contains_key(&recent),
+            "revisiting old made recent the least recently used"
         );
-        ui.config.cache.body_bytes = (retained - 512) as u64;
-        ui.trim_bodies();
-        assert!(ui.views[&old].nodes()[0].text.is_empty());
-        assert_eq!(ui.views[&recent].nodes()[0].text.len(), 512);
+        assert_eq!(ui.views[&old].navigation.anchor, anchor);
         assert!(ui.view().nodes().iter().all(|n| n.text.len() == 8192));
+        assert!(matches!(
+            ui.select_thread("recent".into()).last(),
+            Some(UiAction::SelectThread {
+                known_view: None,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn inactive_unknown_send_and_unconfirmed_save_pin_the_view() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("old".into());
+        ui.insert("exact unsent text", false);
+        let old = ui.active.clone();
+        let draft = ui.view().draft.clone();
+        let anchor = ui.view().navigation.anchor.clone();
+        let follow = ui.view().navigation.follow();
+        ui.view_mut().pending.insert(
+            draft.revision,
+            PendingSend {
+                snapshot: draft.clone(),
+                status: ReceiptStatus::Unknown,
+                operation_id: Some("exact-op".into()),
+                message: None,
+                source_node_id: None,
+                cleared_draft: None,
+                restored_revision: None,
+                send: None,
+            },
+        );
+        ui.config.cache.body_bytes = 0;
+        ui.select_thread("other".into());
+        assert_eq!(ui.views[&old].draft.text, "exact unsent text");
+        ui.apply(UiUpdate::DraftViewSaved {
+            thread_id: "old".into(),
+            draft_id: draft.draft_id.clone(),
+            revision: draft.revision,
+            cursor: draft.cursor,
+            anchor,
+            follow,
+        });
+        assert!(
+            ui.views.contains_key(&old),
+            "an owner save cannot unpin an unknown send"
+        );
+        ui.apply(UiUpdate::Receipt {
+            draft_id: draft.draft_id,
+            revision: draft.revision,
+            thread_id: None,
+            status: ReceiptStatus::Failed,
+            message: Some("not adopted".into()),
+        });
+        assert!(
+            !ui.views.contains_key(&old),
+            "the resolved send no longer pins the saved view"
+        );
     }
     #[test]
     fn projection_work_and_row_metadata_are_bounded_independently_of_retained_history() {

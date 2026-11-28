@@ -6,7 +6,10 @@ impl UiUpdate {
     pub(super) fn needs_retention(&self) -> bool {
         // Exhaustive: new update kinds must choose their cache responsibility.
         match self {
-            Self::CurrentView { .. }
+            Self::DraftViewSaved { .. }
+            | Self::Receipt { .. }
+            | Self::ExactSubmission { .. }
+            | Self::CurrentView { .. }
             | Self::ToolPreview { .. }
             | Self::ToolFacts { .. }
             | Self::HistoryWindow { .. }
@@ -67,12 +70,10 @@ impl UiUpdate {
             | Self::DraftAnchorExpired { .. }
             | Self::DraftSaveFailed { .. }
             | Self::ReceiptSource { .. }
-            | Self::ExactSubmission { .. }
             | Self::RestoredSnapshot { .. }
             | Self::DraftSourceSaved { .. }
             | Self::LoadFailed { .. }
             | Self::HistoryInvalidated { .. }
-            | Self::Receipt { .. }
             | Self::HistoryRebaseNotice { .. }
             | Self::DraftStatus { .. }
             | Self::TerminalRequest { .. }

@@ -359,7 +359,9 @@ enum BackgroundResult {
     DraftSaved {
         thread_id: String,
         restored: Option<(String, crate::draft::RestoredSource)>,
+        stamp: (String, u64, usize),
         anchor: ViewAnchor,
+        follow: bool,
         result: Result<(), ApiError>,
     },
     Refreshed {
@@ -3109,10 +3111,12 @@ async fn run_client(
                         update(&updates, UiUpdate::StorageFailed { thread_id, message: crate::config_setup::tui_error(&error) }).await;
                     }
                 }
-                Some(BackgroundResult::DraftSaved { restored: Some((draft_id, source)), result: Ok(()), .. }) => {
-                    update(&updates, UiUpdate::DraftSourceSaved { draft_id, source }).await;
+                Some(BackgroundResult::DraftSaved { thread_id, restored, stamp: (draft_id, revision, cursor), anchor, follow, result: Ok(()) }) => {
+                    if let Some((draft_id, source)) = restored {
+                        update(&updates, UiUpdate::DraftSourceSaved { draft_id, source }).await;
+                    }
+                    update(&updates, UiUpdate::DraftViewSaved { thread_id, draft_id, revision, cursor, anchor, follow }).await;
                 }
-                Some(BackgroundResult::DraftSaved { restored: None, result: Ok(()), .. }) => {},
                 Some(BackgroundResult::Refreshed {
                     thread_id,
                     receipts,

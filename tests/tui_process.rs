@@ -357,6 +357,80 @@ async fn seed_paused_history(data: &std::path::Path, source: &str) -> (String, S
     (thread, paused_at)
 }
 
+#[tokio::test]
+async fn tui_startup_can_terminate_while_credential_inspection_is_blocked() {
+    use std::os::unix::ffi::OsStrExt;
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let credentials = root.path().join("credentials.toml");
+    std::fs::write(&config, "").unwrap();
+    let fifo = std::ffi::CString::new(credentials.as_os_str().as_bytes()).unwrap();
+    // No writer: a synchronous inspection on the terminal thread would prevent
+    // the startup render and the normal startup cancellation path.
+    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+    let (mut master, mut slave) = (-1, -1);
+    let mut size = libc::winsize {
+        ws_row: 24,
+        ws_col: 100,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::addr_of_mut!(size),
+            )
+        },
+        0
+    );
+    let mut terminal = unsafe { File::from_raw_fd(master) };
+    let slave = unsafe { File::from_raw_fd(slave) };
+    let flags = unsafe { libc::fcntl(master, libc::F_GETFL) };
+    assert!(flags >= 0);
+    assert_eq!(
+        unsafe { libc::fcntl(master, libc::F_SETFL, flags | libc::O_NONBLOCK) },
+        0
+    );
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+    crate::pty_session::isolate_child(&mut command);
+    let data = root.path().join("data");
+    let mut child = command
+        .arg("--config")
+        .arg(&config)
+        .arg("--data-dir")
+        .arg(&data)
+        .current_dir(root.path())
+        .env("TERM", "xterm-256color")
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave)
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut output = Vec::new();
+    read_until_text(
+        &mut terminal,
+        &mut output,
+        "Checking configuration and storage",
+    )
+    .await;
+    let pid = i32::try_from(child.id().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+    // Drain the PTY while shutdown repaints and restores the terminal.
+    read_until(&mut terminal, &mut output, b"\x1b[?1049l").await;
+    let status =
+        crate::test_watchdog::watchdog("quit with blocked credential inspection", child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    assert!(status.success(), "{status}");
+    assert!(!data.join("endpoint.json").exists());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     let binary = std::env::var_os("SHELLBOY_TEST_CLI_BINARY")

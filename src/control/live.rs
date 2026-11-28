@@ -33,6 +33,14 @@ async fn return_joined_slot(slot: &DriverSlot) {
     slot.proactive_join_done.notify_waiters();
 }
 
+fn can_retire_background(job: &ThreadJob) -> bool {
+    match job {
+        ThreadJob::Idle => true,
+        ThreadJob::Retained(job) => job.completed_work(),
+        ThreadJob::Joining => false,
+    }
+}
+
 #[derive(Default)]
 pub(super) struct LiveRegistry {
     drivers: Mutex<HashMap<String, DriverSlot>>,
@@ -174,7 +182,7 @@ impl LiveRegistry {
             .cloned()
         {
             entry.driver_active.store(false, Ordering::Release);
-            if !matches!(*entry.proactive_job.lock().await, ThreadJob::Idle) {
+            if !can_retire_background(&*entry.proactive_job.lock().await) {
                 return false;
             }
             drivers.remove(thread);
@@ -300,10 +308,29 @@ impl LiveRegistry {
         }
     }
 
+    pub(super) async fn prune_completed_background(
+        &self,
+        thread: &str,
+        job: &Arc<Mutex<ThreadJob>>,
+    ) {
+        self.prune_background(thread, job, can_retire_background)
+            .await;
+    }
+
     pub(super) async fn prune_idle_background(
         &self,
         thread: &str,
         proactive_job: &Arc<Mutex<ThreadJob>>,
+    ) {
+        self.prune_background(thread, proactive_job, |job| matches!(job, ThreadJob::Idle))
+            .await;
+    }
+
+    async fn prune_background(
+        &self,
+        thread: &str,
+        proactive_job: &Arc<Mutex<ThreadJob>>,
+        release: impl FnOnce(&ThreadJob) -> bool,
     ) {
         let mut drivers = self.drivers.lock().await;
         let Some(entry) = drivers.get(thread).cloned() else {
@@ -314,7 +341,7 @@ impl LiveRegistry {
         {
             return;
         }
-        if !matches!(*entry.proactive_job.lock().await, ThreadJob::Idle) {
+        if !release(&*entry.proactive_job.lock().await) {
             return;
         }
         drivers.remove(thread);
