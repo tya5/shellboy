@@ -61,7 +61,7 @@ appear in the panel as fork children.
 
 ### `fork_thread` (`src/history.rs` ~400–480)
 - The fork node must be on the source path. `validate_group_boundary` rejects a prefix that still has unmatched tool calls.
-- The fork copies the path prefix (O(prefix) rows), cwd, AGENTS, profile, model, effort and reasoning epoch, and the `reasoning.keep.*` set.
+- The fork copies the path prefix (O(prefix) rows), cwd, AGENTS, profile, model, effort and reasoning epoch, and the History-owned kept-reasoning membership for that epoch.
 - It copies `thread_replacement` rows only for outputs on the fork path, and `attachment_selection` rows only for sources on the fork path.
 - It bumps `root_revision`.
 

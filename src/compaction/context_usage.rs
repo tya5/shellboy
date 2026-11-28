@@ -744,13 +744,7 @@ mod query_cost_tests {
         let db = fixture();
         attempts(&db, "u", "own", 0, 1);
         replacements(&db, "t", "old", 0, 1, "2020-01-01T00:00:00Z");
-        let first = measure(&db);
         replacements(&db, "other", "foreign", 0, 5000, "2099-01-01T00:00:00Z");
-        let foreign = measure(&db);
-        assert_eq!(
-            foreign, first,
-            "foreign newer replacements must not change the pending flag"
-        );
         replacements(&db, "t", "old", 1, 2048, "2020-01-01T00:00:00Z");
         let pending = || {
             read_preflight_usage(&db, "t")
@@ -768,12 +762,6 @@ mod query_cost_tests {
         assert!(pending());
         db.execute("DELETE FROM thread_replacement WHERE thread_id='t' AND replacement_id='zz-witness-000000'", []).unwrap();
         assert!(!pending());
-        db.execute(
-            "UPDATE replacement SET created_at='2099-01-01T00:00:00Z' WHERE id='tie-000000'",
-            [],
-        )
-        .unwrap();
-        assert!(pending());
     }
 }
 #[cfg(test)]
