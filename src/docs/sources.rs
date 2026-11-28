@@ -319,60 +319,41 @@ fn metadata(text: &str, fallback: &str) -> (String, String) {
     )
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Entry {
-    name: String,
-    directory: bool,
+const TOO_WIDE: &str = "too_wide";
+
+fn sorted_names(path: &Path) -> Result<Vec<std::ffi::OsString>, String> {
+    use crate::input_path::FOLDER_WALK_MAX_ENTRIES as CAP;
+    let mut names = fs::read_dir(path)
+        .map_err(io_error)?
+        .take(CAP + 1)
+        .map(|entry| entry.map(|entry| entry.file_name()).map_err(io_error))
+        .collect::<Result<Vec<_>, _>>()?;
+    if names.len() > CAP {
+        return Err(TOO_WIDE.into());
+    }
+    names.sort_unstable();
+    Ok(names)
 }
-fn projected_entry(entry: fs::DirEntry) -> Result<Option<Entry>, String> {
-    let kind = entry.file_type().map_err(io_error)?;
-    let Ok(name) = entry.file_name().into_string() else {
+
+fn child(
+    root: &Path,
+    parent: &str,
+    name: &std::ffi::OsStr,
+) -> Result<Option<(String, PathBuf, bool)>, String> {
+    let Some(name) = name.to_str().filter(|name| !name.contains('\\')) else {
         return Ok(None);
     };
-    if name.contains('\\') || !(kind.is_dir() || (kind.is_file() && name.ends_with(".md"))) {
+    let rel = child_path(parent, name);
+    if rel.len() > 4096 {
         return Ok(None);
     }
-    Ok(Some(Entry {
-        name,
-        directory: kind.is_dir(),
-    }))
-}
-
-// read_dir does not expose an ordered seek. Keep only the nearest keys in
-// memory; classify and read candidates only after selecting the next window.
-struct DirectoryWindow {
-    candidates: std::collections::VecDeque<(Vec<u8>, fs::DirEntry)>,
-    more: bool,
-}
-
-impl DirectoryWindow {
-    fn after(path: &Path, key: &[u8], work: usize) -> Result<Self, String> {
-        let mut selected = std::collections::BTreeMap::<Vec<u8>, fs::DirEntry>::new();
-        let mut more = false;
-        for entry in fs::read_dir(path).map_err(io_error)? {
-            let entry = entry.map_err(io_error)?;
-            let name = entry.file_name();
-            let name = name.as_encoded_bytes();
-            if name <= key {
-                continue;
-            }
-            if selected.len() == work {
-                more = true;
-                if selected
-                    .last_key_value()
-                    .is_some_and(|(last, _)| name >= last.as_slice())
-                {
-                    continue;
-                }
-                selected.pop_last();
-            }
-            selected.insert(name.to_vec(), entry);
-        }
-        Ok(Self {
-            candidates: selected.into_iter().collect(),
-            more,
-        })
+    // The parent was checked when opening its sorted name list. Do not follow a child symlink.
+    let meta = fs::symlink_metadata(root.join(&rel)).map_err(io_error)?;
+    if !(meta.is_dir() || (meta.is_file() && name.ends_with(".md"))) {
+        return Ok(None);
     }
+    let path = under(root, &rel)?;
+    Ok(Some((rel, path, meta.is_dir())))
 }
 
 fn list_directory(
@@ -386,50 +367,40 @@ fn list_directory(
 ) -> Result<Value, String> {
     let path = under(root, tail)?;
     let scope = format!("{scope}:{}", revision(&path));
-    let after = if let Some(cursor) = cursor {
-        if cursor.len() > 8192 {
-            return Err("cursor_expired: Cursor too large".into());
+    let mut offset = read_cursor(cursor, version, &scope)?;
+    let names = match sorted_names(&path) {
+        Ok(names) => names,
+        Err(reason) => {
+            return Ok(paginated(
+                json!({"version":version,"items":[],"unavailable":[{"id":id,"reason":reason}]}),
+                None,
+            ));
         }
-        let invalid = "cursor_expired: Invalid or stale directory cursor";
-        let raw = URL_SAFE_NO_PAD.decode(cursor).map_err(|_| invalid)?;
-        let (v, s, key): (String, String, String) =
-            serde_json::from_slice(&raw).map_err(|_| invalid)?;
-        if v != version || s != scope {
-            return Err(invalid.into());
-        }
-        URL_SAFE_NO_PAD.decode(key).map_err(|_| invalid)?
-    } else {
-        Vec::new()
     };
-    let mut window = DirectoryWindow::after(&path, &after, LIST_WORK)?;
+    if offset > names.len() {
+        return Err("cursor_expired: Offset is outside list".into());
+    }
     let mut items = Vec::new();
-    let mut last = after;
-    while items.len() < count {
-        let Some((key, raw)) = window.candidates.pop_front() else {
-            break;
-        };
-        last = key;
-        let Some(entry) = projected_entry(raw)? else {
+    let source = id.split('/').next().expect("source ID");
+    for name in names.iter().skip(offset).take(LIST_WORK) {
+        offset += 1;
+        let Ok(Some((rel, path, directory))) = child(root, tail, name) else {
             continue;
         };
-        let rel = child_path(tail, &entry.name);
-        let Ok(path) = under(root, &rel) else {
-            continue;
-        };
-        let id = child_path(id, &entry.name);
-        if entry.directory {
+        let id = child_path(source, &rel);
+        if directory {
             items.push(branch(&id, true, version));
         } else if let Ok(item) = file_view(&id, &path, version) {
             items.push(item);
         }
+        if items.len() == count {
+            break;
+        }
     }
-    let next = (window.more || !window.candidates.is_empty()).then(|| {
-        URL_SAFE_NO_PAD.encode(
-            serde_json::to_vec(&(version, scope, URL_SAFE_NO_PAD.encode(last)))
-                .expect("directory cursor"),
-        )
-    });
-    Ok(paginated(json!({"version":version,"items":items}), next))
+    Ok(paginated(
+        json!({"version":version,"items":items}),
+        (offset < names.len()).then(|| next_cursor(version, &scope, offset)),
+    ))
 }
 
 fn child_path(parent: &str, name: &str) -> String {
@@ -443,42 +414,40 @@ fn child_path(parent: &str, name: &str) -> String {
 pub(super) fn preview(row: &Registration) -> Value {
     let mut count = 0;
     let mut bytes = 0u64;
-    let complete = (|| {
+    let observed = (|| {
         let root = canonical_root(&row.path)?;
         let mut pending = vec![(String::new(), 0usize)];
         let mut work = LIST_WORK;
         while let Some((rel, depth)) = pending.pop() {
-            let path = under(&root, &rel)?;
             if work == 0 {
-                return Err("input_limit: Preview budget exhausted".into());
+                return Err("work_limit".into());
             }
-            let window = DirectoryWindow::after(&path, &[], work)?;
-            for (_, raw) in window.candidates {
-                work -= 1;
-                let Some(entry) = projected_entry(raw)? else {
+            let path = under(&root, &rel)?;
+            for name in sorted_names(&path)? {
+                work = work.checked_sub(1).ok_or("work_limit")?;
+                let Some((rel, path, directory)) = child(&root, &rel, &name)? else {
                     continue;
                 };
-                let rel = child_path(&rel, &entry.name);
-                if rel.len() > 4096 || depth >= 32 {
-                    return Err("input_limit: Docs path too deep".into());
-                }
-                if entry.directory {
+                if directory {
+                    if depth >= 31 {
+                        return Err("depth_limit".into());
+                    }
                     pending.push((rel, depth + 1));
                 } else {
-                    let path = under(&root, &rel)?;
                     prefix(&path, 0, TEXT_WORK)?;
                     count += 1;
                     bytes = bytes.saturating_add(fs::metadata(path).map_err(io_error)?.len());
                 }
             }
-            if window.more {
-                return Err("input_limit: Preview budget exhausted".into());
-            }
         }
         Ok::<(), String>(())
-    })()
-    .is_ok();
-    json!({"source":row.name,"files":count,"bytes":bytes,"complete":complete})
+    })();
+    let mut result =
+        json!({"source":row.name,"files":count,"bytes":bytes,"complete":observed.is_ok()});
+    if let Err(reason) = observed {
+        result["reason"] = json!(reason);
+    }
+    result
 }
 
 fn revision(path: &Path) -> String {
@@ -664,17 +633,27 @@ fn bundled_list(parent: Option<String>) -> Result<Vec<Value>, String> {
         .clone())
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct SearchPosition {
     bundled: usize,
     source: usize,
     frames: Vec<Frame>,
     file: Option<(String, usize, String)>,
 }
+#[derive(Serialize, Deserialize)]
 struct Frame {
-    path: String,
-    after: Vec<u8>,
+    name: String,
+    next: usize,
     revision: String,
+}
+
+fn frame_path(frames: &[Frame]) -> String {
+    frames
+        .iter()
+        .map(|frame| frame.name.as_str())
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn hit(
@@ -694,109 +673,6 @@ fn hit(
     Some(
         json!({"id":id,"title":title,"parent_id":parent,"version":version,"excerpt":&text[before..after],"spans":[{"start":offset+start,"end":offset+end}],"score":lowered.matches(needle).count()}),
     )
-}
-// A path is carried once; stack frames only need an ancestor byte length,
-// position, and revision witness. Encode the path separately so JSON escaping
-// cannot inflate a legitimate deep path beyond the cursor input limit.
-#[derive(Serialize, Deserialize)]
-struct SearchCursor(
-    String,
-    String,
-    usize,
-    usize,
-    Vec<(usize, String)>,
-    Option<(usize, String)>,
-    String,
-);
-
-fn search_cursor(version: &str, scope: &str, pos: SearchPosition) -> String {
-    let path = pos
-        .file
-        .as_ref()
-        .map(|f| f.0.as_str())
-        .or_else(|| pos.frames.last().map(|f| f.path.as_str()))
-        .unwrap_or("");
-    let state = SearchCursor(
-        version.into(),
-        scope.into(),
-        pos.bundled,
-        pos.source,
-        pos.frames
-            .iter()
-            .map(|f| (f.path.len(), f.revision.clone()))
-            .collect(),
-        pos.file.as_ref().map(|f| (f.1, f.2.clone())),
-        pos.frames
-            .last()
-            .map(|f| URL_SAFE_NO_PAD.encode(&f.after))
-            .unwrap_or_default(),
-    );
-    format!(
-        "{}.{}",
-        URL_SAFE_NO_PAD.encode(path),
-        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&state).expect("cursor state"))
-    )
-}
-
-fn stream_cursor(
-    cursor: Option<&str>,
-    version: &str,
-    scope: &str,
-) -> Result<SearchPosition, String> {
-    let Some(cursor) = cursor else {
-        return Ok(SearchPosition::default());
-    };
-    let invalid = "cursor_expired: Invalid or stale search cursor";
-    if cursor.len() > 8192 {
-        return Err(invalid.into());
-    }
-    let (path, state) = cursor.split_once('.').ok_or(invalid)?;
-    let path = String::from_utf8(URL_SAFE_NO_PAD.decode(path).map_err(|_| invalid)?)
-        .map_err(|_| invalid)?;
-    let state = URL_SAFE_NO_PAD.decode(state).map_err(|_| invalid)?;
-    let SearchCursor(v, s, bundled, source, stack, file, after) =
-        serde_json::from_slice(&state).map_err(|_| invalid)?;
-    if v != version
-        || s != scope
-        || stack.len() > 32
-        || bundled > BUNDLED.docs.len()
-        || path.len() > 4096
-    {
-        return Err(invalid.into());
-    }
-    let mut frames = Vec::new();
-    let mut prior = None;
-    let frame_count = stack.len();
-    let after = URL_SAFE_NO_PAD.decode(after).map_err(|_| invalid)?;
-    for (index, (len, revision)) in stack.into_iter().enumerate() {
-        let ancestor = path.get(..len).ok_or(invalid)?;
-        if (len != 0 && len != path.len() && path.as_bytes()[len] != b'/')
-            || prior.is_some_and(|length| len <= length)
-            || revision.len() != 16
-        {
-            return Err(invalid.into());
-        }
-        frames.push(Frame {
-            path: ancestor.into(),
-            after: if index + 1 == frame_count {
-                after.clone()
-            } else {
-                let tail = path
-                    .get(if len == 0 { 0 } else { len + 1 }..)
-                    .ok_or(invalid)?;
-                tail.split('/').next().ok_or(invalid)?.as_bytes().to_vec()
-            },
-            revision,
-        });
-        prior = Some(len);
-    }
-    let file = file.map(|(offset, rev)| (path, offset, rev));
-    Ok(SearchPosition {
-        bundled,
-        source,
-        frames,
-        file,
-    })
 }
 fn search(
     query: String,
@@ -824,7 +700,10 @@ fn search(
     }
     let scope =
         hash(serde_json::to_vec(&json!(["search", query, parent, sources])).expect("scope"));
-    let mut pos = stream_cursor(cursor.as_deref(), version, &scope)?;
+    let mut pos: SearchPosition = decode_cursor(cursor.as_deref(), version, &scope, 40_000)?;
+    if pos.frames.len() > 32 || pos.bundled > BUNDLED.docs.len() || pos.source > rows.len() {
+        return Err("cursor_expired: Invalid search position".into());
+    }
     let needle = query.to_lowercase();
     let mut hits = Vec::new();
     let mut unavailable = Vec::new();
@@ -871,8 +750,9 @@ fn search(
                 continue;
             }
         };
-        if let Some((rel, offset, rev)) = pos.file.take() {
+        if let Some((name, offset, rev)) = pos.file.take() {
             work += 1;
+            let rel = child_path(&frame_path(&pos.frames), &name);
             let observation = under(root, &rel).and_then(|path| {
                 let meta = fs::metadata(&path).map_err(io_error)?;
                 Ok((path, meta))
@@ -905,11 +785,11 @@ fn search(
                 }
             };
             let id = format!("{}/{rel}", row.name);
-            let (dir, name) = id.rsplit_once('/').expect("guide id");
+            let (dir, basename) = id.rsplit_once('/').expect("guide id");
             let title = if offset == 0 {
-                metadata(&text, name).0
+                metadata(&text, basename).0
             } else {
-                name.into()
+                basename.into()
             };
             if let Some(h) = hit(&id, &title, dir, &text, &needle, offset, version) {
                 hits.push(h);
@@ -917,7 +797,7 @@ fn search(
             if more {
                 // Repeat only enough UTF-8 text to catch a match across chunks.
                 let overlap = text.ceil_char_boundary(text.len().saturating_sub(query.len() * 4));
-                pos.file = Some((rel, offset + overlap, rev));
+                pos.file = Some((name, offset + overlap, rev));
             } else if pos.frames.is_empty() {
                 pos.source += 1;
             }
@@ -931,8 +811,8 @@ fn search(
                 .map_or("", |p| p.1);
             match under(root, rel) {
                 Ok(path) if path.is_dir() => pos.frames.push(Frame {
-                    path: rel.into(),
-                    after: Vec::new(),
+                    name: rel.into(),
+                    next: 0,
                     revision: revision(&path),
                 }),
                 Ok(path) if path.is_file() && rel.ends_with(".md") => {
@@ -951,75 +831,62 @@ fn search(
             if work >= SEARCH_WORK || pos.frames.len() > 32 {
                 break;
             }
+            let parent = frame_path(&pos.frames);
             let frame = pos.frames.last_mut().expect("frame");
-            let key = (pos.source, frame.path.clone());
-            if !page_dirs.contains_key(&key) {
-                let path = match under(root, &frame.path) {
-                    Ok(path) => path,
-                    Err(reason) => {
-                        unavailable
-                            .push(json!({"source":row.name,"path":frame.path,"reason":reason}));
-                        pos.frames.pop();
-                        work += 1;
-                        continue;
+            let key = (pos.source, parent.clone());
+            if let std::collections::btree_map::Entry::Vacant(slot) = page_dirs.entry(key.clone()) {
+                let names = under(root, &parent).and_then(|path| {
+                    if revision(&path) != frame.revision {
+                        return Err("cursor_expired: Docs folder changed".into());
                     }
-                };
-                if revision(&path) != frame.revision {
-                    return Err("cursor_expired: Docs folder changed".into());
-                }
-                match DirectoryWindow::after(&path, &frame.after, SEARCH_WORK - work) {
-                    Ok(window) => {
-                        page_dirs.insert(key.clone(), window);
+                    sorted_names(&path)
+                });
+                match names {
+                    Ok(names) => {
+                        slot.insert(names);
                     }
+                    Err(reason) if reason.starts_with("cursor_expired:") => return Err(reason),
                     Err(reason) => {
-                        unavailable
-                            .push(json!({"source":row.name,"path":frame.path,"reason":reason}));
+                        unavailable.push(json!({"source":row.name,"path":parent,"reason":reason}));
                         pos.frames.pop();
                         work += 1;
                         continue;
                     }
                 }
             }
-            let window = page_dirs.get_mut(&key).expect("open window");
-            let Some((name, raw)) = window.candidates.pop_front() else {
-                if window.more {
-                    work = SEARCH_WORK;
-                    break;
+            let names = &page_dirs[&key];
+            work += 1;
+            let Some(name) = names.get(frame.next) else {
+                if frame.next > names.len() {
+                    return Err("cursor_expired: Invalid directory position".into());
                 }
+                page_dirs.remove(&key);
                 pos.frames.pop();
-                work += 1;
                 continue;
             };
-            frame.after = name;
-            work += 1;
-            let entry = match projected_entry(raw) {
+            frame.next += 1;
+            let (rel, path, directory) = match child(root, &parent, name) {
                 Ok(Some(entry)) => entry,
                 Ok(None) => continue,
                 Err(reason) => {
-                    unavailable.push(json!({"source":row.name,"path":frame.path,"reason":reason}));
+                    unavailable.push(json!({"source":row.name,"path":child_path(&parent, &name.to_string_lossy()),"reason":reason}));
                     continue;
                 }
             };
-            let rel = child_path(&frame.path, &entry.name);
-            if rel.len() > 4096 {
-                continue;
-            }
-            let Ok(path) = under(root, &rel) else {
-                continue;
-            };
+            let name = name.to_string_lossy().into_owned();
             let rev = revision(&path);
-            if entry.directory {
+            if directory {
                 if pos.frames.len() >= 32 {
                     unavailable.push(json!({"source":row.name,"path":rel,"reason":"depth_limit"}));
                 } else {
                     pos.frames.push(Frame {
-                        path: rel,
-                        after: Vec::new(),
+                        name,
+                        next: 0,
                         revision: rev,
                     });
                 }
             } else {
-                pos.file = Some((rel, 0, rev));
+                pos.file = Some((name, 0, rev));
                 break;
             }
         }
@@ -1028,7 +895,7 @@ fn search(
         }
     }
     let next = if pos.source < rows.len() || pos.bundled < bundled.len() {
-        Some(search_cursor(version, &scope, pos))
+        Some(next_cursor(version, &scope, pos))
     } else {
         None
     };
@@ -1041,6 +908,52 @@ fn search(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn over_cap_folder_reports_its_branch_and_keeps_healthy_docs_visible() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
+        fs::create_dir(path.join("a-wide")).unwrap();
+        fs::create_dir(path.join("b-healthy")).unwrap();
+        for i in 0..=crate::input_path::FOLDER_WALK_MAX_ENTRIES {
+            File::create(path.join("a-wide").join(i.to_string())).unwrap();
+        }
+        fs::write(path.join("b-healthy/guide.md"), "# Branch witness\n").unwrap();
+        let rows = [Registration {
+            name: "local".into(),
+            path,
+        }];
+        let list = |parent: &str| {
+            browse(
+                DocsCommand::List {
+                    parent: Some(parent.into()),
+                    sources: vec![],
+                    limit: 20,
+                    cursor: None,
+                },
+                &rows,
+            )
+            .unwrap()
+        };
+        assert_eq!(list("local/a-wide")["unavailable"][0]["reason"], "too_wide");
+        assert_eq!(
+            list("local/b-healthy")["items"][0]["id"],
+            "local/b-healthy/guide.md"
+        );
+        let search = browse(
+            DocsCommand::Search {
+                query: "Branch witness".into(),
+                parent: Some("local".into()),
+                sources: vec!["local".into()],
+                limit: 20,
+                cursor: None,
+            },
+            &rows,
+        )
+        .unwrap();
+        assert_eq!(search["unavailable"][0]["reason"], "too_wide");
+        assert_eq!(search["items"][0]["id"], "local/b-healthy/guide.md");
+    }
 
     #[test]
     fn registration_and_ownerless_browse_share_the_same_config() {

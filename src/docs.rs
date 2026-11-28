@@ -265,18 +265,28 @@ fn summary(d: &Document, version: &str) -> Value {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Cursor {
+struct Cursor<T> {
     v: u8,
     version: String,
     scope: String,
-    offset: usize,
+    offset: T,
 }
 fn read_cursor(cursor: Option<&str>, version: &str, scope: &str) -> Result<usize, String> {
-    let Some(cursor) = cursor else { return Ok(0) };
-    if cursor.len() > 8192 {
+    decode_cursor(cursor, version, scope, 8192)
+}
+fn decode_cursor<T: Default + serde::de::DeserializeOwned>(
+    cursor: Option<&str>,
+    version: &str,
+    scope: &str,
+    max: usize,
+) -> Result<T, String> {
+    let Some(cursor) = cursor else {
+        return Ok(T::default());
+    };
+    if cursor.len() > max {
         return Err("cursor_expired: Cursor is too large".into());
     }
-    let c: Cursor = URL_SAFE_NO_PAD
+    let c: Cursor<T> = URL_SAFE_NO_PAD
         .decode(cursor)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
@@ -288,7 +298,7 @@ fn read_cursor(cursor: Option<&str>, version: &str, scope: &str) -> Result<usize
     }
     Ok(c.offset)
 }
-fn next_cursor(version: &str, scope: &str, offset: usize) -> String {
+fn next_cursor(version: &str, scope: &str, offset: impl Serialize) -> String {
     URL_SAFE_NO_PAD.encode(
         serde_json::to_vec(&Cursor {
             v: 1,

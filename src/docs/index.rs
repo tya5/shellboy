@@ -12,19 +12,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn error(code: ErrorCode, message: impl Into<String>) -> ApiError {
-    ApiError::new(code, message)
+fn export_error(message: &str) -> ApiError {
+    ApiError::new(ErrorCode::IoFailed, message)
 }
 
 fn export(data: &Path) -> Result<(PathBuf, File), ApiError> {
     let parent = data.join("docs-export");
-    fs::create_dir_all(&parent)
-        .map_err(|_| error(ErrorCode::IoFailed, "Cannot create docs export directory"))?;
+    fs::create_dir_all(&parent).map_err(|_| export_error("Cannot create docs export directory"))?;
     if fs::symlink_metadata(&parent).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err(error(
-            ErrorCode::IoFailed,
-            "Docs export directory cannot be a symlink",
-        ));
+        return Err(export_error("Docs export directory cannot be a symlink"));
     }
     let lock = OpenOptions::new()
         .write(true)
@@ -32,21 +28,17 @@ fn export(data: &Path) -> Result<(PathBuf, File), ApiError> {
         .create(true)
         .truncate(false)
         .open(parent.join("export.lock"))
-        .map_err(|_| error(ErrorCode::IoFailed, "Cannot open docs export lock"))?;
+        .map_err(|_| export_error("Cannot open docs export lock"))?;
     lock.try_lock_exclusive().map_err(|_| {
-        error(
+        ApiError::new(
             ErrorCode::OperationConflict,
             "Another docs export is active",
         )
     })?;
     let root = parent.join("shellboy");
-    fs::create_dir_all(&root)
-        .map_err(|_| error(ErrorCode::IoFailed, "Cannot create bundled guide export"))?;
+    fs::create_dir_all(&root).map_err(|_| export_error("Cannot create bundled guide export"))?;
     if fs::symlink_metadata(&root).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err(error(
-            ErrorCode::IoFailed,
-            "Bundled guide export cannot be a symlink",
-        ));
+        return Err(export_error("Bundled guide export cannot be a symlink"));
     }
     let docs = super::documents();
     let wanted: std::collections::BTreeMap<_, _> = docs
@@ -61,8 +53,7 @@ fn export(data: &Path) -> Result<(PathBuf, File), ApiError> {
     for (name, body) in &wanted {
         let path = root.join(name);
         if fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file()) {
-            return Err(error(
-                ErrorCode::IoFailed,
+            return Err(export_error(
                 "Bundled guide export contains a non-file destination",
             ));
         }
@@ -77,21 +68,17 @@ fn export(data: &Path) -> Result<(PathBuf, File), ApiError> {
             )?;
         }
     }
-    for entry in fs::read_dir(&root)
-        .map_err(|_| error(ErrorCode::IoFailed, "Cannot inspect bundled guide export"))?
+    for entry in
+        fs::read_dir(&root).map_err(|_| export_error("Cannot inspect bundled guide export"))?
     {
-        let entry =
-            entry.map_err(|_| error(ErrorCode::IoFailed, "Cannot inspect an export entry"))?;
+        let entry = entry.map_err(|_| export_error("Cannot inspect an export entry"))?;
         let name = entry.file_name();
         let kind = entry
             .file_type()
-            .map_err(|_| error(ErrorCode::IoFailed, "Cannot inspect export entry type"))?;
-        let Some(name) = name.to_str() else {
-            return Err(error(
-                ErrorCode::IoFailed,
-                "Unexpected entry in managed export",
-            ));
-        };
+            .map_err(|_| export_error("Cannot inspect export entry type"))?;
+        let name = name
+            .to_str()
+            .ok_or_else(|| export_error("Unexpected entry in managed export"))?;
         let managed = name
             .strip_prefix("guide-")
             .and_then(|s| s.strip_suffix(".md"))
@@ -99,14 +86,11 @@ fn export(data: &Path) -> Result<(PathBuf, File), ApiError> {
         // The root is passed to generic RAG. Unexpected material must not be
         // indexed, and is not ours to delete.
         if !managed || !kind.is_file() {
-            return Err(error(
-                ErrorCode::IoFailed,
-                "Unexpected entry in managed export",
-            ));
+            return Err(export_error("Unexpected entry in managed export"));
         }
         if !wanted.contains_key(name) {
             fs::remove_file(entry.path())
-                .map_err(|_| error(ErrorCode::IoFailed, "Cannot retire old exported guide"))?;
+                .map_err(|_| export_error("Cannot retire old exported guide"))?;
         }
     }
     Ok((root, lock))
@@ -147,41 +131,38 @@ async fn index(
     cwd: &Path,
 ) -> Result<Value, ApiError> {
     if (names.is_empty() != all) || names.len() > 201 {
-        return Err(error(
+        return Err(ApiError::new(
             ErrorCode::InvalidArgument,
             "Choose --source NAME or --all",
         ));
     }
     let env = PathEnvironment::current();
     let path = resolve_config_path(config.as_deref(), cwd, &env)
-        .map_err(|e| error(ErrorCode::ConfigInvalid, e.to_string()))?;
+        .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
     let state = config_edit::read_state(&path)?;
     let rows = config_edit::parse_file(&state.bytes, &path)
-        .map_err(|e| error(ErrorCode::ConfigInvalid, e))?
+        .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e))?
         .docs
         .sources;
     if names
         .iter()
         .any(|name| name != "shellboy" && !rows.iter().any(|row| row.name == *name))
     {
-        return Err(error(ErrorCode::TargetUnavailable, "Unknown docs source"));
+        return Err(ApiError::new(
+            ErrorCode::TargetUnavailable,
+            "Unknown docs source",
+        ));
     }
-    let mut selected = Vec::new();
-    if all || names.iter().any(|n| n == "shellboy") {
-        selected.push(("shellboy", None));
-    }
-    for row in &rows {
-        if all || names.contains(&row.name) {
-            selected.push((row.name.as_str(), Some(row)));
-        }
-    }
+    let selected = std::iter::once(("shellboy", None))
+        .chain(rows.iter().map(|row| (row.name.as_str(), Some(row))))
+        .filter(|(name, _)| all || names.iter().any(|selected| selected.as_str() == *name));
     if dry_run {
         return Ok(
-            json!({"dry_run":true,"sources":selected.iter().map(|(_,row)|preview(*row)).collect::<Vec<_>>(),"embedding_may_charge":true,"counts":"docs_only_not_rag_changes"}),
+            json!({"dry_run":true,"sources":selected.map(|(_,row)|preview(row)).collect::<Vec<_>>(),"embedding_may_charge":true,"counts":"docs_only_not_rag_changes"}),
         );
     }
     let data = resolve_cli_data_dir(data.as_deref(), &env, cwd)
-        .map_err(|e| error(ErrorCode::ConfigInvalid, e.to_string()))?;
+        .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
     let invoke = |command| {
         crate::rag::execute_with_text(
             RagOptions { db: None, command },
