@@ -1185,6 +1185,9 @@ pub enum UiUpdate {
         thread_id: Option<String>,
         text: String,
     },
+    ClipboardPasteFailed {
+        draft_id: String,
+    },
     ClipboardAttachment {
         draft_id: String,
         revision: u64,
@@ -1742,6 +1745,7 @@ pub struct UiState {
     diagnostics: Option<crate::diagnostics::Diagnostics>,
     bell: bell::Bell,
     autosave: autosave::Autosave,
+    clipboard_pastes: BTreeMap<String, usize>,
     batching_updates: bool,
     retention_pending: bool,
     #[cfg(test)]
@@ -1951,6 +1955,7 @@ impl UiState {
             queue_notifications: VecDeque::new(),
             next_model_request: 0,
             autosave: Default::default(),
+            clipboard_pastes: BTreeMap::new(),
             view_cache_clock: 0,
             batching_updates: false,
             retention_pending: false,
@@ -3671,11 +3676,13 @@ impl UiState {
                         .promote_status_notice(history_interaction::NoticeKind::Info);
                 }
             }
+            UiUpdate::ClipboardPasteFailed { draft_id } => self.finish_clipboard_paste(&draft_id),
             UiUpdate::ClipboardAttachment {
                 draft_id,
                 revision,
                 attachment,
             } => {
+                self.finish_clipboard_paste(&draft_id);
                 let attachment_id = attachment.id.clone();
                 let limit = self.config.limits.draft_bytes as usize;
                 let accepted =
@@ -3962,7 +3969,19 @@ impl UiState {
         }
     }
 
+    fn finish_clipboard_paste(&mut self, draft_id: &str) {
+        if let Some(count) = self.clipboard_pastes.get_mut(draft_id) {
+            *count -= 1;
+            if *count == 0 {
+                self.clipboard_pastes.remove(draft_id);
+            }
+        }
+    }
     pub fn action_rejected(&mut self, action: &UiAction) {
+        if let UiAction::PasteImage { draft_id, .. } = action {
+            self.finish_clipboard_paste(draft_id);
+            self.trim_bodies();
+        }
         let navigation = match action {
             UiAction::LoadNodeWindow {
                 thread_id,
@@ -4068,7 +4087,8 @@ impl UiState {
                     ),
                 )),
             );
-            if matches!(action.as_ref(), UiAction::ManagementIntent { action, .. } if matches!(action.as_ref(), UiAction::IndexPreview { .. }))
+            if matches!(action.as_ref(), UiAction::PasteImage { .. })
+                || matches!(action.as_ref(), UiAction::ManagementIntent { action, .. } if matches!(action.as_ref(), UiAction::IndexPreview { .. }))
             {
                 self.action_rejected(action);
             } else if matches!(action.as_ref(), UiAction::ManagementIntent { .. }) {
@@ -5297,7 +5317,7 @@ cursor: None,
             "/reasoning" => self.toggle_reasoning(argument),
             "/image" | "/paste-image" => {
                 let view = self.view();
-                vec![UiAction::PasteImage {
+                let action = UiAction::PasteImage {
                     draft_id: view.draft.draft_id.clone(),
                     revision: view.draft.revision,
                     thread_id: view
@@ -5305,7 +5325,10 @@ cursor: None,
                         .clone()
                         .or_else(|| view.draft.edit.as_ref().map(|edit| edit.thread_id.clone())),
                     position: view.draft.cursor,
-                }]
+                };
+                let draft_id = view.draft.draft_id.clone();
+                *self.clipboard_pastes.entry(draft_id).or_default() += 1;
+                vec![action]
             }
             "/copy" => {
                 let parts = argument.split_whitespace().collect::<Vec<_>>();
@@ -6219,7 +6242,15 @@ cursor: None,
         let working = self.retained_working_node_ids();
         let active_retained = retained_body_bytes(self.view(), &working);
         let mut retained = active_retained;
-        let mut pinned: usize = 0;
+        let mut pinned: usize = self
+            .clipboard_pastes
+            .keys()
+            .map(|id| {
+                id.capacity()
+                    + std::mem::size_of::<(String, usize)>()
+                    + 4 * std::mem::size_of::<usize>()
+            })
+            .sum();
         for (key, view) in &mut self.views {
             view.retain_source_ids();
             let weight = view
@@ -6228,7 +6259,8 @@ cursor: None,
                 .saturating_add(self.autosave.cache_bytes(key));
             if key == &self.active {
                 pinned = pinned.saturating_add(weight.saturating_sub(active_retained));
-            } else if view.selecting_agents.is_some()
+            } else if self.clipboard_pastes.contains_key(&view.draft.draft_id)
+                || view.selecting_agents.is_some()
                 || view.pending.values().any(|pending| {
                     matches!(
                         pending.status,
@@ -8597,12 +8629,11 @@ mod layout_cache_tests {
             )
             .await
             .unwrap();
-            assert_eq!(
-                saved.result,
-                Some(serde_json::json!({"accepted":true})),
-                "{:?}",
-                saved.error
-            );
+            assert!(saved.ok, "{:?}", saved.error);
+            let saved: crate::protocol::DraftSaveResult =
+                serde_json::from_value(saved.result.unwrap()).unwrap();
+            assert!(saved.accepted);
+            assert_eq!(saved.anchor_refusal, None);
             ui.apply(UiUpdate::DraftViewSaved {
                 thread_id: thread.into(),
                 draft_id: draft.draft_id,
@@ -8613,22 +8644,21 @@ mod layout_cache_tests {
                 anchor_refusal: None,
             });
         }
-        let hit = |actions: &[UiAction], anchor: &ViewAnchor| {
-            assert!(matches!(actions.last(), Some(UiAction::SelectThread {
-                known_view: Some((saved, false)), ..
-            }) if saved == anchor));
-        };
-        hit(&ui.select_thread("thread".into()), &older);
+        ui.select_thread("thread".into());
         assert_eq!(ui.view().draft.text, older_text);
-        hit(&ui.select_thread("independent".into()), &recent);
+        assert_eq!(ui.view().navigation.anchor, older);
+        assert!(!ui.view().navigation.follow());
+        ui.select_thread("independent".into());
         assert_eq!(ui.view().draft.text, recent_text);
+        assert_eq!(ui.view().navigation.anchor, recent);
         ui.new_chat();
         ui.config.cache.body_bytes = 256 * 1024;
         ui.trim_bodies();
 
-        hit(&ui.select_thread("independent".into()), &recent);
+        ui.select_thread("independent".into());
         assert_eq!(ui.view().draft.text, recent_text);
         assert_eq!(ui.view().navigation.anchor, recent);
+        assert!(!ui.view().navigation.follow());
         let actions = ui.select_thread("thread".into());
         assert!(ui.view().draft.text.is_empty());
         load(&mut ui, data_dir, "thread", &actions).await;

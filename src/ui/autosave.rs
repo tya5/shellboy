@@ -48,7 +48,7 @@ impl Autosave {
         !saveable(view) || self.committed.get(key) == Some(&Signature::of(view))
     }
     pub(super) fn cache_bytes(&self, key: &str) -> usize {
-        [self.admitted.get(key), self.committed.get(key)]
+        let stamps: usize = [self.admitted.get(key), self.committed.get(key)]
             .into_iter()
             .flatten()
             .map(|stamp| {
@@ -58,7 +58,12 @@ impl Autosave {
                     + stamp.draft_id.capacity()
                     + stamp.anchor.node_id.as_ref().map_or(0, String::capacity)
             })
-            .sum()
+            .sum();
+        // Queued keys are owned once by the set and once by the deque.
+        stamps
+            + usize::from(self.queued.contains(key))
+                * (2 * (std::mem::size_of::<String>() + key.len())
+                    + 2 * std::mem::size_of::<usize>())
     }
     pub(super) fn pending(&self) -> bool {
         !self.dirty.is_empty()

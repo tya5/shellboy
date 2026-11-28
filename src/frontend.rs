@@ -2654,12 +2654,13 @@ async fn run_client(
                                 update(
                                     &updates,
                                     UiUpdate::DraftStatus {
-                                        draft_id,
+                                        draft_id: draft_id.clone(),
                                         text: i18n::local!(language, "画像の準備中です。完了後に再操作してください", "Preparing an image. Wait for completion, then try again").into(),
                                     },
                                 )
                                 .await;
                             }
+                            update(&updates, UiUpdate::ClipboardPasteFailed { draft_id }).await;
                             continue;
                         };
                         update(
@@ -3256,7 +3257,8 @@ async fn run_client(
                         status(&updates, None, compose_disconnected_message(error)).await;
                     }
                     let Some(threadless) = images.accept_image(ticket) else {
-                        if let Ok(attachment) = result { images.reject(draft_id, attachment.id); }
+                        if let Ok(attachment) = result { images.reject(draft_id.clone(), attachment.id); }
+                        update(&updates, UiUpdate::ClipboardPasteFailed { draft_id }).await;
                         continue;
                     };
                     match result {
@@ -3273,17 +3275,12 @@ async fn run_client(
                         )
                         .await;
                     }
-                    Err(error) if !error_reported => {
-                        update(
-                            &updates,
-                            UiUpdate::DraftStatus {
-                                draft_id,
-                                text: error.to_string(),
-                            },
-                        )
-                        .await
+                    Err(error) => {
+                        if !error_reported {
+                            update(&updates, UiUpdate::DraftStatus { draft_id: draft_id.clone(), text: error.to_string() }).await;
+                        }
+                        update(&updates, UiUpdate::ClipboardPasteFailed { draft_id }).await;
                     }
-                    Err(_) => {}
                     }
                     images.prune_owners();
                 },

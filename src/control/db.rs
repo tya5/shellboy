@@ -4465,9 +4465,12 @@ mod receipt_wait_tests {
         displaced.draft.text = "new durable input".into();
         let request = Request::new("current:displaced", Command::DraftSave(displaced));
         let saved = store.execute(request.clone(), None).await.unwrap().result;
+        let outcome: crate::protocol::DraftSaveResult =
+            serde_json::from_value(saved.clone()).unwrap();
+        assert!(outcome.accepted);
         assert_eq!(
-            saved,
-            json!({"accepted":true,"anchor_refusal":"cursor_expired"})
+            outcome.anchor_refusal,
+            Some(crate::protocol::DraftAnchorRefusal::CursorExpired)
         );
         assert_eq!(store.execute(request, None).await.unwrap().result, saved);
         args.draft.revision = 1;

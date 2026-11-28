@@ -211,6 +211,46 @@ mod tests {
         }
     }
     #[test]
+    fn clipboard_paste_survives_switch_under_body_pressure() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let key = ui.active.clone();
+        let action = ui.slash("/paste-image").pop().unwrap();
+        let UiAction::PasteImage {
+            draft_id, revision, ..
+        } = action
+        else {
+            panic!("expected clipboard paste");
+        };
+        ui.config.cache.body_bytes = 0;
+        ui.new_chat();
+        assert_ne!(ui.view().draft.draft_id, draft_id);
+        ui.apply(UiUpdate::ClipboardAttachment {
+            draft_id,
+            revision,
+            attachment: attachment("captured", Some(0)),
+        });
+        ui.select_thread(format!("draft:{key}"));
+        assert_eq!(ui.view().draft.attachments[0].id, "captured");
+        assert!(ui.take_deferred_actions().iter().any(|action| matches!(action, UiAction::ClipboardDecision { attachment_id, accepted: true, .. } if attachment_id == "captured")));
+    }
+    #[test]
+    fn clipboard_failure_and_admission_rejection_release_only_their_paste() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let key = ui.active.clone();
+        let draft_id = ui.view().draft.draft_id.clone();
+        let _in_flight = ui.slash("/image").pop().unwrap();
+        let rejected = ui.slash("/image").pop().unwrap();
+        ui.config.cache.body_bytes = 0;
+        ui.new_chat();
+        ui.action_rejected(&rejected);
+        assert!(ui.views.contains_key(&key), "the other paste is still live");
+        ui.apply(UiUpdate::ClipboardPasteFailed { draft_id });
+        assert!(
+            !ui.views.contains_key(&key),
+            "failed paste releases the empty draft"
+        );
+    }
+    #[test]
     fn collapsed_paste_cursor_skips_hidden_graphemes_and_editing_is_atomic() {
         fn folded() -> DraftSnapshot {
             let mut draft = DraftSnapshot::default();

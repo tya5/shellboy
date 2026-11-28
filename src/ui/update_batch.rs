@@ -25,7 +25,9 @@ impl UiUpdate {
             | Self::EditRequestLoaded { .. }
             | Self::BranchesLoaded { .. }
             | Self::RewindResult { .. }
-            | Self::SavedMessage { .. } => true,
+            | Self::SavedMessage { .. }
+            | Self::ClipboardAttachment { .. }
+            | Self::ClipboardPasteFailed { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
             Self::ManagementDetailFailure { .. }
             | Self::WatchDetails { .. }
@@ -77,7 +79,6 @@ impl UiUpdate {
             | Self::DraftStatus { .. }
             | Self::TerminalRequest { .. }
             | Self::Status { .. }
-            | Self::ClipboardAttachment { .. }
             | Self::Progress { .. }
             | Self::Management { .. }
             | Self::IndexPreviewReady { .. }
