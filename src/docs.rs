@@ -8,7 +8,7 @@ pub use index::execute as index;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-pub use sources::{DocsConfig, Registration, SourceCommand, configured_response};
+pub use sources::{DocsConfig, Registration, SourceCommand, configured_response, source_response};
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum DocsCommand {
@@ -532,8 +532,7 @@ mod tests {
             | DocsRead::Get { sources, .. }
             | DocsRead::Search { sources, .. } => sources.push("shellboy".into()),
         }
-        let response =
-            configured_response(DocsCommand::Read(command), None, std::path::Path::new("."));
+        let response = configured_response(command, None, std::path::Path::new("."));
         if response["ok"] == true {
             Ok(response["result"].clone())
         } else {
