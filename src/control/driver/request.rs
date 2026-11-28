@@ -117,7 +117,6 @@ pub(super) async fn prepare_attempt(
     let linker = snapshot.clone();
     let link_attachments = prepared.clone();
     let digest = client.extra_digest();
-    let saved_tail = tail.map(|item| json!({"position":tags.len()-1,"sha256":crate::digest::sha256_hex(serde_json::to_vec(item).expect("tail serializes")),"item":item}));
     let qualify = Box::new(
         move |tx: &rusqlite::Transaction<'_>, row: &mut model::request_path::AttemptAdmission| {
             let admitted = current.admit_attempt_tx(
@@ -128,8 +127,8 @@ pub(super) async fn prepare_attempt(
                 history_characters,
                 digest,
             )?;
-            if admitted && let Some(tail) = saved_tail {
-                row.manifest["context_tail"] = tail;
+            if admitted && let Some(item) = tail {
+                row.manifest["context_tail"] = item.clone();
             }
             Ok(admitted)
         },

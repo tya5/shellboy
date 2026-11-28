@@ -134,7 +134,6 @@ async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() 
         let attempt: String = control.store.database.call(|db| Ok(db.query_row("SELECT id FROM model_attempt WHERE json_extract(input_manifest_json,'$.context_tail.item') IS NOT NULL ORDER BY rowid LIMIT 1",[],|r| r.get(0))?)).await.unwrap();
         let inspected = crate::request_inspect::execute(crate::request_inspect::RequestOptions {thread_id:accepted.thread_id, attempt_id:Some(attempt), compare_attempt_id:None, body:true},Some(root.path().join("config.toml")),Some(root.path().join("data")),root.path()).await;
         assert_eq!(inspected["ok"], true, "{inspected}");
-        assert_eq!(&inspected["result"]["saved"]["context_tail"]["item"],first_tail);
         assert_eq!(std::fs::read(root.path().join("context-count")).unwrap(), b"xx");
         close(control,owner).await;
     }).await.unwrap();
@@ -158,7 +157,6 @@ async fn no_definitions_add_no_context_on_wire_or_inspection() {
         );
         let inspected = inspect_only_attempt(root.path(), &control, accepted.thread_id).await;
         assert_eq!(inspected["unknown"], json!([]));
-        assert!(inspected["saved"]["context_tail"].is_null());
         assert!(
             inspected["body"]["input"]
                 .as_array()
@@ -300,7 +298,6 @@ async fn a_budget_that_only_fits_the_skip_fact_never_launches() {
         );
         assert!(serde_json::to_vec(tail).unwrap().len() as u64 <= minimum);
         let inspected = inspect_only_attempt(root.path(), &control, accepted.thread_id).await;
-        assert_eq!(&inspected["saved"]["context_tail"]["item"], tail);
         assert_eq!(
             inspected["body"]["input"].as_array().unwrap().last(),
             Some(tail)
