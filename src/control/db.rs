@@ -1530,7 +1530,7 @@ impl Store {
             }
             Command::ContextList(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
-                let result = super::context_command::list(tx, &thread)?;
+                let result = super::context_command::list(tx, &thread, args)?;
                 let result = MutationResult::value(result)?;
 
                 Ok(result)

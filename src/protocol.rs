@@ -1052,6 +1052,7 @@ args!(ScheduleSetArgs {
     notify: Option<Vec<ScheduleNotify>>
 });
 args!(ContextAddArgs { thread_id: Option<String>, name: String, command: String, timeout_ms: u32 });
+args!(ContextListArgs { thread_id: Option<String>, #[serde(default)] cursor: Option<String>, #[serde(default = "list_limit")] limit: u32 });
 args!(ContextTarget { thread_id: Option<String>, name: String });
 args!(ContextSetArgs { thread_id: Option<String>, name: String, command: Option<String>, timeout_ms: Option<u32> });
 args!(ScheduleAddArgs {
@@ -1889,7 +1890,7 @@ pub enum Command {
     #[serde(rename = "context.add")]
     ContextAdd(ContextAddArgs),
     #[serde(rename = "context.list")]
-    ContextList(ThreadTarget),
+    ContextList(ContextListArgs),
     #[serde(rename = "context.get")]
     ContextGet(ContextTarget),
     #[serde(rename = "context.set")]

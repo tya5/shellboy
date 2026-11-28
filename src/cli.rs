@@ -2713,6 +2713,10 @@ pub enum ContextCommand {
     List {
         #[arg(long = "thread")]
         thread_id: Option<String>,
+        #[arg(long, default_value_t = wire::DEFAULT_LIST_LIMIT)]
+        limit: u32,
+        #[arg(long)]
+        cursor: Option<String>,
     },
     /// Experimental: get Thread context definitions.
     Get {
@@ -2754,9 +2758,15 @@ impl From<ContextCommand> for wire::Command {
                 command,
                 timeout_ms,
             }),
-            ContextCommand::List { thread_id } => {
-                Self::ContextList(wire::ThreadTarget { thread_id })
-            }
+            ContextCommand::List {
+                thread_id,
+                limit,
+                cursor,
+            } => Self::ContextList(wire::ContextListArgs {
+                thread_id,
+                limit,
+                cursor,
+            }),
             ContextCommand::Get { thread_id, name } => {
                 Self::ContextGet(wire::ContextTarget { thread_id, name })
             }

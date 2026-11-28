@@ -1342,7 +1342,7 @@
         {
           "properties": {
             "args": {
-              "$ref": "#/definitions/ThreadTarget"
+              "$ref": "#/definitions/ContextListArgs"
             },
             "command": {
               "const": "context.list",
@@ -2890,6 +2890,31 @@
       "required": [
         "action"
       ],
+      "type": "object"
+    },
+    "ContextListArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": 50,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ContextSetArgs": {
@@ -8704,7 +8729,7 @@
           "additionalProperties": false,
           "properties": {
             "args": {
-              "$ref": "#/definitions/ThreadTarget"
+              "$ref": "#/definitions/ContextListArgs"
             },
             "command": {
               "const": "context.list",
