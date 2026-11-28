@@ -993,37 +993,38 @@ fn set_field(
         .then(|| file_header(doc))
         .flatten();
     let parent = parent_table(doc, path, true, index)?.expect("created");
-    if path == ["docs", "sources"] {
-        let rows: Vec<crate::docs::Registration> = serde_json::from_value(value.clone())
-            .map_err(|_| change_error(index, "docs.sources must contain name/path pairs"))?;
-        let old = parent.get(last).and_then(Item::as_array_of_tables);
+    let old = parent.get(last).and_then(Item::as_array_of_tables);
+    if let Some(rows) = value.as_array().filter(|rows| {
+        old.is_some() || (!rows.is_empty() && rows.iter().all(|row| row["name"].is_string()))
+    }) {
         let mut tables = toml_edit::ArrayOfTables::new();
         for row in rows {
+            let name = row["name"]
+                .as_str()
+                .ok_or_else(|| change_error(index, "Expected a table with a name"))?;
+            let fields = row.as_object().expect("named object");
             let mut table = old
                 .and_then(|tables| {
-                    tables.iter().find(|table| {
-                        table.get("name").and_then(Item::as_str) == Some(row.name.as_str())
-                    })
+                    tables
+                        .iter()
+                        .find(|table| table.get("name").and_then(Item::as_str) == Some(name))
                 })
                 .cloned()
                 .unwrap_or_default();
-            let path = row
-                .path
-                .to_str()
-                .ok_or_else(|| change_error(index, "Docs path must be UTF-8"))?;
-            if table.get("name").is_none() {
-                table.insert("name", toml_edit::value(row.name));
+            let removed: Vec<_> = table
+                .iter()
+                .filter(|(key, _)| !fields.contains_key(*key))
+                .map(|(key, _)| key.to_owned())
+                .collect();
+            for key in removed {
+                table.remove(&key);
             }
-            if table.get("path").and_then(Item::as_str) != Some(path) {
-                let mut item = toml_edit::value(path);
-                if let Some(decor) = table
-                    .get("path")
-                    .and_then(Item::as_value)
-                    .map(|v| v.decor().clone())
-                {
-                    *item.as_value_mut().expect("string value").decor_mut() = decor;
+            for (key, json) in fields {
+                let mut value = toml_value(json, index)?;
+                if let Some(existing) = table.get(key).and_then(Item::as_value) {
+                    *value.decor_mut() = existing.decor().clone();
                 }
-                table.insert("path", item);
+                table.insert(key, Item::Value(value));
             }
             tables.push(table);
         }
