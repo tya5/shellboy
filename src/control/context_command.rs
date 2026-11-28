@@ -4,8 +4,6 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-const MAX_DEFINITIONS: usize = 16;
-
 #[derive(Serialize)]
 pub(super) struct Definition {
     pub(super) name: String,
@@ -43,8 +41,12 @@ fn exists(db: &Connection, thread: &str) -> Result<(), ApiError> {
     Ok(())
 }
 pub(super) fn definitions(db: &Connection, thread: &str) -> Result<Vec<Definition>, ApiError> {
-    let mut stmt = db.prepare("SELECT name,command,timeout_ms FROM context_command WHERE thread_id=?1 ORDER BY id LIMIT ?2").map_err(storage)?;
-    stmt.query_map(params![thread, MAX_DEFINITIONS], |r| {
+    let mut stmt = db
+        .prepare(
+            "SELECT name,command,timeout_ms FROM context_command WHERE thread_id=?1 ORDER BY id",
+        )
+        .map_err(storage)?;
+    stmt.query_map([thread], |r| {
         Ok(Definition {
             name: r.get(0)?,
             command: r.get(1)?,
@@ -65,12 +67,6 @@ fn lookup(db: &Connection, thread: &str, name: &str) -> Result<Value, ApiError> 
 pub(super) fn add(db: &Connection, thread: &str, args: &ContextAddArgs) -> Result<Value, ApiError> {
     validate(&args.name, Some(&args.command), Some(args.timeout_ms))?;
     exists(db, thread)?;
-    if definitions(db, thread)?.len() >= MAX_DEFINITIONS {
-        return Err(ApiError::new(
-            ErrorCode::InputLimit,
-            "Thread context command limit reached",
-        ));
-    }
     if db.execute("INSERT INTO context_command(thread_id,name,command,timeout_ms) VALUES(?1,?2,?3,?4) ON CONFLICT(thread_id,name) DO NOTHING", params![thread,args.name,args.command,args.timeout_ms]).map_err(storage)? == 0 {
         return Err(ApiError::new(ErrorCode::OperationConflict,"Context command name already exists in this Thread"));
     }
