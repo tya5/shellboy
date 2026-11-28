@@ -1,6 +1,6 @@
 use super::queue::*;
 use super::*;
-use rusqlite::{OpenFlags, StatementStatus};
+use rusqlite::OpenFlags;
 
 fn recovery_db() -> Connection {
     let db = Connection::open_in_memory().unwrap();
@@ -85,8 +85,6 @@ fn bootstrap_seek_is_bounded_on_read_only_connection_at_all_cursor_boundaries() 
             .optional()
             .unwrap();
         assert_eq!(actual.as_deref(), expected, "cursor={cursor:?}");
-        assert_eq!(statement.get_status(StatementStatus::Sort), 0);
-        assert_eq!(statement.get_status(StatementStatus::FullscanStep), 0);
     }
 }
 

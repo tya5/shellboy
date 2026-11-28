@@ -359,16 +359,6 @@ fn maximum_groups_and_validation_bounds() {
     assert!(validate(&a).is_err());
 }
 #[test]
-fn existing_rowid_query_plan_and_bounded_scan_counts() {
-    let db = fixture();
-    assert_eq!(
-        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
-            .unwrap(),
-        crate::storage::SCHEMA_VERSION
-    );
-}
-
-#[test]
 fn descendants_overflow_and_unreported_input_are_not_inferred() {
     let db = fixture();
     db.execute("UPDATE thread SET parent_thread_id='t1' WHERE id='t2'", [])

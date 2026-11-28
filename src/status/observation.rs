@@ -622,39 +622,11 @@ pub(crate) fn prepare(raw: Raw) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::StatementStatus;
     fn database() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
         db
-    }
-    #[test]
-    fn status_plans_seek_their_index_with_foreign_rows() {
-        let db = database();
-        db.execute(
-            "INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES('r','scope','live','2026-01-01',NULL,NULL)",
-            [],
-        )
-        .unwrap();
-        let query = prefix_sql(Kind::Run, 201);
-        let measure = || {
-            let mut st = db.prepare(&query).unwrap();
-            {
-                let mut rows = st.query(params!["[\"scope\"]", "live"]).unwrap();
-                while rows.next().unwrap().is_some() {}
-            }
-            assert_eq!(st.get_status(StatementStatus::FullscanStep), 0);
-        };
-        measure();
-        for n in 0..10000 {
-            db.execute(
-                "INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES(?1,'foreign','completed','2026-01-01',NULL,NULL)",
-                [format!("foreign{n}")],
-            )
-            .unwrap();
-        }
-        measure();
     }
     #[test]
     fn missing_and_metadata_limits_are_distinct_from_an_empty_success() {

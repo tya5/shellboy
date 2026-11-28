@@ -190,7 +190,7 @@ class LanguageAuditTests(unittest.TestCase):
         first, second = self.records()
         decisions = {first['id']: {'category': 'a', 'reason': 'reviewed',
                                   'source_tokens_sha256': first['source_tokens_sha256']}}
-        path.write_text(path.read_text().replace('second', 'edited'))
+        path.write_text(path.read_text(encoding='utf-8').replace('second', 'edited'), encoding='utf-8')
         rows = AUDIT['inventory'](self.root, decisions)['records']
         self.assertEqual(rows[0]['category'], 'a')
         self.assertNotEqual(rows[1]['source_tokens_sha256'], second['source_tokens_sha256'])

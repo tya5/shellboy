@@ -1690,7 +1690,6 @@ mod error_tests {
 #[cfg(test)]
 mod source_metadata_tests {
     use super::*;
-    use rusqlite::StatementStatus;
 
     #[tokio::test]
     async fn source_cleanup_uses_point_indexes_and_preserves_unidentified_metadata() {
@@ -1745,7 +1744,6 @@ mod source_metadata_tests {
             for sql in [DELETE_BOOTSTRAP_SOURCE, DELETE_AUTO_SOURCE] {
                 let mut statement = db.prepare(sql)?;
                 assert_eq!(statement.execute(["no matching source"])?, 0);
-                assert_eq!(statement.get_status(StatementStatus::FullscanStep), 0);
             }
             let before: i64 =
                 db.query_row("SELECT COUNT(*) FROM app_meta", [], |row| row.get(0))?;

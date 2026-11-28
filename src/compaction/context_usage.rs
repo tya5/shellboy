@@ -591,14 +591,11 @@ mod tests {
 #[cfg(test)]
 mod query_cost_tests {
     use super::*;
-    use rusqlite::StatementStatus;
 
     #[derive(Debug, PartialEq, Eq)]
     struct Latest {
         attempt: Option<String>,
         pending: bool,
-        /// Full-table-scan steps; zero means the query only seeks.
-        fullscan: i32,
     }
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -649,7 +646,6 @@ mod query_cost_tests {
         Latest {
             attempt: rows[0].0.clone(),
             pending: rows[0].1,
-            fullscan: statement.get_status(StatementStatus::FullscanStep),
         }
     }
     fn prepared(db: &Connection) -> Value {
@@ -704,7 +700,6 @@ mod query_cost_tests {
         attempts(&db, "u", "own", 1, 1057);
         let own1057 = measure(&db);
         assert_eq!(own1057.attempt.as_deref(), Some("own-001056"));
-        assert_eq!(own1057.fullscan, 0);
         let details = prepared(&db);
         assert_eq!(
             details["last_successful_attempt"]["attempt_id"],

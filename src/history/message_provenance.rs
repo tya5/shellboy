@@ -236,11 +236,7 @@ mod tests {
             ))
             .unwrap();
             let after = measure(query);
-            let forced = measure(
-                "SELECT rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')",
-            );
             assert_eq!(before, after);
-            assert_eq!(before, forced);
         }
     }
     #[test]

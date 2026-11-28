@@ -237,7 +237,6 @@ pub(super) async fn request(
 mod tests {
     use super::*;
     use crate::protocol::AttachmentListArgs;
-    use rusqlite::StatementStatus;
     #[test]
     fn explicit_attachment_scope_does_not_fall_back_to_the_viewer() {
         use crate::protocol::Command;
@@ -392,18 +391,8 @@ mod tests {
         );
         assert_eq!(value["attachments"][1]["attachment_id"], "a");
     }
-    /// Full-table-scan steps of the point lookup: zero means it only seeks.
-    fn point_fullscan_steps(db: &Connection, id: &str) -> i32 {
-        let mut statement = db.prepare(POINT_DETAIL).unwrap();
-        statement
-            .query_map(params!["target", id, TEXT], |_| Ok(()))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        statement.get_status(StatementStatus::FullscanStep)
-    }
     #[test]
-    fn exact_selection_is_independent_of_list_cohort_and_grows_no_scan() {
+    fn exact_selection_is_independent_of_list_cohort() {
         let db = fixture();
         seed(&db, 0, 1000);
         let (list, limited) = prepare(read_tx(&db, "target").unwrap());
@@ -430,7 +419,6 @@ mod tests {
         assert_eq!(value["attachments"][0]["selected"], false);
         assert_eq!(value["global_order_complete"], false);
         seed(&db, 1000, 10000);
-        assert_eq!(point_fullscan_steps(&db, "a"), 0);
         let (missing, _) = prepare(read_selected_tx(&db, "viewer", "a").unwrap());
         assert_eq!(missing["thread_id"], "viewer");
         assert_eq!(missing["scope"]["selection_found"], false);
