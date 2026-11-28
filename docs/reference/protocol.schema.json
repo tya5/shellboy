@@ -1765,7 +1765,7 @@
         {
           "properties": {
             "args": {
-              "$ref": "#/definitions/RunTarget"
+              "$ref": "#/definitions/RunRetryArgs"
             },
             "command": {
               "const": "run.retry",
@@ -1781,7 +1781,7 @@
         {
           "properties": {
             "args": {
-              "$ref": "#/definitions/RunTarget"
+              "$ref": "#/definitions/RunStopTarget"
             },
             "command": {
               "const": "run.stop",
@@ -2829,11 +2829,13 @@
           "type": "array"
         },
         "expected_hash": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "expected_hash",
         "changes"
       ],
       "type": "object"
@@ -3350,6 +3352,20 @@
         "draft": {
           "$ref": "#/definitions/DraftSnapshot"
         },
+        "expected_source_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_thread_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "follow_tail": {
           "type": "boolean"
         },
@@ -3434,7 +3450,13 @@
         "draft": {
           "$ref": "#/definitions/DraftSnapshot"
         },
-        "selection_revision": {
+        "expected_source_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_thread_revision": {
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -4051,6 +4073,24 @@
       },
       "required": [
         "execution_id"
+      ],
+      "type": "object"
+    },
+    "ExpectedTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "generation"
       ],
       "type": "object"
     },
@@ -5991,10 +6031,22 @@
         "pending": {
           "$ref": "#/definitions/HistoryWindowPending"
         },
+        "pinned_sources": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowSource"
+          },
+          "type": "array"
+        },
         "read_sequence": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "received": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowReceived"
+          },
+          "type": "array"
         },
         "recovery": {
           "items": {
@@ -6110,6 +6162,31 @@
       ],
       "type": "object"
     },
+    "HistoryWindowReceived": {
+      "properties": {
+        "after_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "recovery_wait": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_id",
+        "kind",
+        "recovery_wait"
+      ],
+      "type": "object"
+    },
     "HistoryWindowRecovery": {
       "properties": {
         "failure_count": {
@@ -6163,6 +6240,43 @@
         "kind",
         "excerpt",
         "truncated"
+      ],
+      "type": "object"
+    },
+    "HistoryWindowSource": {
+      "properties": {
+        "created_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "reply_excerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reply_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revisit": {
+          "type": "boolean"
+        },
+        "sender": {
+          "$ref": "#/definitions/MessageSender"
+        }
+      },
+      "required": [
+        "node_id",
+        "revisit",
+        "sender"
       ],
       "type": "object"
     },
@@ -7335,6 +7449,16 @@
         "sender": {
           "$ref": "#/definitions/MessageSender"
         },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "thread_id": {
           "type": "string"
         },
@@ -7688,11 +7812,45 @@
       },
       "type": "object"
     },
+    "MessageSource": {
+      "properties": {
+        "attachments": {
+          "items": {
+            "$ref": "#/definitions/UiAttachment"
+          },
+          "type": "array"
+        },
+        "selection_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "selection_revision",
+        "text",
+        "attachments"
+      ],
+      "type": "object"
+    },
     "MessageTarget": {
       "additionalProperties": false,
       "properties": {
         "message_id": {
           "type": "string"
+        },
+        "source_thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -10821,7 +10979,7 @@
           "additionalProperties": false,
           "properties": {
             "args": {
-              "$ref": "#/definitions/RunTarget"
+              "$ref": "#/definitions/RunRetryArgs"
             },
             "command": {
               "const": "run.retry",
@@ -10850,7 +11008,7 @@
           "additionalProperties": false,
           "properties": {
             "args": {
-              "$ref": "#/definitions/RunTarget"
+              "$ref": "#/definitions/RunStopTarget"
             },
             "command": {
               "const": "run.stop",
@@ -12243,6 +12401,28 @@
       ],
       "type": "object"
     },
+    "RunRetryArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ExpectedTurn"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "type": "object"
+    },
     "RunState": {
       "enum": [
         "live",
@@ -12281,6 +12461,44 @@
         "invariant"
       ],
       "type": "string"
+    },
+    "RunStopTarget": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "run_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "run_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected_turn": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ExpectedTurn"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "thread_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread_id"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RunTarget": {
       "additionalProperties": false,
@@ -13101,6 +13319,16 @@
         "execution_id": {
           "type": "string"
         },
+        "expected_owner": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellReadOwner"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "limit_bytes": {
           "default": 65536,
           "format": "uint32",
@@ -13116,6 +13344,22 @@
       },
       "required": [
         "execution_id"
+      ],
+      "type": "object"
+    },
+    "ShellReadOwner": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "run_id"
       ],
       "type": "object"
     },
@@ -18312,6 +18556,16 @@
         },
         "sender": {
           "$ref": "#/definitions/MessageSender"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "thread_id": {
           "type": "string"
