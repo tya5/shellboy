@@ -17,11 +17,10 @@ lists become too long in practice.
 
 ## Bring skills and MCP servers you already have
 
-- **Skills:** Copy the `SKILL.md` folder and its scripts under `knowledge/`.
-  Use its frontmatter description as the “when to use it” part of the
-  `AGENTS.md` index line. Run its scripts through the shell. Adapt steps that
-  name another product's tools: replace `Read` and `Edit` with shell commands,
-  and `Agent` with Shellboy Thread delegation where appropriate.
+- **Skills:** Add the folder as a docs source with
+  `shellboy docs source add --name skills --path /path/to/skills`. Browse it
+  with `shellboy docs list --parent skills`. `SKILL.md` is ordinary Markdown;
+  scripts stay where they are and are not run by the guide reader.
 - **MCP servers:** The model calls a command-line MCP client through the shell.
   If a server must stay running to maintain a login or connection, run it as a
   Thread-owned service. Give the model a small CLI that can list tools, call a
