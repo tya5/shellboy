@@ -272,11 +272,12 @@ async fn closed_turn_gate_cannot_create_a_native_context_process() {
 #[tokio::test]
 async fn a_budget_that_only_fits_the_skip_fact_never_launches() {
     watchdog("context skip request", async {
+        let minimum = minimum_budget();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (root, owner, control, accepted) =
             crate::control::driver::preparation_tests::fixture_with_config(
                 &format!("http://{}/v1", listener.local_addr().unwrap()),
-                "[limits]\ntool_excerpt_bytes=138\n",
+                &format!("[limits]\ntool_excerpt_bytes={minimum}\n"),
             )
             .await;
         define(
@@ -297,7 +298,7 @@ async fn a_budget_that_only_fits_the_skip_fact_never_launches() {
             fact,
             json!({"context":"skipped","reason":"budget_too_small"})
         );
-        assert!(serde_json::to_vec(tail).unwrap().len() <= 138);
+        assert!(serde_json::to_vec(tail).unwrap().len() as u64 <= minimum);
         let inspected = inspect_only_attempt(root.path(), &control, accepted.thread_id).await;
         assert_eq!(&inspected["saved"]["context_tail"]["item"], tail);
         assert_eq!(

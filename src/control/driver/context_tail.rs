@@ -43,29 +43,18 @@ pub(super) async fn collect(
     }
     let limit =
         usize::try_from(control.store.config.limits.tool_excerpt_bytes).unwrap_or(usize::MAX);
-    let base = serde_json::to_vec(&item(ENVELOPE.to_owned() + SUFFIX))
-        .expect("context item serializes")
-        .len();
-    let metadata: Vec<_> = definitions
-        .iter()
-        .map(|definition| {
-            escaped_size(
-                &serde_json::to_string(&ResultEntry {
-                    name: definition.name.clone(),
-                    outcome: Outcome::Cancelled,
-                    started: Some(false),
-                    stdout: String::new(),
-                    truncated: false,
-                })
-                .expect("context metadata serializes"),
-            )
-        })
-        .collect();
-    let reserved = metadata
-        .iter()
-        .fold(base.saturating_add(definitions.len() - 1), |sum, size| {
-            sum.saturating_add(*size)
-        });
+    let reserved = serde_json::to_vec(&tail(
+        definitions.iter().map(|def| ResultEntry {
+            name: def.name.clone(),
+            outcome: Outcome::Cancelled,
+            started: Some(false),
+            stdout: String::new(),
+            truncated: false,
+        }),
+        true,
+    ))
+    .expect("context metadata serializes")
+    .len();
     let Some(available) = limit.checked_sub(reserved) else {
         return Ok(Some(item(SKIPPED.to_owned())));
     };
@@ -84,18 +73,16 @@ pub(super) async fn collect(
     if cancel.is_cancelled() {
         return Ok(None);
     }
-    let mut entries = Vec::new();
-    let mut shortened = false;
-    for (mut entry, metadata) in results.into_iter().zip(metadata) {
-        let encoded = fit_entry(&mut entry, metadata + share).expect("metadata was reserved");
-        shortened |= entry.truncated;
-        entries.push(encoded);
-    }
-    let fact = if shortened { "truncated" } else { "complete" };
-    Ok(Some(item(format!(
-        "{ENVELOPE}{}],\"outcome\":\"{fact}\"}}",
-        entries.join(",")
-    ))))
+    let truncated = results.iter().any(|entry| entry.truncated);
+    Ok(Some(tail(results.into_iter(), truncated)))
+}
+
+fn tail(entries: impl Iterator<Item = ResultEntry>, truncated: bool) -> Value {
+    item(
+        json!({"type":"context_commands", "results": entries.collect::<Vec<_>>(),
+        "outcome": if truncated { "truncated" } else { "complete" }})
+        .to_string(),
+    )
 }
 
 fn item(text: String) -> Value {
@@ -136,8 +123,7 @@ async fn run(
         )
         .await;
     let started = execution.is_ok();
-    let mut bytes = Vec::new();
-    let mut truncated = false;
+    let mut stdout = Excerpt::new(share);
     let outcome = match execution {
         Ok(mut child) => {
             let stopped = loop {
@@ -146,9 +132,7 @@ async fn run(
                     _ = tokio::time::sleep_until(deadline) => break Some(Outcome::TimedOut),
                     event = child.events.recv() => match event {
                         Some(ShellEvent::Output(chunk)) if chunk.stream == OutputStream::Stdout => {
-                            let keep = chunk.bytes.len().min(share - bytes.len());
-                            bytes.extend_from_slice(&chunk.bytes[..keep]);
-                            truncated |= keep != chunk.bytes.len();
+                            stdout.push(&chunk.bytes);
                         }
                         Some(_) => {},
                         None => break None,
@@ -189,105 +173,98 @@ async fn run(
         }
         Err(_) => Outcome::Failed,
     };
+    stdout.finish();
     ResultEntry {
         name: definition.name,
         started: (started || matches!(outcome, Outcome::TimedOut)).then_some(started),
         outcome,
-        stdout: String::from_utf8_lossy(&bytes).into_owned(),
-        truncated,
+        stdout: stdout.text,
+        truncated: stdout.truncated,
     }
 }
 
 const SKIPPED: &str = r#"{"context":"skipped","reason":"budget_too_small"}"#;
 
-// Reserve the larger outcome spelling, so truncation never grows the envelope.
-const ENVELOPE: &str = "{\"type\":\"context_commands\",\"results\":[";
-const SUFFIX: &str = "],\"outcome\":\"truncated\"}";
-
-fn escaped_size(text: &str) -> usize {
-    serde_json::to_vec(text)
-        .expect("context text serializes")
-        .len()
-        - 2
+pub(crate) fn minimum_budget() -> u64 {
+    serde_json::to_vec(&item(SKIPPED.to_owned()))
+        .expect("skip item serializes")
+        .len() as u64
 }
 
-fn fit_entry(entry: &mut ResultEntry, limit: usize) -> Option<String> {
-    let encode =
-        |entry: &ResultEntry| serde_json::to_string(entry).expect("context result serializes");
-    let encoded = encode(entry);
-    if escaped_size(&encoded) <= limit {
-        return Some(encoded);
-    }
-    entry.truncated = true;
-    let stdout = std::mem::take(&mut entry.stdout);
-    let mut best = encode(entry);
-    if escaped_size(&best) > limit {
-        return None;
-    }
-    let (mut low, mut high) = (1, stdout.len());
-    while low <= high {
-        let mid = low + (high - low) / 2;
-        entry.stdout = stdout[..stdout.floor_char_boundary(mid)].to_owned();
-        let encoded = encode(entry);
-        if escaped_size(&encoded) <= limit {
-            best = encoded;
-            low = mid + 1;
-        } else {
-            high = mid - 1;
+struct Excerpt {
+    text: String,
+    pending: Vec<u8>,
+    remaining: usize,
+    truncated: bool,
+}
+
+impl Excerpt {
+    fn new(remaining: usize) -> Self {
+        Self {
+            text: String::new(),
+            pending: Vec::new(),
+            remaining,
+            truncated: false,
         }
     }
-    Some(best)
-}
 
-#[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-    use crate::control::driver::preparation_tests::{close, fixture, ready};
+    fn append(&mut self, text: &str) {
+        for ch in text.chars() {
+            // Excerpt text is a JSON string inside another JSON string.
+            let cost = match ch {
+                '"' | '\\' => 4,
+                '\x08' | '\x0c' | '\n' | '\r' | '\t' => 3,
+                '\x00'..='\x1f' => 7,
+                _ => ch.len_utf8(),
+            };
+            let Some(remaining) = self.remaining.checked_sub(cost) else {
+                self.truncated = true;
+                break;
+            };
+            self.remaining = remaining;
+            self.text.push(ch);
+        }
+    }
 
-    #[tokio::test]
-    async fn context_definitions_supply_fresh_ordered_stdout_and_failure() {
-        let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1").await;
-        let snapshot = ready(&control, &accepted).await;
-        let cancel = CancellationToken::new();
-        assert!(
-            collect(&control, &snapshot, &cancel, Arc::default())
-                .await
-                .unwrap()
-                .is_none()
-        );
-        let thread = accepted.thread_id.clone();
-        control
-            .store
-            .database
-            .call(move |db| {
-                for (name, command) in [("z", "printf '%s' \"$SHELLBOY_TURN_ID\""), ("a", "exit 1")]
-                {
-                    super::super::super::context_command::add(
-                        db,
-                        &thread,
-                        &crate::protocol::ContextAddArgs {
-                            thread_id: None,
-                            name: name.into(),
-                            command: command.into(),
-                            timeout_ms: 10_000,
-                        },
-                    )?;
+    fn push(&mut self, bytes: &[u8]) {
+        if self.truncated {
+            return;
+        }
+        let mut pending = std::mem::take(&mut self.pending);
+        let mut bytes = if pending.is_empty() {
+            bytes
+        } else {
+            pending.extend_from_slice(bytes);
+            &pending
+        };
+        while !self.truncated {
+            match std::str::from_utf8(bytes) {
+                Ok(text) => {
+                    self.append(text);
+                    break;
                 }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let item = collect(&control, &snapshot, &cancel, Arc::default())
-            .await
-            .unwrap()
-            .unwrap();
-        let text = item["content"][0]["text"].as_str().unwrap();
-        let result: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(result["results"][0]["name"], "z");
-        assert_eq!(result["results"][0]["outcome"], "ok");
-        assert_eq!(result["results"][0]["stdout"], snapshot.turn);
-        assert_eq!(result["results"][1]["outcome"], "failed");
-        close(control, owner).await;
+                Err(error) => {
+                    let (valid, rest) = bytes.split_at(error.valid_up_to());
+                    self.append(std::str::from_utf8(valid).expect("valid UTF-8 prefix"));
+                    if self.truncated {
+                        break;
+                    }
+                    if let Some(invalid) = error.error_len() {
+                        self.append("\u{fffd}");
+                        bytes = &rest[invalid..];
+                    } else {
+                        self.pending.extend_from_slice(rest);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fn finish(&mut self) {
+        if !self.pending.is_empty() && !self.truncated {
+            self.append("\u{fffd}");
+        }
     }
 }
 

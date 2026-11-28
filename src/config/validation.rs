@@ -412,10 +412,11 @@ fn contains_toml_datetime(value: &serde_json::Value) -> bool {
 impl Limits {
     fn validate_relations(&self) -> Result<(), ConfigError> {
         // The fixed skipped context fact must fit even when no outcomes do.
-        if self.tool_excerpt_bytes < 138 {
+        let minimum = crate::control::context_tail_minimum_budget();
+        if self.tool_excerpt_bytes < minimum {
             return Err(invalid(
                 "limits.tool_excerpt_bytes",
-                "must be at least 138 bytes",
+                &format!("must be at least {minimum} bytes"),
             ));
         }
         if self.attachment_file_bytes > self.attachment_request_bytes {

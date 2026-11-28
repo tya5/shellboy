@@ -38,6 +38,7 @@ mod attachment_input;
 pub(crate) mod context;
 pub mod db;
 mod driver;
+pub(crate) use driver::context_tail_minimum_budget;
 /// Request assembly parts shared with `shellboy thread request` (#137).
 pub(crate) mod request_parts {
     pub(crate) use super::attachment_input::{has_attachment_ref, strip_local};
