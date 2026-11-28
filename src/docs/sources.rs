@@ -1071,25 +1071,34 @@ mod tests {
         let oversized = "\x01".repeat(246) + ".md";
         fs::write(deep.join(&oversized), "cursor-witness").unwrap();
         fs::write(deep.join("a.md"), "cursor-witness").unwrap();
-        let page = browse(
-            DocsRead::Search {
-                query: "cursor-witness".into(),
-                parent: Some("local".into()),
-                sources: vec!["local".into()],
-                limit: 1,
-                cursor: None,
-            },
-            &[Registration {
-                name: "local".into(),
-                path,
-            }],
-        )
-        .unwrap();
+        fs::write(deep.join("b.md"), "cursor-witness").unwrap();
+        let search = |cursor| {
+            browse(
+                DocsRead::Search {
+                    query: "cursor-witness".into(),
+                    parent: Some("local".into()),
+                    sources: vec!["local".into()],
+                    limit: 1,
+                    cursor,
+                },
+                &[Registration {
+                    name: "local".into(),
+                    path,
+                }],
+            )
+            .unwrap()
+        };
+        let page = search(None);
         assert_eq!(
             page["unavailable"],
             json!([{"source":"local","path":format!("{relative}/{oversized}"),"reason":"path_too_long"}])
         );
         assert_eq!(page["items"][0]["id"], format!("local/{relative}/a.md"));
+        let cursor = page["next_cursor"].as_str().expect("next sibling cursor");
+        assert!(cursor.len() <= CURSOR_BYTES);
+        let resumed = search(Some(cursor.into()));
+        assert_eq!(resumed["items"][0]["id"], format!("local/{relative}/b.md"));
+        assert!(resumed["unavailable"].as_array().unwrap().is_empty());
     }
 
     #[test]
