@@ -732,7 +732,22 @@ struct SearchMark {
     bundled: usize,
     source: usize,
     walk: FolderWalk,
-    file: Option<(String, usize, String)>,
+    file: Option<(String, FoldPosition, String)>,
+}
+
+// Ordered by original scalar, then by UTF-8 byte within its lowercase expansion.
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+struct FoldPosition(usize, u8);
+
+fn fold_position(text: &str, mut offset: usize) -> FoldPosition {
+    for (source, scalar) in text.char_indices() {
+        let width = scalar.to_lowercase().map(char::len_utf8).sum::<usize>();
+        if offset < width {
+            return FoldPosition(source, offset as u8);
+        }
+        offset -= width;
+    }
+    FoldPosition(text.len(), 0)
 }
 
 fn hit(
@@ -741,25 +756,37 @@ fn hit(
     parent: &str,
     text: &str,
     needle: &str,
-    offset: usize,
+    position: FoldPosition,
     version: &str,
-) -> (Option<Value>, usize) {
+) -> Result<(Option<Value>, FoldPosition), String> {
     let lowered = text.to_lowercase();
-    let mut matches = lowered.match_indices(needle);
-    let Some((at, _)) = matches.next() else {
-        return (None, 0);
+    let skip = usize::from(position.1);
+    if skip != 0
+        && (!lowered.is_char_boundary(skip)
+            || text.chars().next().is_none_or(|scalar| {
+                skip >= scalar.to_lowercase().map(char::len_utf8).sum::<usize>()
+            }))
+    {
+        return Err("cursor_expired: Invalid folded search position".into());
+    }
+    let offset = position.0;
+    let mut matches = lowered[skip..]
+        .match_indices(needle)
+        .map(|(at, _)| at + skip);
+    let Some(at) = matches.next() else {
+        return Ok((None, FoldPosition::default()));
     };
-    let (score, last) = matches.fold((1, at), |(count, _), (at, _)| (count + 1, at));
-    let (_, matched_end) = original_span(text, last, last + needle.len());
+    let (score, last) = matches.fold((1, at), |(count, _), at| (count + 1, at));
+    let matched_end = fold_position(text, last + needle.len());
     let (start, end) = original_span(text, at, at + needle.len());
     let before = text.ceil_char_boundary(start.saturating_sub(96));
     let after = text.floor_char_boundary((end + 192).min(text.len()));
-    (
+    Ok((
         Some(
             json!({"id":id,"title":title,"parent_id":parent,"version":version,"excerpt":&text[before..after],"spans":[{"start":offset+start,"end":offset+end}],"score":score}),
         ),
         matched_end,
-    )
+    ))
 }
 fn search(
     query: String,
@@ -785,8 +812,10 @@ fn search(
             source_for(id, rows)?;
         }
     }
-    let scope =
-        hash(serde_json::to_vec(&json!(["search", query, parent, sources])).expect("scope"));
+    let scope = hash(
+        serde_json::to_vec(&json!(["search-fold-position", query, parent, sources]))
+            .expect("scope"),
+    );
     let root_rel = parent
         .as_deref()
         .and_then(|p| p.split_once('/'))
@@ -836,7 +865,17 @@ fn search(
                     .is_none_or(|p| d.id == *p || descendant(d, p, bundled))
         })
         .filter_map(|(index, d)| {
-            let mut found = hit(&d.id, &d.title, &d.parent_id, &d.text, &needle, 0, version).0?;
+            let mut found = hit(
+                &d.id,
+                &d.title,
+                &d.parent_id,
+                &d.text,
+                &needle,
+                FoldPosition::default(),
+                version,
+            )
+            .expect("valid initial position")
+            .0?;
             found["content_hash"] = json!(BUNDLED.hashes[index].get_or_init(|| hash(&d.text)));
             Some(found)
         })
@@ -885,7 +924,8 @@ fn search(
             }
         }
         let (_, root) = current_root.as_ref().expect("opened source root");
-        if let Some((name, offset, rev)) = pos.file.take() {
+        if let Some((name, position, rev)) = pos.file.take() {
+            let offset = position.0;
             work += 1;
             let rel = child_path(&pos.walk.path, &name);
             let observation = under(root, &rel).and_then(|path| {
@@ -917,19 +957,20 @@ fn search(
             };
             let id = format!("{}/{rel}", row.name);
             let (dir, basename) = id.rsplit_once('/').expect("guide id");
-            let title = if offset == 0 {
+            let title = if position == FoldPosition::default() {
                 metadata(&text, basename).0
             } else {
                 basename.into()
             };
-            let (found, matched_end) = hit(&id, &title, dir, &text, &needle, offset, version);
+            let (found, matched_end) = hit(&id, &title, dir, &text, &needle, position, version)?;
             if let Some(h) = found {
                 hits.push(h);
             }
             if more {
                 // Revisit possible crossing starts, but never restart inside an accepted match.
                 let overlap = text.ceil_char_boundary(text.len().saturating_sub(query.len() * 4));
-                pos.file = Some((name, offset + overlap.max(matched_end), rev));
+                let FoldPosition(source, skip) = FoldPosition(overlap, 0).max(matched_end);
+                pos.file = Some((name, FoldPosition(offset + source, skip), rev));
             } else {
                 pos.advance_source_if_idle();
             }
@@ -1000,9 +1041,9 @@ impl SearchMark {
 
     fn admit_file(&mut self, (name, rev): (String, String), fits: &impl Fn(&Self) -> bool) -> bool {
         // Reserve the full offset width at entry so a later chunk always fits.
-        self.file = Some((name, usize::MAX, rev));
+        self.file = Some((name, FoldPosition(usize::MAX, u8::MAX), rev));
         if fits(self) {
-            self.file.as_mut().expect("admitted file").1 = 0;
+            self.file.as_mut().expect("admitted file").1 = FoldPosition::default();
             return true;
         }
         self.file = None;
@@ -1114,6 +1155,18 @@ mod tests {
         assert_eq!(
             search_fixture_pages("aaa", "x".repeat(first) + &"a".repeat(15)),
             vec![(first, first + 3, 4), (first + 12, first + 15, 1)]
+        );
+    }
+
+    #[test]
+    fn overlapping_display_spans_do_not_skip_a_hit_inside_a_folded_scalar() {
+        let needle = "\u{307}i";
+        let first = TEXT_WORK - 4;
+        let text = "x".repeat(first) + "\u{307}\u{130}i";
+        assert_eq!(text.to_lowercase().matches(needle).count(), 2);
+        assert_eq!(
+            search_fixture_pages(needle, text),
+            vec![(first, TEXT_WORK, 1), (TEXT_WORK - 2, TEXT_WORK + 1, 1)]
         );
     }
 
