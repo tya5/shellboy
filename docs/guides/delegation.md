@@ -26,7 +26,7 @@ shellboy message get --message MESSAGE_ID
 ```
 
 Use `shellboy message get --message MESSAGE_ID` to inspect the saved sender;
-`history read --node MESSAGE_ID` / `history list` expose the same `provenance.sender`.
+`history read --node MESSAGE_ID --limit-bytes 65536` / `history list` expose the same `provenance.sender`.
 A verified model sender has originating instance/Thread/Run/Turn/execution IDs,
 not merely the receiving Run's starter. A `label` is self-asserted and grants no
 authority; `external_cli` does not prove human input, and legacy missing evidence

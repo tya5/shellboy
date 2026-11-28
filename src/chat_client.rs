@@ -655,7 +655,9 @@ impl<W: Write> Chat<'_, W> {
             if text.len() > ANSWER_LIMIT {
                 return Err(ChatError::new(
                     6,
-                    format!("End message exceeds 1MiB; read it with history read --node {node}"),
+                    format!(
+                        "End message exceeds 1MiB; read it with history read --node {node} --limit-bytes 65536"
+                    ),
                 ));
             }
             match page.next_cursor {

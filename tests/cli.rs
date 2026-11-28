@@ -899,7 +899,7 @@ async fn shared_defaults_keep_parser_and_wire_deserialization_identical() {
         (
             vec!["history", "read", "--node", "n"],
             "history.read",
-            serde_json::json!({"node_id":"n"}),
+            serde_json::json!({"node_ids":["n"]}),
         ),
         (
             vec!["shell", "write", "--execution", "x", "--text", "s"],

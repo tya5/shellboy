@@ -47,7 +47,7 @@ open a reply duty.
 
 Keep the returned `message_id`. Read the reply state with
 `shellboy message get --message MESSAGE_ID`; when `reply.state` is `replied`,
-read the answer with `shellboy history read --node REPLY_NODE_ID` using
+read the answer with `shellboy history read --node REPLY_NODE_ID --limit-bytes 65536` using
 `reply.node_id`. A person can also observe the question with a bounded wait:
 
 ```sh

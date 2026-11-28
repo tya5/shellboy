@@ -100,7 +100,7 @@ shellboy run retry --run RUN_ID
 shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"ACK_TURN_ID"}]' --timeout-ms 30000
 shellboy turn get --turn ACK_TURN_ID
 # Only if turn get returns end_message_node_id:
-shellboy history read --node END_MESSAGE_NODE_ID
+shellboy history read --node END_MESSAGE_NODE_ID --limit-bytes 65536
 ```
 
 Read the wait snapshot's `state` and then saved Turn facts. `satisfied` can mean
@@ -160,7 +160,7 @@ Use the existing message ID to read saved delivery context and then its body:
 
 ```sh
 shellboy message get --message MESSAGE_ID
-shellboy history read --node MESSAGE_ID
+shellboy history read --node MESSAGE_ID --limit-bytes 65536
 ```
 
 `message get` already exposes `context.hold_reason`; it is not a new DTO field.

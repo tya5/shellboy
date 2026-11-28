@@ -400,7 +400,7 @@ offはコンパクション全体を止めません。意図された動作で�
 
 返された `message_id` を保存し、`shellboy message get --message MESSAGE_ID` で返信状態を確認します。
 `reply.state` が `replied` の場合は、`reply.node_id` を使って
-`shellboy history read --node REPLY_NODE_ID` で回答を読みます。利用者は次のように時間を区切って待つこともできます。
+`shellboy history read --node REPLY_NODE_ID --limit-bytes 65536` で回答を読みます。利用者は次のように時間を区切って待つこともできます。
 
 ```sh
 shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000

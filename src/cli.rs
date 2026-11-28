@@ -504,7 +504,7 @@ pub enum DraftCommand {
 pub enum MessageCommand {
     /// Save an instruction; acceptance is separate from execution and answer completion.
     #[command(
-        after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history read --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history read --node END_MESSAGE_NODE_ID --limit-bytes 65536\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Send(MessageSendOptions),
     /// Request a reply from a named recipient or another Thread.
@@ -521,7 +521,7 @@ pub enum MessageCommand {
     Reply(MessageReplyOptions),
     /// Inspect saved delivery facts; read the original body separately with history read.
     #[command(
-        after_help = "  shellboy message get --message MESSAGE_ID\n  shellboy history read --node MESSAGE_ID\n\nInspect delivery_status and existing context.hold_reason. terminal_before_path_admission is a held reason: the assigned Run/Turn ended before path admission, not proof of receipt termination or body loss. Saved context is not live delivery proof; history read reads retained body without resending it. A missing body is unknown/unavailable, not permission to invent it.\nA rewind does not by itself prove these inputs were lost. Explicit human resume can admit eligible old held inputs, so a fresh manual resend can duplicate their instructions. Do not automatically repair, resend or create a new sender notice.\nGuide: shellboy docs get --id shellboy/recovery-and-storage"
+        after_help = "  shellboy message get --message MESSAGE_ID\n  shellboy history read --node MESSAGE_ID --limit-bytes 65536\n\nInspect delivery_status and existing context.hold_reason. terminal_before_path_admission is a held reason: the assigned Run/Turn ended before path admission, not proof of receipt termination or body loss. Saved context is not live delivery proof; history read reads retained body without resending it. A missing body is unknown/unavailable, not permission to invent it.\nA rewind does not by itself prove these inputs were lost. Explicit human resume can admit eligible old held inputs, so a fresh manual resend can duplicate their instructions. Do not automatically repair, resend or create a new sender notice.\nGuide: shellboy docs get --id shellboy/recovery-and-storage"
     )]
     Get(MessageOptions),
     /// Cancel queued delivery or withdraw your pending reply request after delivery. Admitted history is retained.
@@ -553,7 +553,7 @@ pub enum RunCommand {
 pub enum TurnCommand {
     /// Inspect state and end_message_node_id; fetch the end message with history read.
     #[command(
-        after_help = "  shellboy turn get --turn TURN_ID\n  shellboy history read --node END_MESSAGE_NODE_ID\n\nFetch only a returned end_message_node_id; stopped/failed terminal states need not have an end message. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "  shellboy turn get --turn TURN_ID\n  shellboy history read --node END_MESSAGE_NODE_ID --limit-bytes 65536\n\nFetch only a returned end_message_node_id; stopped/failed terminal states need not have an end message. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Get(TurnOptions),
     /// Interrupt this Turn without stopping the Run.
@@ -1566,14 +1566,16 @@ pub struct HistoryReadOptions {
     /// Read the display source around this character offset from its end.
     #[arg(long, conflicts_with_all = ["parts", "end_message_only"])]
     pub from_end: Option<u64>,
+    /// Exact node ID. Repeat for a batch; body options require one node.
     #[arg(long = "node", required = true)]
     pub node_ids: Vec<String>,
-    #[arg(long,default_value_t=wire::MAX_BODY_BYTES)]
-    pub limit_bytes: u32,
+    /// Read an original-body page with this byte limit.
+    #[arg(long)]
+    pub limit_bytes: Option<u32>,
     #[arg(long)]
     pub cursor: Option<String>,
-    #[arg(long, default_value = wire::DEFAULT_ENCODING)]
-    pub encoding: String,
+    #[arg(long)]
+    pub encoding: Option<String>,
 }
 impl ValueEnum for wire::ThreadListOrder {
     fn value_variants<'a>() -> &'a [Self] {
@@ -2438,27 +2440,43 @@ impl Cli {
                     after: a.after,
                     excerpt_chars: a.excerpt_chars,
                 }),
-                HistoryCommand::Read(mut a) => C::HistoryRead(wire::HistoryReadArgs {
-                    node_ids: (a.node_ids.len() > 1).then(|| std::mem::take(&mut a.node_ids)),
-                    display: a
-                        .offset
-                        .map(|offset| wire::HistoryDisplayPosition::Absolute { offset })
-                        .or_else(|| {
-                            a.from_end
-                                .map(|offset| wire::HistoryDisplayPosition::FromEnd { offset })
-                        })
-                        .or(a.display.then_some(wire::HistoryDisplayPosition::Tail))
-                        .map(|position| wire::HistoryDisplayRead {
-                            position,
-                            selection: None,
-                        }),
-                    end_message_only: a.end_message_only,
-                    parts: a.parts,
-                    node_id: a.node_ids.pop().unwrap_or_default(),
-                    limit_bytes: a.limit_bytes,
-                    cursor: a.cursor,
-                    encoding: a.encoding,
-                }),
+                HistoryCommand::Read(mut a) => {
+                    let body_mode = a.limit_bytes.is_some()
+                        || a.encoding.is_some()
+                        || a.cursor.is_some()
+                        || a.parts
+                        || a.end_message_only
+                        || a.display
+                        || a.offset.is_some()
+                        || a.from_end.is_some();
+                    if body_mode && a.node_ids.len() != 1 {
+                        return Err(ApiError::new(
+                            wire::ErrorCode::InvalidArgument,
+                            "Body options require exactly one --node",
+                        ));
+                    }
+                    C::HistoryRead(wire::HistoryReadArgs {
+                        node_ids: (!body_mode).then(|| std::mem::take(&mut a.node_ids)),
+                        display: a
+                            .offset
+                            .map(|offset| wire::HistoryDisplayPosition::Absolute { offset })
+                            .or_else(|| {
+                                a.from_end
+                                    .map(|offset| wire::HistoryDisplayPosition::FromEnd { offset })
+                            })
+                            .or(a.display.then_some(wire::HistoryDisplayPosition::Tail))
+                            .map(|position| wire::HistoryDisplayRead {
+                                position,
+                                selection: None,
+                            }),
+                        end_message_only: a.end_message_only,
+                        parts: a.parts,
+                        node_id: a.node_ids.pop().unwrap_or_default(),
+                        limit_bytes: a.limit_bytes.unwrap_or(wire::MAX_BODY_BYTES),
+                        cursor: a.cursor,
+                        encoding: a.encoding.unwrap_or_else(|| wire::DEFAULT_ENCODING.into()),
+                    })
+                }
                 HistoryCommand::Search(a) => C::HistorySearch(wire::HistorySearchArgs {
                     query: a.query,
                     limit: a.limit,

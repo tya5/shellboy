@@ -81,7 +81,7 @@ For important changes, explicitly retain an ID in the already known same-instanc
 ### Inspect held input
 
 `message get --message MESSAGE_ID` already includes the saved `context.hold_reason`.
-Use `history read --node MESSAGE_ID` for the retained original body; no resend is
+Use `history read --node MESSAGE_ID --limit-bytes 65536` for the retained original body; no resend is
 needed. A terminal-before-admission hold reason is not a terminal receipt or proof
 of body loss. See [held input inspection](recovery-and-storage.md#inspect-a-held-message-without-resending-it)
 for path/body distinctions and the duplicate-instruction risk of manual resend.
@@ -648,7 +648,7 @@ create no reply duty.
 ```sh
 shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
 shellboy message get --message MESSAGE_ID
-shellboy history read --node REPLY_NODE_ID
+shellboy history read --node REPLY_NODE_ID --limit-bytes 65536
 ```
 
 The reply arrives in a model sender's conversation: finish the sending Turn
@@ -821,7 +821,7 @@ items and schema-valued additionalProperties. Do not assume full draft support.
 Schema64KiB/depth32/nodes2048, composed request128KiB, result1MiB and100000
 validation steps are bounded; excess is explicit failure, not accepted truncation.
 
-To inspect exactly what was validated, use `history read --node END_MESSAGE_NODE_ID
+To inspect exactly what was validated, use `history read --node END_MESSAGE_NODE_ID --limit-bytes 65536
 --end-message-only`. Normal history reads still include the original natural
 text/reasoning. End-message-only cursors cannot be reused for the ordinary projection.
 Use an owner matching this CLI version for that additive read option.
@@ -860,7 +860,7 @@ Before Thread creation/message send, exec makes a read-only end_message_only
 probe with a random missing node. A current owner decodes the argument and reports
 target_unavailable; old-style argument rejection exits6 before work. A refusal
 at end-message read also exits6 (owner_version_mismatch), retaining known node IDs
-and recommending ordinary history read --node END_MESSAGE_NODE_ID without the new flag.
+and recommending ordinary history read --node END_MESSAGE_NODE_ID --limit-bytes 65536 without the new flag.
 Do not resend completed work as if this were an input/schema error. Closed-wire
 support failures are owner/capability errors6, not input2. This is detection only,
 not an old-Core format shim or automatic legacy-protocol downgrade.
@@ -1261,7 +1261,7 @@ there can be at most 16 pending duties per recipient Thread. The 17th ask is rej
 `--text-stdin`. It must be applied and still pending. `message get` exposes
 `expect_reply`, `reply` (state and optional timestamp, node, sender), or
 `reply_to` for a delivered reply; it no longer borrows a Turn's end message.
-Use `history read --node REPLY_NODE_ID` for the body. If `message reply` gets
+Use `history read --node REPLY_NODE_ID --limit-bytes 65536` for the body. If `message reply` gets
 `target_unavailable` for an unknown or unavailable ID, `error.details.pending_duty_ids` lists
 up to 16 duties the caller Thread owes, excluding questions it sent.
 

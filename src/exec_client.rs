@@ -100,7 +100,7 @@ impl Failure {
             error.code,
             ErrorCode::InvalidArgument | ErrorCode::ProtocolMismatch
         ) {
-            return Self {code:6,status:"owner_version_mismatch",message:"Owner/CLI version mismatch: the required end_message_only read was refused. Use matching owner and CLI versions. If work already ran, read the saved end message with history read --node <end_message_node_id> without --end-message-only; do not resend the work.".into(),api:Some(Box::new(error))};
+            return Self {code:6,status:"owner_version_mismatch",message:"Owner/CLI version mismatch: the required end_message_only read was refused. Use matching owner and CLI versions. If work already ran, read the saved end message with history read --node <end_message_node_id> --limit-bytes 65536 without --end-message-only; do not resend the work.".into(),api:Some(Box::new(error))};
         }
         if error.code == ErrorCode::IoFailed {
             return Self {code:6,status:"owner_capability_unavailable",message:"Cannot confirm the owner's end-message read support; check matching owner/CLI versions. If work already ran, inspect the reported IDs with ordinary history read rather than resending it.".into(),api:Some(Box::new(error))};

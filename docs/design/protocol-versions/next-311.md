@@ -296,4 +296,6 @@ requested target as `error.details.target_operation_id`.
 - `history.read` can observe explicit node IDs independently of the selected path.
   The owner returns one sequence for the selection, with each source revision,
   typed availability and bounded tool facts. A retained source shared by a
-  live fork stays available after its origin Thread is deleted.
+  live fork stays available after its origin Thread is deleted. Bare CLI `--node`
+  selects exact observations even for one ID; body options such as
+  `--limit-bytes 65536` select a body page and require exactly one ID.

@@ -94,7 +94,7 @@ Each node lists at most eight executions. For `history list`, `execution_count` 
 ```bash
 shellboy shell get --execution EXECUTION_ID
 shellboy shell read --execution EXECUTION_ID --encoding UTF-8
-shellboy history read --node REQUEST_NODE_ID
+shellboy history read --node REQUEST_NODE_ID --limit-bytes 65536
 shellboy status --run ORIGIN_RUN_ID --all --limit 200
 ```
 
