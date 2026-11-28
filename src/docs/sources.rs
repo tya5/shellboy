@@ -338,19 +338,98 @@ fn projected_entry(entry: fs::DirEntry) -> Result<Option<Entry>, String> {
     }))
 }
 
-fn projected_children(path: &Path, work: &mut usize) -> Result<Vec<Entry>, String> {
-    let mut out = Vec::new();
-    let dir = fs::read_dir(path).map_err(io_error)?;
-    for entry in dir {
-        *work = work
-            .checked_sub(1)
-            .ok_or("input_limit: Docs directory scan exhausted its work budget")?;
-        if let Some(entry) = projected_entry(entry.map_err(io_error)?)? {
-            out.push(entry);
+// read_dir does not expose an ordered seek. Keep only the nearest keys in
+// memory; classify and read candidates only after selecting the next window.
+struct DirectoryWindow {
+    candidates: std::collections::VecDeque<(Vec<u8>, fs::DirEntry)>,
+    more: bool,
+}
+
+impl DirectoryWindow {
+    fn after(path: &Path, key: &[u8], work: usize) -> Result<Self, String> {
+        let mut selected = std::collections::BTreeMap::<Vec<u8>, fs::DirEntry>::new();
+        let mut more = false;
+        for entry in fs::read_dir(path).map_err(io_error)? {
+            let entry = entry.map_err(io_error)?;
+            let name = entry.file_name();
+            let name = name.as_encoded_bytes();
+            if name <= key {
+                continue;
+            }
+            if selected.len() == work {
+                more = true;
+                if selected
+                    .last_key_value()
+                    .is_some_and(|(last, _)| name >= last.as_slice())
+                {
+                    continue;
+                }
+                selected.pop_last();
+            }
+            selected.insert(name.to_vec(), entry);
+        }
+        Ok(Self {
+            candidates: selected.into_iter().collect(),
+            more,
+        })
+    }
+}
+
+fn list_directory(
+    root: &Path,
+    id: &str,
+    tail: &str,
+    count: usize,
+    cursor: Option<&str>,
+    version: &str,
+    scope: &str,
+) -> Result<Value, String> {
+    let path = under(root, tail)?;
+    let scope = format!("{scope}:{}", revision(&path));
+    let after = if let Some(cursor) = cursor {
+        if cursor.len() > 8192 {
+            return Err("cursor_expired: Cursor too large".into());
+        }
+        let invalid = "cursor_expired: Invalid or stale directory cursor";
+        let raw = URL_SAFE_NO_PAD.decode(cursor).map_err(|_| invalid)?;
+        let (v, s, key): (String, String, String) =
+            serde_json::from_slice(&raw).map_err(|_| invalid)?;
+        if v != version || s != scope {
+            return Err(invalid.into());
+        }
+        URL_SAFE_NO_PAD.decode(key).map_err(|_| invalid)?
+    } else {
+        Vec::new()
+    };
+    let mut window = DirectoryWindow::after(&path, &after, LIST_WORK)?;
+    let mut items = Vec::new();
+    let mut last = after;
+    while items.len() < count {
+        let Some((key, raw)) = window.candidates.pop_front() else {
+            break;
+        };
+        last = key;
+        let Some(entry) = projected_entry(raw)? else {
+            continue;
+        };
+        let rel = child_path(tail, &entry.name);
+        let Ok(path) = under(root, &rel) else {
+            continue;
+        };
+        let id = child_path(id, &entry.name);
+        if entry.directory {
+            items.push(branch(&id, true, version));
+        } else if let Ok(item) = file_view(&id, &path, version) {
+            items.push(item);
         }
     }
-    out.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    Ok(out)
+    let next = (window.more || !window.candidates.is_empty()).then(|| {
+        URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(&(version, scope, URL_SAFE_NO_PAD.encode(last)))
+                .expect("directory cursor"),
+        )
+    });
+    Ok(paginated(json!({"version":version,"items":items}), next))
 }
 
 fn child_path(parent: &str, name: &str) -> String {
@@ -370,7 +449,15 @@ pub(super) fn preview(row: &Registration) -> Value {
         let mut work = LIST_WORK;
         while let Some((rel, depth)) = pending.pop() {
             let path = under(&root, &rel)?;
-            for entry in projected_children(&path, &mut work)? {
+            if work == 0 {
+                return Err("input_limit: Preview budget exhausted".into());
+            }
+            let window = DirectoryWindow::after(&path, &[], work)?;
+            for (_, raw) in window.candidates {
+                work -= 1;
+                let Some(entry) = projected_entry(raw)? else {
+                    continue;
+                };
                 let rel = child_path(&rel, &entry.name);
                 if rel.len() > 4096 || depth >= 32 {
                     return Err("input_limit: Docs path too deep".into());
@@ -383,6 +470,9 @@ pub(super) fn preview(row: &Registration) -> Value {
                     count += 1;
                     bytes = bytes.saturating_add(fs::metadata(path).map_err(io_error)?.len());
                 }
+            }
+            if window.more {
+                return Err("input_limit: Preview budget exhausted".into());
             }
         }
         Ok::<(), String>(())
@@ -496,7 +586,6 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
             selected(rows, &sources)?;
             let scope = hash(serde_json::to_vec(&json!(["list", parent, sources])).expect("scope"));
             let mut items = Vec::new();
-            let mut dir_rev = String::new();
             if let Some(id) = &parent {
                 if id == "shellboy" || id.starts_with("shellboy/") {
                     if included(&sources, "shellboy") {
@@ -507,20 +596,15 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
                     if included(&sources, &source.name) {
                         let tail = id.split_once('/').map_or("", |p| p.1);
                         let root = canonical_root(&source.path)?;
-                        let directory = under(&root, tail)?;
-                        dir_rev = revision(&directory);
-                        for entry in projected_children(&directory, &mut LIST_WORK.to_owned())? {
-                            let id = format!("{id}/{}", entry.name);
-                            let rel = id.split_once('/').expect("relative ID").1;
-                            let Ok(path) = under(&root, rel) else {
-                                continue;
-                            };
-                            if entry.directory {
-                                items.push(branch(&id, true, version));
-                            } else if let Ok(item) = file_view(&id, &path, version) {
-                                items.push(item);
-                            }
-                        }
+                        return list_directory(
+                            &root,
+                            id,
+                            tail,
+                            count,
+                            cursor.as_deref(),
+                            version,
+                            &scope,
+                        );
                     }
                 }
             } else {
@@ -535,7 +619,6 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
                     ));
                 }
             }
-            let scope = format!("{scope}:{dir_rev}");
             let offset = read_cursor(cursor.as_deref(), version, &scope)?;
             if offset > items.len() {
                 return Err("cursor_expired: Offset is outside list".into());
@@ -590,7 +673,7 @@ struct SearchPosition {
 }
 struct Frame {
     path: String,
-    next: usize,
+    after: Vec<u8>,
     revision: String,
 }
 
@@ -621,8 +704,9 @@ struct SearchCursor(
     String,
     usize,
     usize,
-    Vec<(usize, usize, String)>,
+    Vec<(usize, String)>,
     Option<(usize, String)>,
+    String,
 );
 
 fn search_cursor(version: &str, scope: &str, pos: SearchPosition) -> String {
@@ -639,9 +723,13 @@ fn search_cursor(version: &str, scope: &str, pos: SearchPosition) -> String {
         pos.source,
         pos.frames
             .iter()
-            .map(|f| (f.path.len(), f.next, f.revision.clone()))
+            .map(|f| (f.path.len(), f.revision.clone()))
             .collect(),
         pos.file.as_ref().map(|f| (f.1, f.2.clone())),
+        pos.frames
+            .last()
+            .map(|f| URL_SAFE_NO_PAD.encode(&f.after))
+            .unwrap_or_default(),
     );
     format!(
         "{}.{}",
@@ -666,7 +754,7 @@ fn stream_cursor(
     let path = String::from_utf8(URL_SAFE_NO_PAD.decode(path).map_err(|_| invalid)?)
         .map_err(|_| invalid)?;
     let state = URL_SAFE_NO_PAD.decode(state).map_err(|_| invalid)?;
-    let SearchCursor(v, s, bundled, source, stack, file) =
+    let SearchCursor(v, s, bundled, source, stack, file, after) =
         serde_json::from_slice(&state).map_err(|_| invalid)?;
     if v != version
         || s != scope
@@ -678,18 +766,26 @@ fn stream_cursor(
     }
     let mut frames = Vec::new();
     let mut prior = None;
-    for (len, next, revision) in stack {
+    let frame_count = stack.len();
+    let after = URL_SAFE_NO_PAD.decode(after).map_err(|_| invalid)?;
+    for (index, (len, revision)) in stack.into_iter().enumerate() {
         let ancestor = path.get(..len).ok_or(invalid)?;
         if (len != 0 && len != path.len() && path.as_bytes()[len] != b'/')
             || prior.is_some_and(|length| len <= length)
-            || next > LIST_WORK
             || revision.len() != 16
         {
             return Err(invalid.into());
         }
         frames.push(Frame {
             path: ancestor.into(),
-            next,
+            after: if index + 1 == frame_count {
+                after.clone()
+            } else {
+                let tail = path
+                    .get(if len == 0 { 0 } else { len + 1 }..)
+                    .ok_or(invalid)?;
+                tail.split('/').next().ok_or(invalid)?.as_bytes().to_vec()
+            },
             revision,
         });
         prior = Some(len);
@@ -836,7 +932,7 @@ fn search(
             match under(root, rel) {
                 Ok(path) if path.is_dir() => pos.frames.push(Frame {
                     path: rel.into(),
-                    next: 0,
+                    after: Vec::new(),
                     revision: revision(&path),
                 }),
                 Ok(path) if path.is_file() && rel.ends_with(".md") => {
@@ -871,9 +967,9 @@ fn search(
                 if revision(&path) != frame.revision {
                     return Err("cursor_expired: Docs folder changed".into());
                 }
-                match projected_children(&path, &mut LIST_WORK.to_owned()) {
-                    Ok(entries) => {
-                        page_dirs.insert(key.clone(), entries);
+                match DirectoryWindow::after(&path, &frame.after, SEARCH_WORK - work) {
+                    Ok(window) => {
+                        page_dirs.insert(key.clone(), window);
                     }
                     Err(reason) => {
                         unavailable
@@ -884,14 +980,26 @@ fn search(
                     }
                 }
             }
-            let entries = &page_dirs[&key];
-            let Some(entry) = entries.get(frame.next) else {
+            let window = page_dirs.get_mut(&key).expect("open window");
+            let Some((name, raw)) = window.candidates.pop_front() else {
+                if window.more {
+                    work = SEARCH_WORK;
+                    break;
+                }
                 pos.frames.pop();
                 work += 1;
                 continue;
             };
-            frame.next += 1;
+            frame.after = name;
             work += 1;
+            let entry = match projected_entry(raw) {
+                Ok(Some(entry)) => entry,
+                Ok(None) => continue,
+                Err(reason) => {
+                    unavailable.push(json!({"source":row.name,"path":frame.path,"reason":reason}));
+                    continue;
+                }
+            };
             let rel = child_path(&frame.path, &entry.name);
             if rel.len() > 4096 {
                 continue;
@@ -906,7 +1014,7 @@ fn search(
                 } else {
                     pos.frames.push(Frame {
                         path: rel,
-                        next: 0,
+                        after: Vec::new(),
                         revision: rev,
                     });
                 }
