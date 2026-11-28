@@ -614,18 +614,16 @@ pub(super) async fn search(
     }
     let mut scopes = scopes.to_vec();
     let mut discovery_error = None;
-    if scopes.is_empty() {
-        if context.database.exists() {
-            match store::open(&context.database, false) {
-                Ok(s) => {
-                    let mut q =
-                        s.db.prepare("SELECT id FROM sources WHERE (kind!='derived' OR EXISTS(SELECT 1 FROM documents d WHERE d.source_id=sources.id AND d.active_revision IS NOT NULL)) ORDER BY id")?;
-                    for id in q.query_map([], |r| r.get::<_, String>(0))? {
-                        scopes.push(format!("source:{}", id?));
-                    }
+    if scopes.is_empty() && context.database.exists() {
+        match store::open(&context.database, false) {
+            Ok(s) => {
+                let mut q =
+                    s.db.prepare("SELECT id FROM sources WHERE (kind!='derived' OR EXISTS(SELECT 1 FROM documents d WHERE d.source_id=sources.id AND d.active_revision IS NOT NULL)) ORDER BY id")?;
+                for id in q.query_map([], |r| r.get::<_, String>(0))? {
+                    scopes.push(format!("source:{}", id?));
                 }
-                Err(error) => discovery_error = Some(error),
             }
+            Err(error) => discovery_error = Some(error),
         }
     }
     if scopes.len() > 201 {

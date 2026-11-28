@@ -1036,7 +1036,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().canonicalize().unwrap();
         let component = "\"".repeat(180);
-        let relative = vec![component.as_str(); 3].join("/");
+        let relative = [component.as_str(); 3].join("/");
         let deep = path.join(&relative);
         fs::create_dir_all(deep.join(format!("z{component}"))).unwrap();
         fs::write(deep.join("a.md"), "cursor-witness").unwrap();
