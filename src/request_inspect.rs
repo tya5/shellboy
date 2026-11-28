@@ -285,10 +285,11 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
         attachments_known_empty: manifest["attachments"]
             .as_array()
             .is_some_and(Vec::is_empty),
-        context_tail: manifest.get("context_tail").cloned(),
+        context_tail: manifest
+            .get("context_tail")
+            .map(|tail| tail.get("item").unwrap_or(tail).clone()),
         context_pending: false,
         saved: Some(json!({
-            "context_tail": manifest.get("context_tail"),
             "input_characters": manifest["input_characters"],
             "request_body_bytes": manifest["http_observation"]["request_body_bytes"],
             "prompt_cache_diagnostics": crate::model::cache_diagnostics::bounded(&manifest["prompt_cache_diagnostics"]),
@@ -492,7 +493,7 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             "context tail: commands run only during request preparation".into(),
         );
     }
-    if let Some(item) = plan.context_tail.as_ref().and_then(|tail| tail.get("item")) {
+    if let Some(item) = plan.context_tail.as_ref() {
         parts.push(Part::Known(item.clone()));
     }
     let wire = if unknown.is_empty() {
