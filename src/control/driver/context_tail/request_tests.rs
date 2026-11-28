@@ -98,33 +98,47 @@ async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() 
 async fn no_definitions_preserve_the_canonical_wire_bytes() {
     watchdog("context-free request bytes", async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (_root, owner, control, accepted) =
+        let (root, owner, control, accepted) =
             fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
-        let snapshot = ready(&control, &accepted).await;
-        let mut prepared = control
-            .attachments
-            .prepare_at_revision(
-                &snapshot.thread,
-                CancellationToken::new(),
-                false,
-                snapshot.selection,
-            )
+        control.kick_quiet(accepted.thread_id.clone()).await;
+        let sent = exchange(&listener, 200, completed(json!([]))).await;
+        let parsed: Value = serde_json::from_slice(&sent).unwrap();
+        assert!(
+            parsed["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| result_at(item).is_none())
+        );
+        let attempt: String = control
+            .store
+            .database
+            .call(|db| Ok(db.query_row("SELECT id FROM model_attempt", [], |row| row.get(0))?))
             .await
             .unwrap();
-        let (mut baseline, _) =
-            request::prepare_request(&snapshot, None, &mut prepared, None).unwrap();
-        model::configure_shell_description(
-            &mut baseline,
-            control.store.config.shell.describe_calls,
+        // Replay the admitted prefix, including ordinary notices saved by the
+        // driver after it first selected the Run. An earlier snapshot lacks them.
+        let inspected = crate::request_inspect::execute(
+            crate::request_inspect::RequestOptions {
+                thread_id: accepted.thread_id,
+                attempt_id: Some(attempt),
+                compare_attempt_id: None,
+                body: true,
+            },
+            Some(root.path().join("config.toml")),
+            Some(root.path().join("data")),
+            root.path(),
+        )
+        .await;
+        assert_eq!(inspected["ok"], true, "{inspected}");
+        let rebuilt = &inspected["result"];
+        assert_eq!(rebuilt["unknown"], json!([]));
+        assert!(rebuilt["saved"]["context_tail"].is_null());
+        assert_eq!(
+            sent.as_slice(),
+            serde_json::to_vec(&rebuilt["body"]).unwrap().as_slice(),
+            "the no-context request must equal the exact saved canonical reconstruction"
         );
-        let client = model_client(&control, &snapshot).unwrap();
-        let body = client
-            .wire_request(baseline, Some(&snapshot.thread))
-            .unwrap()
-            .0;
-        control.kick_quiet(accepted.thread_id).await;
-        let sent = exchange(&listener, 200, completed(json!([]))).await;
-        assert_eq!(sent, serde_json::to_vec(&body).unwrap());
         close(control, owner).await;
     })
     .await
