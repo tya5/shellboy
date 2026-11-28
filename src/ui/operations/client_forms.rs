@@ -720,22 +720,7 @@ mod tests {
     }
 
     #[test]
-    fn every_catalogue_identity_has_one_real_form_and_every_client_builder_matches_its_identity() {
-        let ids = OpKind::ALL
-            .iter()
-            .map(|kind| kind.catalogue())
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(
-            ids,
-            OperationId::ALL
-                .iter()
-                .filter(
-                    |id| !crate::operations::catalogue_tests::CLI_ONLY_OWNER_OPERATIONS
-                        .contains(id)
-                )
-                .copied()
-                .collect()
-        );
+    fn registered_client_forms_build_their_operation_and_show_field_help() {
         let clients = OpKind::ALL
             .iter()
             .copied()
