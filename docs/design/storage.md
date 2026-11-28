@@ -835,3 +835,10 @@ transaction, including on other Threads selecting a shared node. The existing
 Replay entry reuses frames only when this revision and the conversion context
 match; it seeks from the last validated ordinal, or reloads on a mismatch.
 This does not change replay ordering, lease lifetime, or the wire contract.
+
+Replay holds a tentative lease until the snapshot commits on the database lane;
+a failed commit does not publish a reusable prefix. History stores kept
+reasoning as exact Thread/epoch/node memberships; Replay checks only decoded
+nodes, not the previously validated prefix. The replacement owner maintains
+an indexed creation key on Thread memberships, so deciding whether a selected
+attempt predates a replacement is an exact range seek.
