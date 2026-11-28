@@ -30,7 +30,7 @@ const TOOL_SCHEMA_VERSION: u32 = 1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Context {
     thread: String,
-    selection: i64,
+    path_revision: i64,
     profile_revision: i64,
     profile: String,
     model: String,
@@ -444,6 +444,7 @@ impl ReplayLease {
 struct Entry {
     context: Context,
     frames: Vec<Arc<Frame>>,
+    last_ordinal: Option<i64>,
     bytes: usize,
     overhead: usize,
 }
@@ -543,21 +544,36 @@ impl ReplayCache {
             settings_reuses: state.settings_reuses,
         }
     }
-    /// Call in the DB snapshot transaction. Metadata is always revalidated; only
-    /// an unchanged prefix can reuse items, and only the new suffix is decoded.
+    // A failed commit can recycle both ordinals and a path revision. Drop
+    // the tentative entry on the DB lane before another load can observe it.
+    pub(super) fn discard_uncommitted(&self, thread: &str) {
+        let mut state = self.state.lock().expect("replay cache poisoned");
+        if let Some(entry) = state.entries.remove(thread) {
+            state.retained = state.retained.saturating_sub(entry.bytes);
+            state.order.retain(|id| id != thread);
+            state.compact_metadata();
+        }
+    }
+
+    /// Call in the DB snapshot transaction. History fences the validated prefix;
+    /// only rows beyond it are read while its revision and conversion match.
     pub fn load(&self, db: &Connection, thread: &str) -> Result<ReplayLease, StorageError> {
-        let context=db.query_row("SELECT selection_revision,profile_revision,profile_id,model_id,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|row|Ok(Context{thread:thread.into(),selection:row.get(0)?,profile_revision:row.get(1)?,profile:row.get(2)?,model:row.get(3)?,epoch:row.get(4)?,adapter_version:ADAPTER_VERSION,tool_schema_version:TOOL_SCHEMA_VERSION}))?;
+        let context=db.query_row("SELECT replay_path_revision,profile_revision,profile_id,model_id,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|row|Ok(Context{thread:thread.into(),path_revision:row.get(0)?,profile_revision:row.get(1)?,profile:row.get(2)?,model:row.get(3)?,epoch:row.get(4)?,adapter_version:ADAPTER_VERSION,tool_schema_version:TOOL_SCHEMA_VERSION}))?;
         let mut work = AssemblyBudget(MAX_RESPONSE_BYTES);
         work.charge(context.bytes())?;
-        let keep = crate::history::reasoning_keep_checked(db, thread, context.epoch, |bytes| {
-            work.check(bytes)
-        })?;
-        work.charge(
-            keep.capacity() * (size_of::<String>() + size_of::<usize>())
-                + keep.iter().map(String::capacity).sum::<usize>(),
-        )?;
-        let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind,n.import_origin_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?;
-        let mut rows = statement.query([thread])?;
+        let mut state = self.state.lock().expect("replay cache poisoned");
+        let reuse = state.entries.get(thread).filter(|entry| {
+            entry.context.same_conversion(&context)
+                && entry.context.path_revision == context.path_revision
+        });
+        let reused = reuse.map_or(0, |entry| entry.frames.len());
+        let mut last_ordinal = reuse.and_then(|entry| entry.last_ordinal);
+        let after = last_ordinal.unwrap_or(-1);
+        let settings_reuse =
+            reuse.is_some_and(|entry| entry.context.profile_revision != context.profile_revision);
+        let reused_prefix = reuse.is_some();
+        let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind,n.import_origin_json IS NOT NULL,p.ordinal FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>?2 ORDER BY p.ordinal")?;
+        let mut rows = statement.query(rusqlite::params![thread, after])?;
         let mut stamps = Vec::new();
         while let Some(row) = rows.next()? {
             let id = row_text(row, 0)?;
@@ -574,60 +590,50 @@ impl ReplayCache {
             };
             stamp.read_admission(db, thread)?;
             work.charge(stamp.preamble.as_ref().map_or(0, String::capacity))?;
+            last_ordinal = Some(row.get(5)?);
             stamps.push(stamp);
         }
-        let mut state = self.state.lock().expect("replay cache poisoned");
-        let previous = state.entries.remove(thread);
-        state.order.retain(|id| id != thread);
-        if let Some(previous) = &previous {
-            state.retained = state.retained.saturating_sub(previous.bytes);
-        }
-        let prefix = previous.as_ref().filter(|entry| {
-            entry.context.same_conversion(&context)
-                && entry.frames.len() <= stamps.len()
-                && entry
-                    .frames
-                    .iter()
-                    .zip(&stamps)
-                    .all(|(frame, stamp)| frame.stamp == *stamp)
-        });
-        let reuse = prefix.filter(|entry| {
-            entry.frames.len() < stamps.len() || entry.context.selection == context.selection
-        });
-        let reused = reuse.map_or(0, |entry| entry.frames.len());
-        if reuse.is_some_and(|entry| entry.context.profile_revision != context.profile_revision) {
-            state.settings_reuses += 1;
-        }
-        if reused == stamps.len() && reuse.is_some() {
-            state.hits += 1;
-        } else if reused > 0 {
-            state.append_hits += 1;
-        } else {
-            state.rebuilds += 1;
-        }
-        work.charge(stamps.len() * size_of::<Arc<Frame>>())?;
-        let mut frames = Vec::with_capacity(stamps.len());
+        let count = reused + stamps.len();
+        work.charge(count * size_of::<Arc<Frame>>())?;
+        let mut frames = Vec::with_capacity(count);
         if let Some(previous) = reuse {
             for frame in &previous.frames {
                 work.charge(frame.bytes)?;
                 frames.push(frame.clone());
             }
         }
-        if reused < stamps.len() {
+        if settings_reuse {
+            state.settings_reuses += 1;
+        }
+        if stamps.is_empty() && reused_prefix {
+            state.hits += 1;
+        } else if reused > 0 {
+            state.append_hits += 1;
+        } else {
+            state.rebuilds += 1;
+        }
+        if !stamps.is_empty() {
+            let keep =
+                crate::history::reasoning_keep_checked(db, thread, context.epoch, |bytes| {
+                    work.check(bytes)
+                })?;
+            work.charge(
+                keep.capacity() * (size_of::<String>() + size_of::<usize>())
+                    + keep.iter().map(String::capacity).sum::<usize>(),
+            )?;
             // Don't read an oversized SQLite value into the result row at all.
             let mut statement = db.prepare(
                 "SELECT n.id, octet_length(n.payload_json),
                         CASE WHEN n.deleted_reason IS NULL AND octet_length(n.payload_json)<=?3 THEN n.payload_json END
                  FROM thread_path p JOIN node n ON n.id=p.node_id
-                 WHERE p.thread_id=?1 AND p.ordinal>=?2 ORDER BY p.ordinal",
+                 WHERE p.thread_id=?1 AND p.ordinal>?2 ORDER BY p.ordinal",
             )?;
-            let mut rows =
-                statement.query(rusqlite::params![thread, reused as i64, work.0 as i64])?;
+            let mut rows = statement.query(rusqlite::params![thread, after, work.0 as i64])?;
             let mut offset = reused;
             while let Some(row) = rows.next()? {
                 let id = row_text(row, 0)?;
                 let stamp = stamps
-                    .get(offset)
+                    .get(offset - reused)
                     .filter(|stamp| stamp.id == id)
                     .ok_or_else(|| {
                         StorageError::Schema("replay path changed within its DB snapshot".into())
@@ -653,7 +659,7 @@ impl ReplayCache {
                 frames.push(Arc::new(frame));
                 offset += 1;
             }
-            if offset != stamps.len() {
+            if offset != count {
                 return Err(StorageError::Schema(
                     "replay path row count changed within its DB snapshot".into(),
                 ));
@@ -662,9 +668,11 @@ impl ReplayCache {
         let overhead =
             context.bytes() + frames.capacity() * size_of::<Arc<Frame>>() + thread.len() * 2;
         let bytes = overhead.saturating_add(frames.iter().map(|frame| frame.bytes).sum::<usize>());
-        drop(previous);
         drop(stamps);
-        drop(keep);
+        if let Some(previous) = state.entries.remove(thread) {
+            state.retained = state.retained.saturating_sub(previous.bytes);
+            state.order.retain(|id| id != thread);
+        }
         let lease = ReplayLease::new(&frames, Some(&work))?;
         if self.budget > 0 && bytes <= self.budget {
             state.retained = state.retained.saturating_add(bytes);
@@ -674,6 +682,7 @@ impl ReplayCache {
                 Entry {
                     context,
                     frames,
+                    last_ordinal,
                     bytes,
                     overhead,
                 },

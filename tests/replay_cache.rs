@@ -106,6 +106,56 @@ async fn same_epoch_preserves_reasoning_without_encrypted_content_and_never_fabr
 }
 
 #[tokio::test]
+async fn long_replay_prefix_matches_cold_after_appends_and_shared_edits() {
+    let f = Fixture::new().await;
+    f.thread("t").await;
+    f.thread("fork").await;
+    f.db.call(|db| {
+        let tx = db.transaction()?;
+        for i in 0..2048 {
+            append_node(&tx, "t", &format!("n{i}"), None, "user", &user(&format!("input {i}")), "now")?;
+        }
+        tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT 'fork',ordinal,node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal", [])?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let warm = ReplayCache::new(16_000_000);
+    let cold = ReplayCache::new(0);
+    let original = f.load(&warm, "t").await;
+    assert_eq!(original.items().count(), 2048);
+    assert_eq!(
+        f.load(&warm, "fork").await.materialize(),
+        original.materialize()
+    );
+    f.append("t", "appended", user("selected suffix")).await;
+    let appended = f.load(&warm, "t").await;
+    assert_eq!(
+        appended.materialize(),
+        f.load(&cold, "t").await.materialize()
+    );
+    assert_eq!(appended.items().last(), Some(&user("selected suffix")));
+    f.db.call(|db| {
+        db.execute(
+            "UPDATE node SET payload_json=NULL,deleted_reason='collected' WHERE id='n0'",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    for thread in ["t", "fork"] {
+        let current = f.load(&warm, thread).await;
+        assert_eq!(
+            current.materialize(),
+            f.load(&cold, thread).await.materialize()
+        );
+        assert_eq!(current.items().next(), Some(&user("input 1")));
+    }
+    assert_eq!(original.items().next(), Some(&user("input 0")));
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn unchanged_path_hits_and_append_decodes_only_new_nodes_without_modifying_originals() {
     let f = Fixture::new().await;
     f.thread("t").await;
