@@ -27,29 +27,6 @@ fn sum(db: &Connection, sql: &str) -> Result<u64> {
         .map(|value| value as u64)
         .map_err(sql_error)
 }
-// Test oracle only: the O(rows) indexed sums that the schema22 counters
-// replace (#171). Runtime reads the trigger-maintained counters.
-#[cfg(test)]
-const HISTORY_QUERIES: [&str; 10] = [
-    "SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM node INDEXED BY gc_bytes_node",
-    "SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM output_item INDEXED BY gc_bytes_output_item",
-    "SELECT COALESCE(SUM(octet_length(body)),0) FROM instruction_snapshot INDEXED BY gc_bytes_instruction_snapshot",
-    "SELECT COALESCE(SUM(octet_length(body_json)),0) FROM draft INDEXED BY gc_bytes_draft",
-    "SELECT COALESCE(SUM(COALESCE(octet_length(input_manifest_json),0)+COALESCE(octet_length(error_json),0)+COALESCE(octet_length(usage_json),0)),0) FROM model_attempt INDEXED BY gc_bytes_model_attempt",
-    "SELECT COALESCE(SUM(octet_length(payload_ref_json)+octet_length(source_json)),0) FROM event INDEXED BY gc_bytes_event",
-    "SELECT COALESCE(SUM(octet_length(sender_json)+COALESCE(octet_length(result_json),0)),0) FROM receipt INDEXED BY gc_bytes_receipt",
-    "SELECT COALESCE(SUM(octet_length(origin_json)+COALESCE(octet_length(result_ref_json),0)),0) FROM operation_receipt INDEXED BY gc_bytes_operation_receipt",
-    "SELECT COALESCE(SUM(octet_length(arguments_json)),0) FROM tool_call INDEXED BY gc_bytes_tool_call",
-    "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'",
-];
-#[cfg(test)]
-const RAW_QUERY: &str =
-    "SELECT COALESCE(SUM(length(bytes)),0) FROM output_chunk INDEXED BY gc_bytes_output_chunk";
-#[cfg(test)]
-const MANAGED_QUERY: &str = "SELECT COALESCE(SUM(raw_size),0) FROM managed_file INDEXED BY gc_bytes_managed_file WHERE state<>'deleted'";
-#[cfg(test)]
-const INDEX_META_QUERY: &str = "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_index WHERE key LIKE 'index.%'";
-
 /// O(1): exact byte counters maintained by schema22 triggers in the same
 /// transaction as every counted write (storage design #171).
 pub(super) fn logical_usage(db: &Connection) -> Result<Logical> {
