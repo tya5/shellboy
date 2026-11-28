@@ -2,6 +2,8 @@
 pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
     OperationId::ShellBackground,
     OperationId::TurnInterrupt,
+    // Native Wait cancellation supplies its own exact in-flight operation ID.
+    OperationId::OperationCancel,
     // The TUI reloads attachments from its own explicit action (#311 4g).
     OperationId::AttachmentReload,
     OperationId::ArtifactAdd,

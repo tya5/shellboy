@@ -2287,6 +2287,7 @@ pub enum Command {
     MessageCancel(MessageCancelArgs),
     #[serde(rename = "operation.get")]
     OperationGet(OperationTarget),
+    #[serde(rename = "operation.cancel")]
     OperationCancel(OperationTarget),
     #[serde(rename = "run.get")]
     RunGet(RunTarget),
@@ -3236,7 +3237,7 @@ record!(HistoryDisplayPage {
     output_limited: bool,
     received_recovery_wait: bool
 });
-record!(HistoryBody { #[serde(default, skip_serializing_if = "Option::is_none")] observation: Option<HistoryNodeSelection>, #[serde(default, skip_serializing_if = "Option::is_none")] display: Option<HistoryDisplayPage>, context: crate::context::ExecutionContext, provenance: NodeProvenance, node_id: String, kind: String, text: String, source_node_ids: Vec<String>, previous_node_ids: Vec<String>, next_node_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] tombstone_reason: Option<String> });
+record!(HistoryBody { #[serde(default, skip_serializing_if = "Option::is_none")] display: Option<HistoryDisplayPage>, context: crate::context::ExecutionContext, provenance: NodeProvenance, node_id: String, kind: String, text: String, source_node_ids: Vec<String>, previous_node_ids: Vec<String>, next_node_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] tombstone_reason: Option<String> });
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum HistoryReadResult {

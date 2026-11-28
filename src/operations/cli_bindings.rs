@@ -541,7 +541,7 @@ const MEANINGS: &[Meaning] = &[
         OperationId::HistoryRead,
         &["history", "read"],
         &[
-            ("node_id", FieldId::Node),
+            ("node_ids", FieldId::Node),
             ("limit_bytes", FieldId::LimitBytes),
             ("cursor", FieldId::Cursor),
             ("encoding", FieldId::Encoding),
@@ -641,6 +641,7 @@ const MEANINGS: &[Meaning] = &[
         &["attachment", "list"],
         &[
             ("thread_id", FieldId::Thread),
+            ("attachment_ids", FieldId::Attachment),
             ("limit", FieldId::Limit),
             ("cursor", FieldId::Cursor),
         ],

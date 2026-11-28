@@ -438,16 +438,13 @@ mod tests {
             65536 / body.len(),
             "charge source JSON rather than truncated labels"
         );
-        assert!(
-            admitted
-                .iter()
-                .all(|row| row.command.as_ref().unwrap().chars().count() == 512)
-        );
-        assert!(
-            admitted
-                .iter()
-                .all(|row| row.command.as_ref().unwrap().len() == 2048)
-        );
+        for row in admitted.iter() {
+            assert!(
+                row.command
+                    .as_deref()
+                    .is_some_and(|text| text.starts_with('🚀'))
+            );
+        }
         assert_eq!(
             raw.extras
                 .values()
@@ -455,7 +452,13 @@ mod tests {
                 .count(),
             12 - admitted.len()
         );
-        assert!(admitted.len() * body.len() <= 65536);
+        for row in raw.extras.into_values() {
+            let shell = row.detail().shell.unwrap();
+            if let Some(command) = shell.command_excerpt {
+                assert_eq!(command, "🚀".repeat(512));
+            }
+            assert!(shell.command_limited);
+        }
     }
     #[test]
     fn saved_work_queue_and_identities_share_two_batches_without_raw_output() {

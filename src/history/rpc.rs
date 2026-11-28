@@ -19,14 +19,7 @@ pub(crate) fn read(
             serialize(observe_nodes(db, ids, next_sequence())?)?,
         );
     }
-    let (mut body, parts) = read_node(db, args)?;
-    if args.display.is_none() && !args.parts && !args.end_message_only && args.cursor.is_none() {
-        body.observation = Some(observe_nodes(
-            db,
-            std::slice::from_ref(&args.node_id),
-            next_sequence(),
-        )?);
-    }
+    let (body, parts) = read_node(db, args)?;
     let mut value = serde_json::to_value(body)
         .map_err(|_| ApiError::new(ErrorCode::InvalidState, "history body is not serializable"))?;
     if let (Some(parts), Some(object)) = (parts, value.as_object_mut()) {

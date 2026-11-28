@@ -2275,7 +2275,12 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::Inspect,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Thread, FieldId::Limit, FieldId::Cursor],
+        fields: &[
+            FieldId::Thread,
+            FieldId::Attachment,
+            FieldId::Limit,
+            FieldId::Cursor,
+        ],
     },
     // Like shell.read's raw-output pins, reload may touch transient owner resources.
     // It observes current files without committing a send or changing the selection.

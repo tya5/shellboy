@@ -102,7 +102,7 @@ pub(crate) fn read(db: &Connection, ids: &[String]) -> rusqlite::Result<BTreeMap
 }
 
 impl Extra {
-    pub(super) fn detail(self) -> ThreadListDetail {
+    pub(crate) fn detail(self) -> ThreadListDetail {
         let mut answer_excerpt = self
             .answer
             .as_deref()
