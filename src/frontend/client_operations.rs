@@ -60,7 +60,11 @@ pub(super) async fn execute(
 ) -> Result<Value, ApiError> {
     if let ClientOperation::Docs(command) = operation {
         return super::presentation_work(move || {
-            crate::docs::configured_response(command, context.config_path.as_deref(), &context.cwd)
+            crate::docs::configured_response(
+                crate::docs::DocsCommand::Read(command),
+                context.config_path.as_deref(),
+                &context.cwd,
+            )
         })
         .await;
     }
@@ -156,7 +160,7 @@ mod tests {
     async fn docs_and_config_keep_failure_observable_without_terminal_output() {
         let root = tempfile::tempdir().unwrap();
         let value = execute(
-            ClientOperation::Docs(crate::docs::DocsCommand::Get {
+            ClientOperation::Docs(crate::docs::DocsRead::Get {
                 sources: Vec::new(),
                 id: "missing".into(),
                 section: None,
@@ -301,7 +305,7 @@ mod dispatch_tests {
         send.try_send(UiAction::ManagementIntent {
             context: context(1),
             action: Box::new(UiAction::ClientOperation(Box::new(ClientOperation::Docs(
-                crate::docs::DocsCommand::Get {
+                crate::docs::DocsRead::Get {
                     sources: Vec::new(),
                     id: "nonexistent-client-guide".into(),
                     section: None,

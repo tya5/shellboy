@@ -2,7 +2,7 @@
 
 #[derive(Clone, Debug)]
 pub enum ClientOperation {
-    Docs(crate::docs::DocsCommand),
+    Docs(crate::docs::DocsRead),
     Config(crate::config_setup::ConfigCommand),
     Rag {
         options: crate::rag::RagOptions,
@@ -15,17 +15,14 @@ impl ClientOperation {
     pub(crate) fn catalogue(&self) -> crate::operations::OperationId {
         use crate::{
             config_setup::ConfigCommand,
-            docs::DocsCommand,
+            docs::DocsRead,
             operations::OperationId as Id,
             rag::{RagCommand, SourceCommand},
         };
         match self {
-            Self::Docs(DocsCommand::List { .. }) => Id::DocsList,
-            Self::Docs(DocsCommand::Get { .. }) => Id::DocsGet,
-            Self::Docs(DocsCommand::Search { .. }) => Id::DocsSearch,
-            Self::Docs(DocsCommand::Source { .. } | DocsCommand::Index { .. }) => {
-                unreachable!("source management is CLI-only")
-            }
+            Self::Docs(DocsRead::List { .. }) => Id::DocsList,
+            Self::Docs(DocsRead::Get { .. }) => Id::DocsGet,
+            Self::Docs(DocsRead::Search { .. }) => Id::DocsSearch,
             Self::Config(ConfigCommand::Init) => Id::ConfigInit,
             Self::Config(ConfigCommand::Check) => Id::ConfigCheck,
             Self::Exec(_) => Id::Exec,

@@ -30,6 +30,12 @@ pub enum DocsCommand {
         #[command(subcommand)]
         command: SourceCommand,
     },
+    #[command(flatten)]
+    Read(DocsRead),
+}
+
+#[derive(Clone, Debug, Subcommand)]
+pub enum DocsRead {
     /// List immediate children of a documentation category.
     List {
         #[arg(long)]
@@ -520,14 +526,14 @@ fn bundled_get(
 mod tests {
     use super::*;
 
-    fn execute(mut command: DocsCommand) -> Result<Value, String> {
+    fn execute(mut command: DocsRead) -> Result<Value, String> {
         match &mut command {
-            DocsCommand::List { sources, .. }
-            | DocsCommand::Get { sources, .. }
-            | DocsCommand::Search { sources, .. } => sources.push("shellboy".into()),
-            _ => unreachable!("bundled read fixture"),
+            DocsRead::List { sources, .. }
+            | DocsRead::Get { sources, .. }
+            | DocsRead::Search { sources, .. } => sources.push("shellboy".into()),
         }
-        let response = configured_response(command, None, std::path::Path::new("."));
+        let response =
+            configured_response(DocsCommand::Read(command), None, std::path::Path::new("."));
         if response["ok"] == true {
             Ok(response["result"].clone())
         } else {
@@ -556,7 +562,7 @@ mod tests {
         let mut cursor = None;
         let mut text = String::new();
         loop {
-            let page = execute(DocsCommand::Get {
+            let page = execute(DocsRead::Get {
                 sources: Vec::new(),
                 id: "shellboy/tui".into(),
                 section: None,
@@ -570,7 +576,7 @@ mod tests {
                 break;
             }
             assert!(
-                execute(DocsCommand::Get {
+                execute(DocsRead::Get {
                     sources: Vec::new(),
                     id: "shellboy/delegation".into(),
                     section: None,
@@ -596,7 +602,7 @@ mod tests {
     }
     #[test]
     fn english_keyword_and_nested_scope() {
-        let page = execute(DocsCommand::Search {
+        let page = execute(DocsRead::Search {
             query: "subagent".into(),
             parent: Some("shellboy/work".into()),
             sources: Vec::new(),
@@ -622,7 +628,7 @@ mod tests {
     #[test]
     fn bundled_search_keeps_score_order_across_pages() {
         let search = |cursor| {
-            execute(DocsCommand::Search {
+            execute(DocsRead::Search {
                 query: "shellboy".into(),
                 parent: None,
                 sources: Vec::new(),
@@ -658,7 +664,7 @@ mod tests {
             .min_by_key(|s| s.end - s.start)
             .expect("command inside a section");
         for query in ["scheduler", "cron", "スケジュール"] {
-            let page = execute(DocsCommand::Search {
+            let page = execute(DocsRead::Search {
                 query: query.into(),
                 parent: None,
                 sources: Vec::new(),
@@ -703,7 +709,7 @@ mod tests {
         let mut cursor = None;
         let mut text = String::new();
         loop {
-            let page = execute(DocsCommand::Get {
+            let page = execute(DocsRead::Get {
                 sources: Vec::new(),
                 id: source.id.clone(),
                 section: Some(section.id.clone()),
@@ -723,7 +729,7 @@ mod tests {
     }
     #[test]
     fn list_and_search_cursor_conditions_are_bound() {
-        let first = execute(DocsCommand::List {
+        let first = execute(DocsRead::List {
             parent: Some("shellboy/work".into()),
             sources: Vec::new(),
             limit: 1,
@@ -732,7 +738,7 @@ mod tests {
         .unwrap();
         let cursor = first["next_cursor"].as_str().unwrap().to_owned();
         assert!(
-            execute(DocsCommand::List {
+            execute(DocsRead::List {
                 parent: Some("shellboy/start".into()),
                 sources: Vec::new(),
                 limit: 1,
@@ -740,7 +746,7 @@ mod tests {
             })
             .is_err()
         );
-        let second = execute(DocsCommand::List {
+        let second = execute(DocsRead::List {
             parent: Some("shellboy/work".into()),
             sources: Vec::new(),
             limit: 2,
@@ -748,7 +754,7 @@ mod tests {
         })
         .unwrap();
         assert_ne!(first["items"][0]["id"], second["items"][0]["id"]);
-        let first = execute(DocsCommand::Search {
+        let first = execute(DocsRead::Search {
             query: "shellboy".into(),
             parent: None,
             sources: Vec::new(),
@@ -758,7 +764,7 @@ mod tests {
         .unwrap();
         let cursor = first["next_cursor"].as_str().unwrap().to_owned();
         assert!(
-            execute(DocsCommand::Search {
+            execute(DocsRead::Search {
                 query: "shell".into(),
                 parent: None,
                 sources: Vec::new(),
@@ -768,7 +774,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            execute(DocsCommand::Search {
+            execute(DocsRead::Search {
                 query: " ".into(),
                 parent: None,
                 sources: Vec::new(),
@@ -790,7 +796,7 @@ mod tests {
         assert!(read_cursor(Some(&c), "new", "scope").is_err());
         assert!(read_cursor(Some(&c), "old", "other").is_err());
         assert!(
-            execute(DocsCommand::List {
+            execute(DocsRead::List {
                 parent: None,
                 sources: Vec::new(),
                 limit: 201,

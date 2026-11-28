@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     cli::ThreadCreateOptions,
     config_setup::ConfigCommand,
-    docs::DocsCommand,
+    docs::DocsRead,
     exec_client::ExecOptions,
     rag::{IndexMode, IngestKind, RagCommand, RagOptions, SearchMode, SourceCommand},
 };
@@ -31,7 +31,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             |form, _| {
                 let limit = form.number("limit")?;
                 bounded(limit, 1, 200, "件数", "Count", form.language)?;
-                Ok(ClientOperation::Docs(DocsCommand::List {
+                Ok(ClientOperation::Docs(DocsRead::List {
                     parent: form.optional("doc_parent")?,
                     sources: lines(form, "doc_sources")?,
                     limit,
@@ -57,7 +57,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     "Read size in bytes",
                     form.language,
                 )?;
-                Ok(ClientOperation::Docs(DocsCommand::Get {
+                Ok(ClientOperation::Docs(DocsRead::Get {
                     sources: lines(form, "doc_sources")?,
                     id: required(form, "document")?,
                     section: form.optional("section")?,
@@ -77,7 +77,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             |form, _| {
                 let limit = form.number("limit")?;
                 bounded(limit, 1, 100, "件数", "Count", form.language)?;
-                Ok(ClientOperation::Docs(DocsCommand::Search {
+                Ok(ClientOperation::Docs(DocsRead::Search {
                     query: required(form, "query")?,
                     parent: form.optional("doc_parent")?,
                     sources: lines(form, "doc_sources")?,
@@ -709,9 +709,9 @@ mod tests {
             set(&mut form, "doc_sources", "shellboy\nteam-notes");
             let sources = match client(&form) {
                 ClientOperation::Docs(
-                    DocsCommand::List { sources, .. }
-                    | DocsCommand::Get { sources, .. }
-                    | DocsCommand::Search { sources, .. },
+                    DocsRead::List { sources, .. }
+                    | DocsRead::Get { sources, .. }
+                    | DocsRead::Search { sources, .. },
                 ) => sources,
                 _ => panic!("expected a docs read"),
             };
