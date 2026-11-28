@@ -835,6 +835,7 @@ pub(super) struct StageWitness {
 }
 
 pub(super) struct DirectBoundaryReceipt {
+    pub(super) run_id: String,
     pub(super) checkpoint: Value,
     pub(super) terminal: Value,
     pub(super) checkpoint_witness: StageWitness,
@@ -1911,6 +1912,7 @@ async fn direct_boundary_case(
     reopened_owner.shutdown().await.unwrap();
     server.abort();
     DirectBoundaryReceipt {
+        run_id: fixture.run_id,
         checkpoint: checkpoint_record,
         terminal: terminal_record,
         checkpoint_witness,
@@ -2181,7 +2183,7 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
         let mut tokens_and_failures = Vec::new();
         for (attempt, usage, selected, excluded) in [
             ("trigger", 200, &["g1", "g2"][..], &["g3", "g4"][..]),
-            ("growth-trigger", 201, &["g1", "g2", "g3"][..], &["g4"][..]),
+            ("00000000-0000-4000-8000-000000000201", 201, &["g1", "g2", "g3"][..], &["g4"][..]),
         ] {
             if attempt != fixture.attempt_id {
                 let thread = fixture.thread_id;

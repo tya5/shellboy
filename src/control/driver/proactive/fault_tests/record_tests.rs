@@ -43,8 +43,8 @@ async fn active_summary_adoption_survives_a_later_storage_failure() {
         "same scenario uses the exact immutable trigger tuple"
     );
     assert_ne!(
-        rejected.terminal["attempt_id"],
-        committed.terminal["attempt_id"]
+        rejected.run_id, committed.run_id,
+        "each fault was exercised in a distinct Run"
     );
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
