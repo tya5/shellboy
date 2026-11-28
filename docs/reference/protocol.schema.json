@@ -19002,6 +19002,11 @@
     "schedule.list": true,
     "schedule.remove": true,
     "schedule.set": true,
+    "service.add": true,
+    "service.list": true,
+    "service.remove": true,
+    "service.start": true,
+    "service.stop": true,
     "shell.background": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {

@@ -831,9 +831,10 @@ mod detail_link_tests {
                 let node=format!("call-{group}");
                 db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='u'),?1,'u',0,0,'p','m',0,'completed','{}','now')",[&attempt])?;
                 db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,'u','completed','now')",rusqlite::params![group,attempt])?;
-                db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','assistant_response','now',?2)",rusqlite::params![node,json!({"group_id":group,"text":"[source](https://example.test/source)"}).to_string()])?;
+                db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','assistant_response','now',?2)",rusqlite::params![node,json!({"group_id":group,"text":"[source](https://example.test/source)","output":[{"type":"function_call","call_id":"same","name":"shell","arguments":"{}"}]}).to_string()])?;
                 db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,'same',0,'shell','{}','completed')",[group])?;
             }
+            db.execute_batch("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('t',0,'call-g'),('t',1,'call-other');")?;
             db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('other',?1,1,'shell','{}','completed')",["x".repeat(200_000)])?;
             db.execute_batch("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('exec','r','u','exec','running','/','{}','UTF-8','UTF-8','closed','now'); UPDATE tool_call SET operation_id='exec' WHERE group_id='g'; INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('exec',0,'stdout',0,X'616263','now');")?;
             Ok(())

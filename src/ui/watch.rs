@@ -1455,13 +1455,13 @@ mod tests {
             [
                 "recover",
                 "failed",
-                "unread",
                 "working",
+                "unread",
                 "stopped",
                 "restarted",
                 "read",
-                "idle",
-                "no-answer"
+                "no-answer",
+                "idle"
             ]
         );
         assert_eq!(

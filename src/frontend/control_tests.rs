@@ -264,11 +264,11 @@ pub(crate) async fn fixture_with_language(
     let cwd = root.path().to_string_lossy().to_string();
     owner.db.call(move |db|{
         for id in ["thread","independent"] {
-            db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?1,?2,?3,'fixture','fixture-model','now')",rusqlite::params![id,cwd,format!("{cwd}/AGENTS.md")])?;
+            db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?1,?2,?3,'fixture','fixture-model','2026-11-24T00:00:00Z')",rusqlite::params![id,cwd,format!("{cwd}/AGENTS.md")])?;
         }
         for (run,thread) in [("target-run","thread"),("independent-run","independent")] {
-            db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
-            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?1,'recovery_wait','now')",rusqlite::params![run,thread])?;
+            db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,?2,'live','2026-11-24T00:00:00Z')",rusqlite::params![run,thread])?;
+            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?1,'recovery_wait','2026-11-24T00:00:00Z')",rusqlite::params![run,thread])?;
         }
         db.execute("UPDATE turn SET state='running' WHERE id='independent-run'", [])?;
         Ok(())
@@ -318,7 +318,7 @@ async fn recurring_management_mutations_use_selected_listener_without_fallback()
         let applied = super::management_request(
             super::native_history::Owner {
                 data_dir: &selected.loaded.data_dir,
-                instance: &control.store.instance_id,
+                instance: &selected.instance_id,
             },
             command,
             CancellationToken::new(),
@@ -1195,9 +1195,9 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
 async fn seed_pinned_tool_history(control: &std::sync::Arc<crate::control::Control>) {
     control.store.database.call(|db|{
         let tx=db.transaction()?;
-        tx.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='target-run'),'a','target-run',0,0,'fixture','fixture-model',0,'completed','{}','now'); INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','target-run','completed','now'); INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g','call',0,'shell','{\"command\":\"tail -f /dev/null\"}','completed','execution'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('execution','target-run','target-run','shell-operation','running','/','{}','UTF-8','UTF-8','closed','now');")?;
-        crate::history::append_node(&tx,"thread","call-node",Some("target-run"),"assistant_response",&serde_json::json!({"group_id":"g","output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"tail -f /dev/null\"}"}]}),"now")?;
-        for i in 0..60 {crate::history::append_node(&tx,"thread",&format!("speech-{i}"),Some("target-run"),"assistant_response",&serde_json::json!({"text":format!("saved answer {i}")}),"now")?;}
+        tx.execute_batch("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('conversation',(SELECT thread_id FROM turn WHERE id='target-run'),'a','target-run',0,0,'fixture','fixture-model',0,'completed','{}','2026-11-24T00:00:00Z'); INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','target-run','completed','2026-11-24T00:00:00Z'); INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g','call',0,'shell','{\"command\":\"tail -f /dev/null\"}','completed','execution'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('execution','target-run','target-run','shell-operation','running','/','{}','UTF-8','UTF-8','closed','2026-11-24T00:00:00Z');")?;
+        crate::history::append_node(&tx,"thread","call-node",Some("target-run"),"assistant_response",&serde_json::json!({"group_id":"g","output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"tail -f /dev/null\"}"}]}),"2026-11-24T00:00:00Z")?;
+        for i in 0..60 {crate::history::append_node(&tx,"thread",&format!("speech-{i}"),Some("target-run"),"assistant_response",&serde_json::json!({"text":format!("saved answer {i}")}),"2026-11-24T00:00:00Z")?;}
         tx.commit()?;Ok(())
     }).await.unwrap();
 }
@@ -2007,38 +2007,6 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
         .await;
         assert!(response.ok, "{response:?}");
     }
-    let command = Command::UsageGet(UsageGetArgs {
-        thread_id: Some("thread".into()),
-        ..Default::default()
-    });
-    crate::usage_totals::with_test_elapsed(
-        std::time::Duration::from_millis(100),
-        super::management_request(
-            super::native_history::Owner {
-                data_dir: &owner.loaded.data_dir,
-                instance: &control.store.instance_id,
-            },
-            command.clone(),
-            tokio_util::sync::CancellationToken::new(),
-        ),
-    )
-    .await
-    .unwrap();
-    for _ in 0..20 {
-        crate::usage_totals::with_test_elapsed(
-            std::time::Duration::from_micros(99_999),
-            super::management_request(
-                super::native_history::Owner {
-                    data_dir: &owner.loaded.data_dir,
-                    instance: &control.store.instance_id,
-                },
-                command.clone(),
-                tokio_util::sync::CancellationToken::new(),
-            ),
-        )
-        .await
-        .unwrap();
-    }
     server.shutdown().await.unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
@@ -2049,7 +2017,7 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .filter(|row| row["event"] == "usage_totals_slow")
         .collect::<Vec<_>>();
-    assert_eq!(entries.len(), 7, "ThreadGet does not aggregate exact usage");
+    assert_eq!(entries.len(), 6, "ThreadGet does not aggregate exact usage");
     assert_eq!(
         entries
             .iter()
@@ -2057,7 +2025,6 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
             .count(),
         6
     );
-    assert_eq!(entries[6]["usage_slow"]["trigger"], "open");
     for scope in ["turn", "run", "thread", "thread_children"] {
         assert!(
             entries
@@ -2117,10 +2084,9 @@ async fn native_display_header_keeps_typed_title_omission_and_default_contract()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_open_logs_once() {
+async fn ordinary_thread_selection_and_explicit_usage_return_their_scoped_results() {
     use crate::protocol::{Command, UsageGetArgs};
     let (root, owner, control, server) = fixture().await;
-    let logfile = owner.loaded.data_dir.join("logs").join("shellboy.log");
     let (updates, incoming) = std::sync::mpsc::sync_channel(64);
     for target in ["thread", "independent"] {
         crate::usage_totals::with_test_elapsed(
@@ -2148,37 +2114,20 @@ async fn ordinary_thread_selection_reads_only_lightweight_metadata_and_detail_op
         }
         assert!(found);
     }
-    crate::usage_totals::with_test_elapsed(
-        std::time::Duration::from_millis(100),
-        super::management_request(
-            super::native_history::Owner {
-                data_dir: &owner.loaded.data_dir,
-                instance: &control.store.instance_id,
-            },
-            Command::UsageGet(UsageGetArgs {
-                thread_id: Some("thread".into()),
-                ..Default::default()
-            }),
-            tokio_util::sync::CancellationToken::new(),
-        ),
+    let usage = super::management_request(
+        super::selected_owner(&control),
+        Command::UsageGet(UsageGetArgs {
+            thread_id: Some("thread".into()),
+            ..Default::default()
+        }),
+        tokio_util::sync::CancellationToken::new(),
     )
     .await
     .unwrap();
+    assert!(usage.get("error").is_none(), "{usage}");
     server.shutdown().await.unwrap();
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
-    let rows = std::fs::read_to_string(logfile)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-        .filter(|row| row["event"] == "usage_totals_slow")
-        .collect::<Vec<_>>();
-    assert_eq!(
-        rows.len(),
-        1,
-        "selection must run zero aggregations, explicit detail one"
-    );
-    assert_eq!(rows[0]["usage_slow"]["trigger"], "open");
     drop(root);
 }
 

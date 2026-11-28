@@ -148,7 +148,12 @@ mod terminal_refresh_tests {
               INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,exit_code,output_complete,started_at)VALUES('no-raw-exec','target-run','target-run','no-raw-exec','exited','/','{}','UTF-8','UTF-8','closed',1,1,'now');
               INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('no-raw-group','one',0,'shell','{}','completed','no-raw-exec');
               INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('no-raw-group','one','no-raw-node','exited');
-              DROP TABLE output_chunk;")?;
+              ")?;
+            use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+            db.authorizer(Some(|context: AuthContext<'_>| match context.action {
+                AuthAction::Read { table_name: "output_chunk", column_name: "bytes" } => Authorization::Deny,
+                _ => Authorization::Allow,
+            }))?;
             Ok(())
         }).await.unwrap();
         let payload = json!({"group_id":"no-raw-group","item":{"type":"function_call_output","call_id":"one","output":"{\"status\":\"exited\",\"exit_code\":1}"}});

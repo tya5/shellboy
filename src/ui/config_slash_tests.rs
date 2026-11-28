@@ -9,6 +9,7 @@ async fn config_slash_get_set_dispatch_the_cli_commands() {
     let cwd = std::env::temp_dir();
     for text in [
         "config get",
+        "config set --set ui.bell=false",
         r#"config set --expected-hash aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set 'default_model=fixture model' --set ui.bell=false --unset 'connections."my.proxy".default_effort'"#,
     ] {
         let words = shlex::split(text).unwrap();
@@ -44,7 +45,6 @@ fn config_slash_rejects_invalid_input_without_dispatch() {
         "/config init",
         "/config get --data-dir other-owner",
         "/config check --config other-file",
-        "/config set --set ui.bell=false",
         "/config set --expected-hash invalid --set ui.bell=false",
         "/config set --expected-hash hash --set ui.bell",
         "/config set --expected-hash hash --set 'ui.bell=false",
