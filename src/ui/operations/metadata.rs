@@ -1967,8 +1967,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Source => local!(
             language,
-            "登録ソースのIDまたは名前です。rag indexのdocsは同梱ガイドです。",
-            "Registered source ID or name. docs in rag index denotes bundled guides."
+            "登録ソースのIDまたは名前です。",
+            "Registered source ID or name."
         ),
         FieldId::SourceName => local!(
             language,

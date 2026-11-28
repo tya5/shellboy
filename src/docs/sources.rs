@@ -158,32 +158,64 @@ fn registration_command(
     Ok(output)
 }
 
+fn browse_error(message: String) -> ApiError {
+    let (code, detail) = message
+        .split_once(": ")
+        .unwrap_or(("invalid_argument", &message));
+    refusal(
+        serde_json::from_value(json!(code)).unwrap_or(ErrorCode::InvalidArgument),
+        detail,
+    )
+}
+
 pub fn configured_response(command: DocsCommand, explicit: Option<&Path>, cwd: &Path) -> Value {
     let result = (|| {
+        // Explicit bundled scope never opens configuration. This is also the
+        // recovery route when the combined catalogue cannot read its sources.
+        let bundled_only = match &command {
+            DocsCommand::Get { id, sources, .. } => {
+                (id == "shellboy" || id.starts_with("shellboy/"))
+                    && sources.iter().all(|s| s == "shellboy")
+            }
+            DocsCommand::List {
+                parent, sources, ..
+            }
+            | DocsCommand::Search {
+                parent, sources, ..
+            } => {
+                (parent
+                    .as_ref()
+                    .is_some_and(|id| id == "shellboy" || id.starts_with("shellboy/"))
+                    || !sources.is_empty())
+                    && sources.iter().all(|s| s == "shellboy")
+            }
+            _ => false,
+        };
+        if bundled_only {
+            return browse(command, &[]).map_err(browse_error);
+        }
         let path = resolve_config_path(explicit, cwd, &PathEnvironment::current())
             .map_err(|e| refusal(ErrorCode::ConfigInvalid, e.to_string()))?;
         let state = config_edit::read_state(&path)?;
         let settings = config_edit::parse_file(&state.bytes, &path)
-            .map_err(|e| refusal(ErrorCode::ConfigInvalid, e))?
+            .map_err(|_| refusal(ErrorCode::ConfigInvalid,
+                "Cannot load docs sources. For bundled recovery guides use docs list --source shellboy or docs get --id shellboy/configuration"))?
             .docs;
         match command {
             DocsCommand::Source { command } => {
                 registration_command(command, settings, &path, cwd, &state.hash)
             }
-            other => browse(other, &settings.sources).map_err(|message| {
-                let (code, detail) = message
-                    .split_once(": ")
-                    .unwrap_or(("invalid_argument", &message));
-                let code =
-                    serde_json::from_value(json!(code)).unwrap_or(ErrorCode::InvalidArgument);
-                refusal(code, detail)
-            }),
+            other => browse(other, &settings.sources).map_err(browse_error),
         }
     })();
     match result {
         Ok(result) => json!({"protocol_version":PROTOCOL_VERSION,"ok":true,"result":result}),
         Err(error) => json!({"protocol_version":PROTOCOL_VERSION,"ok":false,"error":error}),
     }
+}
+
+fn canonical_root(path: &Path) -> Result<PathBuf, String> {
+    fs::canonicalize(path).map_err(io_error)
 }
 
 fn io_error(_: std::io::Error) -> String {
@@ -292,34 +324,78 @@ struct Entry {
     name: String,
     directory: bool,
 }
-fn children(path: &Path) -> Result<Vec<Entry>, String> {
+fn projected_entry(entry: fs::DirEntry) -> Result<Option<Entry>, String> {
+    let kind = entry.file_type().map_err(io_error)?;
+    let Ok(name) = entry.file_name().into_string() else {
+        return Ok(None);
+    };
+    if name.contains('\\') || !(kind.is_dir() || (kind.is_file() && name.ends_with(".md"))) {
+        return Ok(None);
+    }
+    Ok(Some(Entry {
+        name,
+        directory: kind.is_dir(),
+    }))
+}
+
+fn projected_children(path: &Path, work: &mut usize) -> Result<Vec<Entry>, String> {
     let mut out = Vec::new();
-    // The portable iterator is not ordered or resumable. Refuse over-wide
-    // directories rather than silently dropping entries or allocating unboundedly.
-    for (index, entry) in fs::read_dir(path).map_err(io_error)?.enumerate() {
-        if index >= LIST_WORK {
-            return Err("input_limit: Docs folder has more than 200 entries; split it into smaller categories".into());
-        }
-        let entry = entry.map_err(io_error)?;
-        let kind = entry.file_type().map_err(io_error)?;
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        if kind.is_dir() || (kind.is_file() && name.ends_with(".md")) {
-            out.push(Entry {
-                name,
-                directory: kind.is_dir(),
-            });
+    let dir = fs::read_dir(path).map_err(io_error)?;
+    for entry in dir {
+        *work = work
+            .checked_sub(1)
+            .ok_or("input_limit: Docs directory scan exhausted its work budget")?;
+        if let Some(entry) = projected_entry(entry.map_err(io_error)?)? {
+            out.push(entry);
         }
     }
     out.sort_unstable_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
+
+fn child_path(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        name.into()
+    } else {
+        format!("{parent}/{name}")
+    }
+}
+
+pub(super) fn preview(row: &Registration) -> Value {
+    let mut count = 0;
+    let mut bytes = 0u64;
+    let complete = (|| {
+        let root = canonical_root(&row.path)?;
+        let mut pending = vec![(String::new(), 0usize)];
+        let mut work = LIST_WORK;
+        while let Some((rel, depth)) = pending.pop() {
+            let path = under(&root, &rel)?;
+            for entry in projected_children(&path, &mut work)? {
+                let rel = child_path(&rel, &entry.name);
+                if rel.len() > 4096 || depth >= 32 {
+                    return Err("input_limit: Docs path too deep".into());
+                }
+                if entry.directory {
+                    pending.push((rel, depth + 1));
+                } else {
+                    let path = under(&root, &rel)?;
+                    prefix(&path, 0, TEXT_WORK)?;
+                    count += 1;
+                    bytes = bytes.saturating_add(fs::metadata(path).map_err(io_error)?.len());
+                }
+            }
+        }
+        Ok::<(), String>(())
+    })()
+    .is_ok();
+    json!({"source":row.name,"files":count,"bytes":bytes,"complete":complete})
+}
+
 fn revision(path: &Path) -> String {
     let Ok(meta) = fs::metadata(path) else {
-        return "unavailable".into();
+        return "0000000000000000".into();
     };
-    format!("{}:{:?}", meta.len(), meta.modified().ok())
+    hash(format!("{}:{:?}", meta.len(), meta.modified().ok()))[..16].into()
 }
 fn source_for<'a>(id: &str, rows: &'a [Registration]) -> Result<&'a Registration, String> {
     let name = id.split('/').next().unwrap_or_default();
@@ -340,14 +416,7 @@ fn branch(id: &str, available: bool, version: &str) -> Value {
 }
 
 fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> {
-    let version = hash(
-        serde_json::to_vec(&json!([
-            BUNDLED.version,
-            rows,
-            rows.iter().map(|r| revision(&r.path)).collect::<Vec<_>>()
-        ]))
-        .expect("version"),
-    );
+    let version = hash(serde_json::to_vec(&json!([BUNDLED.version, rows])).expect("version"));
     let version = version.as_str();
     if let DocsCommand::Get { id, sources, .. } = &command {
         selected(rows, sources)?;
@@ -366,7 +435,8 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
         } if id != "shellboy" && !id.starts_with("shellboy/") => {
             limit(limit_bytes, TEXT_WORK)?;
             let source = source_for(&id, rows)?;
-            let path = under(&source.path, id.split_once('/').map_or("", |p| p.1))?;
+            let root = canonical_root(&source.path)?;
+            let path = under(&root, id.split_once('/').map_or("", |p| p.1))?;
             let kind = fs::metadata(&path).map_err(io_error)?;
             if kind.is_dir() {
                 return Ok(branch(&id, true, version));
@@ -382,18 +452,20 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
             if offset as u64 > kind.len() {
                 return Err("cursor_expired: File offset out of range".into());
             }
-            let (head, _) = prefix(&path, 0, TEXT_WORK)?;
-            let headings = sections(&head);
+            let (head, truncated) = prefix(&path, 0, TEXT_WORK)?;
+            let mut headings = sections(&head);
+            if truncated {
+                headings.retain(|section| section.end < head.len());
+            }
             let (start, end) = match &section {
                 None => (
                     0,
                     usize::try_from(kind.len()).map_err(|_| "input_limit: File too large")?,
                 ),
                 Some(section) => {
-                    let found = headings
-                        .iter()
-                        .find(|s| s.id == *section)
-                        .ok_or("target_unavailable: Section not in the first 64 KiB")?;
+                    let found = headings.iter().find(|s| s.id == *section).ok_or(
+                        "target_unavailable: Section has no complete boundary in the first 64 KiB",
+                    )?;
                     (found.start, found.end)
                 }
             };
@@ -434,12 +506,13 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
                     let source = source_for(id, rows)?;
                     if included(&sources, &source.name) {
                         let tail = id.split_once('/').map_or("", |p| p.1);
-                        let directory = under(&source.path, tail)?;
+                        let root = canonical_root(&source.path)?;
+                        let directory = under(&root, tail)?;
                         dir_rev = revision(&directory);
-                        for entry in children(&directory)? {
+                        for entry in projected_children(&directory, &mut LIST_WORK.to_owned())? {
                             let id = format!("{id}/{}", entry.name);
                             let rel = id.split_once('/').expect("relative ID").1;
-                            let Ok(path) = under(&source.path, rel) else {
+                            let Ok(path) = under(&root, rel) else {
                                 continue;
                             };
                             if entry.directory {
@@ -457,7 +530,7 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
                 for row in rows.iter().filter(|r| included(&sources, &r.name)) {
                     items.push(branch(
                         &row.name,
-                        under(&row.path, "").is_ok_and(|p| fs::read_dir(p).is_ok()),
+                        canonical_root(&row.path).is_ok_and(|p| fs::read_dir(p).is_ok()),
                         version,
                     ));
                 }
@@ -508,15 +581,13 @@ fn bundled_list(parent: Option<String>) -> Result<Vec<Value>, String> {
         .clone())
 }
 
-#[derive(Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Default)]
 struct SearchPosition {
     bundled: usize,
     source: usize,
     frames: Vec<Frame>,
     file: Option<(String, usize, String)>,
 }
-#[derive(Serialize, Deserialize)]
 struct Frame {
     path: String,
     next: usize,
@@ -541,6 +612,44 @@ fn hit(
         json!({"id":id,"title":title,"parent_id":parent,"version":version,"excerpt":&text[before..after],"spans":[{"start":offset+start,"end":offset+end}],"score":lowered.matches(needle).count()}),
     )
 }
+// A path is carried once; stack frames only need an ancestor byte length,
+// position, and revision witness. Encode the path separately so JSON escaping
+// cannot inflate a legitimate deep path beyond the cursor input limit.
+#[derive(Serialize, Deserialize)]
+struct SearchCursor(
+    String,
+    String,
+    usize,
+    usize,
+    Vec<(usize, usize, String)>,
+    Option<(usize, String)>,
+);
+
+fn search_cursor(version: &str, scope: &str, pos: SearchPosition) -> String {
+    let path = pos
+        .file
+        .as_ref()
+        .map(|f| f.0.as_str())
+        .or_else(|| pos.frames.last().map(|f| f.path.as_str()))
+        .unwrap_or("");
+    let state = SearchCursor(
+        version.into(),
+        scope.into(),
+        pos.bundled,
+        pos.source,
+        pos.frames
+            .iter()
+            .map(|f| (f.path.len(), f.next, f.revision.clone()))
+            .collect(),
+        pos.file.as_ref().map(|f| (f.1, f.2.clone())),
+    );
+    format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(path),
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&state).expect("cursor state"))
+    )
+}
+
 fn stream_cursor(
     cursor: Option<&str>,
     version: &str,
@@ -549,22 +658,49 @@ fn stream_cursor(
     let Some(cursor) = cursor else {
         return Ok(SearchPosition::default());
     };
+    let invalid = "cursor_expired: Invalid or stale search cursor";
     if cursor.len() > 8192 {
-        return Err("cursor_expired: Cursor too large".into());
+        return Err(invalid.into());
     }
-    let decoded = URL_SAFE_NO_PAD
-        .decode(cursor)
-        .map_err(|_| "cursor_expired: Invalid cursor")?;
-    let (v, s, position): (String, String, SearchPosition) =
-        serde_json::from_slice(&decoded).map_err(|_| "cursor_expired: Invalid cursor")?;
+    let (path, state) = cursor.split_once('.').ok_or(invalid)?;
+    let path = String::from_utf8(URL_SAFE_NO_PAD.decode(path).map_err(|_| invalid)?)
+        .map_err(|_| invalid)?;
+    let state = URL_SAFE_NO_PAD.decode(state).map_err(|_| invalid)?;
+    let SearchCursor(v, s, bundled, source, stack, file) =
+        serde_json::from_slice(&state).map_err(|_| invalid)?;
     if v != version
         || s != scope
-        || position.frames.len() > 32
-        || position.bundled > BUNDLED.docs.len()
+        || stack.len() > 32
+        || bundled > BUNDLED.docs.len()
+        || path.len() > 4096
     {
-        return Err("cursor_expired: Catalogue or query changed".into());
+        return Err(invalid.into());
     }
-    Ok(position)
+    let mut frames = Vec::new();
+    let mut prior = None;
+    for (len, next, revision) in stack {
+        let ancestor = path.get(..len).ok_or(invalid)?;
+        if (len != 0 && len != path.len() && path.as_bytes()[len] != b'/')
+            || prior.is_some_and(|length| len <= length)
+            || next > LIST_WORK
+            || revision.len() != 16
+        {
+            return Err(invalid.into());
+        }
+        frames.push(Frame {
+            path: ancestor.into(),
+            next,
+            revision,
+        });
+        prior = Some(len);
+    }
+    let file = file.map(|(offset, rev)| (path, offset, rev));
+    Ok(SearchPosition {
+        bundled,
+        source,
+        frames,
+        file,
+    })
 }
 fn search(
     query: String,
@@ -581,6 +717,9 @@ fn search(
     }
     selected(rows, &sources)?;
     if let Some(id) = &parent {
+        if id.len() > 4096 {
+            return Err("invalid_argument: Docs parent ID exceeds 4096 bytes".into());
+        }
         if id == "shellboy" || id.starts_with("shellboy/") {
             find(&BUNDLED.docs, id)?;
         } else {
@@ -610,6 +749,7 @@ fn search(
         }
     }
     let mut page_dirs = std::collections::BTreeMap::new();
+    let mut page_roots = std::collections::BTreeMap::new();
     while pos.source < rows.len() && hits.len() < count && work < SEARCH_WORK {
         let row = &rows[pos.source];
         if !included(&sources, &row.name)
@@ -621,10 +761,36 @@ fn search(
             work += 1;
             continue;
         }
+        let root = match page_roots
+            .entry(pos.source)
+            .or_insert_with(|| canonical_root(&row.path))
+        {
+            Ok(path) => path,
+            Err(_) => {
+                unavailable.push(branch(&row.name, false, version));
+                pos.frames.clear();
+                pos.file = None;
+                pos.source += 1;
+                work += 1;
+                continue;
+            }
+        };
         if let Some((rel, offset, rev)) = pos.file.take() {
             work += 1;
-            let path = under(&row.path, &rel)?;
-            let meta = fs::metadata(&path).map_err(io_error)?;
+            let observation = under(root, &rel).and_then(|path| {
+                let meta = fs::metadata(&path).map_err(io_error)?;
+                Ok((path, meta))
+            });
+            let (path, meta) = match observation {
+                Ok(value) => value,
+                Err(reason) => {
+                    unavailable.push(json!({"source":row.name,"path":rel,"reason":reason}));
+                    if pos.frames.is_empty() {
+                        pos.source += 1;
+                    }
+                    continue;
+                }
+            };
             if revision(&path) != rev
                 || offset as u64 > meta.len()
                 || !meta.is_file()
@@ -667,7 +833,7 @@ fn search(
                 .as_deref()
                 .and_then(|p| p.split_once('/'))
                 .map_or("", |p| p.1);
-            match under(&row.path, rel) {
+            match under(root, rel) {
                 Ok(path) if path.is_dir() => pos.frames.push(Frame {
                     path: rel.into(),
                     next: 0,
@@ -692,11 +858,20 @@ fn search(
             let frame = pos.frames.last_mut().expect("frame");
             let key = (pos.source, frame.path.clone());
             if !page_dirs.contains_key(&key) {
-                let path = under(&row.path, &frame.path)?;
+                let path = match under(root, &frame.path) {
+                    Ok(path) => path,
+                    Err(reason) => {
+                        unavailable
+                            .push(json!({"source":row.name,"path":frame.path,"reason":reason}));
+                        pos.frames.pop();
+                        work += 1;
+                        continue;
+                    }
+                };
                 if revision(&path) != frame.revision {
                     return Err("cursor_expired: Docs folder changed".into());
                 }
-                match children(&path) {
+                match projected_children(&path, &mut LIST_WORK.to_owned()) {
                     Ok(entries) => {
                         page_dirs.insert(key.clone(), entries);
                     }
@@ -717,15 +892,11 @@ fn search(
             };
             frame.next += 1;
             work += 1;
-            let rel = if frame.path.is_empty() {
-                entry.name.clone()
-            } else {
-                format!("{}/{}", frame.path, entry.name)
-            };
+            let rel = child_path(&frame.path, &entry.name);
             if rel.len() > 4096 {
                 continue;
             }
-            let Ok(path) = under(&row.path, &rel) else {
+            let Ok(path) = under(root, &rel) else {
                 continue;
             };
             let rev = revision(&path);
@@ -749,12 +920,7 @@ fn search(
         }
     }
     let next = if pos.source < rows.len() || pos.bundled < bundled.len() {
-        let token = URL_SAFE_NO_PAD
-            .encode(serde_json::to_vec(&(version, &scope, pos)).expect("stream cursor"));
-        if token.len() > 8192 {
-            return Err("input_limit: Docs traversal cursor exceeds its limit".into());
-        }
-        Some(token)
+        Some(search_cursor(version, &scope, pos))
     } else {
         None
     };

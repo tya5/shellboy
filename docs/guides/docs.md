@@ -26,6 +26,8 @@ shellboy docs source update --name team --path ./new-handbook
 shellboy docs source remove --name team
 ```
 
+If configuration is broken, `docs list --source shellboy` and bundled guide IDs still work.
+
 Registrations are `[[docs.sources]]` entries with a name and an absolute path. A folder is a menu category, and every `.md` file is a guide. The first heading supplies the title (the filename is the fallback); the first paragraph supplies the summary. There is no frontmatter or special filename. `shellboy` is reserved for the bundled guides. Adding the same name and path is a no-op; use `update` to move it. An unavailable folder remains visible as an unavailable branch. Remove only unregisters the folder; it does not delete files or change a RAG index.
 
 ## Search by keyword
@@ -52,7 +54,7 @@ Use `--all` instead of `--source` to select all sources. Dry-run previews bounde
 
 list/search return `items` and `next_cursor`; get returns Markdown `text`, `sections`, `links`, and `next_cursor`. To continue, pass `--cursor` with the same ID and section, or the same search conditions. You may change the page size for the next request.
 
-`version` combines the executable version and bundled catalogue hash. Bundled documents include a SHA-256 `content_hash`. get's `start` / `end` are UTF-8 byte positions relative to the whole document; pages never split a character. Use a `sections` ID with `--section`. Reusing a cursor after an update or with different conditions is an error; start a new request.
+`version` identifies the combined catalogue configuration and bundled guide version. Individual folder and file revisions are checked separately when continuing a read. Bundled documents include a SHA-256 `content_hash`. get's `start` / `end` are UTF-8 byte positions relative to the whole document; pages never split a character. Use a `sections` ID with `--section`. Reusing a cursor after an update or with different conditions is an error; start a new request.
 
 `links` distinguish `bundled` guide links, `external` web links, and `repository` links available only in the development repository. The latter two are not bundled text. A link to development material does not imply that its file exists in your working environment.
 
