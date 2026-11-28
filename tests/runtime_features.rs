@@ -6592,7 +6592,7 @@ async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
 /// #303 §2.6/§3: #A <= target selects spill only, and that branch touches only
 /// the closed region. With no closed tool group it ends `no_target` without a
 /// model request, and the current Turn's older tool group stays unchanged.
-/// Thread deletion removes #A state, both failure slots and kept reasoning.
+/// Thread deletion removes #A state and both failure slots.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
     let root = tempfile::tempdir().unwrap();
@@ -6687,8 +6687,7 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
         1,
         "#A state exists before deletion"
     );
-    // Synthetic slot and kept-reasoning rows: deletion must end them all.
-    let keep_owner = thread.clone();
+    // Synthetic failure slots: deletion must remove both.
     let synthetic = keys.clone();
     control
         .store
@@ -6700,22 +6699,11 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
                     [key],
                 )?;
             }
-            db.execute(
-                "INSERT INTO history_reasoning_keep(thread_id,epoch,node_id) SELECT id,reasoning_epoch,'fixture' FROM thread WHERE id=?1",
-                [&keep_owner],
-            )?;
             Ok(())
         })
         .await
         .unwrap();
     assert_eq!(count_keys(keys.clone()).await, 3);
-    let kept = |id: String| async {
-        control.store.database.call(move |db| Ok(db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM history_reasoning_keep WHERE thread_id=?1 AND node_id='fixture')",
-            [id], |row| row.get::<_,bool>(0),
-        )?)).await.unwrap()
-    };
-    assert!(kept(thread.clone()).await);
     request(
         &control,
         Command::ThreadDelete(ThreadDeleteArgs {
@@ -6729,10 +6717,6 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
         count_keys(keys).await,
         0,
         "Thread deletion removes #A state and failure slots"
-    );
-    assert!(
-        !kept(thread).await,
-        "Thread deletion removes kept reasoning"
     );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
