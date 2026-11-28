@@ -389,7 +389,6 @@ pub(crate) struct OperationField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Stability {
-    Stable,
     Experimental,
 }
 
@@ -399,7 +398,6 @@ pub(crate) struct OperationSpec {
     pub label: &'static str,
     pub meaning: &'static str,
     pub effect: Effect,
-    pub stability: Stability,
     pub confirmation: Confirmation,
     pub route: Route,
     pub fields: &'static [FieldId],
@@ -1490,7 +1488,6 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
 pub(crate) const SPECS: &[OperationSpec] = &[
     OperationSpec {
         id: OperationId::CompactList,
-        stability: Stability::Stable,
         label: "圧縮 · 保存済み一覧",
         meaning: "保存された圧縮の履歴を期間で絞って表示します。新しい圧縮は要求しません。",
         effect: Effect::Inspect,
@@ -1505,7 +1502,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ShellList,
-        stability: Stability::Stable,
         label: "shell · 一覧",
         meaning: "保存されたshell実行を会話・期間・状態で絞って表示します。出力本文は読みません。",
         effect: Effect::Inspect,
@@ -1524,7 +1520,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::Status,
-        stability: Stability::Stable,
         label: "作業 · 状態一覧",
         meaning: "保存されたRun・Turn・shell・入力の状態と関連IDを指定範囲で表示します。",
         effect: Effect::Inspect,
@@ -1543,7 +1538,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::UsageGet,
-        stability: Stability::Stable,
         label: "使用量 · 合計",
         meaning: "指定したThread・Run・Turnの保存済みトークン使用量と処理時間を表示します。",
         effect: Effect::Inspect,
@@ -1566,7 +1560,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ModelList,
-        stability: Stability::Stable,
         label: "モデル · 一覧",
         meaning: "指定接続、対象Threadの接続、所有者の既定接続の順でモデル一覧をAPIから取得します。",
         effect: Effect::Inspect,
@@ -1576,7 +1569,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadList,
-        stability: Stability::Stable,
         label: "会話 · 一覧",
         meaning: "保存された会話のタイトル、親子関係、現在の状態を絞り込んで表示します。",
         effect: Effect::Inspect,
@@ -1596,7 +1588,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadGet,
-        stability: Stability::Stable,
         label: "会話 · 詳細",
         meaning: "指定したThreadの設定、現在のRun・Turn、所有作業と復旧理由を表示します。",
         effect: Effect::Inspect,
@@ -1606,7 +1597,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadBranches,
-        stability: Stability::Stable,
         label: "会話 · 分岐の木",
         meaning: "Threadの分岐（fork・編集・巻き戻しで分かれた子Thread）を木として、分かれた位置・先端の最後の依頼・時刻・大きさ・状態とともに表示します。",
         effect: Effect::Inspect,
@@ -1616,7 +1606,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadCreate,
-        stability: Stability::Stable,
         label: "会話 · 作成",
         meaning: "保存済みThreadを作成します。モデル処理は別の入力送信で開始します。",
         effect: Effect::SavedMutation,
@@ -1633,7 +1622,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadFork,
-        stability: Stability::Stable,
         label: "会話 · 分岐",
         meaning: "指定した履歴ノードを境界に、出典を保持した新しいThreadを作成します。",
         effect: Effect::SavedMutation,
@@ -1648,7 +1636,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadDelete,
-        stability: Stability::Stable,
         label: "会話 · 削除",
         meaning: "指定Threadと選択した子孫を、実行中の作業や参照を再確認して削除します。",
         effect: Effect::SavedMutation,
@@ -1658,7 +1645,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadDeletePreview,
-        stability: Stability::Stable,
         label: "会話 · 削除影響",
         meaning: "指定Threadと選択した子孫の削除を妨げる作業・参照・回収見込みを表示します。",
         effect: Effect::Inspect,
@@ -1668,7 +1654,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadPrune,
-        stability: Stability::Stable,
         label: "会話 · 原文の解放",
         meaning: "指定ノードより前で採用済みの要約・spillの原文を、このThreadの保持から外します。回収は既存の到達性GCが行い、元に戻せません。",
         effect: Effect::SavedMutation,
@@ -1678,7 +1663,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadRewind,
-        stability: Stability::Stable,
         label: "会話 · 巻き戻し",
         meaning: "指定ノードまでの履歴に選択経路を戻します。切り取った部分は子Threadとして残り、シェルの副作用は戻りません。明示run指定時は復旧待ちの停止と巻き戻しを一括します。",
         effect: Effect::SavedMutation,
@@ -1694,7 +1678,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadArchive,
-        stability: Stability::Stable,
         label: "会話 · アーカイブ",
         meaning: "指定Threadと選択した子孫を既定の一覧から外します。削除ではなく、履歴・検索・使用量・受信は変わらず、新しいRunが始まると一覧へ戻ります。",
         effect: Effect::SavedMutation,
@@ -1704,7 +1687,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadUnarchive,
-        stability: Stability::Stable,
         label: "会話 · アーカイブ解除",
         meaning: "指定Threadと選択した子孫のアーカイブを解除し、既定の一覧へ戻します。",
         effect: Effect::SavedMutation,
@@ -1714,7 +1696,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadTag,
-        stability: Stability::Stable,
         label: "会話 · タグ",
         meaning: "指定Threadへタグを付け外しします。置き場所や切り口を表す自由なラベルで、履歴・検索・使用量・受信・一覧の順序は変わりません。",
         effect: Effect::SavedMutation,
@@ -1724,7 +1705,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ArtifactAdd,
-        stability: Stability::Stable,
         label: "成果物 · 追加",
         meaning: "成果物の追加。",
         effect: Effect::SavedMutation,
@@ -1739,7 +1719,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ArtifactUpdate,
-        stability: Stability::Stable,
         label: "成果物 · 更新",
         meaning: "成果物の更新。",
         effect: Effect::SavedMutation,
@@ -1754,7 +1733,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ArtifactList,
-        stability: Stability::Stable,
         label: "成果物 · 一覧",
         meaning: "成果物の一覧。",
         effect: Effect::Inspect,
@@ -1769,7 +1747,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ArtifactGet,
-        stability: Stability::Stable,
         label: "成果物 · 参照",
         meaning: "成果物の参照。",
         effect: Effect::Inspect,
@@ -1784,7 +1761,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ArtifactRemove,
-        stability: Stability::Stable,
         label: "成果物 · 削除",
         meaning: "成果物の削除。",
         effect: Effect::SavedMutation,
@@ -1794,7 +1770,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ArtifactRead,
-        stability: Stability::Stable,
         label: "成果物 · 内容",
         meaning: "成果物の版の内容を読みます。",
         effect: Effect::Inspect,
@@ -1809,7 +1784,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ServiceAdd,
-        stability: Stability::Stable,
         label: "サービス · 追加",
         meaning: "サービスを保存して起動します。",
         effect: Effect::SavedMutation,
@@ -1825,7 +1799,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ServiceList,
-        stability: Stability::Stable,
         label: "サービス · 一覧",
         meaning: "サービスと実行結果を表示します。",
         effect: Effect::Inspect,
@@ -1835,7 +1808,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ServiceGet,
-        stability: Stability::Stable,
         label: "サービス · 参照",
         meaning: "保存されたサービスを表示します。",
         effect: Effect::Inspect,
@@ -1845,7 +1817,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ServiceSet,
-        stability: Stability::Stable,
         label: "サービス · 名前変更",
         meaning: "サービスの名前を変更します。",
         effect: Effect::SavedMutation,
@@ -1855,7 +1826,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ServiceEndpoint,
-        stability: Stability::Stable,
         label: "サービス · 接続先",
         meaning: "サービスの現在の接続先とトークンを読みます。",
         effect: Effect::Inspect,
@@ -1865,7 +1835,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ServiceStart,
-        stability: Stability::Stable,
         label: "サービス · 起動",
         meaning: "サービスを起動します。",
         effect: Effect::SavedMutation,
@@ -1875,7 +1844,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ServiceStop,
-        stability: Stability::Stable,
         label: "サービス · 停止",
         meaning: "サービスを停止します。",
         effect: Effect::SavedMutation,
@@ -1885,7 +1853,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ServiceRemove,
-        stability: Stability::Stable,
         label: "サービス · 削除",
         meaning: "サービスを停止して削除します。",
         effect: Effect::SavedMutation,
@@ -1895,7 +1862,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ContextAdd,
-        stability: Stability::Experimental,
         label: "コンテキスト · 追加",
         meaning: "Thread のコンテキストコマンドを追加します。",
         effect: Effect::SavedMutation,
@@ -1910,7 +1876,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ContextList,
-        stability: Stability::Experimental,
         label: "コンテキスト · 一覧",
         meaning: "Thread のコンテキストコマンドを一覧表示します。",
         effect: Effect::Inspect,
@@ -1920,7 +1885,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ContextGet,
-        stability: Stability::Experimental,
         label: "コンテキスト · 参照",
         meaning: "Thread のコンテキストコマンドを参照します。",
         effect: Effect::Inspect,
@@ -1930,7 +1894,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ContextSet,
-        stability: Stability::Experimental,
         label: "コンテキスト · 変更",
         meaning: "Thread のコンテキストコマンドを変更します。",
         effect: Effect::SavedMutation,
@@ -1945,7 +1908,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ContextRemove,
-        stability: Stability::Experimental,
         label: "コンテキスト · 削除",
         meaning: "Thread のコンテキストコマンドを削除します。",
         effect: Effect::SavedMutation,
@@ -1955,7 +1917,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ScheduleAdd,
-        stability: Stability::Stable,
         label: "予定 · 追加",
         meaning: "Thread の予定を追加します。",
         effect: Effect::SavedMutation,
@@ -1974,7 +1935,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ScheduleSet,
-        stability: Stability::Stable,
         label: "予定 · 変更",
         meaning: "予定の説明文や通知を変更します。",
         effect: Effect::SavedMutation,
@@ -1988,7 +1948,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ScheduleEnable,
-        stability: Stability::Stable,
         label: "予定 · 有効化",
         meaning: "予定を有効にします。",
         effect: Effect::SavedMutation,
@@ -1998,7 +1957,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ScheduleDisable,
-        stability: Stability::Stable,
         label: "予定 · 無効化",
         meaning: "予定を無効にします。",
         effect: Effect::SavedMutation,
@@ -2008,7 +1966,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ScheduleRemove,
-        stability: Stability::Stable,
         label: "予定 · 削除",
         meaning: "予定を停止して削除します。",
         effect: Effect::SavedMutation,
@@ -2018,7 +1975,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ScheduleList,
-        stability: Stability::Stable,
         label: "予定 · 一覧",
         meaning: "予定と実行結果を表示します。",
         effect: Effect::Inspect,
@@ -2028,7 +1984,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadTags,
-        stability: Stability::Stable,
         label: "会話 · タグ一覧",
         meaning: "使われているタグ名を重複なく、バイト順に表示します。件数は数えません。",
         effect: Effect::Inspect,
@@ -2038,7 +1993,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadCwds,
-        stability: Stability::Stable,
         label: "会話 · 作業場所一覧",
         meaning: "削除されていない会話（アーカイブ済みを含む）の保存cwdを重複なく、バイト順に表示します。件数は数えません。",
         effect: Effect::Inspect,
@@ -2048,7 +2002,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ThreadSet,
-        stability: Stability::Stable,
         label: "会話 · 設定",
         meaning: "Threadの表示タイトル、作業場所、接続、モデル、推論設定、出力上限、指示ファイル、親Thread、自動要約設定、summary文字数上限、自動spill設定を変更します。",
         effect: Effect::SavedMutation,
@@ -2072,7 +2025,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::MessageSend,
-        stability: Stability::Stable,
         label: "依頼 · 送信",
         meaning: "指定Threadへ入力を保存します。受付、Run・Turnへの採用、回答完了は個別に追跡します。",
         effect: Effect::RuntimeControl,
@@ -2089,7 +2041,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::MessageReply,
-        stability: Stability::Stable,
         label: "依頼 · 返信",
         meaning: "受信した依頼へ一度だけ返信します。",
         effect: Effect::SavedMutation,
@@ -2099,7 +2050,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::MessageList,
-        stability: Stability::Stable,
         label: "依頼 · 返信待ち",
         meaning: "保存された返信待ちを向きごとにページで一覧します。",
         effect: Effect::Inspect,
@@ -2116,7 +2066,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::MessageGet,
-        stability: Stability::Stable,
         label: "依頼 · 割当と回答",
         meaning: "保存された入力の受付状態と不変のRun・Turn割当、回答への参照を表示します。",
         effect: Effect::Inspect,
@@ -2126,7 +2075,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::MessageCancel,
-        stability: Stability::Stable,
         label: "依頼 · 未採用入力の取消",
         meaning: "明示した未採用の入力を取り消します。既に履歴へ採用された入力は対象外です。",
         effect: Effect::SavedMutation,
@@ -2136,7 +2084,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::OperationGet,
-        stability: Stability::Stable,
         label: "操作 · 受付結果",
         meaning: "指定operation_idの保存済み受付結果と後続処理を確認し、不確実な再送を判断できます。",
         effect: Effect::Inspect,
@@ -2146,7 +2093,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RunGet,
-        stability: Stability::Stable,
         label: "作業 · 詳細",
         meaning: "Runの保存状態、現在のTurn、所有関係、子作業・shellと保存された復旧理由を表示します。",
         effect: Effect::Inspect,
@@ -2156,7 +2102,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RunRetry,
-        stability: Stability::Stable,
         label: "作業 · 復旧を再試行",
         meaning: "原因を確認した復旧待ちTurnを、明示したRunで再開します。終了済みRunは再開できません。",
         effect: Effect::RuntimeControl,
@@ -2166,7 +2111,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RunStop,
-        stability: Stability::Stable,
         label: "作業 · 停止",
         meaning: "指定Runとその所有作業の停止を要求します。保存状態で実際の終了を確認します。",
         effect: Effect::RuntimeControl,
@@ -2176,7 +2120,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::TurnInterrupt,
-        stability: Stability::Stable,
         label: "応答処理 · 中断",
         meaning: "指定Turnだけを中断します。",
         effect: Effect::RuntimeControl,
@@ -2186,7 +2129,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::TurnGet,
-        stability: Stability::Stable,
         label: "応答処理 · 詳細",
         meaning: "一つのTurnの保存状態と回答ノードIDを表示します。回答本文は履歴原文から参照できます。",
         effect: Effect::Inspect,
@@ -2196,7 +2138,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::Wait,
-        stability: Stability::Stable,
         label: "待機 · 条件を観測",
         meaning: "指定条件のいずれかが成立するまで観測します。観測の期限切れ後も対象の作業は続行します。",
         effect: Effect::Inspect,
@@ -2212,7 +2153,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::HistoryList,
-        stability: Stability::Stable,
         label: "履歴 · 一覧",
         meaning: "指定Threadの採用経路を、出典のRun・日時・関連shell状態で絞り込んで表示します。",
         effect: Effect::Inspect,
@@ -2230,7 +2170,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::HistoryWindow,
-        stability: Stability::Stable,
         label: "履歴 · 位置で読む",
         meaning: "採用経路を位置（末尾・位置・ノード）を基準に前後の件数だけ読み、全体の件数と経路の版を返します。",
         effect: Effect::Inspect,
@@ -2248,7 +2187,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::HistoryRead,
-        stability: Stability::Stable,
         label: "履歴 · 原文",
         meaning: "指定ノードの保存原文と出典を取得します。終了メッセージのみを選ぶと推論や途中説明を除きます。",
         effect: Effect::Inspect,
@@ -2265,7 +2203,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::HistorySearch,
-        stability: Stability::Stable,
         label: "履歴 · 検索",
         meaning: "指定範囲の会話履歴を埋め込み検索し、原文と出典への参照を返します。API費用が発生する場合があります。",
         effect: Effect::Inspect,
@@ -2283,7 +2220,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::HistoryRelations,
-        stability: Stability::Stable,
         label: "履歴 · 関係",
         meaning: "履歴ノードの前後、出典、置換関係を、不変DAGと現在の採用経路を区別して表示します。",
         effect: Effect::Inspect,
@@ -2298,7 +2234,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ShellGet,
-        stability: Stability::Stable,
         label: "shell · 詳細",
         meaning: "対象コマンドの元のcommand、cwd、Run・Turn、保存状態と出力完了を表示します。",
         effect: Effect::Inspect,
@@ -2308,7 +2243,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ShellRead,
-        stability: Stability::Stable,
         label: "shell · 保存出力",
         meaning: "指定Executionの保存済みstdout・stderrを、文字コードとcursorを指定して読み取ります。",
         effect: Effect::Inspect,
@@ -2325,7 +2259,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ShellWrite,
-        stability: Stability::Stable,
         label: "shell · 入力",
         meaning: "指定Executionのstdinへ入力を送ります。送信結果と相手の処理完了は別に確認します。",
         effect: Effect::RuntimeControl,
@@ -2335,7 +2268,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ShellBackground,
-        stability: Stability::Stable,
         label: "shell · 背景化",
         meaning: "指定Executionを停止せず前景待機を終了します。",
         effect: Effect::RuntimeControl,
@@ -2345,7 +2277,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ShellEof,
-        stability: Stability::Stable,
         label: "shell · 入力を閉じる",
         meaning: "指定Executionのstdinを閉じ、これ以降の入力を終了します。",
         effect: Effect::RuntimeControl,
@@ -2355,7 +2286,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ShellStop,
-        stability: Stability::Stable,
         label: "shell · 停止",
         meaning: "指定ExecutionのOSプロセス群へ停止を要求します。Run全体の停止とは対象が異なります。",
         effect: Effect::RuntimeControl,
@@ -2365,7 +2295,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::AttachmentAdd,
-        stability: Stability::Stable,
         label: "添付 · 追加",
         meaning: "対象Threadへファイルまたは画像のパス参照を追加します。読み取り・更新・出典は既存の添付規則に従います。",
         effect: Effect::SavedMutation,
@@ -2375,7 +2304,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::AttachmentList,
-        stability: Stability::Stable,
         label: "添付 · 一覧",
         meaning: "対象Threadで選択されている添付参照とその状態を表示します。",
         effect: Effect::Inspect,
@@ -2385,7 +2313,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::AttachmentRemove,
-        stability: Stability::Stable,
         label: "添付 · 除外",
         meaning: "指定attachment_idをThreadの添付選択から外します。外部ファイルは削除しません。",
         effect: Effect::SavedMutation,
@@ -2395,7 +2322,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::Compact,
-        stability: Stability::Stable,
         label: "履歴 · 圧縮と編集",
         meaning: "安全な境界で圧縮を要求するか、指定範囲の退避・要約・削除・復元を行います。要約はモデルAPIを使用します。",
         effect: Effect::RuntimeControl,
@@ -2412,7 +2338,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::IndexStatus,
-        stability: Stability::Stable,
         label: "索引 · 状態",
         meaning: "会話索引の設定、領域、処理件数と停止・失敗理由を表示します。",
         effect: Effect::Inspect,
@@ -2427,7 +2352,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::IndexPreview,
-        stability: Stability::Stable,
         label: "索引 · 費用確認",
         meaning: "指定資料の索引対象件数と読み取り可能な入力量を、埋め込みAPIを呼ばずに確認します。",
         effect: Effect::Inspect,
@@ -2443,7 +2367,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::IndexBackfill,
-        stability: Stability::Stable,
         label: "索引 · 過去履歴を追加",
         meaning: "明示した過去履歴の埋め込み索引を開始します。事前確認とAPI費用の確認が必要です。",
         effect: Effect::RuntimeControl,
@@ -2459,7 +2382,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::IndexRetry,
-        stability: Stability::Stable,
         label: "索引 · 失敗分を再試行",
         meaning: "対象の失敗済み索引処理を、現在の設定で再試行します。API費用が発生する場合があります。",
         effect: Effect::RuntimeControl,
@@ -2474,7 +2396,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::IndexRebuild,
-        stability: Stability::Stable,
         label: "索引 · 作り直す",
         meaning: "指定した資料と任意の次元数で候補索引を構築します。検証成功まで既存の有効領域を保持します。",
         effect: Effect::RuntimeControl,
@@ -2491,7 +2412,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::IndexProbe,
-        stability: Stability::Stable,
         label: "索引 · 接続と次元を試す",
         meaning: "一つの固定入力を埋め込みAPIへ送り、接続・次元の結果を保存します。API費用が発生する場合があります。",
         effect: Effect::RuntimeControl,
@@ -2501,7 +2421,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::IndexShrink,
-        stability: Stability::Stable,
         label: "索引 · 小さくする",
         meaning: "選択中の索引をAPIを使わず8ビットへ変換し、検索で読むベクトル量を約4分の1にします。完成まで古い索引で検索を続けます。古い索引は削除せず残します。",
         effect: Effect::RuntimeControl,
@@ -2515,7 +2434,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::IndexRemove,
-        stability: Stability::Stable,
         label: "索引 · 使わない索引を削除",
         meaning: "指定した非アクティブの索引を完全に削除します。作り直すには埋め込みの費用がかかります。",
         effect: Effect::RuntimeControl,
@@ -2525,7 +2443,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::StorageStatus,
-        stability: Stability::Stable,
         label: "保存 · 状態",
         meaning: "指定カテゴリの論理使用量、上限、保持と回収に関する保存情報を表示します。",
         effect: Effect::Inspect,
@@ -2535,7 +2452,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::StorageCollect,
-        stability: Stability::Stable,
         label: "保存 · 回収",
         meaning: "指定カテゴリで回収可能な保存データを明示的に回収します。保護された原文と参照は保持します。",
         effect: Effect::SavedMutation,
@@ -2545,7 +2461,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::Exec,
-        stability: Stability::Stable,
         label: "作業 · JSON契約で実行",
         meaning: "保存Threadへ依頼し、最終JSON回答をローカルschemaで検証します。修復回数の範囲で追加のモデル・tool処理を行います。",
         effect: Effect::RuntimeControl,
@@ -2569,7 +2484,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ConfigInit,
-        stability: Stability::Stable,
         label: "設定 · テンプレート作成",
         meaning: "選択したconfigパスへテンプレートを作成します。既存ファイルは上書きしません。",
         effect: Effect::SavedMutation,
@@ -2579,7 +2493,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::ConfigCheck,
-        stability: Stability::Stable,
         label: "設定 · 接続確認",
         meaning: "設定ファイルと環境変数を読み、既定接続のモデル一覧を取得して設定を確認します。実行中の所有者への反映は再起動時です。",
         effect: Effect::Inspect,
@@ -2589,7 +2502,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::DocsList,
-        stability: Stability::Stable,
         label: "ガイド · 一覧",
         meaning: "この実行ファイルに同梱されたガイドを階層ごとに表示します。",
         effect: Effect::Inspect,
@@ -2604,7 +2516,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::DocsGet,
-        stability: Stability::Stable,
         label: "ガイド · 本文",
         meaning: "同梱ガイドの文書IDと任意の見出しから、版付き本文を読み取ります。",
         effect: Effect::Inspect,
@@ -2620,7 +2531,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::DocsSearch,
-        stability: Stability::Stable,
         label: "ガイド · 検索",
         meaning: "同梱ガイドの文字列を検索します。所有者や埋め込みAPIは不要です。",
         effect: Effect::Inspect,
@@ -2636,7 +2546,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagInit,
-        stability: Stability::Stable,
         label: "資料検索 · DB作成",
         meaning: "指定した独立RAGデータベースを初期化します。会話の所有者は起動しません。",
         effect: Effect::SavedMutation,
@@ -2646,7 +2555,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagSourceAdd,
-        stability: Stability::Stable,
         label: "資料検索 · ソース登録",
         meaning: "資料フォルダまたはファイルを名前付きソースとして登録し、除外パターンを保存します。",
         effect: Effect::SavedMutation,
@@ -2661,7 +2569,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagSourceList,
-        stability: Stability::Stable,
         label: "資料検索 · ソース一覧",
         meaning: "独立RAGに登録した資料ソースと除外設定を表示します。",
         effect: Effect::Inspect,
@@ -2671,7 +2578,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagSourceRemove,
-        stability: Stability::Stable,
         label: "資料検索 · ソース解除",
         meaning: "指定した資料ソースの登録と対応する独立索引を削除します。元の外部資料は保持します。",
         effect: Effect::SavedMutation,
@@ -2681,7 +2587,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagIndex,
-        stability: Stability::Stable,
         label: "資料検索 · 索引",
         meaning: "登録資料をkeywordまたはsemanticで索引化します。dry-runは実行対象を表示し、semantic処理はAPI費用が発生する場合があります。",
         effect: Effect::RuntimeControl,
@@ -2691,7 +2596,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagIngest,
-        stability: Stability::Stable,
         label: "資料検索 · 抽出済み本文を登録",
         meaning: "外部抽出した本文を、元ファイル・種類・任意のメタデータと対応付けて登録します。",
         effect: Effect::SavedMutation,
@@ -2708,7 +2612,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagStatus,
-        stability: Stability::Stable,
         label: "資料検索 · 状態",
         meaning: "独立RAGの登録ソース、索引状態と未索引・失敗情報を表示します。",
         effect: Effect::Inspect,
@@ -2718,7 +2621,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagInspect,
-        stability: Stability::Stable,
         label: "資料検索 · 文書詳細",
         meaning: "指定文書IDの保存された版、出典、抽出情報と索引情報を表示します。",
         effect: Effect::Inspect,
@@ -2728,7 +2630,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagSearch,
-        stability: Stability::Stable,
         label: "資料検索 · 検索",
         meaning: "ガイド、会話、登録資料の明示した範囲を検索します。semantic・hybridではAPI費用が発生する場合があります。",
         effect: Effect::Inspect,
@@ -2744,7 +2645,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::RagGet,
-        stability: Stability::Stable,
         label: "資料検索 · 原文",
         meaning: "検索結果の版付きrefを使って、対応する原文を有限ページで取得します。",
         effect: Effect::Inspect,
@@ -2756,11 +2656,17 @@ pub(crate) const SPECS: &[OperationSpec] = &[
 mod cli_bindings;
 pub(crate) static CLI_BINDINGS: std::sync::LazyLock<Vec<CliBinding>> =
     std::sync::LazyLock::new(cli_bindings::build);
+pub(crate) const EXPERIMENTAL: &[OperationId] = &[
+    OperationId::ContextAdd,
+    OperationId::ContextList,
+    OperationId::ContextGet,
+    OperationId::ContextSet,
+    OperationId::ContextRemove,
+];
 pub(crate) fn experimental_operations() -> std::collections::BTreeMap<String, Stability> {
-    SPECS
+    EXPERIMENTAL
         .iter()
-        .filter(|spec| spec.stability == Stability::Experimental)
-        .map(|spec| (spec.id.primary_cli().path.join("."), spec.stability))
+        .map(|id| (id.primary_cli().path.join("."), Stability::Experimental))
         .collect()
 }
 

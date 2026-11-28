@@ -1,6 +1,6 @@
-use clap::{CommandFactory, Parser};
+use clap::FromArgMatches;
 use shellboy::{
-    cli::{Cli, CliCommand},
+    cli::{Cli, CliCommand, command_with_stability},
     config::{PathEnvironment, resolve_cli_data_dir},
     ipc,
     protocol::{ApiError, ErrorCode, Origin, Response},
@@ -48,7 +48,7 @@ fn cli_parse_error(error: &clap::Error) -> ApiError {
         }
     }
     let mut known = BTreeSet::new();
-    names(&Cli::command(), &mut known);
+    names(&command_with_stability(), &mut known);
     let candidates: Vec<&str> = match error.get(ContextKind::InvalidArg) {
         Some(ContextValue::String(value)) => vec![value.as_str()],
         Some(ContextValue::Strings(values)) => values.iter().map(String::as_str).collect(),
@@ -64,10 +64,10 @@ fn cli_parse_error(error: &clap::Error) -> ApiError {
     let usage = error
         .get(ContextKind::Usage)
         .map(ToString::to_string)
-        .or_else(|| Some(Cli::command().render_usage().to_string()));
+        .or_else(|| Some(command_with_stability().render_usage().to_string()));
     let kind = format!("{:?}", error.kind());
     let scheduled = shellboy::cli::scheduled_command_argument_error(
-        Cli::command(),
+        command_with_stability(),
         error,
         &std::env::args_os()
             .skip(1)
@@ -87,7 +87,10 @@ fn cli_parse_error(error: &clap::Error) -> ApiError {
 }
 
 fn main() -> ExitCode {
-    let cli = match Cli::try_parse() {
+    let cli = match command_with_stability()
+        .try_get_matches()
+        .and_then(|matches| Cli::from_arg_matches(&matches))
+    {
         Ok(cli) => cli,
         Err(error)
             if matches!(

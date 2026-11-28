@@ -9,6 +9,33 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub const MAX_STDIN_TEXT_BYTES: usize = wire::MAX_FRAME_BYTES;
 
+/// Render experimental help from the same catalogue as the protocol schema.
+pub fn command_with_stability() -> clap::Command {
+    fn flag(command: clap::Command) -> clap::Command {
+        let about = format!(
+            "Experimental: {}",
+            command
+                .get_about()
+                .map(ToString::to_string)
+                .unwrap_or_default()
+        );
+        command.about(about)
+    }
+    let mut command = Cli::command();
+    let mut groups = std::collections::BTreeSet::new();
+    for id in crate::operations::EXPERIMENTAL {
+        let [group, leaf] = id.primary_cli().path else {
+            continue;
+        };
+        groups.insert(*group);
+        command = command.mut_subcommand(group, |group| group.mut_subcommand(leaf, flag));
+    }
+    for group in groups {
+        command = command.mut_subcommand(group, flag);
+    }
+    command
+}
+
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "shellboy",
@@ -128,7 +155,7 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: ServiceCommand,
     },
-    /// Experimental: manage Thread context commands.
+    /// manage Thread context commands.
     Context {
         #[command(subcommand)]
         command: ContextCommand,
@@ -2698,7 +2725,7 @@ fn artifact_path_from_cli(path: &str, cwd: &Path) -> Result<String, ApiError> {
 
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum ContextCommand {
-    /// Experimental: add Thread context definitions.
+    /// add Thread context definitions.
     Add {
         #[arg(long = "thread")]
         thread_id: Option<String>,
@@ -2709,7 +2736,7 @@ pub enum ContextCommand {
         #[arg(long)]
         timeout_ms: u32,
     },
-    /// Experimental: list Thread context definitions.
+    /// list Thread context definitions.
     List {
         #[arg(long = "thread")]
         thread_id: Option<String>,
@@ -2718,14 +2745,14 @@ pub enum ContextCommand {
         #[arg(long)]
         cursor: Option<String>,
     },
-    /// Experimental: get Thread context definitions.
+    /// get Thread context definitions.
     Get {
         #[arg(long = "thread")]
         thread_id: Option<String>,
         #[arg(long)]
         name: String,
     },
-    /// Experimental: set Thread context definitions.
+    /// set Thread context definitions.
     Set {
         #[arg(long = "thread")]
         thread_id: Option<String>,
@@ -2736,7 +2763,7 @@ pub enum ContextCommand {
         #[arg(long)]
         timeout_ms: Option<u32>,
     },
-    /// Experimental: remove Thread context definitions.
+    /// remove Thread context definitions.
     Remove {
         #[arg(long = "thread")]
         thread_id: Option<String>,
