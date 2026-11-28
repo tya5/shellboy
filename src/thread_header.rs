@@ -15,7 +15,7 @@ const WITNESS_BYTES: usize = 512 * 1024;
 // Current CLI titles allow512 Unicode scalars (at most2048 UTF-8 bytes).
 // Paths need their own allowance: extended Windows paths can exceed512 bytes.
 const IDENTITY_BYTES: usize = 512;
-const TITLE_BYTES: usize = 2048;
+pub(crate) const TITLE_BYTES: usize = 2048;
 const SETTING_BYTES: usize = 4096;
 const PATH_BYTES: usize = 128 * 1024;
 const EFFORT_BYTES: usize = 64;

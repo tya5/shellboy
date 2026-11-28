@@ -163,7 +163,7 @@ impl Session {
                     root: None,
                     include_descendant_count: false,
                     include_activity: false,
-                    include_activity_evidence: false,
+                    include_detail: false,
                     thread_ids: None,
                     state: None,
                     order: Default::default(),

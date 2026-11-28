@@ -3528,6 +3528,8 @@ mod tests {
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
             descendants: None,
+            detail: None,
+            title_truncated: false,
             activity_detail: None,
             latest_completion: None,
             awaiting_reply: 0,
@@ -4468,6 +4470,8 @@ mod tests {
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
             descendants: None,
+            detail: None,
+            title_truncated: false,
             activity_detail: None,
             latest_completion: None,
             awaiting_reply: 0,
@@ -4727,6 +4731,8 @@ mod patch_tests {
     fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
             descendants: None,
+            detail: None,
+            title_truncated: false,
             activity_detail: None,
             latest_completion: None,
             awaiting_reply: 0,
@@ -5471,6 +5477,8 @@ mod archive_tests {
     fn row(id: &str, archived: bool) -> ThreadSummary {
         ThreadSummary {
             descendants: None,
+            detail: None,
+            title_truncated: false,
             activity_detail: None,
             latest_completion: None,
             awaiting_reply: 0,
@@ -5877,6 +5885,8 @@ mod watch_integration_tests {
     fn row(id: &str, phase: crate::activity::ActivityPhase) -> ThreadSummary {
         ThreadSummary {
             descendants: None,
+            detail: None,
+            title_truncated: false,
             activity_detail: None,
             latest_completion: None,
             awaiting_reply: 0,
@@ -6620,6 +6630,8 @@ mod language_tests {
     fn record(id: &str, phase: ActivityPhase) -> ThreadSummary {
         ThreadSummary {
             descendants: None,
+            detail: None,
+            title_truncated: false,
             activity_detail: None,
             latest_completion: None,
             awaiting_reply: 0,

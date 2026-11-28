@@ -641,7 +641,7 @@ mod shared_consumer_tests {
 
 pub(super) fn prepare_native(
     row: &crate::protocol::ThreadSummary,
-    evidence: crate::protocol::ThreadActivityEvidence,
+    evidence: crate::protocol::ThreadListDetail,
     language: crate::config::UiLanguage,
 ) -> PreparedWatchDetail {
     use crate::activity::ActivityPhase;
@@ -746,7 +746,13 @@ pub(super) fn prepare_native(
         }
     });
     let answer_id = turn.and_then(|t| t.answer_node_id.clone());
-    let answer_preview = if evidence.answer_limited {
+    let answer_preview = if let Some(excerpt) = evidence.answer_excerpt {
+        Some(if evidence.answer_truncated {
+            format!("{excerpt}…")
+        } else {
+            excerpt
+        })
+    } else if evidence.answer_truncated {
         Some(
             local!(
                 language,
@@ -756,15 +762,13 @@ pub(super) fn prepare_native(
             .into(),
         )
     } else {
-        evidence.answer_excerpt.or_else(|| {
-            answer_id.as_ref().map(|_| {
-                local!(
-                    language,
-                    "回答本文は未取得（会話を開いて確認）",
-                    "Answer not retrieved (open conversation)"
-                )
-                .into()
-            })
+        answer_id.as_ref().map(|_| {
+            local!(
+                language,
+                "回答本文は未取得（会話を開いて確認）",
+                "Answer not retrieved (open conversation)"
+            )
+            .into()
         })
     };
     let state_age = age(state_at);

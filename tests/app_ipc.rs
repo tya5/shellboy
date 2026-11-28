@@ -284,9 +284,7 @@ async fn rooted_thread_list_pages_and_intersects_exact_ids_over_ipc() {
     let serving = tokio::spawn(control.clone().serve(receive));
     let data = &owner.loaded.data_dir;
     let list = |args| async move {
-        let response = ipc::call(data, Command::ThreadList(args), None, None)
-            .await
-            .unwrap();
+        let response = ipc::call(data, Command::ThreadList(args), None, None).await?;
         match response.error {
             Some(error) => Err(error),
             None => Ok(serde_json::from_value::<ThreadListPage>(response.result.unwrap()).unwrap()),
@@ -300,6 +298,16 @@ async fn rooted_thread_list_pages_and_intersects_exact_ids_over_ipc() {
         archived: shellboy::protocol::ArchivedFilter::Include,
         ..Default::default()
     };
+    assert_eq!(
+        list(ThreadListArgs {
+            include_detail: true,
+            ..args.clone()
+        })
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidArgument
+    );
     let first = list(args.clone()).await.unwrap();
     assert_eq!(first.items[0].thread_id, "leaf");
     let zero = first.items[0].descendants.as_ref().unwrap();
@@ -385,7 +393,7 @@ async fn rooted_thread_list_pages_and_intersects_exact_ids_over_ipc() {
     assert_eq!(descendants.by_state[&ThreadListState::ActiveWork], 1);
     assert_eq!(descendants.by_state[&ThreadListState::Completed], 1);
     let exact = list(ThreadListArgs {
-        include_activity_evidence: true,
+        include_detail: true,
         archived: shellboy::protocol::ArchivedFilter::Exclude,
         state: Some(ThreadListState::Completed),
         thread_ids: Some(vec![
@@ -398,7 +406,11 @@ async fn rooted_thread_list_pages_and_intersects_exact_ids_over_ipc() {
     })
     .await
     .unwrap();
-    let evidence = &exact.activity_evidence["leaf"];
+    let evidence = exact.items[0].detail.as_ref().unwrap();
+    assert_eq!(evidence.parent_title.as_deref(), Some("Bridge"));
+    assert!(!evidence.answer_truncated);
+    assert!(first.items[0].detail.is_none());
+    assert!(!exact.items[0].title_truncated);
     assert!(evidence.parent_deleted);
     assert_eq!(evidence.answer_excerpt.as_deref(), Some("selected answer"));
     assert_eq!(
@@ -409,6 +421,39 @@ async fn rooted_thread_list_pages_and_intersects_exact_ids_over_ipc() {
             .collect::<Vec<_>>(),
         ["leaf"]
     );
+    let long_title = "界".repeat(900);
+    let long_answer = "界".repeat(600);
+    let title = long_title.clone();
+    let answer = long_answer.clone();
+    owner
+        .db
+        .call(move |db| {
+            db.execute("UPDATE thread SET title=?1 WHERE id='leaf'", [title])?;
+            db.execute(
+                "UPDATE node SET payload_json=?1 WHERE id='answer'",
+                [
+                    serde_json::json!({"content":[{"type":"output_text","text":answer}]})
+                        .to_string(),
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let truncated = list(ThreadListArgs {
+        thread_ids: Some(vec!["leaf".into()]),
+        include_detail: true,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let row = &truncated.items[0];
+    assert!(row.title_truncated && row.title.len() <= 2048);
+    assert!(long_title.starts_with(&row.title) && !row.title.is_empty());
+    let detail = row.detail.as_ref().unwrap();
+    let excerpt = detail.answer_excerpt.as_deref().unwrap();
+    assert!(detail.answer_truncated && long_answer.starts_with(excerpt));
+    assert_eq!(excerpt.chars().count(), 512);
     server.shutdown().await.unwrap();
     serving.await.unwrap();
     control.shutdown().await.unwrap();

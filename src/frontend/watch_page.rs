@@ -104,6 +104,7 @@ pub(super) async fn read(
     let watch_summaries = page.items.iter().map(summary).collect();
     let display_times = super::thread_display_times(&page.items);
     Ok(PreparedPage {
+        limited_titles: super::limited_thread_titles(&page.items),
         page: Page {
             items: page.items,
             next_cursor,
@@ -111,7 +112,6 @@ pub(super) async fn read(
         watch_summaries,
         display_times,
         read_sequence: page.read_sequence,
-        limited_titles: Vec::new(),
         scope: None,
         read_at: chrono::Utc::now().to_rfc3339(),
         continuation_limited,
@@ -737,7 +737,7 @@ mod previous_discovery {
                         root: None,
                         include_descendant_count: false,
                         include_activity: false,
-                        include_activity_evidence: false,
+                        include_detail: false,
                         thread_ids: None,
                         state: None,
                         order: Default::default(),

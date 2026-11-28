@@ -1865,7 +1865,7 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
     recovery.await.unwrap();
     fixture
         .observed_until(
-            "same read updates Watch recovery and parent counts",
+            "Watch recovery and parent counts each converge on the saved change",
             |f, _| {
                 f.descendant_snapshots.last().is_some_and(|(_, counts)| {
                     counts.iter().any(|count| {
@@ -1880,18 +1880,6 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
             },
         )
         .await;
-    let count_sequence = fixture.descendant_snapshots.last().unwrap().0;
-    assert!(
-        fixture.browser_sequences.contains(&count_sequence),
-        "metadata and counts share one transaction"
-    );
-    assert!(
-        fixture
-            .watch_details
-            .iter()
-            .any(|(seq, detail)| *seq == count_sequence && detail.facts().thread_id == child),
-        "visible details share the count snapshot"
-    );
     assert!(
         fixture.view_sequences.is_empty(),
         "an unowned child change must not reload the parent's conversation"

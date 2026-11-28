@@ -271,9 +271,15 @@ pub(super) fn reply_count_exact(count: u64) -> bool {
     count <= MAX_HUMAN_REPLY_SUMMARY_DUTIES
 }
 
-pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
+pub(crate) fn prepare(raw: RawSummary, mut title: String, excerpt: String) -> ThreadSummary {
+    let title_truncated = title.len() > crate::thread_header::TITLE_BYTES;
+    if title_truncated {
+        title.truncate(title.floor_char_boundary(crate::thread_header::TITLE_BYTES));
+    }
     ThreadSummary {
         descendants: None,
+        detail: None,
+        title_truncated,
         activity_detail: None,
         latest_completion: None,
         awaiting_reply: if raw.awaiting_reply_exact {

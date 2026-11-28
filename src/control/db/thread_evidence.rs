@@ -1,5 +1,5 @@
 //! Bounded evidence around the latest saved Thread activity.
-use crate::protocol::{ThreadActivityEvidence, ThreadActivityShell};
+use crate::protocol::{ThreadActivityShell, ThreadListDetail};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 
@@ -36,7 +36,7 @@ facts AS MATERIALIZED (
 SELECT id,parent_thread_id,parent_title,parent_deleted,run_id,execution,shell_turn,shell_started,
  CASE WHEN command_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN
    (SELECT CASE WHEN json_valid(shell_json) THEN CASE WHEN json_type(shell_json,'$.command')='text'
-       THEN substr(json_extract(shell_json,'$.command'),1,512) END END FROM shell_execution WHERE id=budgeted.execution) END,
+       THEN substr(json_extract(shell_json,'$.command'),1,513) END END FROM shell_execution WHERE id=budgeted.execution) END,
  output_at,shells,pending,
  CASE WHEN recovery_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN (SELECT recovery_reason_json FROM turn WHERE id=budgeted.turn_id) END,
  CASE WHEN answer_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN (SELECT payload_json FROM node WHERE id=budgeted.answer_node_id) END,
@@ -102,8 +102,16 @@ pub(crate) fn read(db: &Connection, ids: &[String]) -> rusqlite::Result<BTreeMap
 }
 
 impl Extra {
-    pub(super) fn evidence(self) -> ThreadActivityEvidence {
-        ThreadActivityEvidence {
+    pub(super) fn detail(self) -> ThreadListDetail {
+        let mut answer_excerpt = self
+            .answer
+            .as_deref()
+            .and_then(|body| serde_json::from_str(body).ok())
+            .map(|value| crate::history::conversation_excerpt(&value, 513));
+        let answer_truncated = self.answer_limited | trim_excerpt(&mut answer_excerpt);
+        let mut command = self.command;
+        let command_limited = self.command_limited | trim_excerpt(&mut command);
+        ThreadListDetail {
             parent_title: self.parent_title,
             parent_deleted: self.parent_deleted,
             shell: self.execution.map(|execution_id| ThreadActivityShell {
@@ -111,8 +119,8 @@ impl Extra {
                 turn_id: self.shell_turn,
                 started_at: self.shell_started,
                 last_output_at: self.output_at,
-                command_excerpt: self.command,
-                command_limited: self.command_limited,
+                command_excerpt: command,
+                command_limited,
                 state: self.shell_state.unwrap_or_default(),
             }),
             pending_messages: self.pending,
@@ -121,12 +129,19 @@ impl Extra {
                 .as_deref()
                 .and_then(|body| serde_json::from_str(body).ok()),
             recovery_limited: self.recovery_limited,
-            answer_excerpt: self
-                .answer
-                .as_deref()
-                .and_then(|body| serde_json::from_str(body).ok())
-                .map(|value| crate::history::conversation_excerpt(&value, 512)),
-            answer_limited: self.answer_limited,
+            answer_excerpt,
+            answer_truncated,
         }
+    }
+}
+
+fn trim_excerpt(value: &mut Option<String>) -> bool {
+    if let Some(text) = value
+        && let Some((boundary, _)) = text.char_indices().nth(512)
+    {
+        text.truncate(boundary);
+        true
+    } else {
+        false
     }
 }

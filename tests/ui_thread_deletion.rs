@@ -27,6 +27,8 @@ fn list(ui: &mut UiState, ids: &[&str]) {
             .enumerate()
             .map(|(position, id)| ThreadSummary {
                 descendants: None,
+                detail: None,
+                title_truncated: false,
                 activity_detail: None,
                 latest_completion: None,
                 awaiting_reply: 0,
@@ -204,6 +206,8 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
         requested_cursor: None,
         threads: vec![ThreadSummary {
             descendants: None,
+            detail: None,
+            title_truncated: false,
             activity_detail: None,
             latest_completion: None,
             awaiting_reply: 0,

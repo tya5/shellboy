@@ -332,8 +332,9 @@ rooted Watch uses the same state filters with the selected root. Unread
 completion identities remain in the client and only promote loaded rows within
 their group; Watch does not claim a global unread order.
 
-Exact-ID `thread.list` with `include_activity` can also request
-`include_activity_evidence`. The same owner transaction observes the latest
-activity, parent label, bounded shell evidence, pending count, recovery
-error and answer excerpt. The terminal renders those facts; it never opens
-SQLite. The detail and row refreshes retain their own owner read sequences.
+Exact-ID `thread.list` accepts `include_detail`. The same owner transaction
+returns row facts, parent title and deletion state, pending count, recovery
+reason, bounded answer and current shell evidence. The client uses the typed
+answer truncation fact and each row's `title_truncated` flag; it never infers
+truncation from length or opens SQLite. Detail, row refresh, and descendant
+reads retain their own owner read sequences.

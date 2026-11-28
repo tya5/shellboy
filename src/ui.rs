@@ -4350,6 +4350,8 @@ impl UiState {
             })
             .map(|(key, view)| ThreadSummary {
                 descendants: None,
+                detail: None,
+                title_truncated: false,
                 activity_detail: None,
                 latest_completion: None,
                 awaiting_reply: 0,

@@ -95,10 +95,8 @@ impl ThreadListArgs {
                 "root cannot be combined with order=created or awaiting",
             ));
         }
-        if self.include_activity_evidence && (!self.include_activity || self.thread_ids.is_none()) {
-            return Err(invalid(
-                "activity evidence requires include_activity and exact Thread IDs",
-            ));
+        if self.include_detail && self.thread_ids.is_none() {
+            return Err(invalid("include_detail requires exact Thread IDs"));
         }
         if let Some(ids) = &self.thread_ids {
             if ids.len() > MAX_LIST_LIMIT as usize {

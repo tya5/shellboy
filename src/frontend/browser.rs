@@ -755,8 +755,8 @@ pub(super) async fn observe_native(
                 .collect(),
             display_times: thread_display_times(&page.items),
             watch_summaries: page.items.iter().map(super::watch_page::summary).collect(),
+            limited_titles: super::limited_thread_titles(&page.items),
             rows: page.items,
-            limited_titles: Vec::new(),
             excerpt: None,
         })
     };
@@ -769,7 +769,7 @@ pub(super) async fn observe_native(
                     root: ticket.descendant_root.clone(),
                     thread_ids: Some(ticket.detail_ids.clone()),
                     include_activity: true,
-                    include_activity_evidence: true,
+                    include_detail: true,
                     ..Default::default()
                 },
                 &ticket.detail_stop,
@@ -778,15 +778,15 @@ pub(super) async fn observe_native(
         match result {
             _ if ticket.detail_stop.is_cancelled() => (None, 0),
             Err(error) => return Err(error),
-            Ok(mut page) => {
+            Ok(page) => {
                 let requested = ticket.detail_ids.clone();
                 let sequence = page.read_sequence;
                 let details = presentation_work(move || {
                     let details = page
                         .items
                         .into_iter()
-                        .filter_map(|row| {
-                            let evidence = page.activity_evidence.remove(&row.thread_id)?;
+                        .filter_map(|mut row| {
+                            let evidence = row.detail.take()?;
                             Some(super::watch_read::prepare_native(&row, evidence, language))
                         })
                         .collect::<Vec<_>>();
@@ -848,9 +848,9 @@ pub(super) async fn observe_list(
             generation: ticket.generation,
             read_sequence: page.read_sequence,
             display_times: thread_display_times(&page.items),
+            limited_titles: super::limited_thread_titles(&page.items),
             rows: page.items,
             missing_ids,
-            limited_titles: Vec::new(),
             excerpt,
             watch_summaries: Vec::new(),
         }),

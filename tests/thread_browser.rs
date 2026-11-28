@@ -4,6 +4,8 @@ use shellboy::{config::Config, protocol::ThreadSummary, ui::*};
 fn item(id: &str, parent: Option<&str>) -> ThreadSummary {
     ThreadSummary {
         descendants: None,
+        detail: None,
+        title_truncated: false,
         activity_detail: None,
         latest_completion: None,
         awaiting_reply: 0,

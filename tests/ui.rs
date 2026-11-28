@@ -3016,6 +3016,8 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
         threads: (0..30)
             .map(|i| shellboy::protocol::ThreadSummary {
                 descendants: None,
+                detail: None,
+                title_truncated: false,
                 activity_detail: None,
                 latest_completion: None,
                 awaiting_reply: 0,

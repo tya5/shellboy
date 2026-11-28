@@ -4343,6 +4343,8 @@ mod stream_tests {
         let rows = vec![
             ThreadSummary {
                 descendants: None,
+                detail: None,
+                title_truncated: false,
                 activity_detail: None,
                 latest_completion: None,
                 awaiting_reply: 0,
@@ -4373,6 +4375,8 @@ mod stream_tests {
             },
             ThreadSummary {
                 descendants: None,
+                detail: None,
+                title_truncated: false,
                 activity_detail: None,
                 latest_completion: None,
                 awaiting_reply: 0,
@@ -4570,4 +4574,11 @@ mod tool_preview_tests {
         );
         assert!(!notice.contains("行") && !notice.contains("文字変換エラー"));
     }
+}
+
+fn limited_thread_titles(rows: &[crate::protocol::ThreadSummary]) -> Vec<String> {
+    rows.iter()
+        .filter(|row| row.title_truncated)
+        .map(|row| row.thread_id.clone())
+        .collect()
 }

@@ -264,3 +264,14 @@ after the RFC3339 cutoff. It uses the same bounded page contract and continuatio
 with the cutoff included in the cursor scope. The TUI uses that result to
 subtract its own session-local seen Run identities; seen identities are neither
 sent to the owner nor persisted.
+
+### Exact Thread list detail and title bounds
+
+`thread.list` accepts `include_detail` only with exact `thread_ids`. Each
+matching row can include `detail`, read in the same owner transaction as the
+row: parent title and deletion state, pending count, saved recovery reason,
+selected answer excerpt, and current shell identity, command and output clock.
+`answer_truncated` identifies an excerpt cut at the output bound or omitted at
+the source-read bound. Titles are UTF-8 prefixes of at most 2,048 bytes;
+`title_truncated: true` identifies a shortened title. Clients do not infer
+truncation from string length.

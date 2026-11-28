@@ -1446,14 +1446,14 @@ impl ThreadListState {
         }
     }
 }
-args!(ThreadListArgs { #[serde(default, skip_serializing_if = "Option::is_none")] root: Option<String>, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_descendant_count: bool, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity: bool, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity_evidence: bool, #[serde(default, skip_serializing_if = "Option::is_none")] state: Option<ThreadListState>, #[serde(default, skip_serializing_if = "Option::is_none")] thread_ids: Option<Vec<String>>, #[serde(default, skip_serializing_if = "ThreadListOrder::is_updated")] order: ThreadListOrder, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
+args!(ThreadListArgs { #[serde(default, skip_serializing_if = "Option::is_none")] root: Option<String>, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_descendant_count: bool, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity: bool, #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_detail: bool, #[serde(default, skip_serializing_if = "Option::is_none")] state: Option<ThreadListState>, #[serde(default, skip_serializing_if = "Option::is_none")] thread_ids: Option<Vec<String>>, #[serde(default, skip_serializing_if = "ThreadListOrder::is_updated")] order: ThreadListOrder, #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
 impl Default for ThreadListArgs {
     fn default() -> Self {
         Self {
             root: None,
             include_descendant_count: false,
             include_activity: false,
-            include_activity_evidence: false,
+            include_detail: false,
             thread_ids: None,
             state: None,
             order: ThreadListOrder::Updated,
@@ -2443,7 +2443,7 @@ record!(ThreadListFilters {
     #[serde(default, skip_serializing_if = "Option::is_none")] root: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_descendant_count: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_activity_evidence: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] include_detail: bool,
     #[serde(skip_serializing_if = "Option::is_none")] order: Option<ThreadListOrder>,
     #[serde(skip_serializing_if = "Option::is_none")] archived: Option<ArchivedFilter>,
     #[serde(skip_serializing_if = "Option::is_none")] state: Option<ThreadListState>,
@@ -2459,11 +2459,10 @@ record!(ThreadListPage {
     filters: ThreadListFilters,
     #[serde(skip_serializing_if = "Option::is_none")] next_cursor: Option<String>,
     read_sequence: u64,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")] activity_evidence: std::collections::BTreeMap<String, ThreadActivityEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")] root_count: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")] root_count_exact: Option<bool>,
 });
-record!(ThreadActivityEvidence {
+record!(ThreadListDetail {
     parent_title: Option<String>,
     parent_deleted: bool,
     shell: Option<ThreadActivityShell>,
@@ -2471,7 +2470,7 @@ record!(ThreadActivityEvidence {
     recovery_error: Option<ApiError>,
     recovery_limited: bool,
     answer_excerpt: Option<String>,
-    answer_limited: bool,
+    answer_truncated: bool,
 });
 record!(ThreadActivityShell {
     execution_id: String,
@@ -2680,6 +2679,10 @@ record!(ThreadDescendants {
     cycle: bool,
 });
 record!(ThreadSummary {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    title_truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    detail: Option<ThreadListDetail>,
     #[serde(default, skip_serializing_if = "Option::is_none")] descendants: Option<ThreadDescendants>,
     #[serde(default, skip_serializing_if = "Option::is_none")] activity_detail: Option<ThreadActivity>,
     #[serde(default, skip_serializing_if = "Option::is_none")] latest_completion: Option<ThreadCompletion>, #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, awaiting_replies: u64, awaiting_replies_count_exact: bool, awaiting_thread_count_exact: bool, awaiting_named_count_exact: bool, #[schemars(description = "Pending replies for the selected name (human by default): exact through 16; 17 with exact=false means 17 or more.")] awaiting_named_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting_named_oldest_at: Option<String>, awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_thread_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, created_at: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String, #[serde(default = "default_true", skip_serializing_if = "is_true")] #[schemars(description = "False if the excerpt scan ended before reaching older selected history.")] excerpt_complete: bool });

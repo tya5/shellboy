@@ -253,21 +253,19 @@ fn observation(
             ).optional().map_err(sql_error)?;
         }
     }
-    let activity_evidence = if args.include_activity_evidence {
+    if args.include_detail {
         let ids = items
             .iter()
             .map(|item| item.thread_id.clone())
             .collect::<Vec<_>>();
-        super::thread_evidence::read(connection, &ids)
-            .map_err(sql_error)?
-            .into_iter()
-            .map(|(id, facts)| (id, facts.evidence()))
-            .collect()
-    } else {
-        Default::default()
-    };
+        let mut details = super::thread_evidence::read(connection, &ids).map_err(sql_error)?;
+        for item in &mut items {
+            item.detail = details
+                .remove(&item.thread_id)
+                .map(super::thread_evidence::Extra::detail);
+        }
+    }
     Ok(ThreadListPage {
-        activity_evidence,
         items,
         limit,
         filters: list_filters(args, has_query),
@@ -283,7 +281,7 @@ fn list_filters(args: &ThreadListArgs, has_query: bool) -> ThreadListFilters {
     ThreadListFilters {
         root: args.root.clone(),
         include_activity: args.include_activity,
-        include_activity_evidence: args.include_activity_evidence,
+        include_detail: args.include_detail,
         include_descendant_count: args.include_descendant_count,
         order: (discovery && args.awaiting.is_none()).then_some(args.order),
         archived: discovery.then_some(args.archived),
