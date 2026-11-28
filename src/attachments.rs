@@ -508,18 +508,46 @@ impl AttachmentService {
             })
             .await
             .map_err(storage_error)?;
+        let pins = Arc::new((snapshot.pinned != 0).then_some(pins));
+        self.prepare_snapshot(
+            thread_id,
+            cancel,
+            force_reload,
+            snapshot,
+            pins,
+            observe_attachment,
+        )
+        .await
+    }
+
+    async fn prepare_snapshot(
+        &self,
+        thread_id: &str,
+        cancel: CancellationToken,
+        force_reload: bool,
+        snapshot: selection::SelectionSnapshot,
+        pins: Arc<Option<PinLease>>,
+        observe: impl Fn(&Path, u64, bool, &Mutex<Cache>) -> Result<ReadEvidence, ApiError>
+        + Clone
+        + Send
+        + 'static,
+    ) -> Result<PreparedAttachments, ApiError> {
         let selection::SelectionSnapshot {
-            revision,
-            selected,
-            pinned,
+            revision, selected, ..
         } = snapshot;
-        let pins = Arc::new((pinned != 0).then_some(pins));
         let deadline = self.deadline();
         let file_limit = self.config.limits.attachment_file_bytes;
         let limit = self.config.limits.attachment_request_bytes;
-        let mut paths = BTreeMap::<&Path, Vec<usize>>::new();
+        // Group duplicate slots without letting path spelling reorder reads.
+        let mut groups = Vec::<(&Path, Vec<usize>)>::new();
+        let mut by_path = std::collections::HashMap::<&Path, usize>::new();
         for (index, slot) in selected.iter().enumerate().filter(|(_, slot)| slot.active) {
-            paths.entry(&slot.path).or_default().push(index);
+            let path = slot.path.as_path();
+            let group = *by_path.entry(path).or_insert_with(|| {
+                groups.push((path, Vec::new()));
+                groups.len() - 1
+            });
+            groups[group].1.push(index);
         }
         let mut observed = BTreeMap::new();
         let mut kept = BTreeMap::<&Path, (ReadEvidence, usize)>::new();
@@ -527,18 +555,22 @@ impl AttachmentService {
         let mut cutoff = None;
         let mut protected = 0u64;
         let mut total = 0u64;
-        for (path, slots) in paths {
+        for (path, slots) in groups {
             let read_path = path.to_owned();
             let cache = self.cache.clone();
             let pin = pins.clone();
-            let evidence = self
-                .workers
-                .execute(deadline, cancel.clone(), move || {
-                    let _pin = pin;
-                    observe_attachment(&read_path, file_limit, force_reload, &cache)
-                })
-                .await
-                .map_err(|e| e.message);
+            let observe = observe.clone();
+            let evidence = if Instant::now() >= deadline {
+                Err("File preparation timed out before observation".into())
+            } else {
+                self.workers
+                    .execute(deadline, cancel.clone(), move || {
+                        let _pin = pin;
+                        observe(&read_path, file_limit, force_reload, &cache)
+                    })
+                    .await
+                    .map_err(|e| e.message)
+            };
             if cancel.is_cancelled() {
                 return Err(cancelled());
             }
@@ -612,22 +644,19 @@ impl AttachmentService {
                 .into_iter()
                 .map(|(path, (evidence, _))| (path.to_owned(), evidence))
                 .collect();
-            // A timed-out OS read may still own the attachment worker permit.
-            // Encoding needs no filesystem access and must not wait behind it.
-            let encode = self.control_workers.execute_owned(move || {
-                Ok(admitted
-                    .into_iter()
-                    .map(|(path, evidence)| {
-                        let encoded = evidence.encode(&path, &cache);
-                        (path, encoded)
-                    })
-                    .collect::<BTreeMap<_, _>>())
-            });
-            tokio::select! {
-                biased;
-                _ = cancel.cancelled() => return Err(cancelled()),
-                result = encode => result?,
-            }
+            // Give retained evidence a bounded conversion phase even when a
+            // later read exhausted the observation deadline. No paths are reopened.
+            self.workers
+                .execute(self.deadline(), cancel.clone(), move || {
+                    Ok(admitted
+                        .into_iter()
+                        .map(|(path, evidence)| {
+                            let encoded = evidence.encode(&path, &cache);
+                            (path, encoded)
+                        })
+                        .collect::<BTreeMap<_, _>>())
+                })
+                .await?
         };
         if cancel.is_cancelled() {
             return Err(cancelled());
@@ -1844,6 +1873,155 @@ const MANAGED_UNIT: std::num::NonZeroU32 = std::num::NonZeroU32::new(128).unwrap
 const ONE_ROW: std::num::NonZeroU32 = std::num::NonZeroU32::new(1).unwrap();
 /// One keyset page of one state through `managed_retention(state,created_at)`.
 const MANAGED_PAGE: &str = "SELECT m.id,m.absolute_path,m.state,COALESCE(m.raw_size,0),m.created_at,EXISTS(SELECT 1 FROM runtime_pin p WHERE p.resource_kind='managed_file' AND p.resource_id=m.id) OR EXISTS(SELECT 1 FROM attachment_ref a JOIN attachment_selection s ON s.attachment_id=a.id JOIN thread t ON t.id=s.thread_id WHERE a.absolute_path=m.absolute_path AND s.state='active' AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM draft d,json_each(d.body_json,'$.attachments') a WHERE d.state IN ('editing','accepting','submitting','submitted') AND (d.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=d.thread_id AND t.deleted_at IS NULL)) AND (json_extract(a.value,'$.id')=m.id OR json_extract(a.value,'$.path')=m.absolute_path)) OR EXISTS(SELECT 1 FROM draft d JOIN thread t ON t.id=d.thread_id JOIN attachment_ref a ON a.source_node_id=json_extract(d.body_json,'$.source_message_id') WHERE d.state='archived' AND json_extract(d.body_json,'$.kind')='cancelled_message' AND t.deleted_at IS NULL AND a.absolute_path=m.absolute_path) FROM managed_file m INDEXED BY managed_retention WHERE m.state=?1 AND m.created_at>=?2 AND (m.created_at>?2 OR m.id>?3) ORDER BY m.created_at,m.id LIMIT ?4";
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+
+    fn snapshot(paths: &[&Path]) -> selection::SelectionSnapshot {
+        selection::SelectionSnapshot {
+            revision: 0,
+            pinned: 0,
+            selected: paths
+                .iter()
+                .enumerate()
+                .map(|(i, path)| Selected {
+                    id: format!("slot-{i}"),
+                    source_node_id: "user".into(),
+                    source_element_index: i,
+                    path: path.to_path_buf(),
+                    kind: AttachmentKind::File,
+                    protected: true,
+                    active: true,
+                    reason: None,
+                    sent_fingerprint: None,
+                    observation_hash: None,
+                    omission: None,
+                    previous_state: None,
+                    detached: false,
+                })
+                .collect(),
+        }
+    }
+
+    async fn service(path: &Path) -> AttachmentService {
+        let db = DbWorker::open(path.join("shellboy.db")).await.unwrap();
+        let mut config = Config::default();
+        config.workers.attachment = 2;
+        config.workers.control_file = 1;
+        config.io.file_prepare_timeout_ms = 30_000;
+        AttachmentService::new(db, &config, path.into(), "test".into())
+    }
+
+    fn has_snapshot(prepared: &PreparedAttachments, index: usize) -> bool {
+        let expected = format!("data:text/plain;base64,{}", STANDARD.encode(b"snapshot"));
+        prepared.placements[index]
+            .content
+            .iter()
+            .any(|part| part["file_data"] == expected)
+    }
+
+    #[tokio::test]
+    async fn a_later_stalled_path_does_not_displace_an_earlier_readable_attachment() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service(dir.path()).await;
+        let early = dir.path().join("z-first.txt");
+        let later = dir.path().join("a-later.txt");
+        std::fs::write(&early, b"snapshot").unwrap();
+        let selected = snapshot(&[&early, &later, &early]);
+        let reads = Arc::new(Mutex::new(Vec::<PathBuf>::new()));
+        let logged = reads.clone();
+        let slow_path = later.clone();
+        let (entered, started) = tokio::sync::mpsc::unbounded_channel();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let held = Arc::new(Mutex::new(held));
+        let owner = service.clone();
+        let task = tokio::spawn(async move {
+            owner
+                .prepare_snapshot(
+                    "thread",
+                    CancellationToken::new(),
+                    false,
+                    selected,
+                    Arc::new(None),
+                    move |path, limit, force, cache| {
+                        logged.lock().unwrap().push(path.to_owned());
+                        if path == slow_path {
+                            entered.send(()).unwrap();
+                            let _ = held.lock().unwrap().recv();
+                            return Err(io_error("fixture stalled path"));
+                        }
+                        observe_attachment(path, limit, force, cache)
+                    },
+                )
+                .await
+        });
+        let mut started = started;
+        tokio::time::timeout(Duration::from_secs(10), started.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::time::resume();
+        let prepared = tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(*reads.lock().unwrap(), [early, later]);
+        assert!(has_snapshot(&prepared, 0));
+        assert_eq!(
+            prepared.manifest[1].omission_reason,
+            Some(OmissionReason::AttachmentUnavailable)
+        );
+        assert!(has_snapshot(&prepared, 2));
+        drop(release);
+        service.wait_idle().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn retained_attachment_encodes_while_the_control_file_lane_is_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service(dir.path()).await;
+        let path = dir.path().join("guide.txt");
+        std::fs::write(&path, b"snapshot").unwrap();
+        let control = service.control_files();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let blocker = tokio::spawn(async move {
+            control
+                .execute_owned(move || {
+                    entered.send(()).unwrap();
+                    let _ = held.recv();
+                    Ok(())
+                })
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(10), started)
+            .await
+            .unwrap()
+            .unwrap();
+        let prepared = tokio::time::timeout(
+            Duration::from_secs(10),
+            service.prepare_snapshot(
+                "thread",
+                CancellationToken::new(),
+                false,
+                snapshot(&[&path]),
+                Arc::new(None),
+                observe_attachment,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(has_snapshot(&prepared, 0));
+        assert!(!blocker.is_finished());
+        drop(release);
+        blocker.await.unwrap().unwrap();
+    }
+}
 
 #[cfg(test)]
 mod mime_tests {
