@@ -60,11 +60,7 @@ pub(super) async fn execute(
 ) -> Result<Value, ApiError> {
     if let ClientOperation::Docs(command) = operation {
         return super::presentation_work(move || {
-            crate::docs::configured_response(
-                crate::docs::DocsCommand::Read(command),
-                context.config_path.as_deref(),
-                &context.cwd,
-            )
+            crate::docs::configured_response(command, context.config_path.as_deref(), &context.cwd)
         })
         .await;
     }

@@ -166,41 +166,39 @@ fn browse_error(message: String) -> ApiError {
     )
 }
 
-pub fn configured_response(command: DocsCommand, explicit: Option<&Path>, cwd: &Path) -> Value {
-    let result = (|| {
-        // Explicit bundled scope never opens configuration. This is also the
-        // recovery route when the combined catalogue cannot read its sources.
-        if let DocsCommand::Read(command) = &command {
-            let bundled_only = match command {
-                DocsRead::Get { id, sources, .. } => {
-                    is_bundled(id) && sources.iter().all(|s| s == "shellboy")
-                }
-                DocsRead::List {
-                    parent, sources, ..
-                }
-                | DocsRead::Search {
-                    parent, sources, ..
-                } => {
-                    (parent.as_deref().is_some_and(is_bundled) || !sources.is_empty())
-                        && sources.iter().all(|s| s == "shellboy")
-                }
-            };
-            if bundled_only {
-                return browse(command.clone(), &[]).map_err(browse_error);
-            }
+pub fn configured_response(command: DocsRead, explicit: Option<&Path>, cwd: &Path) -> Value {
+    // Explicit bundled scope is also the recovery route for broken config.
+    let bundled_only = match &command {
+        DocsRead::Get { id, sources, .. } => {
+            is_bundled(id) && sources.iter().all(|s| s == "shellboy")
         }
-        let (path, state, settings) = load_sources(explicit, cwd)?;
-        match command {
-            DocsCommand::Source { command } => {
-                registration_command(command, settings, &path, cwd, &state.hash)
-            }
-            DocsCommand::Read(command) => browse(command, &settings.sources).map_err(browse_error),
-            DocsCommand::Index { .. } => Err(refusal(
-                ErrorCode::InvalidArgument,
-                "Use the Docs index operation",
-            )),
+        DocsRead::List {
+            parent, sources, ..
         }
-    })();
+        | DocsRead::Search {
+            parent, sources, ..
+        } => {
+            (parent.as_deref().is_some_and(is_bundled) || !sources.is_empty())
+                && sources.iter().all(|s| s == "shellboy")
+        }
+    };
+    envelope(if bundled_only {
+        browse(command, &[]).map_err(browse_error)
+    } else {
+        load_sources(explicit, cwd)
+            .and_then(|(_, _, settings)| browse(command, &settings.sources).map_err(browse_error))
+    })
+}
+
+pub fn source_response(command: SourceCommand, explicit: Option<&Path>, cwd: &Path) -> Value {
+    envelope(
+        load_sources(explicit, cwd).and_then(|(path, state, settings)| {
+            registration_command(command, settings, &path, cwd, &state.hash)
+        }),
+    )
+}
+
+fn envelope(result: Result<Value, ApiError>) -> Value {
     match result {
         Ok(result) => json!({"protocol_version":PROTOCOL_VERSION,"ok":true,"result":result}),
         Err(error) => json!({"protocol_version":PROTOCOL_VERSION,"ok":false,"error":error}),
@@ -1096,38 +1094,37 @@ mod tests {
         )
         .unwrap();
         let run = |command| configured_response(command, Some(&config), &cwd);
-        let add = || DocsCommand::Source {
-            command: SourceCommand::Add {
-                name: "recipes".into(),
-                path: "skills".into(),
-            },
+        let manage = |command| source_response(command, Some(&config), &cwd);
+        let add = || SourceCommand::Add {
+            name: "recipes".into(),
+            path: "skills".into(),
         };
-        assert_eq!(run(add())["result"]["written"], true);
-        assert_eq!(run(add())["result"]["written"], false);
+        assert_eq!(manage(add())["result"]["written"], true);
+        assert_eq!(manage(add())["result"]["written"], false);
         assert!(
             fs::read_to_string(&config)
                 .unwrap()
                 .contains("[[docs.sources]]")
         );
-        let list = run(DocsCommand::Read(DocsRead::List {
+        let list = run(DocsRead::List {
             parent: Some("recipes/demo".into()),
             sources: vec!["shellboy".into(), "recipes".into()],
             limit: 1,
             cursor: None,
-        }));
+        });
         assert_eq!(list["result"]["items"][0]["title"], "Literal heading");
         assert_eq!(
             list["result"]["items"][0]["summary"],
             "Look up frobnicate here."
         );
         let get = |sources| {
-            run(DocsCommand::Read(DocsRead::Get {
+            run(DocsRead::Get {
                 id: "recipes/demo/SKILL.md".into(),
                 sources,
                 section: None,
                 limit_bytes: 64,
                 cursor: None,
-            }))
+            })
         };
         assert_eq!(
             get(vec!["shellboy".into()])["error"]["code"],
@@ -1137,31 +1134,29 @@ mod tests {
             get(vec!["shellboy".into(), "recipes".into()])["result"]["text"],
             "# Literal heading\n\nLook up frobnicate here.\n"
         );
-        let query = run(DocsCommand::Read(DocsRead::Search {
+        let query = run(DocsRead::Search {
             parent: None,
             sources: vec!["recipes".into()],
             query: "frobnicate".into(),
             limit: 1,
             cursor: None,
-        }));
+        });
         assert_eq!(query["result"]["items"][0]["id"], "recipes/demo/SKILL.md");
         fs::rename(&folder, cwd.join("moved")).unwrap();
-        let list = run(DocsCommand::Read(DocsRead::List {
+        let list = run(DocsRead::List {
             parent: None,
             sources: Vec::new(),
             limit: 50,
             cursor: None,
-        }));
+        });
         assert_eq!(list["result"]["items"][0]["id"], "shellboy");
         assert_eq!(
             list["result"]["items"][1]["availability"]["state"],
             "unavailable"
         );
         assert_eq!(
-            run(DocsCommand::Source {
-                command: SourceCommand::Remove {
-                    name: "recipes".into()
-                }
+            manage(SourceCommand::Remove {
+                name: "recipes".into()
             })["ok"],
             true
         );

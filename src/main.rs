@@ -411,9 +411,20 @@ fn main() -> ExitCode {
             cli.data_dir,
             &cwd,
         ))),
-        Some(CliCommand::Docs { command }) => standalone_response(
-            shellboy::docs::configured_response(command, cli.config.as_deref(), &cwd),
-        ),
+        Some(CliCommand::Docs {
+            command: shellboy::docs::DocsCommand::Read(command),
+        }) => standalone_response(shellboy::docs::configured_response(
+            command,
+            cli.config.as_deref(),
+            &cwd,
+        )),
+        Some(CliCommand::Docs {
+            command: shellboy::docs::DocsCommand::Source { command },
+        }) => standalone_response(shellboy::docs::source_response(
+            command,
+            cli.config.as_deref(),
+            &cwd,
+        )),
         Some(CliCommand::Startup(options)) => standalone_response(runtime.block_on(
             shellboy::startup::execute(options, cli.config, cli.data_dir, &cwd),
         )),
