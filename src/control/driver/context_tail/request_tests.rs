@@ -62,11 +62,7 @@ fn result_at(item: &Value) -> Option<Value> {
     (value["type"] == "context_commands").then_some(value)
 }
 
-async fn inspect_only_attempt(
-    root: &std::path::Path,
-    control: &Arc<Control>,
-    thread_id: String,
-) -> Value {
+async fn attempt_ids(control: &Control, thread_id: &str) -> Vec<String> {
     use crate::protocol::{Command, Request, StatusArgs};
     let status = control
         .request(Request::new(
@@ -75,7 +71,7 @@ async fn inspect_only_attempt(
                 control.store.operation_epoch.current()
             ),
             Command::Status(StatusArgs {
-                thread_id: Some(thread_id.clone()),
+                thread_id: Some(thread_id.into()),
                 all: true,
                 ..Default::default()
             }),
@@ -83,19 +79,30 @@ async fn inspect_only_attempt(
         .await;
     assert!(status.ok, "{:?}", status.error);
     let page = status.result.unwrap();
-    let mut attempts = page["items"]
+    page["items"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|item| item["kind"] == "attempt");
-    let attempt = attempts
-        .next()
-        .expect("status includes the admitted attempt");
-    assert!(attempts.next().is_none(), "{page}");
+        .filter(|item| item["kind"] == "attempt")
+        .map(|item| item["id"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+async fn inspect_only_attempt(
+    root: &std::path::Path,
+    control: &Control,
+    thread_id: String,
+) -> Value {
+    let ids = attempt_ids(control, &thread_id).await;
+    let [id]: [String; 1] = ids.try_into().expect("one public admitted attempt");
+    inspect_attempt(root, thread_id, id).await
+}
+
+async fn inspect_attempt(root: &std::path::Path, thread_id: String, id: String) -> Value {
     let inspected = crate::request_inspect::execute(
         crate::request_inspect::RequestOptions {
             thread_id,
-            attempt_id: Some(attempt["id"].as_str().unwrap().into()),
+            attempt_id: Some(id),
             compare_attempt_id: None,
             body: true,
         },
@@ -117,6 +124,8 @@ async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() 
         define(&control,&accepted.thread_id,"failure", "exit 7", 10_000).await;
         control.kick_quiet(accepted.thread_id.clone()).await;
         let first = exchange(&listener, 503, json!({"error":{"code":"server_error","message":"fixture retry"}})).await;
+        let ids = attempt_ids(&control, &accepted.thread_id).await;
+        let [first_attempt]: [String; 1] = ids.try_into().expect("one admitted attempt before continuation");
         let retry = exchange(&listener, 200, completed(json!([{"type":"function_call","name":"shell","call_id":"next-step","arguments":"{\"command\":\"printf tool\"}"}]))).await;
         assert_eq!(retry, first, "the retry must send the identical body");
         let first: Value = serde_json::from_slice(&first).unwrap();
@@ -131,9 +140,8 @@ async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() 
         let last = input.last().unwrap();
         assert_eq!(result_at(last).unwrap()["results"][0]["stdout"], "xx");
         assert_eq!(input.iter().filter(|item| result_at(item).is_some()).count(), 1);
-        let attempt: String = control.store.database.call(|db| Ok(db.query_row("SELECT id FROM model_attempt WHERE json_extract(input_manifest_json,'$.context_tail.item') IS NOT NULL ORDER BY rowid LIMIT 1",[],|r| r.get(0))?)).await.unwrap();
-        let inspected = crate::request_inspect::execute(crate::request_inspect::RequestOptions {thread_id:accepted.thread_id, attempt_id:Some(attempt), compare_attempt_id:None, body:true},Some(root.path().join("config.toml")),Some(root.path().join("data")),root.path()).await;
-        assert_eq!(inspected["ok"], true, "{inspected}");
+        let inspected = inspect_attempt(root.path(), accepted.thread_id, first_attempt).await;
+        assert_eq!(inspected["body"]["input"].as_array().unwrap().last(), Some(first_tail));
         assert_eq!(std::fs::read(root.path().join("context-count")).unwrap(), b"xx");
         close(control,owner).await;
     }).await.unwrap();
