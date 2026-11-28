@@ -8,6 +8,7 @@ pub use index::execute as index;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+pub(crate) use sources::owner_source;
 pub use sources::{DocsConfig, Registration, SourceCommand, configured_response, source_response};
 
 #[derive(Debug, Clone, Subcommand)]

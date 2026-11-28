@@ -13,7 +13,11 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_VERSION: u32 = 52;
-pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity", "id.resolve"];
+pub const PROTOCOL_CAPABILITIES: &[&str] = &[
+    "events.reasoning_activity",
+    "id.resolve",
+    "docs.source.registry",
+];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PENDING_REPLY_DUTIES: u64 = 16;
 pub const MAX_SYNC_DELETION_REPLY_DUTIES: u64 = 16;
@@ -141,6 +145,9 @@ fn operation_result_schemas(
     result!("storage.status", StorageStatus);
     opaque!("storage.collect");
     result!("config.get", ConfigGetResult);
+    result!("docs.source.list", DocsSourceListResult);
+    result!("docs.source.add", DocsSourceAddResult);
+    result!("docs.source.remove", DocsSourceRemoveResult);
     result!("config.set", ConfigSetResult);
     result!("credentials.set", CredentialsSetResult);
     result!("credentials.clear", CredentialsClearResult);
@@ -1551,6 +1558,16 @@ impl Default for StatusArgs {
 }
 // Receipt-free long-poll over the owner's in-memory change clock (#243).
 args!(ConfigGetArgs {});
+args!(DocsSourceListArgs {});
+args!(DocsSourceAddArgs {
+    name: String,
+    path: String,
+    expected_hash: String
+});
+args!(DocsSourceRemoveArgs {
+    name: String,
+    expected_hash: String
+});
 args!(ConfigSetArgs { expected_hash: String, changes: Vec<ConfigChange> });
 /// One named change to the configuration file. `field` is a TOML dotted key;
 /// a missing or null `value` removes the key so its default applies again.
@@ -2010,6 +2027,12 @@ pub enum Command {
     ConfigGet(ConfigGetArgs),
     #[serde(rename = "config.set")]
     ConfigSet(ConfigSetArgs),
+    #[serde(rename = "docs.source.list")]
+    DocsSourceList(DocsSourceListArgs),
+    #[serde(rename = "docs.source.add")]
+    DocsSourceAdd(DocsSourceAddArgs),
+    #[serde(rename = "docs.source.remove")]
+    DocsSourceRemove(DocsSourceRemoveArgs),
     #[serde(rename = "credentials.set")]
     CredentialsSet(CredentialsSetArgs),
     #[serde(rename = "credentials.clear")]
@@ -2415,6 +2438,20 @@ fn nullable_origin_identity(generator: &mut schemars::SchemaGenerator) -> schema
 }
 
 // Config edit details are open; authenticated change provenance is not.
+record!(DocsSourceListResult {
+    items: Vec<crate::docs::Registration>,
+    content_hash: String,
+});
+record!(DocsSourceAddResult {
+    source: crate::docs::Registration,
+    written: bool,
+});
+record!(DocsSourceRemoveResult {
+    source: crate::docs::Registration,
+    removed: bool,
+    written: bool,
+});
+
 record!(ConfigSetResult {
     #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String>,
     #[schemars(schema_with = "nullable_origin_identity")]

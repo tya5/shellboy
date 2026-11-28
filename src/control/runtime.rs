@@ -373,6 +373,24 @@ impl Control {
             ),
             Command::ConfigGet(_) => self.config_get(disconnected).await,
             Command::ConfigSet(args) => self.config_set(args, caller.as_ref()).await,
+            Command::DocsSourceList(_) => self.docs_source_list(disconnected).await,
+            Command::DocsSourceAdd(args) => {
+                self.docs_source_write(
+                    crate::docs::SourceCommand::Add {
+                        name: args.name,
+                        path: args.path.into(),
+                    },
+                    args.expected_hash,
+                )
+                .await
+            }
+            Command::DocsSourceRemove(args) => {
+                self.docs_source_write(
+                    crate::docs::SourceCommand::Remove { name: args.name },
+                    args.expected_hash,
+                )
+                .await
+            }
             Command::CredentialsSet(args) => self.credentials_set(args, caller.as_ref()).await,
             Command::CredentialsClear(args) => self.credentials_clear(args, caller.as_ref()).await,
             Command::ConnectionTest(args) => self.connection_test(args, disconnected).await,

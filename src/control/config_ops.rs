@@ -50,55 +50,25 @@ impl Control {
         args: ConfigSetArgs,
         caller: Option<&Origin>,
     ) -> Result<Value, ApiError> {
-        let deadline = self.config_deadline();
-        let path = self
-            .store
-            .config
-            .source
-            .as_ref()
-            .map(|source| source.path.clone())
-            .ok_or_else(|| {
-                ApiError::new(
-                    ErrorCode::InvalidState,
-                    "This owner was started without a configuration path",
-                )
-            })?;
-        let guard = tokio::time::timeout_at(deadline, self.config_write.clone().lock_owned())
-            .await
-            .map_err(|_| {
-                ApiError::new(
-                    ErrorCode::IoFailed,
-                    "Another configuration change is still running; nothing was written",
-                )
-                .details(json!({"written":false}))
-            })?;
+        let path = self.selected_config_path()?;
         let config = self.store.config.clone();
         let clients = self.store.clients.clone();
         let change_clock = self.change_clock.clone();
         let applied = self
-            .attachments
-            .control_files()
-            .execute(deadline, CancellationToken::new(), move || {
-                // A timed-out caller stops waiting, but the next change must not start
-                // until this one has really ended, so the closure owns the guard.
-                let _guard = guard;
-                let applied = crate::config_edit::apply_live(&path, &args.expected_hash, &args.changes, &config, &clients)?;
-                // Publish under the write guard even if the caller has stopped waiting.
+            .config_write_job(move || {
+                let applied = crate::config_edit::apply_live(
+                    &path,
+                    &args.expected_hash,
+                    &args.changes,
+                    &config,
+                    &clients,
+                )?;
                 if applied.written || applied.applied_to_running_owner {
                     change_clock.record_config_changed();
                 }
                 Ok(applied)
             })
-            .await
-            .map_err(|error| {
-                if error.code == ErrorCode::IoFailed && error.details.is_none() {
-                    // Only the worker wait can fail without details, and it cannot say
-                    // whether the closure has finished.
-                    error.hint("The change may still complete. Read shellboy config get before repeating it")
-                } else {
-                    error
-                }
-            })?;
+            .await?;
         let Value::Object(fields) = applied.result else {
             return Err(ApiError::new(
                 ErrorCode::InvalidState,
@@ -131,5 +101,88 @@ impl Control {
             ErrorCode::InvalidState,
             "Cannot encode config edit result",
         )
+    }
+    fn selected_config_path(&self) -> Result<PathBuf, ApiError> {
+        self.store
+            .config
+            .source
+            .as_ref()
+            .map(|source| source.path.clone())
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::InvalidState,
+                    "This owner was started without a configuration path",
+                )
+            })
+    }
+
+    async fn config_write_job<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+    ) -> Result<T, ApiError> {
+        let deadline = self.config_deadline();
+        let guard = tokio::time::timeout_at(deadline, self.config_write.clone().lock_owned())
+            .await
+            .map_err(|_| {
+                ApiError::new(
+                    ErrorCode::IoFailed,
+                    "Another configuration change is still running; nothing was written",
+                )
+                .details(json!({"written":false}))
+            })?;
+        self.attachments.control_files().execute(deadline, CancellationToken::new(), move || {
+            // Keep the guard until the closure ends, even if the caller stops waiting.
+            let _guard = guard;
+            work()
+        }).await
+            .map_err(|error| {
+                if error.code == ErrorCode::IoFailed && error.details.is_none() {
+                    // Only the worker wait can fail without details, and it cannot say
+                    // whether the closure has finished.
+                    error.hint("The change may still complete. Read shellboy config get before repeating it")
+                } else {
+                    error
+                }
+            })
+    }
+
+    pub(super) async fn docs_source_list(
+        &self,
+        disconnected: CancellationToken,
+    ) -> Result<Value, ApiError> {
+        let path = self.selected_config_path()?;
+        let result = self
+            .attachments
+            .control_files()
+            .execute(self.config_deadline(), disconnected, move || {
+                crate::docs::owner_source(crate::docs::SourceCommand::List, &path, None)
+            })
+            .await?;
+        if serde_json::to_vec(&result).map_or(usize::MAX, |bytes| bytes.len())
+            > MAX_READ_RESULT_BYTES
+        {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                "The Docs source registry is too large for one response",
+            ));
+        }
+        Ok(result)
+    }
+
+    pub(super) async fn docs_source_write(
+        &self,
+        command: crate::docs::SourceCommand,
+        expected_hash: String,
+    ) -> Result<Value, ApiError> {
+        let path = self.selected_config_path()?;
+        let change_clock = self.change_clock.clone();
+        self.config_write_job(move || {
+            let result = crate::docs::owner_source(command, &path, Some(&expected_hash))?;
+            if result["written"] == true {
+                change_clock.record_config_changed();
+            }
+            Ok(result)
+        })
+        .await
     }
 }

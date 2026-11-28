@@ -122,6 +122,9 @@ impl Command {
             Self::StorageCollect(_) => ("storage.collect", CommandRoute::Runtime),
             Self::ConfigGet(_) => ("config.get", CommandRoute::Runtime),
             Self::ConfigSet(_) => ("config.set", CommandRoute::Runtime),
+            Self::DocsSourceList(_) => ("docs.source.list", CommandRoute::Runtime),
+            Self::DocsSourceAdd(_) => ("docs.source.add", CommandRoute::Runtime),
+            Self::DocsSourceRemove(_) => ("docs.source.remove", CommandRoute::Runtime),
             Self::CredentialsSet(_) => ("credentials.set", CommandRoute::Runtime),
             Self::CredentialsClear(_) => ("credentials.clear", CommandRoute::Runtime),
             Self::ConnectionTest(_) => ("connection.test", CommandRoute::Runtime),
@@ -183,6 +186,7 @@ impl Command {
             | Self::StorageStatus(_)
             | Self::StorageCollect(_)
             | Self::ConnectionTest(_)
+            | Self::DocsSourceList(_)
             | Self::ConfigGet(_) => true,
             Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
             Self::DraftImage(_) => false,
@@ -245,6 +249,8 @@ impl Command {
             | Self::Compact(_)
             | Self::ContextEdit(_)
             | Self::IndexStatus(_)
+            | Self::DocsSourceAdd(_)
+            | Self::DocsSourceRemove(_)
             | Self::ConfigSet(_)
             | Self::CredentialsSet(_)
             | Self::CredentialsClear(_) => false,
@@ -350,8 +356,11 @@ impl Command {
             | Self::IndexRemove(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_)
+            | Self::DocsSourceList(_)
             | Self::ConfigGet(_)
             | Self::ConnectionTest(_)
+            | Self::DocsSourceAdd(_)
+            | Self::DocsSourceRemove(_)
             | Self::ConfigSet(_)
             | Self::CredentialsSet(_)
             | Self::CredentialsClear(_) => false,
@@ -456,8 +465,11 @@ impl Command {
             | Self::IndexRemove(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_)
+            | Self::DocsSourceList(_)
             | Self::ConfigGet(_)
             | Self::ConnectionTest(_)
+            | Self::DocsSourceAdd(_)
+            | Self::DocsSourceRemove(_)
             | Self::ConfigSet(_)
             | Self::CredentialsSet(_)
             | Self::CredentialsClear(_) => false,
@@ -529,6 +541,7 @@ impl Command {
             | Self::IndexPreview(_)
             | Self::StorageStatus(_)
             | Self::ConnectionTest(_)
+            | Self::DocsSourceList(_)
             | Self::ConfigGet(_) => true,
             Self::DraftImage(_) => false,
             Self::OwnerShutdown(_)
@@ -564,6 +577,8 @@ impl Command {
             | Self::IndexShrink(_)
             | Self::IndexRemove(_)
             | Self::StorageCollect(_)
+            | Self::DocsSourceAdd(_)
+            | Self::DocsSourceRemove(_)
             | Self::ConfigSet(_)
             | Self::CredentialsSet(_)
             | Self::CredentialsClear(_) => false,

@@ -21,7 +21,7 @@ const TEXT_WORK: usize = 65536;
 pub struct DocsConfig {
     pub sources: Vec<Registration>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Registration {
     pub name: String,
@@ -196,6 +196,27 @@ pub fn source_response(command: SourceCommand, explicit: Option<&Path>, cwd: &Pa
             registration_command(command, settings, &path, cwd, &state.hash)
         }),
     )
+}
+
+pub(crate) fn owner_source(
+    command: SourceCommand,
+    path: &Path,
+    expected_hash: Option<&str>,
+) -> Result<Value, ApiError> {
+    let state = config_edit::read_state(path)?;
+    if let Some(expected) = expected_hash
+        && state.hash != expected
+    {
+        return Err(config_edit::conflict(expected, &state.hash));
+    }
+    let settings = config_edit::parse_file(&state.bytes, path)
+        .map_err(|_| refusal(ErrorCode::ConfigInvalid, "Cannot load docs sources"))?
+        .docs;
+    if matches!(command, SourceCommand::List) {
+        return Ok(json!({"items":settings.sources,"content_hash":state.hash}));
+    }
+    // IPC accepts absolute source paths only. No caller cwd or config override.
+    registration_command(command, settings, path, Path::new(""), &state.hash)
 }
 
 fn envelope(result: Result<Value, ApiError>) -> Value {

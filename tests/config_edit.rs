@@ -1674,3 +1674,83 @@ fn busy_settings_file_keeps_old_contents_and_reports_sharing_conflict() {
             .written
     );
 }
+
+#[tokio::test]
+async fn docs_registry_ipc_uses_selected_config_and_fences_stale_edits() {
+    use shellboy::{
+        app::DataOwner,
+        ipc,
+        protocol::{DocsSourceAddArgs, DocsSourceListArgs, DocsSourceRemoveArgs},
+    };
+    crate::test_watchdog::watchdog("Docs registry over IPC", async {
+        let root = tempfile::tempdir().unwrap();
+        let selected = root.path().join("selected.toml");
+        let decoy = root.path().join("config.toml");
+        let guide = root.path().join("guide");
+        std::fs::create_dir(&guide).unwrap();
+        let guide = guide.canonicalize().unwrap();
+        std::fs::write(&selected, FULL).unwrap();
+        std::fs::write(&decoy, FULL).unwrap();
+        let data = root.path().join("data");
+        let owner = DataOwner::start(
+            Some(selected.clone()),
+            Some(data.clone()),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        control.start().await.unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let server = ipc::LocalServer::bind(&owner, tx).await.unwrap();
+        let serving = tokio::spawn(async move { control.serve(rx).await });
+        let call = |command, operation| async {
+            ipc::call(&data, command, operation, None).await.unwrap()
+        };
+        let list = || call(Command::DocsSourceList(DocsSourceListArgs {}), None);
+        let initial = list().await.result.unwrap();
+        crate::operation_result_schema::assert_result("docs.source.list", &initial);
+        assert_eq!(initial["items"], json!([]));
+        let hash = |value: &Value| value["content_hash"].as_str().unwrap().to_owned();
+        let add = Command::DocsSourceAdd(DocsSourceAddArgs {
+            name: "guide".into(),
+            path: guide.to_str().unwrap().into(),
+            expected_hash: hash(&initial),
+        });
+        let added = call(add.clone(), None).await;
+        crate::operation_result_schema::assert_result(
+            "docs.source.add",
+            added.result.as_ref().unwrap(),
+        );
+        assert_eq!(added.result.as_ref().unwrap()["written"], true);
+        let replay = call(add, Some(added.operation_id.clone())).await;
+        assert_eq!(replay.result, added.result);
+        let listed = list().await.result.unwrap();
+        assert_eq!(listed["items"], json!([{"name":"guide","path":guide}]));
+        assert!(
+            std::fs::read_to_string(&selected)
+                .unwrap()
+                .contains("[[docs.sources]]")
+        );
+        let remove = |expected_hash| {
+            Command::DocsSourceRemove(DocsSourceRemoveArgs {
+                name: "guide".into(),
+                expected_hash,
+            })
+        };
+        let stale = call(remove(hash(&initial)), None).await.error.unwrap();
+        assert_eq!(stale.code, ErrorCode::OperationConflict);
+        assert_eq!(stale.details.unwrap()["written"], false);
+        assert_eq!(list().await.result.unwrap(), listed);
+        let removed = call(remove(hash(&listed)), None).await.result.unwrap();
+        crate::operation_result_schema::assert_result("docs.source.remove", &removed);
+        assert_eq!(removed["removed"], true);
+        assert_eq!(list().await.result.unwrap()["items"], json!([]));
+        assert_eq!(std::fs::read_to_string(&decoy).unwrap(), FULL);
+        server.shutdown().await.unwrap();
+        serving.await.unwrap();
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}

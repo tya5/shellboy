@@ -3,7 +3,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity",
-    "id.resolve"
+    "id.resolve",
+    "docs.source.registry"
   ],
   "definitions": {
     "Accepted": {
@@ -2302,6 +2303,54 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/DocsSourceListArgs"
+            },
+            "command": {
+              "const": "docs.source.list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DocsSourceAddArgs"
+            },
+            "command": {
+              "const": "docs.source.add",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DocsSourceRemoveArgs"
+            },
+            "command": {
+              "const": "docs.source.remove",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/CredentialsSetArgs"
             },
             "command": {
@@ -3067,6 +3116,46 @@
         "node_id",
         "ordinal",
         "parent_continues"
+      ],
+      "type": "object"
+    },
+    "DocsSourceAddArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_hash": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "expected_hash"
+      ],
+      "type": "object"
+    },
+    "DocsSourceListArgs": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "DocsSourceRemoveArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_hash": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "expected_hash"
       ],
       "type": "object"
     },
@@ -7466,6 +7555,22 @@
       ],
       "type": "object"
     },
+    "Registration": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
     "RejectionReason": {
       "enum": [
         "cancelled",
@@ -10444,6 +10549,93 @@
             },
             "command": {
               "const": "config.set",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DocsSourceListArgs"
+            },
+            "command": {
+              "const": "docs.source.list",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DocsSourceAddArgs"
+            },
+            "command": {
+              "const": "docs.source.add",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/DocsSourceRemoveArgs"
+            },
+            "command": {
+              "const": "docs.source.remove",
               "type": "string"
             },
             "operation_id": {
@@ -15304,6 +15496,64 @@
         "changed_by"
       ],
       "title": "CredentialsSetResult",
+      "type": "object"
+    },
+    "docs.source.add": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/Registration"
+        },
+        "written": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source",
+        "written"
+      ],
+      "title": "DocsSourceAddResult",
+      "type": "object"
+    },
+    "docs.source.list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "content_hash": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/Registration"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "content_hash"
+      ],
+      "title": "DocsSourceListResult",
+      "type": "object"
+    },
+    "docs.source.remove": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "removed": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/definitions/Registration"
+        },
+        "written": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source",
+        "removed",
+        "written"
+      ],
+      "title": "DocsSourceRemoveResult",
       "type": "object"
     },
     "draft.get": {

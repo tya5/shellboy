@@ -834,7 +834,7 @@ fn change_entry(name: &str, before: Option<Option<&Leaf>>, after: Option<&Leaf>)
     }
     entry
 }
-fn conflict(expected: &str, current: &str) -> ApiError {
+pub(crate) fn conflict(expected: &str, current: &str) -> ApiError {
     ApiError::new(
         ErrorCode::OperationConflict,
         "The configuration file changed since it was read; nothing was written",

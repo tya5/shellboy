@@ -77,6 +77,7 @@ named_jobs! {
     IndexPreview => index_preview, IndexBackfill => index_backfill, IndexRetry => index_retry,
     IndexRebuild => index_rebuild, IndexProbe => index_probe, IndexShrink => index_shrink, IndexRemove => index_remove, StorageStatus => storage_status,
     StorageCollect => storage_collect, ConfigGet => config_get, ConfigSet => config_set,
+    DocsSourceList => docs_source_list, DocsSourceAdd => docs_source_add, DocsSourceRemove => docs_source_remove,
     CredentialsSet => credentials_set, CredentialsClear => credentials_clear, ConnectionTest => connection_test,
 }
 
@@ -215,6 +216,9 @@ impl Kind {
             | Kind::StorageCollect
             | Kind::ConfigGet
             | Kind::ConfigSet
+            | Kind::DocsSourceList
+            | Kind::DocsSourceAdd
+            | Kind::DocsSourceRemove
             | Kind::CredentialsSet
             | Kind::CredentialsClear
             | Kind::ConnectionTest => Runtime,

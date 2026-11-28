@@ -466,6 +466,8 @@ pub(super) fn runtime_preflight(request: &Request) -> Result<()> {
             | Command::IndexShrink(_)
             | Command::IndexRemove(_)
             | Command::StorageCollect(_)
+            | Command::DocsSourceAdd(_)
+            | Command::DocsSourceRemove(_)
             | Command::ConfigSet(_)
             | Command::CredentialsSet(_)
             | Command::CredentialsClear(_)
