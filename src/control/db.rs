@@ -4393,7 +4393,7 @@ mod receipt_wait_tests {
         let mut args = crate::protocol::DraftSaveArgs {
             expected_source_message: None,
             expected_thread_revision: None,
-            thread_id,
+            thread_id: thread_id.clone(),
             draft: Box::new(crate::draft::DraftSnapshot {
                 revision: 2,
                 text: "current".into(),
@@ -4481,11 +4481,29 @@ mod receipt_wait_tests {
             .await
             .unwrap_err();
         assert_eq!(refused.code, ErrorCode::OperationConflict);
-        let saved = db.call(|db| Ok(db.query_row(
-            "SELECT json_extract(d.body_json, '$.text'), v.follow_tail, v.anchor_node_id FROM draft d JOIN view_state v USING(thread_id)",
-            [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?)),
-        )?)).await.unwrap();
-        assert_eq!(saved, ("new durable input".into(), false, "reading".into()));
+        let state: crate::protocol::DraftState = serde_json::from_value(
+            store
+                .execute(
+                    Request::new(
+                        "current:read-back",
+                        Command::DraftGet(crate::protocol::DraftGetArgs {
+                            thread_id: Some(thread_id),
+                            operation_id: None,
+                        }),
+                    ),
+                    None,
+                )
+                .await
+                .unwrap()
+                .result,
+        )
+        .unwrap();
+        let draft = state.draft.unwrap();
+        assert_eq!(draft.text, "new durable input");
+        assert_eq!(draft.revision, 3);
+        let view = state.view.unwrap();
+        assert!(!view.follow_tail);
+        assert_eq!(view.anchor.node_id.as_deref(), Some("reading"));
         db.shutdown().await.unwrap();
     }
 

@@ -3456,11 +3456,11 @@ impl UiState {
                     view.thread_id.as_deref() == Some(&thread_id) && view.draft.draft_id == draft_id
                 }) {
                     if let Some(crate::protocol::DraftAnchorRefusal::CursorExpired) = anchor_refusal
-                        && !view.navigation.follow()
+                        && !follow
+                        && view.navigation.follow() == follow
                         && view.navigation.anchor == anchor
                     {
                         view.status = "Saved view anchor is no longer selected".into();
-                        view.save_retry = false;
                         if key == &self.active {
                             view.navigation
                                 .on_event(NavEvent::Read(ReadEvent::RebaseRequested {
@@ -3475,7 +3475,7 @@ impl UiState {
                             });
                         }
                     }
-                    self.autosave.committed(
+                    self.autosave.settled(
                         key.clone(),
                         autosave::Signature {
                             draft_id,
@@ -3484,7 +3484,6 @@ impl UiState {
                             anchor,
                             follow,
                         },
-                        anchor_refusal.is_some(),
                     );
                 }
             }
@@ -6216,14 +6215,21 @@ cursor: None,
         {
             self.retention_passes += 1;
         }
-        let budget = usize::try_from(self.config.cache.body_bytes).unwrap_or(usize::MAX);
+        let limit = usize::try_from(self.config.cache.body_bytes).unwrap_or(usize::MAX);
         let mut inactive = Vec::new();
         let working = self.retained_working_node_ids();
-        let mut retained = retained_body_bytes(self.view(), &working);
+        let active_retained = retained_body_bytes(self.view(), &working);
+        let mut retained = active_retained;
+        let mut pinned: usize = 0;
         for (key, view) in &mut self.views {
             view.retain_source_ids();
-            if key == &self.active
-                || view.thread_id.is_none()
+            let weight = view
+                .retained_view_bytes()
+                .saturating_add(key.capacity())
+                .saturating_add(self.autosave.cache_bytes(key));
+            if key == &self.active {
+                pinned = pinned.saturating_add(weight.saturating_sub(active_retained));
+            } else if view.thread_id.is_none()
                 || view.selecting_agents.is_some()
                 || view.pending.values().any(|pending| {
                     matches!(
@@ -6233,15 +6239,14 @@ cursor: None,
                 })
                 || !self.autosave.reconstructible(key, view)
             {
-                continue;
+                pinned = pinned.saturating_add(weight);
+            } else {
+                retained = retained.saturating_add(weight);
+                inactive.push((view.cache_touch, key.clone(), weight));
             }
-            let weight = view
-                .retained_view_bytes()
-                .saturating_add(key.capacity())
-                .saturating_add(self.autosave.cache_bytes(key));
-            retained = retained.saturating_add(weight);
-            inactive.push((view.cache_touch, key.clone(), weight));
         }
+        // Pinned data consumes body-budget space but never enters the LRU.
+        let budget = limit.saturating_sub(pinned);
         if retained <= budget {
             return;
         }
@@ -8596,6 +8601,62 @@ mod layout_cache_tests {
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn pinned_input_consumes_body_budget_without_becoming_an_eviction_candidate() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("cached".into());
+        let cached = ui.active.clone();
+        ui.select_thread("pinned".into());
+        let pinned = ui.active.clone();
+        let text = "input ".repeat(64 * 1024);
+        ui.insert(&text, false);
+        ui.select_thread("current".into());
+        assert!(ui.views.contains_key(&cached));
+        ui.config.cache.body_bytes = 256 * 1024;
+        ui.trim_bodies();
+        assert!(!ui.views.contains_key(&cached));
+        assert_eq!(ui.views[&pinned].draft.text, text);
+    }
+    #[test]
+    fn refused_anchor_does_not_settle_a_later_navigation_snapshot() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("old".into());
+        ui.insert("durable input", false);
+        let key = ui.active.clone();
+        let draft = ui.view().draft.clone();
+        let a = ViewAnchor {
+            node_id: Some("expired-a".into()),
+            char_offset: 0,
+        };
+        let b = ViewAnchor {
+            node_id: Some("selected-b".into()),
+            char_offset: 4,
+        };
+        let saved = |anchor, anchor_refusal| UiUpdate::DraftViewSaved {
+            thread_id: "old".into(),
+            draft_id: draft.draft_id.clone(),
+            revision: draft.revision,
+            cursor: draft.cursor,
+            anchor,
+            follow: false,
+            anchor_refusal,
+        };
+        ui.view_mut().navigation.select_reading();
+        ui.view_mut().navigation.anchor = a.clone();
+        let attempted = ui.save_requests().pop().expect("snapshot A");
+        assert!(matches!(attempted.action, UiAction::SaveDraft { anchor, .. } if anchor == a));
+        ui.view_mut().navigation.anchor = b.clone();
+        ui.config.cache.body_bytes = 0;
+        ui.select_thread("other".into());
+        ui.apply(saved(
+            a,
+            Some(crate::protocol::DraftAnchorRefusal::CursorExpired),
+        ));
+        assert_eq!(ui.views[&key].navigation.anchor, b);
+        ui.apply(saved(b, None));
+        assert!(!ui.views.contains_key(&key));
     }
 
     #[test]
