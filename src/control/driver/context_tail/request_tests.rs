@@ -62,7 +62,7 @@ fn result_at(item: &Value) -> Option<Value> {
     (value["type"] == "context_commands").then_some(value)
 }
 
-async fn attempt_ids(control: &Control, thread_id: &str) -> Vec<String> {
+async fn attempt_ids(control: &Arc<Control>, thread_id: &str) -> Vec<String> {
     use crate::protocol::{Command, Request, StatusArgs};
     let status = control
         .request(Request::new(
@@ -90,7 +90,7 @@ async fn attempt_ids(control: &Control, thread_id: &str) -> Vec<String> {
 
 async fn inspect_only_attempt(
     root: &std::path::Path,
-    control: &Control,
+    control: &Arc<Control>,
     thread_id: String,
 ) -> Value {
     let ids = attempt_ids(control, &thread_id).await;
