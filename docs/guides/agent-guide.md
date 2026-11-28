@@ -15,18 +15,12 @@ relevant. A person can invoke a procedure by asking for it by name. There is
 no separate skills registry; revisit a dedicated short index only if these
 lists become too long in practice.
 
-## Bring skills and MCP servers you already have
+## Bring existing skills, MCP servers, and team knowledge
 
-- **Skills:** Add the folder as a docs source with
-  `shellboy docs source add --name skills --path /path/to/skills`. Browse it
-  with `shellboy docs list --parent skills`. `SKILL.md` is ordinary Markdown;
-  scripts stay where they are and are not run by the guide reader.
-- **MCP servers:** The model calls a command-line MCP client through the shell.
-  If a server must stay running to maintain a login or connection, run it as a
-  Thread-owned service. Give the model a small CLI that can list tools, call a
-  tool, and show usage with `--help`. Use the server's supported transport and
-  keep credentials in a user-written private file. This is a setup pattern,
-  not a built-in adapter or an endorsement of a particular client.
+See the [User Guide](user-guide.md#bring-your-skills-mcp-servers-and-team-knowledge)
+([日本語](user-guide.ja.md#スキルmcp-サーバーチームの知識を持ち込む)) for setup.
+Read only the skill you need, call the configured MCP bridge through the shell
+without exposing its credentials, and use the team's explicit `rag --db` path.
 
 ## Read this guide in the running environment
 

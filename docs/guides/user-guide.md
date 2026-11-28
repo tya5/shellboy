@@ -17,6 +17,7 @@ cost estimate.
 
 ## Jump to a task
 
+- **Reuse existing assets:** [Skills, MCP servers, and team knowledge](#bring-your-skills-mcp-servers-and-team-knowledge).
 - **Start or reopen a Thread:** [First setup](configuration.md#first-setup-without-an-owner), [Windows and PowerShell setup](configuration.md#windows-shell-examples), [send your first request](#2-send-your-first-request), or [switch conversations](#3-switch-conversations).
 - **Send, ask, or delegate:** [Pending replies](#pending-replies) and [waiting for replies](delegation.md#waiting-for-replies).
 - **Work with files or saved conversations:** [Attachments](attachments.md), [Windows shell notes](shell.md#windows-shell-notes), [keyword and semantic search](rag.md), and [compaction](history-and-search.md#compaction-and-spill).
@@ -454,19 +455,41 @@ relevant. A person can invoke a procedure by asking for it by name. There is
 no separate skills registry; revisit a dedicated short index only if these
 lists become too long in practice.
 
-## Bring skills and MCP servers you already have
+## Bring your skills, MCP servers, and team knowledge
 
-- **Skills:** Copy the `SKILL.md` folder and its scripts under `knowledge/`.
-  Use its frontmatter description as the “when to use it” part of the
-  `AGENTS.md` index line. Run its scripts through the shell. Adapt steps that
-  name another product's tools: replace `Read` and `Edit` with shell commands,
-  and `Agent` with Shellboy Thread delegation where appropriate.
-- **MCP servers:** The model calls a command-line MCP client through the shell.
-  If a server must stay running to maintain a login or connection, run it as a
-  Thread-owned service. Give the model a small CLI that can list tools, call a
-  tool, and show usage with `--help`. Use the server's supported transport and
-  keep credentials in a user-written private file. This is a setup pattern,
-  not a built-in adapter or an endorsement of a particular client.
+Shellboy has no plugin format and does not inject a skill list by default.
+As the list grows, it takes up more context on every request, even when none
+of those skills are relevant. Keep the full collection available on demand.
+
+- **Skills:** Register the folder that holds your `SKILL.md` folders:
+  `shellboy docs source add --name skills --path ./skills`. Browse its menu
+  branches with `shellboy docs list --parent skills` or search by keyword with
+  `shellboy docs search --source skills --query 'release checks'`. `SKILL.md`
+  is ordinary Markdown; the first heading is its title. An optional external
+  converter can tidy titles if needed. Registration does not run skill scripts.
+  For semantic search, preview with `shellboy docs index --source skills --dry-run`,
+  then run `shellboy docs index --source skills` and search with
+  `shellboy rag search --scope source:skills --mode semantic --query 'how to verify a release'`.
+  Indexing and semantic queries may incur embedding charges. See [Docs](docs.md).
+- **Keep a few skills in view:** Put a short `name — when to use it — path` line
+  for each in `AGENTS.md`. Where the experimental `context` commands are
+  available, a Thread can instead opt in to a command that prints a short
+  list for each new conversation request. Use a trusted command and an explicit
+  timeout; its output is visible to the provider.
+- **MCP servers:** Call an external MCP bridge CLI from the shell, using a
+  `shellboy-services` recipe as a setup pattern. If the server must stay
+  connected, run it as a [Thread service](agent-guide.md#services-for-long-running-commands).
+  Keep credentials in the bridge, out of commands and output visible to the
+  model. Shellboy does not supply a built-in MCP adapter.
+- **Team knowledge:** Keep the original documents in the team repository. Today
+  you can pair them with a project knowledge DB and select it explicitly with
+  `shellboy rag --db ./knowledge/rag.db search --scope source:handbook --query 'release checks'`.
+  Use the source name registered in that store. `--db` does not select the
+  conversation store. The planned prebuilt-store workflow
+  ([#467](https://github.com/tya5/shellboy/issues/467)) would let the team ship the
+  store alongside its originals in the repo; it is not needed for the explicit
+  `--db` path today.
+  See [RAG](rag.md) for registration and indexing.
 
 ## Ask and reply
 

@@ -16,6 +16,7 @@ Shellboyは端末で会話し、モデルにshell作業を依頼するアプリ�
 
 ## 目的別ガイド
 
+- **手持ちの資産を使う:** [スキル、MCP サーバー、チームの知識](#スキルmcp-サーバーチームの知識を持ち込む)。
 - **会話を始める・開き直す:** [初回設定](configuration.md#first-setup-without-an-owner)、[Windows と PowerShell の設定](configuration.md#windows-shell-examples)、[最初の依頼を送る](#2-最初の依頼を送る)、[会話を切り替える](#3-会話を切り替える)。
 - **メッセージを送る・返信を求める・委譲する:** [返信待ち](#返信待ち)と[返信を待つ手順](delegation.md#waiting-for-replies)。
 - **ファイルや過去の会話を使う:** [添付](attachments.md)、[Windows のシェル](shell.md#windows-shell-notes)、[キーワード検索と意味検索](rag.md)、[コンパクション](history-and-search.md#compaction-and-spill)。
@@ -381,6 +382,36 @@ rewindは作成時の生の値をコピーするため、後から親を変更�
 
 offはコンパクション全体を止めません。意図された動作ではautomatic summaryを
 続け、automatic spill段階だけをskipします。実効値がautomaticの経路を決めます。
+
+## スキル、MCP サーバー、チームの知識を持ち込む
+
+Shellboy に専用のプラグイン形式はなく、既定ではスキル一覧を自動で入力に追加しません。
+一覧が長くなるほど、関係のないスキルまで毎回コンテキストを消費するためです。
+全体は、必要なときに探せる形で置いておきます。
+
+- **スキル:** `SKILL.md` を含むフォルダーをまとめたディレクトリを
+  `shellboy docs source add --name skills --path ./skills` で登録します。
+  `shellboy docs list --parent skills` でメニューの枝をたどり、
+  `shellboy docs search --source skills --query 'リリース確認'` でキーワード検索できます。
+  `SKILL.md` は普通の Markdown で、最初の見出しがタイトルになります。
+  必要なら外部の変換ツールでタイトルを整えられます。登録してもスクリプトは実行されません。
+  意味で探すには `shellboy docs index --source skills --dry-run` で確認してから
+  `shellboy docs index --source skills` を実行し、
+  `shellboy rag search --scope source:skills --mode semantic --query 'リリースの確認方法'`
+  で検索します。索引の作成や意味検索には埋め込みの料金がかかる場合があります。[Docs](docs.md) を参照してください。
+- **よく使うものだけを常に見せる:** `AGENTS.md` に「名前 — 使う場面 — パス」を短く一行ずつ書きます。
+  実験的な `context` コマンドが使える環境では、Thread ごとに有効にして、新しい会話リクエストごとに短い一覧を出力させることもできます。
+  信頼できるコマンドと明示的なタイムアウトを指定してください。出力はモデルの提供元に送られます。
+- **MCP サーバー:** `shellboy-services` のレシピを構成例として、外部の MCP ブリッジ CLI をシェルから呼び出します。
+  接続を維持する必要があるサーバーは [Thread のサービス](agent-guide.md#services-for-long-running-commands) として動かします。
+  資格情報はブリッジ側に置き、モデルに見えるコマンドや出力には含めません。Shellboy に内蔵の MCP アダプターはありません。
+- **チームの知識:** 原本はチームのリポジトリに置きます。現在はプロジェクト用の知識 DB を用意し、
+  `shellboy rag --db ./knowledge/rag.db search --scope source:handbook --query 'リリース確認'`
+  のように明示して使えます。`source:` にはその DB に登録した名前を指定します。
+  `--db` は会話の保存先を切り替えません。
+  [#467](https://github.com/tya5/shellboy/issues/467) では、原本と構築済みストアを
+  リポジトリで一緒に配布する方法が計画されています。現在の `--db` の使い方には不要です。
+  登録と索引の作成は [RAG](rag.md) を参照してください。
 
 ## 質問と返信
 
