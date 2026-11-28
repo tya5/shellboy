@@ -8,6 +8,11 @@ pub(crate) enum PauseError {
     Cancelled,
 }
 
+pub(crate) enum WaitCancellation {
+    Interruptible,
+    Owned,
+}
+
 pub(crate) struct Boundary<'a> {
     mutex: &'a Mutex<()>,
     guard: Option<MutexGuard<'a, ()>>,
@@ -22,22 +27,17 @@ impl<'a> Boundary<'a> {
     pub(crate) async fn pause<T>(
         &mut self,
         cancel: &CancellationToken,
+        mode: WaitCancellation,
         wait: impl Future<Output = T>,
     ) -> Result<T, PauseError> {
         drop(self.guard.take());
-        let outcome = tokio::select! { biased; _ = cancel.cancelled() => return Err(PauseError::Cancelled), outcome = wait => outcome };
-        let guard = tokio::select! { biased; _ = cancel.cancelled() => return Err(PauseError::Cancelled), guard = self.mutex.lock() => guard };
-        self.guard = Some(guard);
-        Ok(outcome)
-    }
-    /// Like pause, but the wait owns cancellation and must finish cleanup before returning.
-    pub(crate) async fn pause_owned<T>(
-        &mut self,
-        cancel: &CancellationToken,
-        wait: impl Future<Output = T>,
-    ) -> Result<T, PauseError> {
-        drop(self.guard.take());
-        let outcome = wait.await;
+        let outcome = match mode {
+            WaitCancellation::Interruptible => {
+                tokio::select! { biased; _ = cancel.cancelled() => return Err(PauseError::Cancelled), outcome = wait => outcome }
+            }
+            // The wait must finish cleanup before this boundary can be reacquired.
+            WaitCancellation::Owned => wait.await,
+        };
         let guard = tokio::select! { biased; _ = cancel.cancelled() => return Err(PauseError::Cancelled), guard = self.mutex.lock() => guard };
         self.guard = Some(guard);
         Ok(outcome)
@@ -67,11 +67,15 @@ mod tests {
                 let guard = mutex.lock().await;
                 let mut boundary = Boundary::new(&mutex, guard);
                 let result = boundary
-                    .pause(&CancellationToken::new(), async {
-                        ready_tx.send(()).unwrap();
-                        release_rx.await.unwrap();
-                        42
-                    })
+                    .pause(
+                        &CancellationToken::new(),
+                        WaitCancellation::Interruptible,
+                        async {
+                            ready_tx.send(()).unwrap();
+                            release_rx.await.unwrap();
+                            42
+                        },
+                    )
                     .await
                     .unwrap();
                 assert_eq!(result, 42);
@@ -102,7 +106,7 @@ mod tests {
                 let guard = mutex.lock().await;
                 let mut boundary = Boundary::new(&mutex, guard);
                 let result = boundary
-                    .pause(&cancel, async {
+                    .pause(&cancel, WaitCancellation::Interruptible, async {
                         ready_tx.send(()).unwrap();
                         release_rx.await.unwrap();
                     })
@@ -130,7 +134,11 @@ mod tests {
         cancel.cancel();
         assert!(
             boundary
-                .pause(&cancel, std::future::pending::<()>())
+                .pause(
+                    &cancel,
+                    WaitCancellation::Interruptible,
+                    std::future::pending::<()>()
+                )
                 .await
                 .is_err()
         );
