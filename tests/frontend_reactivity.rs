@@ -89,11 +89,11 @@ impl Fixture {
         let cwd = root.path().to_str().unwrap().to_owned();
         owner.db.call(move |db| {
             let tx=db.transaction()?;
-            tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('reactive','BASE_TITLE',?1,'','fixture','fixture0','now')",[cwd])?;
-            shellboy::history::append_node(&tx,"reactive","paid-baseline",None,"assistant_response",&json!({"text":"PAID_R6_HISTORY remains visible"}),"now")?;
+            tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('reactive','BASE_TITLE',?1,'','fixture','fixture0','2026-01-01T00:00:00Z')",[cwd])?;
+            shellboy::history::append_node(&tx,"reactive","paid-baseline",None,"assistant_response",&json!({"text":"PAID_R6_HISTORY remains visible"}),"2026-01-01T00:00:00Z")?;
             if long_usage {
                 // 90 turns x 40 attempts, newest turns hold the only provider usage.
-                tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('lr','reactive','completed','now','now')")?;
+                tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('lr','reactive','completed','2026-01-01T00:00:00Z','2026-01-01T00:02:00Z')")?;
                 for i in 0..90usize {
                     tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,'reactive','lr','completed',?2,?2)",rusqlite::params![format!("lt{i:03}"),format!("2026-01-01T00:{:02}:{:02}Z",i/60,i%60)])?;
                     for a in 0..40usize {
@@ -350,7 +350,12 @@ impl Fixture {
                     self.detail_trace.pop_front();
                 }
             }
-            self.actions.send(action).await.unwrap();
+            if self.actions.send(action).await.is_err() {
+                panic!(
+                    "native frontend closed while pumping UI actions: {:?}",
+                    (&mut self.bridge).await
+                );
+            }
         }
         // Read the completed frame, not TestBackend's diff-applied cells:
         // TestBackend does not clear a wide glyph's trailing cell when a later
@@ -378,7 +383,12 @@ impl Fixture {
                     self.detail_trace.pop_front();
                 }
             }
-            self.actions.send(action).await.unwrap();
+            if self.actions.send(action).await.is_err() {
+                panic!(
+                    "native frontend closed while pumping UI actions: {:?}",
+                    (&mut self.bridge).await
+                );
+            }
         }
         let mut screen = String::new();
         for y in 0..40 {
