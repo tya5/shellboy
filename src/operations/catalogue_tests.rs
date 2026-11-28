@@ -2,6 +2,11 @@
 pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
     OperationId::ShellBackground,
     OperationId::TurnInterrupt,
+    OperationId::ContextAdd,
+    OperationId::ContextList,
+    OperationId::ContextGet,
+    OperationId::ContextSet,
+    OperationId::ContextRemove,
     OperationId::ArtifactAdd,
     OperationId::ArtifactUpdate,
     OperationId::ArtifactList,
