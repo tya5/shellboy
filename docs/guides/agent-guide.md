@@ -1441,3 +1441,4 @@ continuations. Use short, read-only commands you trust. These commands run with 
 owner's shell permissions, and the provider and saved request inspection can see
 their stdout. Do not print secrets. There is no default timeout. Forks and children
 start without commands, and provider retries reuse the prepared output.
+`SHELLBOY_REQUEST_INDEX` is the zero-based provider request ordinal within the Turn; retries do not advance it.

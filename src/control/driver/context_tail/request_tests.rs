@@ -122,6 +122,7 @@ async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() 
         let (root, owner, control, accepted) = fixture(&format!("http://{}/v1",listener.local_addr().unwrap())).await;
         define(&control,&accepted.thread_id,"probe", "printf x >> context-count; cat context-count", 10_000).await;
         define(&control,&accepted.thread_id,"failure", "exit 7", 10_000).await;
+        define(&control,&accepted.thread_id,"ordinal", r#"printf '%s' "$SHELLBOY_REQUEST_INDEX""#, 10_000).await;
         control.kick_quiet(accepted.thread_id.clone()).await;
         let first = exchange(&listener, 503, json!({"error":{"code":"server_error","message":"fixture retry"}})).await;
         let ids = attempt_ids(&control, &accepted.thread_id).await;
@@ -135,10 +136,12 @@ async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() 
         let first_result = result_at(first_tail).unwrap();
         assert_eq!(first_result["results"][0]["stdout"], "x");
         assert_eq!(first_result["results"][1]["outcome"], "failed");
+        assert_eq!(first_result["results"][2]["stdout"], "0");
         let input = next["input"].as_array().unwrap();
         assert!(input.iter().any(|item| item["type"] == "function_call_output"));
         let last = input.last().unwrap();
         assert_eq!(result_at(last).unwrap()["results"][0]["stdout"], "xx");
+        assert_eq!(result_at(last).unwrap()["results"][2]["stdout"], "1");
         assert_eq!(input.iter().filter(|item| result_at(item).is_some()).count(), 1);
         let inspected = inspect_attempt(root.path(), accepted.thread_id, first_attempt).await;
         assert_eq!(inspected["body"]["input"].as_array().unwrap().last(), Some(first_tail));

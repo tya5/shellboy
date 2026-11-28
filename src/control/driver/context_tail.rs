@@ -30,11 +30,23 @@ pub(super) async fn collect(
     start_gate: Arc<Mutex<bool>>,
 ) -> Result<Option<Value>, ApiError> {
     let thread = snapshot.thread.clone();
-    let definitions = control
+    let turn = snapshot.turn.clone();
+    let (definitions, request_index) = control
         .store
         .database
         .call(move |db| {
-            super::super::context_command::definitions(db, &thread).map_err(StorageError::from)
+            let definitions = super::super::context_command::definitions(db, &thread)?;
+            // Every adopted tool group starts one continuation; retry attempts do not.
+            let request_index = if definitions.is_empty() {
+                0
+            } else {
+                db.query_row(
+                    "SELECT count(*) FROM tool_group WHERE turn_id=?1",
+                    [&turn],
+                    |row| row.get::<_, i64>(0),
+                )?
+            };
+            Ok::<_, StorageError>((definitions, request_index))
         })
         .await
         .map_err(storage_error)?;
@@ -67,6 +79,7 @@ pub(super) async fn collect(
             start_gate.clone(),
             definition,
             share,
+            request_index,
         )
     }))
     .await;
@@ -96,10 +109,12 @@ async fn run(
     start_gate: Arc<Mutex<bool>>,
     definition: super::super::context_command::Definition,
     share: usize,
+    request_index: i64,
 ) -> ResultEntry {
     let mut env = shell_output::cli_environment(control, &snapshot.thread);
     env.insert("SHELLBOY_RUN_ID".into(), snapshot.run.clone());
     env.insert("SHELLBOY_TURN_ID".into(), snapshot.turn.clone());
+    env.insert("SHELLBOY_REQUEST_INDEX".into(), request_index.to_string());
     let args = crate::protocol::ShellToolArgs {
         command: definition.command,
         description: None,
