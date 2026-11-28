@@ -388,6 +388,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/next_accepted_receipt_turn.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 74,
+        sql: include_str!("../../migrations/next_latest_adopted_attempt.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(

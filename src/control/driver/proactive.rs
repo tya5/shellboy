@@ -59,7 +59,7 @@ pub(super) async fn preflight(
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, crate::storage::decode_spill_override(r.get_ref(3)?, 3)?, r.get(4)?)),
             )?;
             let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
-                crate::compaction::context_usage::read_context_usage_tx(db, &thread, None)?,
+                crate::compaction::context_usage::read_preflight_usage(db, &thread)?,
             );
             let attempt_consumed = match usage["last_successful_attempt"]["attempt_id"].as_str() {
                 Some(attempt_id) => db.query_row(
