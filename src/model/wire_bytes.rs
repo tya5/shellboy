@@ -323,9 +323,7 @@ pub(crate) fn escaped_len(text: &str) -> u64 {
     string_len(text) - 2
 }
 fn string_len(text: &str) -> u64 {
-    let mut counter = Counter::default();
-    serde_json::to_writer(&mut counter, text).expect("a string serializes as JSON");
-    counter.0
+    json_len(text).expect("a string serializes as JSON")
 }
 
 #[derive(Default)]
@@ -341,9 +339,13 @@ impl Write for Counter {
 }
 
 fn serialized_len(value: &Value) -> u64 {
+    json_len(value).expect("JSON Value is serializable")
+}
+
+pub(crate) fn json_len(value: &(impl serde::Serialize + ?Sized)) -> serde_json::Result<u64> {
     let mut counter = Counter::default();
-    serde_json::to_writer(&mut counter, value).expect("JSON Value is serializable");
-    counter.0
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.0)
 }
 
 #[cfg(test)]

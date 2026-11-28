@@ -1,4 +1,5 @@
 //! Ordered, Thread-owned definitions. Only the conversation driver runs them.
+use crate::model::wire_bytes::json_len;
 use crate::protocol::{
     ApiError, ContextAddArgs, ContextListArgs, ContextSetArgs, ContextTarget, ErrorCode,
     MAX_FRAME_BYTES, PageCursor, Response,
@@ -7,12 +8,6 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-#[derive(Serialize)]
-pub(super) struct Definition {
-    pub(super) name: String,
-    pub(super) command: String,
-    pub(super) timeout_ms: u32,
-}
 fn storage(error: rusqlite::Error) -> ApiError {
     super::storage_error(error.into())
 }
@@ -42,23 +37,6 @@ fn exists(db: &Connection, thread: &str) -> Result<(), ApiError> {
         return Err(ApiError::new(ErrorCode::ThreadNotFound, "Thread not found"));
     }
     Ok(())
-}
-pub(super) fn definitions(db: &Connection, thread: &str) -> Result<Vec<Definition>, ApiError> {
-    let mut stmt = db
-        .prepare(
-            "SELECT name,command,timeout_ms FROM context_command WHERE thread_id=?1 ORDER BY id",
-        )
-        .map_err(storage)?;
-    stmt.query_map([thread], |r| {
-        Ok(Definition {
-            name: r.get(0)?,
-            command: r.get(1)?,
-            timeout_ms: r.get(2)?,
-        })
-    })
-    .map_err(storage)?
-    .collect::<Result<_, _>>()
-    .map_err(storage)
 }
 #[derive(Serialize)]
 struct ListPage<'a> {
@@ -103,7 +81,7 @@ pub(super) fn list(
         .query(params![thread, after, i64::from(args.limit) + 1])
         .map_err(storage)?;
     let frame_overhead = |cursor: Option<&str>| {
-        serde_json::to_vec(&Response::success(
+        json_len(&Response::success(
             operation_id,
             ListPage {
                 thread_id: thread,
@@ -111,14 +89,13 @@ pub(super) fn list(
                 next_cursor: cursor,
             },
         ))
-        .map(|bytes| bytes.len())
         .map_err(serialization_error)
     };
     let mut items = Vec::new();
     let mut item_bytes = 0;
     let mut next_cursor = None;
     let mut row = rows.next().map_err(storage)?;
-    if row.is_none() && frame_overhead(None)? > MAX_FRAME_BYTES {
+    if row.is_none() && frame_overhead(None)? > MAX_FRAME_BYTES as u64 {
         return Err(ApiError::new(
             ErrorCode::InputLimit,
             "Context list response exceeds the frame limit",
@@ -150,11 +127,8 @@ pub(super) fn list(
             .transpose()?;
         // The envelope already includes the brackets; charge each item and
         // just the commas between items, without reserializing the prefix.
-        let size = serde_json::to_vec(&item)
-            .map_err(serialization_error)?
-            .len()
-            + usize::from(!items.is_empty());
-        if frame_overhead(cursor.as_deref())? + item_bytes + size > MAX_FRAME_BYTES {
+        let size = json_len(&item).map_err(serialization_error)? + u64::from(!items.is_empty());
+        if frame_overhead(cursor.as_deref())? + item_bytes + size > MAX_FRAME_BYTES as u64 {
             if items.is_empty() {
                 return Err(ApiError::new(
                     ErrorCode::InputLimit,

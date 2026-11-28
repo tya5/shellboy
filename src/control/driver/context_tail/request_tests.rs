@@ -297,6 +297,12 @@ async fn a_budget_that_only_fits_the_skip_fact_never_launches() {
             10_000,
         )
         .await;
+        // An unneeded column/row must not be decoded after admission is refused.
+        let thread = accepted.thread_id.clone();
+        owner.db.call(move |db| {
+            db.execute("INSERT INTO context_command(thread_id,name,command,timeout_ms) VALUES(?1,CAST(X'ff' AS TEXT),CAST(X'ff' AS TEXT),10000)", [&thread])?;
+            Ok(())
+        }).await.unwrap();
         control.kick_quiet(accepted.thread_id.clone()).await;
         let sent: Value =
             serde_json::from_slice(&exchange(&listener, 200, completed(json!([]))).await).unwrap();
@@ -335,7 +341,7 @@ async fn expired_launch_admission_refuses_without_starting() {
                 &snapshot,
                 &cancel,
                 gate.clone(),
-                super::super::super::context_command::Definition {
+                Definition {
                     name: "expired".into(),
                     command: "printf launched > launch-marker".into(),
                     timeout_ms: 10,
