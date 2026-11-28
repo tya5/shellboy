@@ -42,6 +42,7 @@ async fn production_migration_pragmas_and_reopen() {
             assert_eq!(integrity, "ok");
             assert!(!connection.prepare("PRAGMA foreign_key_check")?.exists([])?);
             seed_thread(connection, "persisted")?;
+            connection.execute("INSERT INTO context_command(thread_id,name,command,timeout_ms) VALUES('persisted','fixture','echo fixture',100)", [])?;
             Ok(())
         })
         .await
@@ -55,6 +56,13 @@ async fn production_migration_pragmas_and_reopen() {
             let thread: String =
                 connection.query_row("SELECT id FROM thread", [], |row| row.get(0))?;
             assert_eq!(thread, "persisted");
+            let saved: (String, u32) = connection.query_row(
+                "SELECT command,timeout_ms FROM context_command WHERE thread_id=?1 AND name='fixture'",
+                [&thread], |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!(saved, ("echo fixture".into(), 100));
+            connection.execute("DELETE FROM thread WHERE id=?1", [&thread])?;
+            assert!(!connection.prepare("SELECT 1 FROM context_command WHERE thread_id=?1")?.exists([&thread])?);
             Ok(())
         })
         .await

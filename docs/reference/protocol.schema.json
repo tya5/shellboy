@@ -1326,6 +1326,86 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/ContextAddArgs"
+            },
+            "command": {
+              "const": "context.add",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ThreadTarget"
+            },
+            "command": {
+              "const": "context.list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ContextTarget"
+            },
+            "command": {
+              "const": "context.get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ContextSetArgs"
+            },
+            "command": {
+              "const": "context.set",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ContextTarget"
+            },
+            "command": {
+              "const": "context.remove",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/ScheduleAddArgs"
             },
             "command": {
@@ -2731,6 +2811,34 @@
       },
       "type": "object"
     },
+    "ContextAddArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "command",
+        "timeout_ms"
+      ],
+      "type": "object"
+    },
     "ContextEditAction": {
       "enum": [
         "spill",
@@ -2781,6 +2889,56 @@
       },
       "required": [
         "action"
+      ],
+      "type": "object"
+    },
+    "ContextSetArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "ContextTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
@@ -6285,6 +6443,15 @@
       ],
       "type": "string"
     },
+    "OperationStability": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "stable",
+        "experimental"
+      ],
+      "title": "Stability",
+      "type": "string"
+    },
     "OperationTarget": {
       "additionalProperties": false,
       "properties": {
@@ -8483,6 +8650,151 @@
             },
             "command": {
               "const": "service.remove",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ContextAddArgs"
+            },
+            "command": {
+              "const": "context.add",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ThreadTarget"
+            },
+            "command": {
+              "const": "context.list",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ContextTarget"
+            },
+            "command": {
+              "const": "context.get",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ContextSetArgs"
+            },
+            "command": {
+              "const": "context.set",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/ContextTarget"
+            },
+            "command": {
+              "const": "context.remove",
               "type": "string"
             },
             "operation_id": {
@@ -17533,6 +17845,13 @@
       "title": "WaitResult",
       "type": "object"
     }
+  },
+  "operation_stability": {
+    "context.add": "experimental",
+    "context.get": "experimental",
+    "context.list": "experimental",
+    "context.remove": "experimental",
+    "context.set": "experimental"
   },
   "protocol_version": 51,
   "title": "Shellboy local RPC protocol v51"
