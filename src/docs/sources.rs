@@ -484,7 +484,7 @@ fn browse(command: DocsRead, rows: &[Registration]) -> Result<Value, String> {
             limit_bytes,
             cursor,
         } if !is_bundled(&id) => {
-            limit(limit_bytes, TEXT_WORK)?;
+            limit(limit_bytes, DOCS_READ_MAX_BYTES)?;
             let source = source_for(&id, rows)?;
             let root = canonical_root(&source.path)?;
             let path = under(&root, id.split_once('/').map_or("", |p| p.1))?;
@@ -732,7 +732,7 @@ struct SearchMark {
     bundled: usize,
     source: usize,
     walk: FolderWalk,
-    file: Option<(String, usize, usize, String)>,
+    file: Option<(String, usize, String)>,
 }
 
 fn hit(
@@ -742,25 +742,23 @@ fn hit(
     text: &str,
     needle: &str,
     offset: usize,
-    scanned: usize,
     version: &str,
-) -> Option<Value> {
+) -> (Option<Value>, usize) {
     let lowered = text.to_lowercase();
-    let overlap = text.floor_char_boundary(scanned.saturating_sub(offset).min(text.len()));
-    let boundary = text[..overlap]
-        .chars()
-        .flat_map(char::to_lowercase)
-        .map(char::len_utf8)
-        .sum::<usize>();
-    let mut matches = lowered
-        .match_indices(needle)
-        .filter(|(at, _)| at + needle.len() > boundary);
-    let (at, _) = matches.next()?;
+    let mut matches = lowered.match_indices(needle);
+    let Some((at, _)) = matches.next() else {
+        return (None, 0);
+    };
+    let (score, last) = matches.fold((1, at), |(count, _), (at, _)| (count + 1, at));
+    let (_, matched_end) = original_span(text, last, last + needle.len());
     let (start, end) = original_span(text, at, at + needle.len());
     let before = text.ceil_char_boundary(start.saturating_sub(96));
     let after = text.floor_char_boundary((end + 192).min(text.len()));
-    Some(
-        json!({"id":id,"title":title,"parent_id":parent,"version":version,"excerpt":&text[before..after],"spans":[{"start":offset+start,"end":offset+end}],"score":1 + matches.count()}),
+    (
+        Some(
+            json!({"id":id,"title":title,"parent_id":parent,"version":version,"excerpt":&text[before..after],"spans":[{"start":offset+start,"end":offset+end}],"score":score}),
+        ),
+        matched_end,
     )
 }
 fn search(
@@ -812,13 +810,13 @@ fn search(
             || pos
                 .file
                 .as_ref()
-                .is_some_and(|(name, _, _, _)| name.contains('/'))))
+                .is_some_and(|(name, _, _)| name.contains('/'))))
         || (pos.walk.levels.is_empty()
             && (!pos.walk.path.is_empty()
                 || pos
                     .file
                     .as_ref()
-                    .is_some_and(|(name, _, _, _)| name != root_rel)))
+                    .is_some_and(|(name, _, _)| name != root_rel)))
     {
         return Err("cursor_expired: Invalid search position".into());
     }
@@ -838,16 +836,7 @@ fn search(
                     .is_none_or(|p| d.id == *p || descendant(d, p, bundled))
         })
         .filter_map(|(index, d)| {
-            let mut found = hit(
-                &d.id,
-                &d.title,
-                &d.parent_id,
-                &d.text,
-                &needle,
-                0,
-                0,
-                version,
-            )?;
+            let mut found = hit(&d.id, &d.title, &d.parent_id, &d.text, &needle, 0, version).0?;
             found["content_hash"] = json!(BUNDLED.hashes[index].get_or_init(|| hash(&d.text)));
             Some(found)
         })
@@ -896,7 +885,7 @@ fn search(
             }
         }
         let (_, root) = current_root.as_ref().expect("opened source root");
-        if let Some((name, offset, scanned, rev)) = pos.file.take() {
+        if let Some((name, offset, rev)) = pos.file.take() {
             work += 1;
             let rel = child_path(&pos.walk.path, &name);
             let observation = under(root, &rel).and_then(|path| {
@@ -912,8 +901,7 @@ fn search(
                 }
             };
             if revision(&path) != rev
-                || offset > scanned
-                || scanned as u64 > meta.len()
+                || offset as u64 > meta.len()
                 || !meta.is_file()
                 || !rel.ends_with(".md")
             {
@@ -934,18 +922,14 @@ fn search(
             } else {
                 basename.into()
             };
-            if let Some(h) = hit(&id, &title, dir, &text, &needle, offset, scanned, version) {
+            let (found, matched_end) = hit(&id, &title, dir, &text, &needle, offset, version);
+            if let Some(h) = found {
                 hits.push(h);
             }
             if more {
-                // Repeat only enough UTF-8 text to catch a match across chunks.
+                // Revisit possible crossing starts, but never restart inside an accepted match.
                 let overlap = text.ceil_char_boundary(text.len().saturating_sub(query.len() * 4));
-                if !pos.admit_file(
-                    (name, offset + overlap, offset + text.len(), rev),
-                    &cursor_fits,
-                ) {
-                    unavailable.push(long_path(&row.name, &rel));
-                }
+                pos.file = Some((name, offset + overlap.max(matched_end), rev));
             } else {
                 pos.advance_source_if_idle();
             }
@@ -961,7 +945,7 @@ fn search(
                     }
                 }
                 Ok(path) if path.is_file() && root_rel.ends_with(".md") => {
-                    if !pos.admit_file((root_rel.into(), 0, 0, revision(&path)), &cursor_fits) {
+                    if !pos.admit_file((root_rel.into(), revision(&path)), &cursor_fits) {
                         unavailable.push(long_path(&row.name, root_rel));
                     }
                     continue;
@@ -981,7 +965,7 @@ fn search(
             }
             WalkStep::File(rel, path) => {
                 let name = rel.rsplit('/').next().expect("guide filename");
-                if !pos.admit_file((name.into(), 0, 0, revision(&path)), &cursor_fits) {
+                if !pos.admit_file((name.into(), revision(&path)), &cursor_fits) {
                     unavailable.push(long_path(&row.name, &rel));
                 }
             }
@@ -1014,18 +998,11 @@ impl SearchMark {
         false
     }
 
-    fn admit_file(
-        &mut self,
-        mut file: (String, usize, usize, String),
-        fits: &impl Fn(&Self) -> bool,
-    ) -> bool {
-        // Reserve the full integer widths at entry so a later chunk always fits.
-        let (offset, scanned) = (file.1, file.2);
-        (file.1, file.2) = (usize::MAX, usize::MAX);
-        self.file = Some(file);
+    fn admit_file(&mut self, (name, rev): (String, String), fits: &impl Fn(&Self) -> bool) -> bool {
+        // Reserve the full offset width at entry so a later chunk always fits.
+        self.file = Some((name, usize::MAX, rev));
         if fits(self) {
-            let file = self.file.as_mut().expect("admitted file");
-            (file.1, file.2) = (offset, scanned);
+            self.file.as_mut().expect("admitted file").1 = 0;
             return true;
         }
         self.file = None;
@@ -1117,13 +1094,32 @@ mod tests {
 
     #[test]
     fn search_overlap_yields_crossing_match_but_not_a_duplicate() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().canonicalize().unwrap();
         let needle = "match-token";
         let first = TEXT_WORK - needle.len() * 2;
         let crossing = TEXT_WORK - 3;
         let text =
             "x".repeat(first) + needle + &"x".repeat(crossing - first - needle.len()) + needle;
+        assert_eq!(
+            search_fixture_pages(needle, text),
+            vec![
+                (first, first + needle.len(), 1),
+                (crossing, crossing + needle.len(), 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn self_overlapping_needle_keeps_match_alignment_across_pages() {
+        let first = TEXT_WORK - 13;
+        assert_eq!(
+            search_fixture_pages("aaa", "x".repeat(first) + &"a".repeat(15)),
+            vec![(first, first + 3, 4), (first + 12, first + 15, 1)]
+        );
+    }
+
+    fn search_fixture_pages(needle: &str, text: String) -> Vec<(usize, usize, u64)> {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
         fs::write(path.join("guide.md"), text).unwrap();
         let rows = [Registration {
             name: "local".into(),
@@ -1147,8 +1143,12 @@ mod tests {
         let mut seen = HashSet::new();
         loop {
             for hit in page["items"].as_array().unwrap() {
-                assert_eq!(hit["score"], 1);
-                spans.push(hit["spans"][0].clone());
+                let span = &hit["spans"][0];
+                spans.push((
+                    span["start"].as_u64().unwrap() as usize,
+                    span["end"].as_u64().unwrap() as usize,
+                    hit["score"].as_u64().unwrap(),
+                ));
             }
             let Some(cursor) = page["next_cursor"].as_str() else {
                 break;
@@ -1156,13 +1156,7 @@ mod tests {
             assert!(seen.insert(cursor.to_owned()));
             page = run(Some(cursor.into()));
         }
-        assert_eq!(
-            spans,
-            [
-                json!({"start":first,"end":first+needle.len()}),
-                json!({"start":crossing,"end":crossing+needle.len()})
-            ]
-        );
+        spans
     }
 
     #[test]
