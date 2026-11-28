@@ -639,6 +639,7 @@ mod tests {
         .unwrap();
         let query = prefix_sql(Kind::Run, 201);
         let measure = || {
+            let mut st = db.prepare(&query).unwrap();
             {
                 let mut rows = st.query(params!["[\"scope\"]", "live"]).unwrap();
                 while rows.next().unwrap().is_some() {}

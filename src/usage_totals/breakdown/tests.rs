@@ -750,8 +750,7 @@ fn model_groups_use_existing_bounded_attempt_scan_and_do_not_invent_summary_usag
 }
 
 #[test]
-fn model_group_by_validates_and_reuses_rowid_query_without_model_scan() {
-    let db = fixture();
+fn model_group_by_validates() {
     let mut a = args("model");
     assert!(validate(&a).is_ok());
     a.group_by = Some("profile".into());

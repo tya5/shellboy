@@ -16,7 +16,7 @@ use std::{
 };
 pub(crate) use thread_list::thread_list;
 #[cfg(test)]
-use thread_list::{awaiting_human_candidates_sql, thread_list_awaiting_human};
+use thread_list::thread_list_awaiting_human;
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
