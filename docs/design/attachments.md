@@ -143,7 +143,7 @@ file.
 Adoption fixes each Thread/attachment ID's slot: live with the sent SHA-256, or
 permanently omitted if unavailable. A later adopted change or unavailability
 retires a live slot permanently. The adopted send ledger stores the omission
-reason (`next_attachment_omission`) alongside the observation, but only rows
+reason (`0072_attachment_omission`) alongside the observation, but only rows
 that actually supplied bytes become `sent`. The first adopted byte-bearing slot provides its sent fingerprint. The
 migration also carries adopted unavailability forward from the send ledger,
 including a first unavailable slot that legacy code later resumed. Failed and

@@ -6,5 +6,5 @@ WHERE sent.state='unavailable' AND EXISTS (
     WHERE attempt.id=sent.attempt_id
       AND json_extract(attempt.input_manifest_json,'$.adoption.outcome')='adopted'
 );
-INSERT INTO schema_migration(version,name) VALUES(72,'next_attachment_omission');
+INSERT INTO schema_migration(version,name) VALUES(72,'0072_attachment_omission');
 PRAGMA user_version=72;
