@@ -170,30 +170,35 @@ pub fn configured_response(command: DocsCommand, explicit: Option<&Path>, cwd: &
     let result = (|| {
         // Explicit bundled scope never opens configuration. This is also the
         // recovery route when the combined catalogue cannot read its sources.
-        let bundled_only = match &command {
-            DocsCommand::Get { id, sources, .. } => {
-                is_bundled(id) && sources.iter().all(|s| s == "shellboy")
+        if let DocsCommand::Read(command) = &command {
+            let bundled_only = match command {
+                DocsRead::Get { id, sources, .. } => {
+                    is_bundled(id) && sources.iter().all(|s| s == "shellboy")
+                }
+                DocsRead::List {
+                    parent, sources, ..
+                }
+                | DocsRead::Search {
+                    parent, sources, ..
+                } => {
+                    (parent.as_deref().is_some_and(is_bundled) || !sources.is_empty())
+                        && sources.iter().all(|s| s == "shellboy")
+                }
+            };
+            if bundled_only {
+                return browse(command.clone(), &[]).map_err(browse_error);
             }
-            DocsCommand::List {
-                parent, sources, ..
-            }
-            | DocsCommand::Search {
-                parent, sources, ..
-            } => {
-                (parent.as_deref().is_some_and(is_bundled) || !sources.is_empty())
-                    && sources.iter().all(|s| s == "shellboy")
-            }
-            _ => false,
-        };
-        if bundled_only {
-            return browse(command, &[]).map_err(browse_error);
         }
         let (path, state, settings) = load_sources(explicit, cwd)?;
         match command {
             DocsCommand::Source { command } => {
                 registration_command(command, settings, &path, cwd, &state.hash)
             }
-            other => browse(other, &settings.sources).map_err(browse_error),
+            DocsCommand::Read(command) => browse(command, &settings.sources).map_err(browse_error),
+            DocsCommand::Index { .. } => Err(refusal(
+                ErrorCode::InvalidArgument,
+                "Use the Docs index operation",
+            )),
         }
     })();
     match result {
@@ -469,10 +474,10 @@ fn branch(id: &str, available: bool, version: &str) -> Value {
     json!({"id":id,"parent_id":parent,"kind":"category","title":title,"summary":"","version":version,"availability":if available {json!({"state":"available"})} else {json!({"state":"unavailable","reason":"folder_unavailable"})}})
 }
 
-fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> {
+fn browse(command: DocsRead, rows: &[Registration]) -> Result<Value, String> {
     let version = hash(serde_json::to_vec(&json!([BUNDLED.version, rows])).expect("version"));
     let version = version.as_str();
-    if let DocsCommand::Get { id, sources, .. } = &command {
+    if let DocsRead::Get { id, sources, .. } = &command {
         selected(rows, sources)?;
         let name = id.split('/').next().unwrap_or_default();
         if !included(sources, name) {
@@ -480,7 +485,7 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
         }
     }
     match command {
-        DocsCommand::Get {
+        DocsRead::Get {
             id,
             sources,
             section,
@@ -540,7 +545,7 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
                     .then(|| next_cursor(version, &scope, page_end)),
             ))
         }
-        DocsCommand::List {
+        DocsRead::List {
             parent,
             sources,
             limit: count,
@@ -593,23 +598,20 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
                 (end < items.len()).then(|| next_cursor(version, &scope, end)),
             ))
         }
-        DocsCommand::Search {
+        DocsRead::Search {
             query,
             parent,
             sources,
             limit: count,
             cursor,
         } => search(query, parent, sources, count, cursor, rows, version),
-        DocsCommand::Get {
+        DocsRead::Get {
             id,
             sources,
             section,
             limit_bytes,
             cursor,
         } => bundled_get(id, sources, section, limit_bytes, cursor),
-        DocsCommand::Source { .. } | DocsCommand::Index { .. } => {
-            Err("invalid_argument: Source operations need a configuration context".into())
-        }
     }
 }
 fn included(filters: &[String], name: &str) -> bool {
@@ -1057,7 +1059,7 @@ mod tests {
         }];
         let list = |parent: &str| {
             browse(
-                DocsCommand::List {
+                DocsRead::List {
                     parent: Some(parent.into()),
                     sources: vec![],
                     limit: 20,
@@ -1073,7 +1075,7 @@ mod tests {
             "local/b-healthy/guide.md"
         );
         let search = browse(
-            DocsCommand::Search {
+            DocsRead::Search {
                 query: "Branch witness".into(),
                 parent: Some("local".into()),
                 sources: vec!["local".into()],
@@ -1113,25 +1115,25 @@ mod tests {
                 .unwrap()
                 .contains("[[docs.sources]]")
         );
-        let list = run(DocsCommand::List {
+        let list = run(DocsCommand::Read(DocsRead::List {
             parent: Some("recipes/demo".into()),
             sources: vec!["shellboy".into(), "recipes".into()],
             limit: 1,
             cursor: None,
-        });
+        }));
         assert_eq!(list["result"]["items"][0]["title"], "Literal heading");
         assert_eq!(
             list["result"]["items"][0]["summary"],
             "Look up frobnicate here."
         );
         let get = |sources| {
-            run(DocsCommand::Get {
+            run(DocsCommand::Read(DocsRead::Get {
                 id: "recipes/demo/SKILL.md".into(),
                 sources,
                 section: None,
                 limit_bytes: 64,
                 cursor: None,
-            })
+            }))
         };
         assert_eq!(
             get(vec!["shellboy".into()])["error"]["code"],
@@ -1141,21 +1143,21 @@ mod tests {
             get(vec!["shellboy".into(), "recipes".into()])["result"]["text"],
             "# Literal heading\n\nLook up frobnicate here.\n"
         );
-        let query = run(DocsCommand::Search {
+        let query = run(DocsCommand::Read(DocsRead::Search {
             parent: None,
             sources: vec!["recipes".into()],
             query: "frobnicate".into(),
             limit: 1,
             cursor: None,
-        });
+        }));
         assert_eq!(query["result"]["items"][0]["id"], "recipes/demo/SKILL.md");
         fs::rename(&folder, cwd.join("moved")).unwrap();
-        let list = run(DocsCommand::List {
+        let list = run(DocsCommand::Read(DocsRead::List {
             parent: None,
             sources: Vec::new(),
             limit: 50,
             cursor: None,
-        });
+        }));
         assert_eq!(list["result"]["items"][0]["id"], "shellboy");
         assert_eq!(
             list["result"]["items"][1]["availability"]["state"],
