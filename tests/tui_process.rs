@@ -372,6 +372,17 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     );
     std::fs::write(&config, &config_source).unwrap();
     let (paused_thread, paused_at) = seed_paused_history(&data, &config_source).await;
+    let _owner =
+        crate::pty_session::ServeFixture::start(&binary, root.path(), &config, &data).await;
+    let owner_instance = || {
+        serde_json::from_slice::<shellboy::app::Endpoint>(
+            &std::fs::read(data.join("endpoint.json")).unwrap(),
+        )
+        .unwrap()
+        .instance_id
+    };
+    let instance = owner_instance();
+
     let (allow_delta, delta_ready) = tokio::sync::oneshot::channel();
     let (allow_completion, completion_ready) = tokio::sync::oneshot::channel();
     let proxy = tokio::spawn(async move {
@@ -748,7 +759,17 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         )
         .unwrap();
     assert!(draft.contains("EDITABLE_WHILE_WAITING"));
-    assert!(!data.join("endpoint.json").exists());
+    assert_eq!(owner_instance(), instance);
+    let owner_probe = shellboy::ipc::call(
+        &data,
+        shellboy::protocol::Command::ThreadList(Default::default()),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(owner_probe.ok, "{:?}", owner_probe.error);
+
     let pauses: i64 = db
         .query_row(
             "SELECT count(*) FROM app_meta WHERE key LIKE 'index.pause.%'",
@@ -849,6 +870,7 @@ async fn short_tool_history_wheel_loads_older_without_refollow() {
         });
         let config=root.path().join("config.toml");
         std::fs::write(&config,format!("default_connection='fixture'\ndefault_model='fixture-model'\n[connections.fixture]\nbase_url='http://{address}/v1'\n")).unwrap();
+        let _owner = crate::pty_session::ServeFixture::start(std::ffi::OsStr::new(env!("CARGO_BIN_EXE_shellboy")), root.path(), &config, &data).await;
         let (mut master,mut slave)=(-1,-1);let mut size=libc::winsize{ws_row:110,ws_col:100,ws_xpixel:0,ws_ypixel:0};
         // SAFETY: each successful descriptor is immediately owned by a File.
         assert_eq!(unsafe{libc::openpty(&mut master,&mut slave,std::ptr::null_mut(),std::ptr::null_mut(),std::ptr::addr_of_mut!(size))},0);

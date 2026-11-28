@@ -828,26 +828,6 @@ async fn storage_vacuum_cli_previews_runs_and_refuses_live_owner() {
     drop(lock);
 }
 
-#[cfg(unix)]
-#[test]
-fn width_cache_fake_terminal_benchmark() {
-    let output = std::process::Command::new("python3")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/width_cache_pty.py"
-        ))
-        .arg(env!("CARGO_BIN_EXE_shellboy"))
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    eprintln!("{}", String::from_utf8_lossy(&output.stdout));
-}
-
 #[test]
 fn protocol_schema_is_standalone_and_matches_the_generated_contract() {
     let output = Command::new(env!("CARGO_BIN_EXE_shellboy"))

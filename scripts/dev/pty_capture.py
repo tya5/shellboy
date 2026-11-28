@@ -70,7 +70,7 @@ def check_config(root):
 
 class Terminal:
     def __init__(self, binary, root=None, cols=80, palette='dark', term='xterm-256color', no_color=False,
-                 rows=36, connection_url='http://127.0.0.1:9/v1', language='en'):
+                 rows=36, connection_url='http://127.0.0.1:9/v1', language='en', *, synthetic_child=False):
         if os.name != 'posix':
             raise OSError('Live PTYs require Unix; replay and VT tests are portable')
         import fcntl
@@ -81,6 +81,7 @@ class Terminal:
         self.raw = bytearray()
         self.master = None
         self.process = None
+        self.owner = None
         self.scratch = None
         try:
             if root is None:
@@ -115,12 +116,18 @@ class Terminal:
             if no_color:
                 env['NO_COLOR'] = '1'
             executable = [str(binary)] if isinstance(binary, (str, Path)) else list(binary)
+            command = executable + ['--config', str(self.root / 'config.toml'),
+                                    '--data-dir', str(self.root / 'data')]
+            if not synthetic_child:
+                self.owner = subprocess.Popen(command + ['serve'], cwd=self.root, env=env,
+                                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                              stderr=subprocess.DEVNULL, start_new_session=True)
+                self._wait_for_owner()
             master, slave = pty.openpty()
             self.master = master
             try:
                 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
-                self.process = subprocess.Popen(executable + ['--config', str(self.root / 'config.toml'),
-                    '--data-dir', str(self.root / 'data')], cwd=self.root, env=env,
+                self.process = subprocess.Popen(command, cwd=self.root, env=env,
                     stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
             finally:
                 os.close(slave)
@@ -128,6 +135,36 @@ class Terminal:
         except BaseException:
             self.close(force=True)
             raise
+
+    def _wait_for_owner(self):
+        stdout = self.owner.stdout
+        deadline = time.monotonic() + WATCHDOG_SECONDS
+        line = bytearray()
+        while b'\n' not in line:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([stdout], [], [], remaining)[0]:
+                raise TimeoutError('PTY fixture owner readiness watchdog')
+            chunk = os.read(stdout.fileno(), 4096)
+            if not chunk or len(line) + len(chunk) > OUTPUT_LIMIT:
+                raise RuntimeError('PTY fixture owner did not publish readiness')
+            line.extend(chunk)
+        if json.loads(line.partition(b'\n')[0]).get('event') != 'ready':
+            raise RuntimeError('PTY fixture owner did not publish readiness')
+
+    def _stop_owner(self):
+        if self.owner is None:
+            return
+        try:
+            if self.owner.poll() is None:
+                self.owner.terminate()
+            try:
+                self.owner.wait(timeout=WATCHDOG_SECONDS)
+            except subprocess.TimeoutExpired:
+                self.owner.kill()
+                self.owner.wait()
+        finally:
+            self.owner.stdout.close()
+            self.owner = None
 
     def text(self):
         return self.frames.completed_text
@@ -208,6 +245,7 @@ class Terminal:
             if self.process and self.process.returncode and error is None and not force:
                 error = RuntimeError('TUI exit status: ' + str(self.process.returncode))
         finally:
+            self._stop_owner()
             if self.master is not None:
                 os.close(self.master)
                 self.master = None

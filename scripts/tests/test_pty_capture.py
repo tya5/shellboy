@@ -53,7 +53,7 @@ while sys.stdin.buffer.read(1) != b'\x11': pass
 '''
         from unittest.mock import patch
         with patch.dict(os.environ, {'SHELLBOY_THREAD_ID': 'must-not-leak', 'SYNTHETIC_API_KEY': 'not-a-secret', 'SYNTHETIC_PRIVATE_VALUE': 'not-a-secret'}):
-            terminal = capture.Terminal([sys.executable, '-c', source], cols=20, rows=4, no_color=True)
+            terminal = capture.Terminal([sys.executable, '-c', source], cols=20, rows=4, no_color=True, synthetic_child=True)
         root = terminal.root
         try:
             self.assertIn('READY', terminal.expect(lambda text: 'READY' in text, 'ready'))
