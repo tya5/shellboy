@@ -713,7 +713,12 @@ async fn repeated_term_keeps_one_owner_drain_until_storage_can_finish() {
     fixture.owner.signal(libc::SIGTERM);
     assert!(fixture.owner.child.try_wait().unwrap().is_none());
     hold.execute_batch("ROLLBACK").unwrap();
-    assert!(fixture.owner.exited().await.success());
+    let status = fixture.owner.exited().await;
+    assert!(
+        status.success(),
+        "{status}\n{}",
+        fixture.shutdown_diagnostic()
+    );
     fixture.assert_graceful();
     fixture.owner.native_group = None;
 }
