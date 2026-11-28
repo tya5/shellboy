@@ -53,6 +53,7 @@ pub(super) async fn prepare_attempt(
     slot: &DriverSlot,
     instruction_body: Option<&Arc<str>>,
     client: &HttpModelClient,
+    tail: Option<&Value>,
 ) -> Result<
     Option<model::request_path::PreparedInput<Arc<crate::attachments::PreparedAttachments>>>,
     ApiError,
@@ -74,7 +75,8 @@ pub(super) async fn prepare_attempt(
         }
     };
     snapshot.cache_diagnostics_enabled = client.cache_diagnostics_enabled();
-    let (mut request, tags) = match prepare_request(snapshot, instruction_body, &mut prepared) {
+    let (mut request, tags) = match prepare_request(snapshot, instruction_body, &mut prepared, tail)
+    {
         Ok(prepared) => prepared,
         Err(error) => return fail_turn(control, snapshot, error).await,
     };
@@ -299,6 +301,7 @@ pub(super) fn prepare_request(
     snapshot: &Snapshot,
     instruction_body: Option<&Arc<str>>,
     prepared: &mut crate::attachments::PreparedAttachments,
+    tail: Option<&Value>,
 ) -> Result<(Value, Vec<ItemTag>), ApiError> {
     let mut input = leading_items(&snapshot.agents, instruction_body.map(|body| &**body))?;
     let mut tags = vec![ItemTag::new(Category::System)];
@@ -308,6 +311,10 @@ pub(super) fn prepare_request(
     // The context line is saved history (#183), so the replay already holds it.
     if let Some(replay) = &snapshot.input {
         crate::control::attachment_input::bind(replay, prepared, &mut input, &mut tags)?;
+    }
+    if let Some(item) = tail {
+        input.push(item.clone());
+        tags.push(ItemTag::new(Category::Context));
     }
     let mut request =
         model::response_request(&snapshot.model, input, snapshot.effort.as_deref(), true);

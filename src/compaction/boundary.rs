@@ -30,6 +30,18 @@ impl<'a> Boundary<'a> {
         self.guard = Some(guard);
         Ok(outcome)
     }
+    /// Like pause, but the wait owns cancellation and must finish cleanup before returning.
+    pub(crate) async fn pause_owned<T>(
+        &mut self,
+        cancel: &CancellationToken,
+        wait: impl Future<Output = T>,
+    ) -> Result<T, PauseError> {
+        drop(self.guard.take());
+        let outcome = wait.await;
+        let guard = tokio::select! { biased; _ = cancel.cancelled() => return Err(PauseError::Cancelled), guard = self.mutex.lock() => guard };
+        self.guard = Some(guard);
+        Ok(outcome)
+    }
     pub(crate) fn is_held(&self) -> bool {
         self.guard.is_some()
     }

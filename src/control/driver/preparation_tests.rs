@@ -2045,7 +2045,8 @@ async fn admitted_attempt_records_the_exact_sent_body_bytes_by_source() {
         .unwrap();
     let instructions: Arc<str> = Arc::from("Working instructions 日本語");
     let (mut request, tags) =
-        super::request::prepare_request(&snapshot, Some(&instructions), &mut prepared).unwrap();
+        super::request::prepare_request(&snapshot, Some(&instructions), &mut prepared, None)
+            .unwrap();
     model::configure_shell_description(&mut request, control.store.config.shell.describe_calls);
     let client = HttpModelClient::new(control.store.config.connections["fixture"].clone()).unwrap();
     snapshot.input_bytes = client
@@ -2436,7 +2437,7 @@ async fn ordinary_admission_and_completion_preserve_long_model_names_with_gc_ena
                 .await
                 .unwrap();
             let (request, _) =
-                super::request::prepare_request(&snapshot, None, &mut prepared).unwrap();
+                super::request::prepare_request(&snapshot, None, &mut prepared, None).unwrap();
             let prepared = Arc::new(prepared);
             let attempt = id();
             assert!(
