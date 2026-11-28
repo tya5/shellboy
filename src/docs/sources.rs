@@ -331,7 +331,7 @@ fn sorted_names(path: &Path) -> Result<Vec<std::ffi::OsString>, String> {
     if names.len() > CAP {
         return Err(TOO_WIDE.into());
     }
-    names.sort_unstable();
+    names.sort_unstable_by(|a, b| a.as_encoded_bytes().cmp(b.as_encoded_bytes()));
     Ok(names)
 }
 
@@ -345,7 +345,7 @@ fn child(
     };
     let rel = child_path(parent, name);
     if rel.len() > 4096 {
-        return Ok(None);
+        return Err("path_too_long".into());
     }
     // The parent was checked when opening its sorted name list. Do not follow a child symlink.
     let meta = fs::symlink_metadata(root.join(&rel)).map_err(io_error)?;
@@ -604,7 +604,16 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
             sources,
             limit: count,
             cursor,
-        } => search(query, parent, sources, count, cursor, rows, version),
+        } => search(
+            query,
+            parent,
+            sources,
+            count,
+            cursor,
+            rows,
+            version,
+            SEARCH_DIRECTORY_BYTES,
+        ),
         other => super::execute(other),
     }
 }
@@ -633,18 +642,104 @@ fn bundled_list(parent: Option<String>) -> Result<Vec<Value>, String> {
         .clone())
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default)]
 struct SearchPosition {
     bundled: usize,
     source: usize,
     frames: Vec<Frame>,
     file: Option<(String, usize, String)>,
 }
-#[derive(Serialize, Deserialize)]
 struct Frame {
     name: String,
-    next: usize,
+    after: Vec<u8>,
     revision: String,
+}
+
+// Keep enough room for the last native filename and 32 directory revision witnesses.
+const SEARCH_DIRECTORY_BYTES: usize = 3072;
+
+#[derive(Default, Serialize, Deserialize)]
+struct SearchMark {
+    bundled: usize,
+    source: usize,
+    path: String,
+    revisions: Vec<String>,
+    file: Option<(usize, String)>,
+}
+
+impl SearchMark {
+    fn from_position(pos: &SearchPosition) -> Self {
+        let mut path = frame_path(&pos.frames).into_bytes();
+        if let Some(frame) = pos.frames.last() {
+            if !path.is_empty() {
+                path.push(b'/');
+            }
+            path.extend(&frame.after);
+        } else if let Some((name, _, _)) = &pos.file {
+            path.extend(name.as_bytes());
+        }
+        Self {
+            bundled: pos.bundled,
+            source: pos.source,
+            path: URL_SAFE_NO_PAD.encode(path),
+            revisions: pos
+                .frames
+                .iter()
+                .map(|frame| frame.revision.clone())
+                .collect(),
+            file: pos
+                .file
+                .as_ref()
+                .map(|(_, offset, rev)| (*offset, rev.clone())),
+        }
+    }
+
+    fn resume(self, root: &str) -> Result<SearchPosition, String> {
+        let invalid = "cursor_expired: Invalid search position";
+        let path = URL_SAFE_NO_PAD.decode(self.path).map_err(|_| invalid)?;
+        let mut pos = SearchPosition {
+            bundled: self.bundled,
+            source: self.source,
+            ..Default::default()
+        };
+        if self.revisions.len() > 32 {
+            return Err(invalid.into());
+        }
+        let last = if self.revisions.is_empty() {
+            path.as_slice()
+        } else {
+            let tail = if root.is_empty() {
+                path.as_slice()
+            } else {
+                path.strip_prefix(root.as_bytes())
+                    .and_then(|tail| tail.strip_prefix(b"/"))
+                    .ok_or(invalid)?
+            };
+            let parts: Vec<_> = tail.split(|&b| b == b'/').collect();
+            if parts.len() != self.revisions.len() {
+                return Err(invalid.into());
+            }
+            let mut name = root;
+            for (part, revision) in parts.iter().zip(self.revisions) {
+                pos.frames.push(Frame {
+                    name: name.into(),
+                    after: part.to_vec(),
+                    revision,
+                });
+                // The final key may be an unprojectable native filename.
+                name = std::str::from_utf8(part).unwrap_or("");
+            }
+            parts.last().copied().ok_or(invalid)?
+        };
+        if let Some((offset, rev)) = self.file {
+            pos.file = Some((
+                std::str::from_utf8(last).map_err(|_| invalid)?.into(),
+                offset,
+                rev,
+            ));
+        }
+        Ok(pos)
+    }
 }
 
 fn frame_path(frames: &[Frame]) -> String {
@@ -682,6 +777,7 @@ fn search(
     cursor: Option<String>,
     rows: &[Registration],
     version: &str,
+    directory_bytes: usize,
 ) -> Result<Value, String> {
     limit(count, SEARCH_WORK)?;
     if query.trim().is_empty() || query.len() > 4096 {
@@ -700,8 +796,13 @@ fn search(
     }
     let scope =
         hash(serde_json::to_vec(&json!(["search", query, parent, sources])).expect("scope"));
-    let mut pos: SearchPosition = decode_cursor(cursor.as_deref(), version, &scope, 40_000)?;
-    if pos.frames.len() > 32 || pos.bundled > BUNDLED.docs.len() || pos.source > rows.len() {
+    let root_rel = parent
+        .as_deref()
+        .and_then(|p| p.split_once('/'))
+        .map_or("", |p| p.1);
+    let mark: SearchMark = decode_cursor(cursor.as_deref(), version, &scope, CURSOR_BYTES)?;
+    let mut pos = mark.resume(root_rel)?;
+    if pos.bundled > BUNDLED.docs.len() || pos.source > rows.len() {
         return Err("cursor_expired: Invalid search position".into());
     }
     let needle = query.to_lowercase();
@@ -805,14 +906,16 @@ fn search(
         }
         if pos.frames.is_empty() {
             work += 1;
-            let rel = parent
-                .as_deref()
-                .and_then(|p| p.split_once('/'))
-                .map_or("", |p| p.1);
+            let rel = root_rel;
+            if rel.len() > directory_bytes {
+                unavailable.push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
+                pos.source += 1;
+                continue;
+            }
             match under(root, rel) {
                 Ok(path) if path.is_dir() => pos.frames.push(Frame {
                     name: rel.into(),
-                    next: 0,
+                    after: Vec::new(),
                     revision: revision(&path),
                 }),
                 Ok(path) if path.is_file() && rel.ends_with(".md") => {
@@ -856,15 +959,14 @@ fn search(
             }
             let names = &page_dirs[&key];
             work += 1;
-            let Some(name) = names.get(frame.next) else {
-                if frame.next > names.len() {
-                    return Err("cursor_expired: Invalid directory position".into());
-                }
+            let next =
+                names.partition_point(|name| name.as_encoded_bytes() <= frame.after.as_slice());
+            let Some(name) = names.get(next) else {
                 page_dirs.remove(&key);
                 pos.frames.pop();
                 continue;
             };
-            frame.next += 1;
+            frame.after = name.as_encoded_bytes().to_vec();
             let (rel, path, directory) = match child(root, &parent, name) {
                 Ok(Some(entry)) => entry,
                 Ok(None) => continue,
@@ -876,12 +978,15 @@ fn search(
             let name = name.to_string_lossy().into_owned();
             let rev = revision(&path);
             if directory {
-                if pos.frames.len() >= 32 {
+                if rel.len() > directory_bytes {
+                    unavailable
+                        .push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
+                } else if pos.frames.len() >= 32 {
                     unavailable.push(json!({"source":row.name,"path":rel,"reason":"depth_limit"}));
                 } else {
                     pos.frames.push(Frame {
                         name,
-                        next: 0,
+                        after: Vec::new(),
                         revision: rev,
                     });
                 }
@@ -895,7 +1000,11 @@ fn search(
         }
     }
     let next = if pos.source < rows.len() || pos.bundled < bundled.len() {
-        Some(next_cursor(version, &scope, pos))
+        Some(next_cursor(
+            version,
+            &scope,
+            SearchMark::from_position(&pos),
+        ))
     } else {
         None
     };
@@ -908,6 +1017,47 @@ fn search(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn deep_escaped_search_resumes_and_reports_a_path_that_cannot_be_continued() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
+        let component = "\"".repeat(180);
+        let relative = vec![component.as_str(); 3].join("/");
+        let deep = path.join(&relative);
+        fs::create_dir_all(deep.join(format!("z{component}"))).unwrap();
+        fs::write(deep.join("a.md"), "cursor-witness").unwrap();
+        fs::write(deep.join("b.md"), "cursor-witness").unwrap();
+        let rows = [Registration {
+            name: "local".into(),
+            path,
+        }];
+        let search = |cursor| {
+            search(
+                "cursor-witness".into(),
+                Some("local".into()),
+                vec!["local".into()],
+                1,
+                cursor,
+                &rows,
+                "fixture",
+                650,
+            )
+            .unwrap()
+        };
+        let first = search(None);
+        assert_eq!(first["items"][0]["id"], format!("local/{relative}/a.md"));
+        let cursor = first["next_cursor"].as_str().unwrap();
+        let second = search(Some(cursor.into()));
+        assert_eq!(second["items"][0]["id"], format!("local/{relative}/b.md"));
+        let last = search(Some(second["next_cursor"].as_str().unwrap().into()));
+        assert_eq!(last["unavailable"][0]["reason"], "path_too_long");
+        assert_eq!(
+            last["unavailable"][0]["path"],
+            format!("{relative}/z{component}")
+        );
+    }
 
     #[test]
     fn over_cap_folder_reports_its_branch_and_keeps_healthy_docs_visible() {
