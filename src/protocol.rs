@@ -347,6 +347,7 @@ pub fn schema_json() -> String {
     add_root!("ConfigCredentialsFileView", ConfigCredentialsFileView);
     add_root!("ConfigRestartView", ConfigRestartView);
     add_root!("ConfigGetResult", ConfigGetResult);
+    add_root!("OperationStability", crate::operations::Stability);
     let operation_results = operation_result_schemas(&mut generator);
     for (name, schema) in generator.take_definitions(false) {
         definitions.entry(name).or_insert(schema);
@@ -380,6 +381,7 @@ pub fn schema_json() -> String {
         "protocol_version": PROTOCOL_VERSION,
         "capabilities": PROTOCOL_CAPABILITIES,
         "operation_results": operation_results,
+        "operation_stability": crate::operations::experimental_operations(),
         "opaque_result_note": "A true operation schema means the result is opaque JSON, not yet represented by a stable Rust result record.",
         "definitions": definitions
     });
