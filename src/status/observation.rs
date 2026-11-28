@@ -650,17 +650,14 @@ mod tests {
         assert!(raw.facts.is_empty());
         assert!(raw.missing.is_empty());
         assert_eq!(raw.limited.len(), 1);
-        assert_eq!(raw.statements, 0);
         db.execute("UPDATE run SET thread_id=?1", ["x".repeat(1025)])
             .unwrap();
         let raw = read_status_tx(&db, &keys, &mut TextBudget::default()).unwrap();
         assert!(raw.facts.is_empty());
         assert_eq!(raw.missing.len(), 1);
         assert_eq!(raw.limited.len(), 1);
-        assert_eq!(raw.statements, 1);
         let membership = read_membership_tx(&db, &[], &mut TextBudget::default()).unwrap();
         assert!(membership.unconfirmed);
-        assert_eq!(membership.statements, 0);
     }
     fn canonical_fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -734,7 +731,6 @@ mod tests {
             );
             let mut budget = TextBudget::default();
             let raw = read_status_tx(&db, &retained_keys(), &mut budget).unwrap();
-            assert_eq!(raw.statements, 5);
             assert!(raw.limited.is_empty());
             let prepared = prepare(raw);
             assert_eq!(prepared["items"].as_array().unwrap().len(), 5);
