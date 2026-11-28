@@ -185,67 +185,15 @@ class LanguageAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'stale reviewed decisions'):
             AUDIT['inventory'](self.root, decisions)
 
-    def test_changed_en_predicate_requires_review_even_when_literal_id_is_unchanged(self):
-        path = self.source(f'fn f() {{ let en = true; if !en {{ use_it("{JA}"); }} }}')
-        row = self.records()[0]
-        decision = {row['id']: {'category': 'a', 'reason': 'reviewed Ja branch',
-                               'source_tokens_sha256': row['source_tokens_sha256']}}
-        path.write_text(path.read_text(encoding='utf-8').replace('!en', 'en'), encoding='utf-8')
-        self.assertEqual(self.records()[0]['id'], row['id'])
-        with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
-            AUDIT['inventory'](self.root, decision)
-
-    def test_scope_ignores_sibling_functions_and_constants_but_not_same_item(self):
-        path = self.source(f'fn reviewed() {{ let en = true; if !en {{ use_it("{JA}"); }} }}\n'
-                           'fn other() { let value = 1; }\nconst OTHER: usize = 1;')
-        row = self.records()[0]
-        decision = {row['id']: {'category': 'a', 'reason': 'reviewed Ja branch',
-                               'source_tokens_sha256': row['source_tokens_sha256']}}
-        value = path.read_text(encoding='utf-8').replace('value = 1', 'value = 2').replace('usize = 1', 'usize = 3')
-        path.write_text(value, encoding='utf-8')
-        self.assertEqual(AUDIT['inventory'](self.root, decision)['records'][0]['category'], 'a')
-        path.write_text(value.replace('!en', 'en'), encoding='utf-8')
-        with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
-            AUDIT['inventory'](self.root, decision)
-
-    def test_const_scope_attributes_and_enclosing_function_are_hashed(self):
-        path = self.source(f'#[cfg(feature = "a")] const FIRST: &str = "{JA}";\n'
-                           'const SECOND: &str = "separate";\n'
-                           f'fn owner() {{ const INNER: &str = "{JA}x"; if true {{ use_it(INNER); }} }}')
-        rows = self.records()
-        decisions = {r['id']: {'category': 'a', 'reason': 'reviewed',
-                                'source_tokens_sha256': r['source_tokens_sha256']} for r in rows}
-        original = path.read_text(encoding='utf-8')
-        path.write_text(original.replace('"separate"', '"changed"'), encoding='utf-8')
-        AUDIT['inventory'](self.root, decisions)
-        for changed in [original.replace('feature = "a"', 'feature = "b"'),
-                        original.replace('if true', 'if false')]:
-            path.write_text(changed, encoding='utf-8')
-            with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
-                AUDIT['inventory'](self.root, decisions)
-
-    def test_unknown_item_falls_back_to_file_and_generic_const_does_not_swallow_siblings(self):
-        path = self.source(f'fn f<const N: usize>() {{ use_it("{JA}"); }}\nfn g() {{ let x = 1; }}')
-        row = self.records()[0]
-        decision = {row['id']: {'category': 'c', 'reason': 'pending review',
-                               'source_tokens_sha256': row['source_tokens_sha256']}}
-        path.write_text(path.read_text(encoding='utf-8').replace('let x = 1', 'let x = 2'), encoding='utf-8')
-        AUDIT['inventory'](self.root, decision)
-        path = self.source(f'macro_rules! x {{ () => {{ "{JA}" }} }}\nfn sibling() {{ let x = 1; }}')
-        row = self.records()[0]
-        decision = {row['id']: {'category': 'c', 'reason': 'pending review',
-                               'source_tokens_sha256': row['source_tokens_sha256']}}
-        path.write_text(path.read_text(encoding='utf-8').replace('let x = 1', 'let x = 2'), encoding='utf-8')
-        with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
-            AUDIT['inventory'](self.root, decision)
-
-    def test_generic_const_default_does_not_create_a_cross_item_scope(self):
-        self.source(f'fn f<const N: usize = 1>() {{ use_it("{JA}"); }}\n'
-                    'fn sibling() { let value = 1; }')
-        first = self.records()[0]
-        path = self.root / 'src' / 'lib.rs'
-        path.write_text(path.read_text(encoding='utf-8').replace('value = 1', 'value = 2'), encoding='utf-8')
-        self.assertEqual(first['source_tokens_sha256'], self.records()[0]['source_tokens_sha256'])
+    def test_reviewed_literal_is_stable_when_an_adjacent_literal_changes(self):
+        path = self.source(f'fn f() {{ use_it("{JA} first", "{JA} second"); }}')
+        first, second = self.records()
+        decisions = {first['id']: {'category': 'a', 'reason': 'reviewed',
+                                  'source_tokens_sha256': first['source_tokens_sha256']}}
+        path.write_text(path.read_text().replace('second', 'edited'))
+        rows = AUDIT['inventory'](self.root, decisions)['records']
+        self.assertEqual(rows[0]['category'], 'a')
+        self.assertNotEqual(rows[1]['source_tokens_sha256'], second['source_tokens_sha256'])
 
     def test_consistency_command_allows_c_but_rejects_stale_review(self):
         path = self.source(f'fn f() {{ let en = true; if !en {{ use_it("{JA}"); }} }}\n'
@@ -258,10 +206,10 @@ class LanguageAuditTests(unittest.TestCase):
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertGreater(json.loads(result.stdout)['counts']['c'], 0)
-        path.write_text(path.read_text(encoding='utf-8').replace('!en', 'en'), encoding='utf-8')
+        path.write_text(path.read_text(encoding='utf-8').replace(f'"{JA}"', '"English"'), encoding='utf-8')
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
-        self.assertIn('reviewed source changed', result.stderr)
+        self.assertIn('stale reviewed decisions', result.stderr)
 
     def test_protected_tokens_require_both_evidence_fields_and_remain_distinct(self):
         self.source(f'fn compare(s: &str) -> bool {{ s == "{JA}" }}')

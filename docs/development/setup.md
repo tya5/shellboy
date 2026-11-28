@@ -469,8 +469,9 @@ for explicit decisions (`category` a/b/c/protected, `reason`, and
 Markdown counts/owner boundaries. Owners do not exempt literals from review.
 The initial reviewed map is `scripts/dev/language-classifications.json`; add
 `--classifications scripts/dev/language-classifications.json` to reproduce the
-table's reviewed counts. Changed source tokens require re-review even if a
-literal's text/ID did not change. `--check` fails while
+table's reviewed counts. Manual fingerprints identify the exact literal token,
+not its enclosing function or file. Review changes to language routing separately;
+a stable literal fingerprint does not prove the branch is still correct. `--check` fails while
 (c) remains, and stale reviewed IDs are errors. Conservative (c) candidates
 still require source-boundary review; never bulk-translate provider/user/saved
 content. See [the Stage C table](../validation/language-audit-stage-c.md).

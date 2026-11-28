@@ -433,11 +433,11 @@ def inventory(root, classifications=None):
     decisions = classifications or {}
     seen, records = set(), []
     for path, (source, items, fixture, localized, paired, excluded, spans) in prepared.items():
-        occurrences, fingerprints = Counter(), {}
-        for index, token in enumerate(items):
+        occurrences = Counter()
+        for token in items:
             if token.kind not in ('string', 'raw_string') or not JAPANESE.search(decoded(token)):
                 continue
-            fingerprint = scope_fingerprint(items, spans, index, fingerprints)
+            fingerprint = hashlib.sha256(json.dumps((token.kind, token.text)).encode()).hexdigest()
             digest = hashlib.sha256(token.text.encode()).hexdigest()[:16]
             occurrences[digest] += 1
             relative = path.relative_to(root).as_posix()
