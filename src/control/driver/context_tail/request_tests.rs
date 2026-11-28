@@ -83,12 +83,19 @@ async fn inspect_only_attempt(
         .await;
     assert!(status.ok, "{:?}", status.error);
     let page = status.result.unwrap();
-    let items = page["items"].as_array().unwrap();
-    assert_eq!(items.len(), 1, "{page}");
+    let mut attempts = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["kind"] == "attempt");
+    let attempt = attempts
+        .next()
+        .expect("status includes the admitted attempt");
+    assert!(attempts.next().is_none(), "{page}");
     let inspected = crate::request_inspect::execute(
         crate::request_inspect::RequestOptions {
             thread_id,
-            attempt_id: Some(items[0]["id"].as_str().unwrap().into()),
+            attempt_id: Some(attempt["id"].as_str().unwrap().into()),
             compare_attempt_id: None,
             body: true,
         },
