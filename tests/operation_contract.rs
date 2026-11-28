@@ -899,6 +899,39 @@ async fn thread_count(data: &std::path::Path) -> usize {
 }
 
 #[tokio::test]
+async fn call_with_welcome_keeps_the_request_handshake_even_when_admission_rolls_epoch() {
+    let (_root, owner, server, serving) = full_owner().await;
+    let data = &owner.loaded.data_dir;
+    let (before, refused) = shellboy::ipc::call_with_welcome(data, create_thread(), None, None)
+        .await
+        .unwrap();
+    assert_eq!(before.instance_id, owner.instance_id);
+    assert!(
+        refused
+            .operation_id
+            .starts_with(&format!("{}:", before.operation_epoch))
+    );
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, ErrorCode::StorageLimit);
+    assert_eq!(error.details.unwrap()["reason"], "operation_epoch_rolled");
+    let (after, created) = shellboy::ipc::call_with_welcome(data, create_thread(), None, None)
+        .await
+        .unwrap();
+    assert_eq!(after.instance_id, before.instance_id);
+    assert_ne!(after.operation_epoch, before.operation_epoch);
+    assert!(created.ok, "{:?}", created.error);
+    assert!(
+        created
+            .operation_id
+            .starts_with(&format!("{}:", after.operation_epoch))
+    );
+    assert_eq!(thread_count(data).await, 1);
+    server.shutdown().await.unwrap();
+    serving.abort();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn client_mutation_after_an_epoch_roll_mints_in_the_new_epoch_and_applies_once() {
     let (_root, owner, server, serving) = full_owner().await;
     let data = owner.loaded.data_dir.clone();
