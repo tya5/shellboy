@@ -2354,22 +2354,23 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })))
     .await
     .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
+    let operation_id = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let count = observer
+            let pending = observer
                 .store
                 .database
                 .call(|db| {
+                    use rusqlite::OptionalExtension;
                     Ok(db.query_row(
-                        "SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
+                        "SELECT substr(key,length('wait.pending.')+1) FROM app_meta WHERE key LIKE 'wait.pending.%'",
                         [],
-                        |row| row.get::<_, i64>(0),
-                    )?)
+                        |row| row.get::<_, String>(0),
+                    ).optional()?)
                 })
                 .await
                 .unwrap();
-            if count == 1 {
-                break;
+            if let Some(operation_id) = pending {
+                break operation_id;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -2384,7 +2385,45 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         _ => None,
     })
     .await;
-    assert_eq!(field(&outcome, "/status"), "interrupted");
+    assert_eq!(field(&outcome, "/status"), "cancelled");
+    assert_eq!(field(&outcome, "/request_operation_id"), operation_id);
+    let data = root.path().join("data");
+    let receipt = shellboy::ipc::call(
+        &data,
+        Command::OperationGet(OperationTarget {
+            operation_id: operation_id.clone(),
+        }),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(receipt.ok, "{:?}", receipt.error);
+    let receipt = receipt.result.unwrap();
+    assert_eq!(receipt["state"], "completed");
+    assert_eq!(
+        receipt.pointer("/outcome/result/status").unwrap(),
+        "cancelled"
+    );
+    for (id, reason) in [
+        (operation_id, "already_settled"),
+        ("unknown-wait".into(), "unknown_operation"),
+    ] {
+        let response = shellboy::ipc::call(
+            &data,
+            Command::OperationCancel(OperationTarget {
+                operation_id: id.clone(),
+            }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!response.ok);
+        let details = response.error.unwrap().details.unwrap();
+        assert_eq!(details["reason"], reason);
+        assert_eq!(details["target_operation_id"], id);
+    }
     send.send(UiAction::LoadManagementDetail {
         detail_request_id: 1,
         request_id: report_id,

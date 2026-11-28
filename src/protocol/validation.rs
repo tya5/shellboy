@@ -1130,7 +1130,9 @@ impl Command {
                 }
                 Ok(())
             }
-            Self::OperationGet(a) => nonempty(&a.operation_id, "operation_id"),
+            Self::OperationGet(a) | Self::OperationCancel(a) => {
+                nonempty(&a.operation_id, "operation_id")
+            }
             Self::RunGet(a) => nonempty(&a.run_id, "run_id"),
             Self::RunRetry(a) => {
                 nonempty(&a.run_id, "run_id")?;

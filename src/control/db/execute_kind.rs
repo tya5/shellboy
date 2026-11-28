@@ -67,7 +67,7 @@ named_jobs! {
     ThreadDeletePreview => thread_delete_preview, ThreadDeleteSetPreview => thread_delete_set_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
     ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadCwds => thread_cwds, ThreadSet => thread_set,
     MessageSend => message_send, MessageAsk => message_ask, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get, MessageList => message_list, IdResolve => id_resolve,
-    OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
+    OperationGet => operation_get, OperationCancel => operation_cancel, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
     TurnInterrupt => turn_interrupt, ShellBackground => shell_background, TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryRecall => history_recall, HistoryReceived => history_received, HistoryRead => history_read,
     HistorySearch => history_search, HistoryRelations => history_relations, HistoryExport => history_export, ShellGet => shell_get,
     ShellRead => shell_read, ShellWrite => shell_write, ShellEof => shell_eof, ShellStop => shell_stop,
@@ -209,6 +209,7 @@ impl Kind {
             | Kind::ConfigSet
             | Kind::CredentialsSet
             | Kind::CredentialsClear
+            | Kind::OperationCancel
             | Kind::ConnectionTest => Runtime,
         }
     }

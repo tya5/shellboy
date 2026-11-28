@@ -13,7 +13,11 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_VERSION: u32 = 42;
-pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity", "id.resolve"];
+pub const PROTOCOL_CAPABILITIES: &[&str] = &[
+    "events.reasoning_activity",
+    "id.resolve",
+    "operation.cancel",
+];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PENDING_REPLY_DUTIES: u64 = 16;
 pub const MAX_SYNC_DELETION_REPLY_DUTIES: u64 = 16;
@@ -106,6 +110,7 @@ fn operation_result_schemas(
     result!("message.list", MessageListPage);
     result!("message.cancel", MessageCancelResult);
     result!("operation.get", OperationReceiptDetails);
+    result!("operation.cancel", OperationCancelResult);
     result!("run.get", RunDetails);
     opaque!("run.retry");
     opaque!("run.stop");
@@ -484,6 +489,7 @@ states!(Assignment {
 });
 states!(WaitStatus {
     Satisfied,
+    Cancelled,
     Timeout,
     Interrupted,
     RecoveryWait,
@@ -1202,6 +1208,10 @@ record!(MessageSource {
     selection_revision: u64,
     text: String,
     attachments: Vec<crate::draft::UiAttachment>,
+});
+record!(OperationCancelResult {
+    operation_id: String,
+    cancel_requested: bool
 });
 args!(OperationTarget {
     operation_id: String
@@ -2192,6 +2202,7 @@ pub enum Command {
     MessageCancel(MessageCancelArgs),
     #[serde(rename = "operation.get")]
     OperationGet(OperationTarget),
+    OperationCancel(OperationTarget),
     #[serde(rename = "run.get")]
     RunGet(RunTarget),
     #[serde(rename = "run.retry")]

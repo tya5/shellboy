@@ -75,6 +75,14 @@ pub(super) struct RuntimeOperation {
     pub(super) fingerprint: Value,
     pub(super) deferred_shell_stop: Option<String>,
     pub(super) receive: RuntimeObserver,
+    pub(super) observation_cancel: ObservationCancel,
+}
+
+#[derive(Clone)]
+pub(super) enum ObservationCancel {
+    Unsupported,
+    Active(CancellationToken),
+    Ended,
 }
 
 impl Control {
@@ -87,7 +95,9 @@ impl Control {
         debug_assert!(!request.command.requires_receipt());
         if !request.command.runtime_cancellable() {
             // IndexStatus is an already queued finite DB read, as before.
-            return self.runtime_action(request, caller, disconnected).await;
+            return self
+                .runtime_action(request, caller, disconnected, None)
+                .await;
         }
         let cancelled = disconnected.clone();
         // The outer admitted request owns this bounded observation. Existing
@@ -99,7 +109,7 @@ impl Control {
             _ = cancelled.cancelled() => Err(ApiError::new(ErrorCode::InvalidState,
                 "Observation caller disconnected; no operation receipt was created")
                 .hint("Repeat the observation for fresh state; a semantic search may incur another query embedding charge")),
-            result = self.runtime_action(request, caller, disconnected) => result,
+            result = self.runtime_action(request, caller, disconnected, None) => result,
         }
     }
 
@@ -129,12 +139,17 @@ impl Control {
             operation.receive.clone()
         } else {
             let (send, receive) = tokio::sync::watch::channel(None);
+            let cancel_observation =
+                matches!(request.command, Command::Wait(_)).then(CancellationToken::new);
             operations.insert(
                 request.operation_id.clone(),
                 RuntimeOperation {
                     fingerprint,
                     deferred_shell_stop: None,
                     receive: receive.clone(),
+                    observation_cancel: cancel_observation
+                        .clone()
+                        .map_or(ObservationCancel::Unsupported, ObservationCancel::Active),
                 },
             );
             let control = self.clone();
@@ -184,12 +199,27 @@ impl Control {
                             super::schedule::delete(&control, request).await
                         } else {
                             let cancellable = request.command.runtime_cancellable();
-                            let action = control.runtime_action(request, caller, disconnected);
+                            let observes = cancel_observation.is_some();
+                            let action = control.runtime_action(
+                                request,
+                                caller,
+                                disconnected,
+                                cancel_observation,
+                            );
                             let result = if cancellable {
                                 tokio::select! {biased;_=control.stop.cancelled()=>Err(ApiError::new(ErrorCode::InvalidState,"Owner stopped this operation; inspect saved jobs and retry explicitly")),result=action=>result}
                             } else {
                                 action.await
                             };
+                            if observes
+                                && let Some(operation) = control
+                                    .runtime_operations
+                                    .lock()
+                                    .await
+                                    .get_mut(&operation_id)
+                            {
+                                operation.observation_cancel = ObservationCancel::Ended;
+                            }
                             if result
                                 .as_ref()
                                 .err()
@@ -336,12 +366,78 @@ impl Control {
         }
     }
 
+    async fn cancel_operation(&self, operation_id: String) -> Result<Value, ApiError> {
+        let refusal = |reason, message| {
+            ApiError::new(ErrorCode::InvalidState, message)
+                .details(json!({"reason":reason,"target_operation_id":operation_id}))
+        };
+        if let Some(operation) = self.runtime_operations.lock().await.get(&operation_id) {
+            if let ObservationCancel::Active(cancel) = &operation.observation_cancel {
+                cancel.cancel();
+                return encode_result(
+                    crate::protocol::OperationCancelResult {
+                        operation_id,
+                        cancel_requested: true,
+                    },
+                    ErrorCode::InvalidState,
+                    "Cannot encode operation cancellation",
+                );
+            }
+            if operation.receive.borrow().is_some()
+                || matches!(operation.observation_cancel, ObservationCancel::Ended)
+            {
+                return Err(refusal(
+                    "already_settled",
+                    "The observation has already ended",
+                ));
+            }
+            return Err(refusal(
+                "not_cancellable",
+                "The operation is not a cancellable observation",
+            ));
+        }
+        let id = operation_id.clone();
+        let state = self
+            .store
+            .database
+            .call(move |db| {
+                use rusqlite::OptionalExtension;
+                db.query_row(
+                    "SELECT state FROM operation_receipt WHERE operation_id=?1",
+                    [&id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(Into::into)
+            })
+            .await
+            .map_err(storage_error)?;
+        match state.as_deref() {
+            Some("pending") => Err(refusal(
+                "not_cancellable",
+                "The operation is not a cancellable observation",
+            )),
+            Some(_) => Err(refusal(
+                "already_settled",
+                "The operation has already settled",
+            )),
+            None => Err(refusal(
+                "unknown_operation",
+                "No operation with that ID is known",
+            )),
+        }
+    }
+
     async fn runtime_action(
         self: &Arc<Self>,
         request: Request,
         caller: Option<Origin>,
         disconnected: CancellationToken,
+        cancel_observation: Option<CancellationToken>,
     ) -> Result<Value, ApiError> {
+        if let Command::OperationCancel(args) = request.command {
+            return self.cancel_operation(args.operation_id).await;
+        }
         if matches!(&request.command, Command::Status(a) if a.memory) {
             return self.memory_snapshot(disconnected).await;
         }
@@ -483,8 +579,14 @@ impl Control {
             }
             Command::EventsWait(args) => self.runtime_events_wait(args, disconnected).await,
             Command::Wait(args) => {
-                self.runtime_wait(request.operation_id, args, caller, disconnected)
-                    .await
+                self.runtime_wait(
+                    request.operation_id,
+                    args,
+                    caller,
+                    disconnected,
+                    cancel_observation,
+                )
+                .await
             }
             Command::ShellGet(args) => {
                 let mut result = encode_result(
@@ -849,13 +951,15 @@ impl Control {
         args: WaitArgs,
         caller: Option<Origin>,
         disconnected: CancellationToken,
+        cancel_observation: Option<CancellationToken>,
     ) -> Result<Value, ApiError> {
-        let result = wait::observe(
+        let result = wait::observe_cancellable(
             self.clone(),
             operation_id,
             args,
             caller.clone(),
             disconnected,
+            cancel_observation,
         )
         .await?;
         let failed_target = result

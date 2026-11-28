@@ -259,3 +259,20 @@ after the RFC3339 cutoff. It uses the same bounded page contract and continuatio
 with the cutoff included in the cursor scope. The TUI uses that result to
 subtract its own session-local seen Run identities; seen identities are neither
 sent to the owner nor persisted.
+
+## Exact operation observation cancellation
+
+An owner advertising `operation.cancel` accepts `operation.cancel` with the exact
+`operation_id` of an in-flight cancellable observation (`shellboy operation
+cancel --operation ID`). The call allocates no receipt. It may come from a
+separate connection to that owner. Initially only `wait` opts in. Success
+acknowledges the signal (`cancel_requested: true`), not the original outcome.
+The original Wait connection receives its normal receipt-backed reply, with
+`status: cancelled` when cancellation wins; a terminal observation can win first.
+Disconnect and owner interruption retain their existing `interrupted` semantics.
+Neither action stops the observed Run or other target work.
+
+Refusals use `error.details.reason`: `unknown_operation` for an unrecognized
+exact ID, `not_cancellable` for known active work that does not opt in, and
+`already_settled` for an operation that has ended. Refusals identify the
+requested target as `error.details.target_operation_id`.

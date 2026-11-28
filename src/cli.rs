@@ -534,6 +534,8 @@ pub enum OperationCommand {
         after_help = "  shellboy operation get --operation OPERATION_ID\n\nUse error.details.operation_id if an automatically assigned ID was returned after a connection failure. An unavailable receipt does not prove the side effect never happened. This lookup allocates no receipt. --operation selects the saved receipt; global --operation-id only identifies this lookup request. Guide: shellboy docs get --id shellboy/recovery-and-storage"
     )]
     Get(OperationOptions),
+    /// Cancel an exact in-flight observation, not the work it observes.
+    Cancel(OperationOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum RunCommand {
@@ -2292,6 +2294,11 @@ impl Cli {
                     message_ids: a.message_ids,
                 }),
             },
+            CliCommand::Operation {
+                command: OperationCommand::Cancel(a),
+            } => C::OperationCancel(wire::OperationTarget {
+                operation_id: a.operation_id,
+            }),
             CliCommand::Operation {
                 command: OperationCommand::Get(a),
             } => C::OperationGet(wire::OperationTarget {

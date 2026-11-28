@@ -75,6 +75,7 @@ impl Command {
             Self::MessageList(_) => ("message.list", CommandRoute::Database),
             Self::IdResolve(_) => ("id.resolve", CommandRoute::Database),
             Self::OperationGet(_) => ("operation.get", CommandRoute::Database),
+            Self::OperationCancel(_) => ("operation.cancel", CommandRoute::Runtime),
             Self::RunGet(_) => ("run.get", CommandRoute::Database),
             Self::RunRetry(_) => ("run.retry", CommandRoute::Database),
             Self::RunStop(_) => ("run.stop", CommandRoute::Database),
@@ -130,6 +131,7 @@ impl Command {
     /// Wait remains stateful: it owns registration and changes caller activity.
     pub(crate) fn requires_receipt(&self) -> bool {
         match self {
+            Self::OperationCancel(_) => false,
             Self::DraftImage(args) => matches!(args.action, super::DraftImageAction::Commit { .. }),
             _ => !self.is_read_only(),
         }
@@ -209,6 +211,7 @@ impl Command {
             | Self::MessageList(_)
             | Self::IdResolve(_)
             | Self::OperationGet(_)
+            | Self::OperationCancel(_)
             | Self::RunGet(_)
             | Self::RunRetry(_)
             | Self::RunStop(_)
@@ -295,6 +298,7 @@ impl Command {
             | Self::MessageList(_)
             | Self::IdResolve(_)
             | Self::OperationGet(_)
+            | Self::OperationCancel(_)
             | Self::RunGet(_)
             | Self::RunRetry(_)
             | Self::RunStop(_)
@@ -400,6 +404,7 @@ impl Command {
             | Self::MessageList(_)
             | Self::IdResolve(_)
             | Self::OperationGet(_)
+            | Self::OperationCancel(_)
             | Self::RunGet(_)
             | Self::TurnGet(_)
             | Self::Wait(_)
@@ -438,6 +443,7 @@ impl Command {
     /// Observes targets without changing their state; receipt metadata and API cost are separate.
     pub fn is_read_only(&self) -> bool {
         match self {
+            Self::OperationCancel(_) => false,
             Self::TurnInterrupt(_) | Self::ShellBackground(_) => false,
             Self::DraftGet(_) | Self::DraftList(_) | Self::DraftRestore(_) => true,
             Self::DraftSave(_) | Self::DraftSubmit(_) => false,
