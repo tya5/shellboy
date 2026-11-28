@@ -357,11 +357,23 @@ pub async fn call(
     operation_id: Option<String>,
     origin: Option<Origin>,
 ) -> Result<Response<Value>, ApiError> {
+    call_with_welcome(data_dir, command, operation_id, origin)
+        .await
+        .map(|(_, response)| response)
+}
+
+/// Return the validated Welcome and response from the same request connection.
+pub async fn call_with_welcome(
+    data_dir: &Path,
+    command: Command,
+    operation_id: Option<String>,
+    origin: Option<Origin>,
+) -> Result<(Welcome, Response<Value>), ApiError> {
     let endpoint = match environment_endpoint(data_dir)? {
         Some(endpoint) => endpoint,
         None => read_endpoint(data_dir).await?,
     };
-    connect(endpoint, command, operation_id, origin).await
+    connect_with_capability(endpoint, command, operation_id, origin, None, None).await
 }
 
 /// Use the selected directory's listener, not an inherited invocation endpoint.
@@ -486,7 +498,9 @@ pub async fn call_announcing(
         Some(endpoint) => endpoint,
         None => read_endpoint(data_dir).await?,
     };
-    connect_with_capability(endpoint, command, None, origin, None, Some(announce)).await
+    connect_with_capability(endpoint, command, None, origin, None, Some(announce))
+        .await
+        .map(|(_, response)| response)
 }
 
 /// Send a command only when the owner advertised the required capability in Welcome.
@@ -510,6 +524,7 @@ pub async fn call_requiring_capability(
         None,
     )
     .await
+    .map(|(_, response)| response)
 }
 
 fn environment_endpoint(data_dir: &Path) -> Result<Option<Endpoint>, ApiError> {
@@ -587,7 +602,9 @@ async fn connect(
     operation_id: Option<String>,
     origin: Option<Origin>,
 ) -> Result<Response<Value>, ApiError> {
-    connect_with_capability(endpoint, command, operation_id, origin, None, None).await
+    connect_with_capability(endpoint, command, operation_id, origin, None, None)
+        .await
+        .map(|(_, response)| response)
 }
 
 async fn connect_with_capability(
@@ -597,7 +614,7 @@ async fn connect_with_capability(
     origin: Option<Origin>,
     required_capability: Option<&str>,
     announce: Option<&mut (dyn FnMut(&str) + Send)>,
-) -> Result<Response<Value>, ApiError> {
+) -> Result<(Welcome, Response<Value>), ApiError> {
     if endpoint.protocol_version != PROTOCOL_VERSION {
         let mut error = protocol_mismatch(PROTOCOL_VERSION, endpoint.protocol_version);
         if let Some(version) = endpoint.owner_version
@@ -718,6 +735,7 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> Result<Response<Value>, ApiError> {
     call_stream_requiring_capability(stream, endpoint, command, operation_id, origin, None, None)
         .await
+        .map(|(_, response)| response)
 }
 
 async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
@@ -728,7 +746,7 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     origin: Option<Origin>,
     required_capability: Option<&str>,
     announce: Option<&mut (dyn FnMut(&str) + Send)>,
-) -> Result<Response<Value>, ApiError> {
+) -> Result<(Welcome, Response<Value>), ApiError> {
     write_frame(
         &mut stream,
         &Hello {
@@ -816,7 +834,7 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     if response.operation_id != expected {
         return Err(uncertain(endpoint_mismatch()));
     }
-    Ok(response)
+    Ok((welcome, response))
 }
 
 /// An explicit data-directory shutdown never uses an inherited environment endpoint.
@@ -2099,7 +2117,8 @@ mod frame_delivery_tests {
             None,
         )
         .await
-        .unwrap_err();
+        .err()
+        .expect("missing capability must refuse the request");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
         assert_eq!(
             error.details.as_ref().unwrap()["required_capability"],
