@@ -3,7 +3,7 @@ use super::*;
 use globset::{GlobBuilder, GlobMatcher};
 use std::collections::BTreeMap;
 
-const MAX_VISITED: usize = 100_000;
+use crate::input_path::FOLDER_WALK_MAX_ENTRIES as MAX_VISITED;
 const MAX_TARGETS: usize = 10_000;
 const SAMPLE_LIMIT: usize = 20;
 pub(super) fn validate_patterns(patterns: &[String]) -> Result<()> {
