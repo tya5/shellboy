@@ -1910,7 +1910,7 @@ impl Form {
             OpKind::AttachmentList => (vec![thread()], |form, _cwd| {
                 Ok(Command::AttachmentList(
                     crate::protocol::AttachmentListArgs {
-                        attachment_id: None,
+                        attachment_ids: None,
                         thread_id: form.thread_target()?.thread_id,
                         limit: crate::protocol::DEFAULT_LIST_LIMIT,
                         cursor: None,

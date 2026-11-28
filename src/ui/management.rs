@@ -919,7 +919,7 @@ impl ManagementPopup {
                     KeyCode::Char('s') => {
                         vec![UiAction::Manage(Command::AttachmentList(
                             AttachmentListArgs {
-                                attachment_id: None,
+                                attachment_ids: None,
                                 thread_id: Some(thread_id),
                                 limit: crate::protocol::DEFAULT_LIST_LIMIT,
                                 cursor: None,

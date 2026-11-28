@@ -275,3 +275,9 @@ selected answer excerpt, and current shell identity, command and output clock.
 the source-read bound. Titles are UTF-8 prefixes of at most 2,048 bytes;
 `title_truncated: true` identifies a shortened title. Clients do not infer
 truncation from string length.
+
+`attachment.list` accepts `attachment_ids` with an explicit `thread_id` and
+no cursor. Provide one or more unique IDs, up to the page limit. Exact matches
+use the same row and file-availability rules as ordinary pages. The CLI form
+is `attachment list --thread THREAD --attachment ID`, with a repeatable
+`--attachment` option.

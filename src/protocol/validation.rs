@@ -1017,13 +1017,7 @@ impl Command {
             Self::ThreadGet(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::Compact(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::AttachmentReload(a) => nonempty(&a.thread_id, "thread_id"),
-            Self::AttachmentList(a) => {
-                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
-                if a.limit == 0 || a.limit > crate::protocol::MAX_LIST_LIMIT {
-                    return Err(invalid("attachment limit must be in 1..=200"));
-                }
-                Ok(())
-            }
+            Self::AttachmentList(a) => a.validate(),
             Self::ContextEdit(a) => a.validate(),
             Self::CompactPreview(a) => a.validate(),
             Self::ThreadImport(a) => {
@@ -1429,4 +1423,32 @@ fn validate_run_selection(value: Option<&super::ExpectedRunSelection>) -> Result
         validate_expected_turn(value.turn.as_ref())?;
     }
     Ok(())
+}
+
+impl AttachmentListArgs {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
+        optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
+        limit(self.limit, MAX_LIST_LIMIT)?;
+        if let Some(ids) = &self.attachment_ids {
+            if self.thread_id.is_none() || self.cursor.is_some() || ids.is_empty() {
+                return Err(invalid(
+                    "attachment_ids requires an explicit Thread, at least one ID, and no cursor",
+                ));
+            }
+            if ids.len() > self.limit as usize {
+                return Err(ApiError::new(
+                    ErrorCode::InputLimit,
+                    "attachment_ids exceeds the page limit",
+                ));
+            }
+            let mut unique = std::collections::HashSet::with_capacity(ids.len());
+            for id in ids {
+                nonempty(id, "attachment ID")?;
+                if id.len() > 256 || !unique.insert(id) {
+                    return Err(invalid("attachment_ids must be unique bounded IDs"));
+                }
+            }
+        }
+        Ok(())
+    }
 }

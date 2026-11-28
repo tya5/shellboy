@@ -960,6 +960,8 @@ pub(crate) fn saved_unavailable_reason(
     }
 }
 
+const ATTACHMENT_EXACT_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason,s.selected_order FROM json_each(?2) q CROSS JOIN attachment_selection s ON s.thread_id=?1 AND s.attachment_id=q.value JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path ORDER BY s.selected_order,s.attachment_id";
+
 fn saved_selection(
     db: &Connection,
     thread_id: &str,
@@ -1004,14 +1006,38 @@ pub fn list_tx(
     crate::protocol::RecordPage<AttachmentDetails, crate::protocol::ThreadScopeFilter>,
     ApiError,
 > {
-    use crate::protocol::{MAX_LIST_LIMIT, PageCursor, RecordPage, ThreadScopeFilter};
-    if args.limit == 0 || args.limit > MAX_LIST_LIMIT {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            "attachment limit must be in 1..=200",
+    use crate::protocol::{PageCursor, RecordPage, ThreadScopeFilter};
+    args.validate()?;
+    let thread_id = args.thread_id.as_deref().unwrap_or_default();
+    if let Some(ids) = &args.attachment_ids {
+        let exists: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1)",
+                [thread_id],
+                |r| r.get(0),
+            )
+            .map_err(sql_error)?;
+        if !exists {
+            return Err(ApiError::new(ErrorCode::ThreadNotFound, "Thread not found"));
+        }
+        let encoded = serde_json::to_string(ids).expect("attachment IDs serialize");
+        let mut statement = db.prepare(ATTACHMENT_EXACT_SQL).map_err(sql_error)?;
+        let mut rows = statement
+            .query(params![thread_id, encoded])
+            .map_err(sql_error)?;
+        let mut items = Vec::with_capacity(ids.len());
+        while let Some(row) = rows.next().map_err(sql_error)? {
+            items.push(saved_selection(db, thread_id, row)?);
+        }
+        return Ok(RecordPage::new(
+            args.limit,
+            ThreadScopeFilter {
+                thread_id: thread_id.into(),
+            },
+            items,
+            None,
         ));
     }
-    let thread_id = args.thread_id.as_deref().unwrap_or_default();
     let (revision, max_order): (u64, u64) = db
         .query_row(
             "SELECT t.selection_revision,COALESCE((SELECT selected_order FROM attachment_selection INDEXED BY attachment_page_order WHERE thread_id=t.id ORDER BY selected_order DESC,attachment_id DESC LIMIT 1),0) FROM thread t WHERE t.id=?1",

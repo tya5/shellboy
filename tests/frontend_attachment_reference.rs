@@ -72,6 +72,29 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
     let (rpc_send, rpc_receive) = tokio::sync::mpsc::channel(16);
     let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
     tokio::spawn(control.clone().serve(rpc_receive));
+    let list_saved = |attachment_ids| async {
+        let response = shellboy::ipc::call(
+            &owner.loaded.data_dir,
+            Command::AttachmentList(AttachmentListArgs {
+                attachment_ids,
+                thread_id: Some("actual".into()),
+                limit: 2,
+                cursor: None,
+            }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(response.ok, "{:?}", response.error);
+        response.result.unwrap()
+    };
+    let first = list_saved(None).await;
+    let ids = vec!["late".into(), "early-0000".into()];
+    let exact_page = list_saved(Some(ids)).await;
+    assert_eq!(exact_page["items"][0], first["items"][0]);
+    assert_eq!(exact_page["items"][1]["attachment_id"], "late");
+    assert!(exact_page["next_cursor"].is_null());
     let (actions, receiver) = tokio::sync::mpsc::channel(16);
     let (updates, source) = std::sync::mpsc::sync_channel(128);
     // Notification-driven test adapter; both channels are finite and owned by
@@ -95,7 +118,7 @@ async fn attachment_reference_reads_exact_foreign_selection_outside_list_then_or
     actions
         .send(UiAction::Manage(Command::AttachmentList(
             AttachmentListArgs {
-                attachment_id: None,
+                attachment_ids: None,
                 thread_id: Some("actual".into()),
                 limit: 2,
                 cursor: None,

@@ -1171,6 +1171,9 @@ pub struct AttachmentReloadOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct AttachmentListOptions {
+    /// Read exact selections in the specified Thread; repeat for multiple IDs.
+    #[arg(long = "attachment", requires = "thread_id", conflicts_with = "cursor")]
+    pub attachment_ids: Vec<String>,
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
     #[arg(long, default_value_t = wire::DEFAULT_LIST_LIMIT)]
@@ -2571,7 +2574,7 @@ impl Cli {
                     kind: a.kind,
                 }),
                 AttachmentCommand::List(a) => C::AttachmentList(wire::AttachmentListArgs {
-                    attachment_id: None,
+                    attachment_ids: (!a.attachment_ids.is_empty()).then_some(a.attachment_ids),
                     thread_id: a.thread_id,
                     limit: a.limit,
                     cursor: a.cursor,

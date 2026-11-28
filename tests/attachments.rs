@@ -405,7 +405,7 @@ async fn oldest_past_attachments_excluded_only_at_admission_never_resurrect() {
             Ok(list_tx(
                 db,
                 &shellboy::protocol::AttachmentListArgs {
-                    attachment_id: None,
+                    attachment_ids: None,
                     thread_id: Some("thread".into()),
                     limit: shellboy::protocol::DEFAULT_LIST_LIMIT,
                     cursor: None,
@@ -1421,7 +1421,7 @@ async fn observed_list(f: &Fixture) -> Vec<shellboy::protocol::AttachmentDetails
             Request::new(
                 uuid::Uuid::new_v4().to_string(),
                 Command::AttachmentList(AttachmentListArgs {
-                    attachment_id: None,
+                    attachment_ids: None,
                     thread_id: Some("thread".into()),
                     limit: shellboy::protocol::MAX_LIST_LIMIT,
                     cursor: None,
@@ -1457,7 +1457,7 @@ async fn attachment_list_pages_in_selected_order_and_observes_only_page_items() 
         Request::new(
             uuid::Uuid::new_v4().to_string(),
             Command::AttachmentList(AttachmentListArgs {
-                attachment_id: None,
+                attachment_ids: None,
                 thread_id: Some("thread".into()),
                 limit: 2,
                 cursor,

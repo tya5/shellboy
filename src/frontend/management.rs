@@ -472,20 +472,19 @@ pub(super) fn follow_target_in(
             }));
         }
         let thread=row.get("thread_id").and_then(Value::as_str).filter(|s|!s.is_empty()).ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"The selected attachment record has no explicit Thread; inspect its Thread attachment list"))?;
+        let id = row
+            .get("attachment_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::TargetUnavailable,
+                    "Saved attachment identity is unavailable",
+                )
+            })?;
         return Ok(Command::AttachmentList(
             crate::protocol::AttachmentListArgs {
-                attachment_id: Some(
-                    row["attachment_id"]
-                        .as_str()
-                        .filter(|id| !id.is_empty())
-                        .ok_or_else(|| {
-                            ApiError::new(
-                                ErrorCode::TargetUnavailable,
-                                "Saved attachment identity is unavailable",
-                            )
-                        })?
-                        .into(),
-                ),
+                attachment_ids: Some(vec![id.into()]),
                 thread_id: Some(thread.into()),
                 limit: crate::protocol::DEFAULT_LIST_LIMIT,
                 cursor: None,
