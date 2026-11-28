@@ -650,8 +650,38 @@ impl BrowserMessage<'_> {
 
 const FILTER_DELAY: Duration = Duration::from_millis(150);
 
+#[derive(Clone, PartialEq, Eq)]
+struct PresentationScope {
+    mode: BrowserMode,
+    archived: ArchivedFilter,
+    root: Option<String>,
+    filter: String,
+}
+
+struct CachedScope {
+    key: PresentationScope,
+    rows: Vec<(String, String)>,
+    touched: Instant,
+}
+
+impl CachedScope {
+    fn bytes(&self) -> usize {
+        self.key.filter.capacity()
+            + self.key.root.as_ref().map_or(0, String::capacity)
+            + self.rows.capacity() * std::mem::size_of::<(String, String)>()
+            + self
+                .rows
+                .iter()
+                .map(|(id, title)| id.capacity() + title.capacity())
+                .sum::<usize>()
+    }
+}
+
 #[derive(Default)]
 pub(super) struct ThreadBrowser {
+    scope_cache: Vec<CachedScope>,
+    presenting_cached: bool,
+    current_rows_confirmed: bool,
     language: UiLanguage,
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     collapsed: BTreeSet<String>,
@@ -787,13 +817,147 @@ impl ThreadBrowser {
     pub fn generation(&self) -> u64 {
         self.generation
     }
+    fn presentation_scope(&self) -> PresentationScope {
+        PresentationScope {
+            mode: self.mode,
+            archived: self.archived,
+            root: self
+                .descendant_root
+                .clone()
+                .filter(|_| self.mode == BrowserMode::Watch),
+            filter: self.filter.clone(),
+        }
+    }
+    fn remember_scope_rows(&mut self) {
+        if !self.visible || !self.current_rows_confirmed {
+            return;
+        }
+        let key = self.presentation_scope();
+        self.scope_cache.retain(|entry| entry.key != key);
+        let rows = self
+            .visible_indices()
+            .iter()
+            .filter_map(|index| self.items.get(*index))
+            .filter(|row| !row.thread_id.starts_with("draft:"))
+            .map(|row| (row.thread_id.clone(), one_line(&row.title)))
+            .collect();
+        self.scope_cache.push(CachedScope {
+            key,
+            rows,
+            touched: Instant::now(),
+        });
+    }
+    fn restore_scope_rows(&mut self) {
+        let key = self.presentation_scope();
+        self.presenting_cached = false;
+        if let Some(entry) = self.scope_cache.iter_mut().find(|entry| entry.key == key) {
+            entry.touched = Instant::now();
+            self.presenting_cached = !entry.rows.is_empty();
+        }
+        if self.presenting_cached {
+            // Cached rows never enter the action or observation tables.
+            self.items = Vec::new();
+            self.watch_summaries.clear();
+            self.watch_scope_ids.clear();
+            self.display_times.clear();
+            self.selected = 0;
+            self.invalidate_tree();
+        }
+    }
+    fn preview_rows(&self) -> Option<&CachedScope> {
+        self.presenting_cached
+            .then(|| self.presentation_scope())
+            .and_then(|key| self.scope_cache.iter().find(|entry| entry.key == key))
+    }
+    pub(super) fn cached_scope_bytes(&self) -> (usize, usize) {
+        use std::mem::size_of;
+        let active = self.items.capacity() * size_of::<ThreadSummary>()
+            + self
+                .items
+                .iter()
+                .map(|row| {
+                    [
+                        &row.thread_id,
+                        &row.title,
+                        &row.cwd,
+                        &row.state,
+                        &row.updated_at,
+                        &row.excerpt,
+                    ]
+                    .into_iter()
+                    .chain(row.parent_thread_id.iter())
+                    .chain(row.created_at.iter())
+                    .chain(row.archived_at.iter())
+                    .chain(row.latest_run_stop_reason.iter())
+                    .chain(row.awaiting_named_oldest_at.iter())
+                    .chain(row.tags.iter())
+                    .map(String::capacity)
+                    .sum::<usize>()
+                        + row.tags.capacity() * size_of::<String>()
+                        + row
+                            .last_input
+                            .iter()
+                            .chain(row.last_end_message.iter())
+                            .map(crate::memory::json_retained_bytes)
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
+        (
+            active
+                + self.scope_cache.capacity() * size_of::<CachedScope>()
+                + self
+                    .scope_cache
+                    .iter()
+                    .map(CachedScope::bytes)
+                    .sum::<usize>(),
+            active
+                + self
+                    .preview_rows()
+                    .map_or(0, |entry| size_of::<CachedScope>() + entry.bytes()),
+        )
+    }
+    pub(super) fn oldest_scope(&self) -> Option<Instant> {
+        let pin = self.preview_rows().map(|entry| &entry.key);
+        self.scope_cache
+            .iter()
+            .filter(|entry| Some(&entry.key) != pin)
+            .map(|entry| entry.touched)
+            .min()
+    }
+    pub(super) fn evict_oldest_scope(&mut self) -> Option<usize> {
+        let oldest = self.oldest_scope()?;
+        let pin = self.preview_rows().map(|entry| entry.key.clone());
+        let index = self
+            .scope_cache
+            .iter()
+            .position(|entry| entry.touched == oldest && Some(&entry.key) != pin.as_ref())?;
+        let before = self.scope_cache.capacity();
+        let bytes = self.scope_cache.swap_remove(index).bytes();
+        self.scope_cache.shrink_to_fit();
+        Some(bytes + (before - self.scope_cache.capacity()) * std::mem::size_of::<CachedScope>())
+    }
     pub fn close(&mut self) {
+        if !self.visible {
+            return;
+        }
+        self.remember_scope_rows();
+        self.presenting_cached = false;
+        self.current_rows_confirmed = false;
+        self.generation = self.generation.wrapping_add(1);
+        self.reset_patch_evidence();
+        self.next_cursor = None;
+        self.items = Vec::new();
+        self.watch_summaries.clear();
+        self.watch_scope_ids.clear();
+        self.display_times.clear();
+        self.invalidate_tree();
         self.visible = false;
         self.filter_deadline = None;
         self.watch.get_mut().close();
         self.watch_visible_ids.get_mut().clear();
     }
     fn invalidate(&mut self, cursor: Option<String>) {
+        self.current_rows_confirmed = false;
         self.next_cursor = cursor;
         self.watch_page_info = None;
         self.generation = self.generation.wrapping_add(1);
@@ -1003,13 +1167,7 @@ impl ThreadBrowser {
         root: Option<String>,
         preferred: Option<String>,
     ) -> UiAction {
-        let action = self.open(filter, vec![], preferred);
-        self.mode = BrowserMode::Watch;
-        self.descendant_root = root;
-        self.watch.get_mut().begin_generation(self.generation, true);
-        self.invalidate_tree();
-        let _ = action;
-        self.request(None)
+        self.open_scope(BrowserMode::Watch, filter, root, vec![], preferred)
     }
     pub fn open(
         &mut self,
@@ -1017,10 +1175,21 @@ impl ThreadBrowser {
         drafts: Vec<ThreadSummary>,
         preferred: Option<String>,
     ) -> UiAction {
+        self.open_scope(BrowserMode::List, filter, None, drafts, preferred)
+    }
+    fn open_scope(
+        &mut self,
+        mode: BrowserMode,
+        filter: String,
+        root: Option<String>,
+        drafts: Vec<ThreadSummary>,
+        preferred: Option<String>,
+    ) -> UiAction {
+        self.remember_scope_rows();
         self.visible = true;
-        self.mode = BrowserMode::List;
+        self.mode = mode;
         self.archived = ArchivedFilter::Exclude;
-        self.descendant_root = None;
+        self.descendant_root = root;
         self.watch_visible_ids.get_mut().clear();
         self.watch_scope_ids.clear();
         self.filter = filter;
@@ -1037,6 +1206,7 @@ impl ThreadBrowser {
         let notice = self.notice.take().filter(|_| !self.notice_seen.get());
         let notice_en = self.notice_en.take().filter(|_| notice.is_some());
         let action = self.begin(None);
+        self.restore_scope_rows();
         self.watch.get_mut().begin_generation(self.generation, true);
         self.notice = notice;
         self.notice_en = notice_en;
@@ -1069,6 +1239,9 @@ impl ThreadBrowser {
             return;
         }
         let deleted: BTreeSet<_> = ids.iter().map(String::as_str).collect();
+        for entry in &mut self.scope_cache {
+            entry.rows.retain(|(id, _)| !deleted.contains(id.as_str()));
+        }
         let position = self.selected_position().unwrap_or(0);
         let screen_row = self.selected_screen_row();
         let surviving_selection = self
@@ -1147,6 +1320,13 @@ impl ThreadBrowser {
             || (requested_cursor.is_some() && requested_cursor != self.next_cursor)
         {
             return false;
+        }
+        if requested_cursor.is_none() {
+            self.presenting_cached = false;
+            self.current_rows_confirmed = true;
+            let key = self.presentation_scope();
+            self.scope_cache.retain(|entry| entry.key != key);
+            self.scope_cache.shrink_to_fit();
         }
         if self.mode == BrowserMode::Watch {
             let id = self.preferred.clone().or_else(|| {
@@ -1932,6 +2112,7 @@ impl ThreadBrowser {
             self.clear_watch_detail_scope();
         }
         if key.code == KeyCode::Tab && key.modifiers.is_empty() {
+            self.remember_scope_rows();
             self.remember_selection();
             self.mode = if self.mode == BrowserMode::List {
                 BrowserMode::Watch
@@ -1940,6 +2121,7 @@ impl ThreadBrowser {
             };
             self.invalidate_tree();
             let action = self.begin(None);
+            self.restore_scope_rows();
             let scoped = self.mode == BrowserMode::Watch && self.descendant_root.is_some();
             if scoped {
                 self.watch.get_mut().prune_to(&self.watch_scope_ids);
@@ -1994,8 +2176,8 @@ impl ThreadBrowser {
             && key.modifiers == KeyModifiers::CONTROL
             && matches!(key.code, KeyCode::Char('g' | 'G'))
         {
-            // Switch between the default list and the archived list. Rows of the
-            // other view are dropped at once; the selection is not carried over.
+            self.remember_scope_rows();
+            // The selection and action evidence do not carry across scopes.
             self.archived = if self.archived == ArchivedFilter::Only {
                 ArchivedFilter::Exclude
             } else {
@@ -2008,7 +2190,9 @@ impl ThreadBrowser {
             self.invalidate_tree();
             *self.table_state.get_mut() = TableState::default();
             self.table_body_rows.set(0);
-            return ThreadOutcome::Load(Box::new(self.begin(None)));
+            let action = self.begin(None);
+            self.restore_scope_rows();
+            return ThreadOutcome::Load(Box::new(action));
         }
         if self.mode == BrowserMode::List
             && key.modifiers == KeyModifiers::CONTROL
@@ -2180,6 +2364,7 @@ impl ThreadBrowser {
             }
             KeyCode::Backspace => {
                 if let Some((at, _)) = self.filter.grapheme_indices(true).next_back() {
+                    self.remember_scope_rows();
                     self.filter.truncate(at);
                 }
             }
@@ -2189,6 +2374,7 @@ impl ThreadBrowser {
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
                 if self.filter.chars().count() < 256 {
+                    self.remember_scope_rows();
                     self.filter.push(ch);
                 }
             }
@@ -2199,6 +2385,7 @@ impl ThreadBrowser {
             self.reconfirming_row = None;
             self.invalidate_tree();
             self.invalidate(None);
+            self.restore_scope_rows();
             self.filter_deadline = Some(now + FILTER_DELAY);
         }
         ThreadOutcome::None
@@ -2447,6 +2634,24 @@ impl ThreadBrowser {
         active_thread: Option<&str>,
         notice_visible: bool,
     ) {
+        if let Some(cached) = self.preview_rows() {
+            let label = BrowserText::ReconfirmRows.render(self.language);
+            let body = popup::panel_recorded(frame, area, label, &self.filter, "", &self.paint);
+            let lines: Vec<_> = cached
+                .rows
+                .iter()
+                .take(body.height.into())
+                .map(|(id, title)| {
+                    Line::from(if title.is_empty() {
+                        id.as_str()
+                    } else {
+                        title.as_str()
+                    })
+                })
+                .collect();
+            frame.render_widget(Paragraph::new(lines), body);
+            return;
+        }
         if self.mode == BrowserMode::Watch {
             self.draw_watch(frame, area, active_thread);
             return;
@@ -5530,6 +5735,51 @@ mod archive_tests {
             excerpt: None,
             watch_summaries: vec![],
         }
+    }
+
+    #[test]
+    fn revisiting_cached_scope_paints_titles_without_restoring_action_evidence() {
+        let mut browser = opened(UiLanguage::En, vec![row("a", false)]);
+        let old_generation = browser.generation;
+        browser.close();
+        let request = browser.open(String::new(), vec![], None);
+        assert!(
+            matches!(request, UiAction::LoadThreads { cursor: None, generation, .. } if generation != old_generation)
+        );
+        assert!(paint(&browser, 80, 20).contains("title a"));
+        assert!(matches!(browser.key(ctrl('a')), ThreadOutcome::None));
+        assert_eq!(browser.next_cursor(), None);
+        assert!(
+            browser.evict_oldest_scope().is_none(),
+            "painted scope is pinned"
+        );
+        assert!(!browser.apply(
+            old_generation,
+            11,
+            None,
+            vec![row("old", false)],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        assert!(browser.apply(
+            browser.generation,
+            12,
+            None,
+            vec![row("fresh", false)],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        assert!(
+            matches!(browser.key(ctrl('a')), ThreadOutcome::Archive(id, true) if id == "fresh")
+        );
+        browser.close();
+        assert!(browser.evict_oldest_scope().is_some());
+        browser.open(String::new(), vec![], None);
+        assert!(!paint(&browser, 80, 20).contains("title fresh"));
     }
 
     #[test]

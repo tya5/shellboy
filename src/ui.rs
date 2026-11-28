@@ -472,6 +472,10 @@ pub struct ClipboardPastePin(Arc<()>);
 
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    NativeMemoryObservation {
+        action: Box<UiAction>,
+        caches: serde_json::Value,
+    },
     ExternalObserved {
         generation: u64,
     },
@@ -1466,14 +1470,13 @@ impl RenderUnitKey {
 struct HistoryLayoutEntry {
     value: Arc<HistoryLayout>,
     bytes: usize,
-    touched: u64,
+    touched: Instant,
 }
 #[derive(Default)]
 struct HistoryLayoutCache {
     entries: BTreeMap<HistoryLayoutKey, HistoryLayoutEntry>,
     units: BTreeMap<RenderUnitKey, HistoryLayoutEntry>,
     bytes: usize,
-    clock: u64,
     #[cfg(test)]
     builds: usize,
     #[cfg(test)]
@@ -1519,28 +1522,39 @@ impl HistoryLayoutKey {
     }
 }
 impl HistoryLayoutCache {
-    fn evict(&mut self, budget: usize) {
-        while self.bytes > budget {
-            let whole = self
-                .entries
-                .iter()
-                .min_by_key(|(_, entry)| entry.touched)
-                .map(|(key, entry)| (key.clone(), entry.touched));
-            let unit = self
-                .units
-                .iter()
-                .min_by_key(|(_, entry)| entry.touched)
-                .map(|(key, entry)| (key.clone(), entry.touched));
-            let removed = match (whole, unit) {
-                (Some((_whole, wt)), Some((unit, ut))) if ut < wt => self.units.remove(&unit),
-                (Some((whole, _)), _) => self.entries.remove(&whole),
-                (None, Some((unit, _))) => self.units.remove(&unit),
-                (None, None) => break,
-            };
-            if let Some(old) = removed {
-                self.bytes -= old.bytes;
-            }
+    fn oldest(&self) -> Option<Instant> {
+        self.entries
+            .values()
+            .chain(self.units.values())
+            .map(|entry| entry.touched)
+            .min()
+    }
+    fn evict_oldest(&mut self) -> bool {
+        let whole = self
+            .entries
+            .iter()
+            .min_by_key(|(_, entry)| entry.touched)
+            .map(|(key, entry)| (key.clone(), entry.touched));
+        let unit = self
+            .units
+            .iter()
+            .min_by_key(|(_, entry)| entry.touched)
+            .map(|(key, entry)| (key.clone(), entry.touched));
+        let removed = match (whole, unit) {
+            (Some((_, wt)), Some((unit, ut))) if ut < wt => self.units.remove(&unit),
+            (Some((whole, _)), _) => self.entries.remove(&whole),
+            (None, Some((unit, _))) => self.units.remove(&unit),
+            (None, None) => None,
+        };
+        if let Some(old) = removed {
+            self.bytes -= old.bytes;
+            true
+        } else {
+            false
         }
+    }
+    fn evict(&mut self, budget: usize) {
+        while self.bytes > budget && self.evict_oldest() {}
     }
     fn unit(&mut self, key: &RenderUnitKey) -> Option<Arc<HistoryLayout>> {
         #[cfg(test)]
@@ -1549,9 +1563,8 @@ impl HistoryLayoutCache {
                 self.unit_hits += 1;
             }
         }
-        self.clock = self.clock.saturating_add(1);
         self.units.get_mut(key).map(|entry| {
-            entry.touched = self.clock;
+            entry.touched = Instant::now();
             Arc::clone(&entry.value)
         })
     }
@@ -1577,14 +1590,13 @@ impl HistoryLayoutCache {
             self.bytes -= old.bytes;
         }
         self.evict(budget - bytes);
-        self.clock = self.clock.saturating_add(1);
         self.bytes += bytes;
         self.units.insert(
             key,
             HistoryLayoutEntry {
                 value,
                 bytes,
-                touched: self.clock,
+                touched: Instant::now(),
             },
         );
     }
@@ -1604,9 +1616,8 @@ impl HistoryLayoutCache {
         });
     }
     fn get(&mut self, key: &HistoryLayoutKey) -> Option<Arc<HistoryLayout>> {
-        self.clock = self.clock.saturating_add(1);
         self.entries.get_mut(key).map(|entry| {
-            entry.touched = self.clock;
+            entry.touched = Instant::now();
             Arc::clone(&entry.value)
         })
     }
@@ -1631,14 +1642,13 @@ impl HistoryLayoutCache {
             self.bytes -= old.bytes;
         }
         self.evict(budget - bytes);
-        self.clock = self.clock.saturating_add(1);
         self.bytes += bytes;
         self.entries.insert(
             key,
             HistoryLayoutEntry {
                 value,
                 bytes,
-                touched: self.clock,
+                touched: Instant::now(),
             },
         );
     }
@@ -1756,7 +1766,6 @@ pub struct UiState {
     key_hints: key_hints::Cache,
     pub views: BTreeMap<String, ThreadView>,
     pub active: String,
-    view_cache_clock: u64,
     thread_browser: threads::ThreadBrowser,
     descendants: watch::DescendantView,
     pub selection_mode: bool,
@@ -1791,6 +1800,7 @@ pub struct UiState {
     program_status_pending: Option<crate::program_status::Snapshot>,
     program_status_seen: Option<(String, String)>,
     layout_cache: HistoryLayoutCache,
+    popup_layout_frame: Option<Instant>,
     visible_links: Vec<crate::terminal_links::LinkRegion>,
     // Last actually painted source IDs; bounded by the 128-node projection.
     painted_body_nodes: Option<(String, u64, Vec<String>)>,
@@ -1938,6 +1948,7 @@ impl UiState {
             program_status_pending: None,
             program_status_seen: None,
             layout_cache: HistoryLayoutCache::default(),
+            popup_layout_frame: None,
             visible_links: vec![],
             painted_body_nodes: None,
             render_width: 0,
@@ -1957,7 +1968,6 @@ impl UiState {
             queue_notifications: VecDeque::new(),
             next_model_request: 0,
             autosave: Default::default(),
-            view_cache_clock: 0,
             batching_updates: false,
             retention_pending: false,
             #[cfg(test)]
@@ -3974,6 +3984,10 @@ impl UiState {
     }
 
     pub fn action_rejected(&mut self, action: &UiAction) {
+        if let UiAction::NativeMemoryObservation { action, .. } = action {
+            self.action_rejected(action);
+            return;
+        }
         let navigation = match action {
             UiAction::LoadNodeWindow {
                 thread_id,
@@ -4422,8 +4436,7 @@ impl UiState {
             .collect()
     }
     fn adopt_view(&mut self, key: String) {
-        self.view_cache_clock = self.view_cache_clock.saturating_add(1);
-        self.views.get_mut(&key).expect("selected view").cache_touch = self.view_cache_clock;
+        self.views.get_mut(&key).expect("selected view").cache_touch = Some(Instant::now());
         self.active = key;
     }
 
@@ -6024,6 +6037,156 @@ cursor: None,
                 self.help_page.lines(popup::reader_width(body)).into_owned()
             });
     }
+    fn reader_caches(&mut self) -> [Option<&mut popup::ReaderCache>; 5] {
+        [
+            Some(&mut self.help_cache),
+            Some(&mut self.confirmation_cache),
+            self.management.reader_mut(),
+            self.details.as_mut().and_then(details::Details::reader_mut),
+            self.operations
+                .as_mut()
+                .and_then(operations::Operations::reader_mut),
+        ]
+    }
+    fn set_reader_budgets(&mut self) {
+        let budget = self.config.cache.layout_bytes as usize;
+        for reader in self.reader_caches().into_iter().flatten() {
+            reader.set_budget(budget);
+        }
+    }
+    fn with_native_memory_observation(&mut self, action: UiAction) -> UiAction {
+        let mut inner = &action;
+        loop {
+            match inner {
+                UiAction::ManagementIntent { action, .. }
+                | UiAction::SubmittedCommand { action, .. } => inner = action,
+                UiAction::Command(Command::Status(args))
+                | UiAction::Manage(Command::Status(args))
+                    if args.memory =>
+                {
+                    break;
+                }
+                _ => return action,
+            }
+        }
+        let working = self.retained_working_node_ids();
+        let (retained, pinned) = self.body_cache_bytes(&working, |_, _, _| {});
+        let frame_start = self.popup_layout_frame;
+        let mut layout_retained = self.layout_cache.bytes;
+        let mut layout_pinned = 0;
+        for reader in self.reader_caches().into_iter().flatten() {
+            if reader
+                .touched
+                .zip(frame_start)
+                .is_some_and(|(touch, frame)| touch >= frame)
+            {
+                layout_pinned += reader.retained_bytes();
+            } else {
+                layout_retained += reader.retained_bytes();
+            }
+        }
+        UiAction::NativeMemoryObservation {
+            action: Box::new(action),
+            caches: serde_json::json!({
+                "body_bytes": { "retained": retained, "pinned": pinned, "limit": self.config.cache.body_bytes },
+                "layout_bytes": { "retained": layout_retained, "pinned": layout_pinned, "limit": self.config.cache.layout_bytes },
+            }),
+        }
+    }
+    fn popup_body_bytes(&self) -> usize {
+        self.details
+            .as_ref()
+            .map_or(0, details::Details::reader_body_bytes)
+            .saturating_add(self.management.reader_body_bytes())
+            .saturating_add(self.help_page.reader_body_bytes())
+    }
+    fn view_is_evictable(&self, key: &str, view: &ThreadView) -> bool {
+        key != self.active
+            && !view
+                .clipboard_pins
+                .iter()
+                .any(|(draft, pin)| draft == &view.draft.draft_id && pin.strong_count() != 0)
+            && view.selecting_agents.is_none()
+            && !view.pending.values().any(|pending| {
+                matches!(
+                    pending.status,
+                    ReceiptStatus::Accepting | ReceiptStatus::Unknown
+                )
+            })
+            && if view.thread_id.is_none() {
+                view.draft.text.is_empty()
+                    && view.draft.attachments.is_empty()
+                    && view.draft.edit.is_none()
+                    && view.pending.is_empty()
+            } else {
+                self.autosave.reconstructible(key, view)
+            }
+    }
+    // Keep observation and eviction on the same accounting and eligibility rules.
+    fn body_cache_bytes(
+        &self,
+        working: &[String],
+        mut candidate: impl FnMut(Option<Instant>, &str, usize),
+    ) -> (usize, usize) {
+        let (browser_bytes, browser_pinned) = self.thread_browser.cached_scope_bytes();
+        let active_retained = retained_body_bytes(self.view(), working);
+        let mut retained =
+            active_retained.saturating_add(browser_bytes.saturating_sub(browser_pinned));
+        let mut pinned = browser_pinned.saturating_add(self.popup_body_bytes());
+        for (key, view) in &self.views {
+            let weight = view
+                .retained_view_bytes()
+                .saturating_add(key.capacity())
+                .saturating_add(self.autosave.cache_bytes(key));
+            if key == &self.active {
+                pinned = pinned.saturating_add(weight.saturating_sub(active_retained));
+            } else if self.view_is_evictable(key, view) {
+                retained = retained.saturating_add(weight);
+                candidate(view.cache_touch, key, weight);
+            } else {
+                pinned = pinned.saturating_add(weight);
+            }
+        }
+        (retained, pinned)
+    }
+    fn trim_layouts(&mut self, frame_start: Instant) {
+        self.popup_layout_frame = Some(frame_start);
+        let budget = self.config.cache.layout_bytes as usize;
+        let mut readers = [
+            Some(&mut self.help_cache),
+            Some(&mut self.confirmation_cache),
+            self.management.reader_mut(),
+            self.details.as_mut().and_then(details::Details::reader_mut),
+            self.operations
+                .as_mut()
+                .and_then(operations::Operations::reader_mut),
+        ];
+        let mut popup_bytes: usize = readers
+            .iter()
+            .flatten()
+            .map(|reader| reader.retained_bytes())
+            .sum();
+        while self.layout_cache.bytes.saturating_add(popup_bytes) > budget {
+            let oldest = readers
+                .iter_mut()
+                .flatten()
+                .filter(|reader| {
+                    reader.touched.is_some_and(|t| t < frame_start) && reader.retained_bytes() != 0
+                })
+                .min_by_key(|reader| reader.touched);
+            if let Some(reader) = oldest
+                && self
+                    .layout_cache
+                    .oldest()
+                    .is_none_or(|t| reader.touched < Some(t))
+            {
+                popup_bytes -= reader.retained_bytes();
+                reader.clear();
+            } else if !self.layout_cache.evict_oldest() {
+                break;
+            }
+        }
+    }
     fn draw_overlays(
         &mut self,
         frame: &mut Frame<'_>,
@@ -6148,7 +6311,9 @@ cursor: None,
         ]
     }
     fn thread_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
-        match self.thread_browser.key(key) {
+        let outcome = self.thread_browser.key(key);
+        self.trim_bodies();
+        match outcome {
             threads::ThreadOutcome::WatchAction(target) => {
                 if target.kind == watch::WatchActionKind::Output {
                     vec![UiAction::WatchAction(target)]
@@ -6229,44 +6394,13 @@ cursor: None,
         }
         let limit = usize::try_from(self.config.cache.body_bytes).unwrap_or(usize::MAX);
         let mut inactive = Vec::new();
+        self.views
+            .values_mut()
+            .for_each(ThreadView::retain_source_ids);
         let working = self.retained_working_node_ids();
-        let active_retained = retained_body_bytes(self.view(), &working);
-        let mut retained = active_retained;
-        let mut pinned: usize = 0;
-        for (key, view) in &mut self.views {
-            view.retain_source_ids();
-            let weight = view
-                .retained_view_bytes()
-                .saturating_add(key.capacity())
-                .saturating_add(self.autosave.cache_bytes(key));
-            if key == &self.active {
-                pinned = pinned.saturating_add(weight.saturating_sub(active_retained));
-            } else if view
-                .clipboard_pins
-                .iter()
-                .any(|(draft, _)| draft == &view.draft.draft_id)
-                || view.selecting_agents.is_some()
-                || view.pending.values().any(|pending| {
-                    matches!(
-                        pending.status,
-                        ReceiptStatus::Accepting | ReceiptStatus::Unknown
-                    )
-                })
-                || if view.thread_id.is_none() {
-                    !view.draft.text.is_empty()
-                        || !view.draft.attachments.is_empty()
-                        || view.draft.edit.is_some()
-                        || !view.pending.is_empty()
-                } else {
-                    !self.autosave.reconstructible(key, view)
-                }
-            {
-                pinned = pinned.saturating_add(weight);
-            } else {
-                retained = retained.saturating_add(weight);
-                inactive.push((view.cache_touch, key.clone(), weight));
-            }
-        }
+        let (mut retained, pinned) = self.body_cache_bytes(&working, |touch, key, weight| {
+            inactive.push((touch, key.to_owned(), weight));
+        });
         // Pinned data consumes body-budget space but never enters the LRU.
         let budget = limit.saturating_sub(pinned);
         if retained <= budget {
@@ -6274,13 +6408,26 @@ cursor: None,
         }
         inactive.sort_unstable();
         let mut evicted = BTreeSet::new();
-        for (_, key, weight) in inactive {
-            if retained <= budget {
+        let mut inactive = inactive.into_iter().peekable();
+        while retained > budget {
+            let oldest_scope = self.thread_browser.oldest_scope();
+            if oldest_scope.is_some()
+                && inactive
+                    .peek()
+                    .is_none_or(|(touch, _, _)| oldest_scope < *touch)
+            {
+                let bytes = self
+                    .thread_browser
+                    .evict_oldest_scope()
+                    .expect("oldest browser scope");
+                retained = retained.saturating_sub(bytes);
+            } else if let Some((_, key, weight)) = inactive.next() {
+                self.views.remove(&key);
+                evicted.insert(key);
+                retained = retained.saturating_sub(weight);
+            } else {
                 break;
             }
-            self.views.remove(&key);
-            evicted.insert(key);
-            retained = retained.saturating_sub(weight);
         }
         self.autosave.forget_views(&evicted);
         let mut evicted_bodies = 0;
@@ -6795,6 +6942,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     state.aux_popup_paint.set(None);
     state.viewport = area;
     if area.width < 8 || area.height < 5 {
+        state.trim_layouts(Instant::now());
         frame.render_widget(
             Paragraph::new(text_width::glyphs::select(
                 "Shellboy · enlarge terminal",
@@ -7032,7 +7180,10 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
             .thread_browser
             .draw(frame, popup_area, active, notice_visible);
     }
+    let popup_frame = Instant::now();
+    state.set_reader_budgets();
     let overlay_links = state.draw_overlays(frame, popup_area);
+    state.trim_layouts(popup_frame);
     state.visible_links = overlay_links;
     if state.history_links_active() {
         state.visible_links.extend(
@@ -7319,7 +7470,11 @@ fn run_session(
                 state.dirty = true;
             }
             if let Some(event) = event {
-                let actions_to_send = state.event(event);
+                let actions_to_send = state
+                    .event(event)
+                    .into_iter()
+                    .map(|action| state.with_native_memory_observation(action))
+                    .collect();
                 for error in actions.try_send_batch(actions_to_send) {
                     state.action_rejected(&error.into_inner());
                 }
@@ -8314,6 +8469,29 @@ mod layout_cache_tests {
         assert_eq!(ui.view().navigation.anchor, anchor);
         assert!(Arc::ptr_eq(&anchored, &ui.history_layout(20, 8)));
     }
+    #[test]
+    fn popup_layout_pressure_preserves_the_current_reader_and_evicts_the_inactive_one() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.config.cache.layout_bytes = 12 * 1024;
+        ui.set_reader_budgets();
+        let source = || (0..96).map(|_| Line::from("retained row")).collect();
+        ui.help_cache.prepare(1, 60, source);
+        let boundary = Instant::now();
+        ui.confirmation_cache.prepare(1, 60, source);
+        assert!(
+            ui.help_cache.retained_bytes() + ui.confirmation_cache.retained_bytes() > 12 * 1024
+        );
+        ui.trim_layouts(boundary);
+        ui.confirmation_cache
+            .prepare(1, 60, || panic!("the displayed reader is pinned"));
+        let mut builds = 0;
+        ui.help_cache.prepare(1, 60, || {
+            builds += 1;
+            source()
+        });
+        assert_eq!(builds, 1);
+    }
+
     #[test]
     fn layout_global_lru_zero_oversize_and_eviction_release_owned_buffers() {
         let ui = UiState::new(&Config::default(), std::env::temp_dir());

@@ -12,7 +12,6 @@ struct Image {
 #[derive(Default)]
 pub(super) struct DraftImages {
     images: HashMap<(String, String), Image>,
-    owners: HashMap<String, String>,
     pending: HashMap<u64, (String, Option<String>)>,
     next_ticket: u64,
     send_references: HashMap<(String, String), usize>,
@@ -20,12 +19,6 @@ pub(super) struct DraftImages {
 }
 impl DraftImages {
     pub(super) fn associate(&mut self, draft: &str, thread: &str) {
-        if !self.images.keys().any(|(owner, _)| owner == draft)
-            && !self.pending.values().any(|(owner, _)| owner == draft)
-        {
-            return;
-        }
-        self.owners.insert(draft.to_owned(), thread.to_owned());
         // Once a draft targets a Thread, committed owner writes own disposal.
         self.images.retain(|(owner, _), _| owner != draft);
         for (owner, target) in self.pending.values_mut() {
@@ -50,27 +43,17 @@ impl DraftImages {
             .remove(&ticket)
             .map(|(_, thread)| thread.is_none())
     }
-    #[cfg(test)]
-    pub(super) fn threads(&self) -> impl Iterator<Item = &String> {
-        self.owners.values()
-    }
     pub(super) fn forget_threads(&mut self, deleted: &HashSet<String>) {
-        let mut drafts: HashSet<_> = self
-            .owners
-            .iter()
-            .filter(|(_, thread)| deleted.contains(*thread))
+        let drafts: HashSet<_> = self
+            .pending
+            .values()
+            .filter(|(_, thread)| {
+                thread
+                    .as_ref()
+                    .is_some_and(|thread| deleted.contains(thread))
+            })
             .map(|(draft, _)| draft.clone())
             .collect();
-        drafts.extend(
-            self.pending
-                .values()
-                .filter(|(_, thread)| {
-                    thread
-                        .as_ref()
-                        .is_some_and(|thread| deleted.contains(thread))
-                })
-                .map(|(draft, _)| draft.clone()),
-        );
         self.images.retain(|key, _| {
             if !drafts.contains(&key.0) {
                 return true;
@@ -78,12 +61,7 @@ impl DraftImages {
             self.releases.push(key.clone());
             false
         });
-        self.owners.retain(|draft, _| !drafts.contains(draft));
         self.pending.retain(|_, (draft, _)| !drafts.contains(draft));
-    }
-    pub(super) fn prune_owners(&mut self) {
-        self.owners
-            .retain(|draft, _| self.pending.values().any(|(owner, _)| owner == draft));
     }
     pub(super) fn begin_send(&mut self, draft: &str, attachments: &[UiAttachment]) {
         for attachment in attachments {
@@ -126,7 +104,6 @@ impl DraftImages {
     pub(super) fn sent(&mut self, draft: &str, attachments: &HashSet<String>) {
         self.images
             .retain(|(owner, id), _| owner != draft || !attachments.contains(id));
-        self.prune_owners();
     }
     pub(super) fn decision(&mut self, draft: String, attachment: String, accepted: bool) {
         let key = (draft, attachment);
@@ -138,7 +115,6 @@ impl DraftImages {
             self.images.remove(&key);
             self.releases.push(key);
         }
-        self.prune_owners();
     }
     pub(super) fn release(&mut self, draft: &str, revision: u64, selected: &HashSet<String>) {
         self.images.retain(|key, image| {
@@ -152,7 +128,6 @@ impl DraftImages {
             self.releases.push(key.clone());
             false
         });
-        self.prune_owners();
     }
 }
 
@@ -252,16 +227,14 @@ mod tests {
         assert!(images.accept_image(old).is_none());
         assert!(images.accept_image(newly_sent).is_none());
         assert_eq!(images.accept_image(unrelated), Some(false));
-        assert!(images.threads().all(|thread| thread == "kept"));
+        assert!(images.pending.is_empty());
     }
     #[test]
     fn failed_capture_reclaims_ticket_and_owner_even_when_command_error_was_already_reported() {
         let mut images = DraftImages::default();
         let ticket = images.begin_image("draft", Some("thread"));
         assert_eq!(images.accept_image(ticket), Some(false));
-        images.prune_owners();
         assert!(images.pending.is_empty());
-        assert_eq!(images.threads().count(), 0);
         assert!(images.accept_image(ticket).is_none());
     }
 }

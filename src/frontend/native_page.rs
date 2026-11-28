@@ -18,6 +18,16 @@ pub(super) struct KnownSubmission {
     pub draft_id: String,
     pub revision: u64,
 }
+pub(super) fn forget_operation(
+    known: &mut std::collections::HashMap<String, Vec<KnownSubmission>>,
+    operation: &str,
+) {
+    known.retain(|_, submissions| {
+        submissions.retain(|submission| submission.operation_id != operation);
+        !submissions.is_empty()
+    });
+}
+
 pub(super) const KNOWN_SUBMISSIONS: usize = 128;
 
 /// Remember one submission, keeping only the newest bounded set.
@@ -225,6 +235,27 @@ pub(super) async fn read_queue(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn settled_operation_retires_only_its_projection_record() {
+        let submission = |operation: &str| KnownSubmission {
+            operation_id: operation.into(),
+            draft_id: "draft".into(),
+            revision: 7,
+        };
+        let mut known = std::collections::HashMap::from([
+            (
+                "first".into(),
+                vec![submission("settled"), submission("pending")],
+            ),
+            ("second".into(), vec![submission("other")]),
+        ]);
+        forget_operation(&mut known, "settled");
+        assert_eq!(known["first"][0].operation_id, "pending");
+        forget_operation(&mut known, "pending");
+        assert!(!known.contains_key("first"));
+        assert_eq!(known["second"][0].operation_id, "other");
+    }
 
     /// The installed queue: observed pending rows, this Thread's human duties,
     /// known submissions settled by exact receipt, and tracked receipts.

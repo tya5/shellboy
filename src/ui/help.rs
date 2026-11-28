@@ -13,6 +13,24 @@ pub(super) struct Page {
     pub context: &'static str,
     content: Content,
 }
+impl Page {
+    pub(super) fn reader_body_bytes(&self) -> usize {
+        match &self.content {
+            Content::Fixed(lines) => super::presentation::bytes(lines),
+            Content::Guide(rows) => {
+                rows.capacity() * std::mem::size_of::<Row>()
+                    + rows
+                        .iter()
+                        .map(|row| match row {
+                            Row::Section(text) | Row::Note(text, _) => text.capacity(),
+                            Row::Entry(key, text) => key.capacity() + text.capacity(),
+                            Row::Blank => 0,
+                        })
+                        .sum::<usize>()
+            }
+        }
+    }
+}
 enum Content {
     Fixed(Vec<Line<'static>>),
     Guide(Vec<Row>),

@@ -110,6 +110,15 @@ pub(super) enum Outcome {
     },
 }
 impl ManagementPopup {
+    pub(super) fn reader_body_bytes(&self) -> usize {
+        self.frame.as_ref().map_or(0, |frame| {
+            frame.view.text.capacity() + frame.view.title.capacity()
+        })
+    }
+    pub(super) fn reader_mut(&mut self) -> Option<&mut popup::ReaderCache> {
+        Some(self.reader_cache.get_mut())
+    }
+
     pub(super) fn set_language(&mut self, language: UiLanguage) {
         if self.language != language {
             self.language = language;

@@ -345,6 +345,10 @@ pub(super) enum Outcome {
     Client(ClientOperation),
 }
 impl Operations {
+    pub(super) fn reader_mut(&mut self) -> Option<&mut popup::ReaderCache> {
+        self.form.as_mut().map(|form| form.reader.get_mut())
+    }
+
     pub fn new(context: Context) -> Self {
         let mut result = Self {
             language: UiLanguage::Ja,

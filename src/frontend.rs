@@ -1278,8 +1278,13 @@ async fn run_client(
                 let mut action = action;
                 let mut submission = None;
                 let mut context = None;
+                let mut native_caches = None;
                 let action = loop {
                     match action {
+                        UiAction::NativeMemoryObservation { action: inner, caches } => {
+                            action = *inner;
+                            native_caches = Some(caches);
+                        }
                         UiAction::SubmittedCommand {
                             submission: input,
                             action: inner,
@@ -1334,7 +1339,7 @@ async fn run_client(
                 match action {
                     UiAction::ReconnectCompose => {
                         if !compose_disconnected.load(Ordering::Acquire) { continue; }
-                        let result = reconcile_compose(selected, &updates, &mut compose_unknown, &mut images, &mut selection, &mut dirty_threads).await;
+                        let result = reconcile_compose(selected, &updates, &mut compose_unknown, &mut known_submissions, &mut images, &mut selection, &mut dirty_threads).await;
                         match result {
                             Ok(()) => {
                                 if saved_events.is_none() {
@@ -1349,7 +1354,7 @@ async fn run_client(
                         }
                     }
                     UiAction::CopySelected { .. } | UiAction::ConfirmedIndex { .. } => unreachable!("selection normalized before dispatch"),
-                    UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
+                    UiAction::NativeMemoryObservation { .. } | UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
                     }
                     UiAction::Quit => break,
@@ -1812,6 +1817,9 @@ async fn run_client(
                                     "scope": "native memory observation, not an atomic snapshot",
                                     "refresh": "Repeat status --memory explicitly to observe again",
                                 });
+                                if let Some(caches) = native_caches {
+                                    value["client_observation"]["native_caches"] = caches;
+                                }
                             }
                             command_outcome(&outcomes, submission, &management_outcome(&response))
                                 .await;
@@ -3279,7 +3287,6 @@ async fn run_client(
                         (_, Err(_)) => {}
                     }
                     settle_paste(&updates, submission, pin, draft_id, revision, result).await;
-                    images.prune_owners();
                 },
                 Some(BackgroundResult::Copied {
                     scope,
@@ -3854,6 +3861,7 @@ fn reconcile_compose<'a>(
     owner: native_history::Owner<'a>,
     updates: &'a BufferedUpdates,
     compose_unknown: &'a mut HashMap<String, UnknownCompose>,
+    known_submissions: &'a mut HashMap<String, Vec<native_page::KnownSubmission>>,
     images: &'a mut draft_images::DraftImages,
     selection: &'a mut selection::Selection,
     dirty_threads: &'a mut HashSet<String>,
@@ -3890,6 +3898,7 @@ fn reconcile_compose<'a>(
                         else {
                             unreachable!()
                         };
+                        native_page::forget_operation(known_submissions, &operation);
                         images.end_send(&draft_id, &attachments);
                         images.sent(&draft_id, &attachments);
                         images.associate(&draft_id, &thread);
@@ -3955,6 +3964,7 @@ fn reconcile_compose<'a>(
                     attachments,
                     ..
                 } => {
+                    native_page::forget_operation(known_submissions, &operation);
                     let Err(error) = outcome else {
                         unreachable!("unconfirmed send was retained")
                     };

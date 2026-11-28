@@ -672,6 +672,17 @@ fn answer_fields_for(node: &UiNode, language: UiLanguage) -> Vec<PresentationFie
 }
 
 impl Details {
+    pub(super) fn reader_body_bytes(&self) -> usize {
+        super::presentation::bytes(&self.original_lines)
+            + self
+                .original
+                .as_ref()
+                .map_or(0, |body| body.text.capacity())
+    }
+    pub(super) fn reader_mut(&mut self) -> Option<&mut popup::ReaderCache> {
+        Some(self.reader_cache.get_mut())
+    }
+
     pub fn new(view: &ThreadView, links: bool) -> Self {
         let selected_node = if view.navigation.follow() {
             view.nodes().len().saturating_sub(1)
