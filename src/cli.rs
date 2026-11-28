@@ -128,7 +128,7 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: ServiceCommand,
     },
-    /// Manage Thread context commands.
+    /// Experimental: manage Thread context commands.
     Context {
         #[command(subcommand)]
         command: ContextCommand,
@@ -2698,6 +2698,7 @@ fn artifact_path_from_cli(path: &str, cwd: &Path) -> Result<String, ApiError> {
 
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum ContextCommand {
+    /// Experimental: add Thread context definitions.
     Add {
         #[arg(long = "thread")]
         thread_id: Option<String>,
@@ -2708,16 +2709,19 @@ pub enum ContextCommand {
         #[arg(long)]
         timeout_ms: u32,
     },
+    /// Experimental: list Thread context definitions.
     List {
         #[arg(long = "thread")]
         thread_id: Option<String>,
     },
+    /// Experimental: get Thread context definitions.
     Get {
         #[arg(long = "thread")]
         thread_id: Option<String>,
         #[arg(long)]
         name: String,
     },
+    /// Experimental: set Thread context definitions.
     Set {
         #[arg(long = "thread")]
         thread_id: Option<String>,
@@ -2728,6 +2732,7 @@ pub enum ContextCommand {
         #[arg(long)]
         timeout_ms: Option<u32>,
     },
+    /// Experimental: remove Thread context definitions.
     Remove {
         #[arg(long = "thread")]
         thread_id: Option<String>,

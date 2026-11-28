@@ -135,3 +135,55 @@ pub(super) async fn collect(
         json!({"type":"message","role":"developer","content":[{"type":"input_text","text":text}]}),
     ))
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::control::driver::preparation_tests::{close, fixture, ready};
+
+    #[tokio::test]
+    async fn context_definitions_supply_fresh_ordered_stdout_and_failure() {
+        let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1").await;
+        let snapshot = ready(&control, &accepted).await;
+        let cancel = CancellationToken::new();
+        assert!(
+            collect(&control, &snapshot, &cancel)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let thread = accepted.thread_id.clone();
+        control
+            .store
+            .database
+            .call(move |db| {
+                for (name, command) in [("z", "printf '%s' \"$SHELLBOY_TURN_ID\""), ("a", "exit 1")]
+                {
+                    super::super::super::context_command::add(
+                        db,
+                        &thread,
+                        &crate::protocol::ContextAddArgs {
+                            thread_id: None,
+                            name: name.into(),
+                            command: command.into(),
+                            timeout_ms: 10_000,
+                        },
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let item = collect(&control, &snapshot, &cancel)
+            .await
+            .unwrap()
+            .unwrap();
+        let text = item["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(result["results"][0]["name"], "z");
+        assert_eq!(result["results"][0]["outcome"], "ok");
+        assert_eq!(result["results"][0]["stdout"], snapshot.turn);
+        assert_eq!(result["results"][1]["outcome"], "failed");
+        close(control, owner).await;
+    }
+}

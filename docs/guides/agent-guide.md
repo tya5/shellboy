@@ -1432,3 +1432,12 @@ boundary, not by when the preview or a sent message arrived.
 To export a Thread for the user, run `shellboy thread export --thread ID --out PATH`. The file can include private conversation data and encrypted reasoning, so use the requested destination and do not share it without permission. This is a live export of retained history, not a snapshot or a recovery of deleted data.
 
 To import a retained-history JSONL export at the user's request, run `shellboy thread import --in PATH`. It creates a new Thread, does not resume execution, and does not replay the source provider's opaque reasoning.
+
+### Request context commands (experimental)
+
+A Thread can opt into [context commands](cli-reference.md#context-commands-experimental)
+to supply fresh facts at the end of each conversation request, including tool
+continuations. Use short, read-only commands you trust. These commands run with the
+owner's shell permissions, and the provider and saved request inspection can see
+their stdout. Do not print secrets. There is no default timeout. Forks and children
+start without commands, and provider retries reuse the prepared output.

@@ -1364,3 +1364,19 @@ Read `error.hint` for the next action and `error.message` for diagnostic evidenc
 An unavailable or excluded attachment was not sent in that request. Inspect `shellboy attachment list --thread THREAD_ID` for current state; an earlier replay notice or accepted attachment command is not a delivery receipt.
 
 Standalone `rag` reports hints on failures and on failed scopes or inputs in a partial result. Use `shellboy rag init` for the intended, uninitialized store, `shellboy rag status` for a failed standalone embedding or store, and `shellboy index status` for the owner history index. For missing semantic coverage, repeat the search with `--mode keyword` to avoid another embedding call. Preserve the original query and requested scope.
+
+## Context commands (experimental)
+
+`context add --thread THREAD --name NAME --command STRING --timeout-ms N`
+registers one quoted shell command. The timeout is required and must be positive.
+Use `context list --thread THREAD`, `context get --thread THREAD --name NAME`,
+`context set --thread THREAD --name NAME [--command STRING] [--timeout-ms N]`,
+or `context remove --thread THREAD --name NAME`. Set changes command or timeout
+without changing execution order. A model shell may omit `--thread` for its own
+Thread. Names are unique within each Thread; resources are not inherited.
+
+Context commands run sequentially in registration order in the Thread's effective
+working directory. Each new conversation request runs them once; a provider retry
+reuses that request's prepared output. Core sends bounded stdout and typed outcomes
+in the last request item, not as saved history. `request inspect` shows the saved
+tail for an admitted attempt and never runs the commands.
