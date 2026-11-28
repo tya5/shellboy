@@ -334,6 +334,7 @@ async fn ask_back_keeps_duty_open_and_the_answering_run_owes_it_once() {
         let got = f
             .execute(
                 Command::MessageGet(crate::protocol::MessageTarget {
+                    source_thread_id: None,
                     message_id: duty.clone(),
                 }),
                 None,

@@ -2239,6 +2239,7 @@ mod tests {
             let saved = rpc(
                 &control,
                 Command::MessageGet(crate::protocol::MessageTarget {
+                    source_thread_id: None,
                     message_id: message.clone(),
                 }),
             )

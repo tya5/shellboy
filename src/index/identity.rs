@@ -805,7 +805,8 @@ mod tests {
                 value: Some(json!("new-embed-model")),
             },
         ];
-        let applied = config_edit::apply_live(&path, Some(&hash), &changes, &config, &clients).unwrap();
+        let applied =
+            config_edit::apply_live(&path, Some(&hash), &changes, &config, &clients).unwrap();
         assert_eq!(applied.result["restart_required"], true);
         assert_eq!(applied.result["applied_to_running_owner"], true);
         for entry in applied.result["changes"].as_array().unwrap() {
