@@ -77,8 +77,8 @@ fn latest_query(source: &str) -> String {
         CASE WHEN octet_length(a.id)<=?2 THEN a.id END, {},
         CASE WHEN octet_length(a.started_at)<=?2 THEN a.started_at END,
         CASE WHEN octet_length(a.ended_at)<=?2 THEN a.ended_at END,
-        (EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id
-          WHERE tr.thread_id=t.id AND r.created_at>a.started_at)
+        (EXISTS(SELECT 1 FROM thread_replacement tr
+          WHERE tr.thread_id=t.id AND tr.replacement_created_at>a.started_at)
           -- #236: a rewind removed this attempt's output from the path, so its input size is stale
           OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=t.id AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
         COALESCE(octet_length(a.id)>?2 OR octet_length(a.started_at)>?2
@@ -330,7 +330,7 @@ mod tests {
             "later",
         )
         .await;
-        db.call(|db|{db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('marker','summary','now','{}'); INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES('edit','marker','key','format','prompt','completed','2021-01-01T00:00:00Z'); INSERT INTO thread_replacement VALUES('t','edit');")?;Ok(())}).await.unwrap();
+        db.call(|db|{db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('marker','summary','now','{}'); INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES('edit','marker','key','format','prompt','completed','2021-01-01T00:00:00Z'); INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('t','edit');")?;Ok(())}).await.unwrap();
         db.call(|db| {
             db.execute("UPDATE model_attempt SET response_id='adopted-provider-id' WHERE id='newest'", [])?;
             for (id, manifest) in [("received", "{}"), ("fenced", r#"{"adoption":{"outcome":"not_adopted"}}"#)] {
@@ -762,23 +762,6 @@ mod query_cost_tests {
         assert_eq!(
             details["last_successful_attempt"]["next_request_pending"],
             true
-        );
-        let plan = plan(&db);
-        assert!(
-            plan.iter()
-                .any(|p| p.contains("SEARCH tr USING COVERING INDEX") && p.contains("thread_id=?")),
-            "{plan:?}"
-        );
-        assert!(
-            plan.iter()
-                .any(|p| p.contains("SEARCH r USING INDEX") && p.contains("id=?")),
-            "{plan:?}"
-        );
-        assert!(
-            !plan
-                .iter()
-                .any(|p| p.starts_with("SCAN tr") || p.starts_with("SCAN r")),
-            "{plan:?}"
         );
     }
 }

@@ -403,6 +403,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/next_history_reasoning_keep.sql"),
         foreign_keys: Some(Impact::Tables(&["history_reasoning_keep"])),
     },
+    Migration {
+        version: 77,
+        sql: include_str!("../../migrations/next_ordered_thread_replacement.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(

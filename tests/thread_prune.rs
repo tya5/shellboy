@@ -143,7 +143,9 @@ fn replacement(id: &str, output: &str, sources: &[&str], holders: &[&str]) -> St
         sql += &format!("INSERT INTO replacement_source VALUES('{id}',{i},'{s}',0,NULL);");
     }
     for h in holders {
-        sql += &format!("INSERT INTO thread_replacement VALUES('{h}','{id}');");
+        sql += &format!(
+            "INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('{h}','{id}');"
+        );
     }
     sql
 }
@@ -619,7 +621,7 @@ INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT '
 INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('s1','turn','summary','1900','{}',2),('tail','turn','message','1900','{}',2);
 INSERT INTO thread_path VALUES('live',0,'s1'),('live',1,'tail');
 INSERT INTO replacement VALUES('r1','s1','k','1','1','completed','now');
-INSERT INTO thread_replacement VALUES('live','r1');
+INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('live','r1');
 WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<65537)
 INSERT INTO replacement_source SELECT 'r1',x,'m'||x,0,NULL FROM n;";
     let f = Fixture::new(script).await;
