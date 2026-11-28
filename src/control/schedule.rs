@@ -484,7 +484,7 @@ fn add_definition(
                 "Thread not found",
             )
         })?;
-    if input.command.is_empty() || input.command.len() > 32 * 1024 || input.command.contains('\0') {
+    if !valid_command_field(&input.command) {
         return Err(invalid(
             "Shell command must be 1 to 32768 bytes without NUL",
         ));
@@ -2582,4 +2582,8 @@ mod tests {
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
+}
+
+pub(super) fn valid_command_field(command: &str) -> bool {
+    !command.is_empty() && command.len() <= 32 * 1024 && !command.contains('\0')
 }

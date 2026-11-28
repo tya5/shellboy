@@ -416,7 +416,7 @@ impl Limits {
         if self.tool_excerpt_bytes < minimum {
             return Err(invalid(
                 "limits.tool_excerpt_bytes",
-                &format!("must be at least {minimum} bytes"),
+                format!("must be at least {minimum} bytes"),
             ));
         }
         if self.attachment_file_bytes > self.attachment_request_bytes {

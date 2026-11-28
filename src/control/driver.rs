@@ -1,8 +1,8 @@
 //! Per-Thread model/tool loop. A long wait keeps its IPC slot for the whole wait.
 mod adoption;
 mod context_tail;
-pub(crate) use crate::compaction::boundary::WaitCancellation;
-use context_tail::minimum_budget as context_tail_minimum_budget;
+use crate::compaction::boundary::WaitCancellation;
+pub(crate) use context_tail::minimum_budget as context_tail_minimum_budget;
 mod notification_admission;
 mod overflow;
 pub(super) mod proactive;
