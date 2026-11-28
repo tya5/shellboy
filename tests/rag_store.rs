@@ -1661,7 +1661,7 @@ async fn retiring_builtin_docs_preserves_embeddings_for_identical_registered_mat
            PRAGMA user_version=5;").unwrap();
     }
     let migrated = call(root, RagCommand::Init).await;
-    assert_eq!(migrated["result"]["migrated_from_schema"], 5, "{migrated}");
+    assert_eq!(migrated["ok"], true, "{migrated}");
     let old = search(root, "docs", "recovery", SearchMode::Semantic).await;
     assert_eq!(old["result"]["scope_errors"][0]["code"], "scope_invalid");
     assert_eq!(

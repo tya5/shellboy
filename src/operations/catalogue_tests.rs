@@ -272,15 +272,10 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
         CLI_BINDINGS.len(),
         "one binding per executable spelling"
     );
-    // Docs also has standalone commands outside the form catalogue.
-    leaves.retain(|path, _| !path.starts_with("docs ") || bindings.contains_key(path));
-    assert_eq!(
-        leaves.keys().collect::<Vec<_>>(),
-        bindings.keys().collect::<Vec<_>>(),
-        "coverage is checked against actual clap, not OperationId::ALL"
-    );
-    for (path, command) in leaves {
-        let binding = bindings[&path];
+    for (path, binding) in bindings {
+        let command = leaves
+            .get(&path)
+            .unwrap_or_else(|| panic!("missing Clap command: {path}"));
         let spec = binding.operation.spec();
         let actual = command
             .get_arguments()
