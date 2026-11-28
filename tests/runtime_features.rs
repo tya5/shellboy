@@ -6667,16 +6667,15 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
         format!("compact.a_state.{thread}"),
         format!("compact.deterministic_range_failure.closed.{thread}"),
         format!("compact.deterministic_range_failure.active.{thread}"),
-        format!("reasoning.keep.{thread}"),
     ];
-    let count_keys = |keys: [String; 4]| async {
+    let count_keys = |keys: [String; 3]| async {
         control
             .store
             .database
             .call(move |db| {
                 Ok(db.query_row(
-                    "SELECT count(*) FROM app_meta WHERE key IN (?1,?2,?3,?4)",
-                    [&keys[0], &keys[1], &keys[2], &keys[3]],
+                    "SELECT count(*) FROM app_meta WHERE key IN (?1,?2,?3)",
+                    [&keys[0], &keys[1], &keys[2]],
                     |row| row.get::<_, i64>(0),
                 )?)
             })
@@ -6689,6 +6688,7 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
         "#A state exists before deletion"
     );
     // Synthetic slot and kept-reasoning rows: deletion must end them all.
+    let keep_owner = thread.clone();
     let synthetic = keys.clone();
     control
         .store
@@ -6701,14 +6701,21 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
                 )?;
             }
             db.execute(
-                "INSERT INTO app_meta(key,value) VALUES(?1,'{\"epoch\":1,\"nodes\":[]}')",
-                [&synthetic[3]],
+                "INSERT INTO history_reasoning_keep(thread_id,epoch,node_id) SELECT id,reasoning_epoch,'fixture' FROM thread WHERE id=?1",
+                [&keep_owner],
             )?;
             Ok(())
         })
         .await
         .unwrap();
-    assert_eq!(count_keys(keys.clone()).await, 4);
+    assert_eq!(count_keys(keys.clone()).await, 3);
+    let kept = |id: String| async {
+        control.store.database.call(move |db| Ok(db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history_reasoning_keep WHERE thread_id=?1 AND node_id='fixture')",
+            [id], |row| row.get::<_,bool>(0),
+        )?)).await.unwrap()
+    };
+    assert!(kept(thread.clone()).await);
     request(
         &control,
         Command::ThreadDelete(ThreadDeleteArgs {
@@ -6721,7 +6728,11 @@ async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
     assert_eq!(
         count_keys(keys).await,
         0,
-        "Thread deletion removes #A state, failure slots and the kept-reasoning set"
+        "Thread deletion removes #A state and failure slots"
+    );
+    assert!(
+        !kept(thread).await,
+        "Thread deletion removes kept reasoning"
     );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
