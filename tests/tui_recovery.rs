@@ -464,35 +464,41 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
             json!({"id":"three-calls","status":"completed","output":calls}),
         ))
         .unwrap();
-    // Wait for the second real process; the first result has already been saved.
-    let execution_id = crate::test_watchdog::watchdog("foreground shell execution becomes available", async {
-        loop {
-            while let Ok(update)=incoming.try_recv(){ui.apply(update);deliver(&sender,ui.take_deferred_actions());}
-            let running=control.store.database.call(|db| {
-                use rusqlite::OptionalExtension;
-                Ok(db.query_row("SELECT s.id FROM tool_call c JOIN shell_execution s ON s.id=c.operation_id WHERE c.call_id='two' AND s.state='running'",[],|row|row.get::<_,String>(0)).optional()?)
-            }).await.expect("read exact foreground execution");
-            if let Some(id)=running {break id;}
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    }).await.expect("foreground shell becomes available");
-    // The owner can start the shell before the frontend delivers the saved input.
-    let thread = match ui.view().thread_id.clone() {
-        Some(thread) => thread,
-        None => {
-            crate::test_watchdog::receive_until(
-                "UI adopts the saved Thread for the foreground shell",
-                &incoming,
-                crate::test_watchdog::WATCHDOG,
-                |update| {
-                    ui.apply(update);
-                    deliver(&sender, ui.take_deferred_actions());
-                    ui.view().thread_id.clone()
-                },
-            )
-            .await
-        }
-    };
+    // The owner can start the shell before the UI adopts the first send. Use
+    // the adopted Thread to qualify the exact running execution for Background.
+    let (thread, execution_id) = crate::test_watchdog::watchdog(
+        "UI adopted Thread and its second foreground shell is running",
+        async {
+            let deadline = crate::test_watchdog::Deadline::new("UI adoption and foreground shell");
+            loop {
+                if let Some(thread) = ui.view().thread_id.clone() {
+                    let target = thread.clone();
+                    let running = control.store.database.call(move |db| {
+                        use rusqlite::OptionalExtension;
+                        Ok(db.query_row(
+                            "SELECT s.id FROM tool_call c JOIN shell_execution s ON s.id=c.operation_id JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1 AND c.call_id='two' AND s.state='running'",
+                            [target], |row| row.get::<_, String>(0),
+                        ).optional()?)
+                    }).await.expect("read exact foreground execution for the adopted Thread");
+                    if let Some(id) = running {
+                        break (thread, id);
+                    }
+                }
+                let update = tokio::task::block_in_place(|| deadline.receive(&incoming)).expect("frontend update while waiting for Thread adoption and shell start");
+                if let UiUpdate::Receipt {
+                    status: ui::ReceiptStatus::Failed | ui::ReceiptStatus::Unknown,
+                    message,
+                    ..
+                } = &update {
+                    panic!("first send was not confirmed: {message:?}");
+                }
+                ui.apply(update);
+                deliver(&sender, ui.take_deferred_actions());
+            }
+        },
+    )
+    .await
+    .expect("foreground shell becomes available on the adopted Thread");
     deliver(
         &sender,
         vec![UiAction::Background {
