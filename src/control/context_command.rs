@@ -20,7 +20,7 @@ fn validate(name: &str, command: Option<&str>, timeout: Option<u32>) -> Result<(
     if name.trim().is_empty()
         || name.len() > 128
         || name.contains('\0')
-        || command.is_some_and(|s| s.trim().is_empty() || s.len() > 8192 || s.contains('\0'))
+        || command.is_some_and(|s| s.trim().is_empty() || !super::schedule::valid_command_field(s))
         || timeout == Some(0)
     {
         return Err(ApiError::new(
