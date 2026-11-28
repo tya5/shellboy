@@ -258,7 +258,7 @@ async fn frontend_delivers_background_and_child_recovery_without_selecting_them(
     control.store.database.call(move |db| {
         // Thread organization does not redirect the local recovery bell.
         db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) SELECT 'bell-parent','parent',cwd,agents_path,profile_id,model_id,updated_at FROM thread WHERE id=?1", [&thread])?;
-        db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('bell-parent-run','bell-parent','live','now')", [])?;
+        db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('bell-parent-run','bell-parent','live','2026-11-24T00:00:00Z')", [])?;
         db.execute("UPDATE thread SET parent_thread_id='bell-parent' WHERE id=?1", [&thread])?;
         db.execute("UPDATE turn SET state='running',generation=generation+1 WHERE id=?1", [&turn])?;
         Ok(())
