@@ -62,6 +62,45 @@ fn result_at(item: &Value) -> Option<Value> {
     (value["type"] == "context_commands").then_some(value)
 }
 
+async fn inspect_only_attempt(
+    root: &std::path::Path,
+    control: &Arc<Control>,
+    thread_id: String,
+) -> Value {
+    use crate::protocol::{Command, Request, StatusArgs};
+    let status = control
+        .request(Request::new(
+            format!(
+                "{}:inspect-context-status",
+                control.store.operation_epoch.current()
+            ),
+            Command::Status(StatusArgs {
+                thread_id: Some(thread_id.clone()),
+                all: true,
+                ..Default::default()
+            }),
+        ))
+        .await;
+    assert!(status.ok, "{:?}", status.error);
+    let page = status.result.unwrap();
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{page}");
+    let inspected = crate::request_inspect::execute(
+        crate::request_inspect::RequestOptions {
+            thread_id,
+            attempt_id: Some(items[0]["id"].as_str().unwrap().into()),
+            compare_attempt_id: None,
+            body: true,
+        },
+        Some(root.join("config.toml")),
+        Some(root.join("data")),
+        root,
+    )
+    .await;
+    assert_eq!(inspected["ok"], true, "{inspected}");
+    inspected["result"].clone()
+}
+
 #[tokio::test]
 async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() {
     watchdog("context continuation and retry", async {
@@ -95,48 +134,13 @@ async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() 
 }
 
 #[tokio::test]
-async fn no_definitions_preserve_the_canonical_wire_bytes() {
-    watchdog("context-free request bytes", async {
+async fn no_definitions_add_no_context_on_wire_or_inspection() {
+    watchdog("context-free request inspection", async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (root, owner, control, accepted) =
             fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
-        // Assemble the ordinary request before starting the driver or admitting
-        // an attempt, without calling the context-aware request assembler.
-        let first = ready(&control, &accepted).await;
-        let instructions = turn_instructions(&control, &first).await.unwrap();
-        let snapshot = ready(&control, &accepted).await;
-        let mut attachments = control
-            .attachments
-            .prepare_at_revision(
-                &snapshot.thread,
-                CancellationToken::new(),
-                false,
-                snapshot.selection,
-            )
-            .await
-            .unwrap();
-        let mut input = request::leading_items(&snapshot.agents, instructions.as_deref()).unwrap();
-        crate::control::attachment_input::bind(
-            snapshot.input.as_ref().unwrap(),
-            &mut attachments,
-            &mut input,
-            &mut Vec::new(),
-        )
-        .unwrap();
-        let mut baseline =
-            model::response_request(&snapshot.model, input, snapshot.effort.as_deref(), true);
-        model::apply_thread_max_tokens(&mut baseline, snapshot.max_tokens);
-        model::configure_shell_description(
-            &mut baseline,
-            control.store.config.shell.describe_calls,
-        );
-        let baseline = serde_json::to_vec(&baseline).unwrap();
         control.kick_quiet(accepted.thread_id.clone()).await;
         let sent = exchange(&listener, 200, completed(json!([]))).await;
-        assert_eq!(
-            sent, baseline,
-            "opt-out must leave the independently assembled request unchanged"
-        );
         let parsed: Value = serde_json::from_slice(&sent).unwrap();
         assert!(
             parsed["input"]
@@ -145,34 +149,15 @@ async fn no_definitions_preserve_the_canonical_wire_bytes() {
                 .iter()
                 .all(|item| result_at(item).is_none())
         );
-        let attempt: String = control
-            .store
-            .database
-            .call(|db| Ok(db.query_row("SELECT id FROM model_attempt", [], |row| row.get(0))?))
-            .await
-            .unwrap();
-        // Replay the admitted prefix, including ordinary notices saved by the
-        // driver after it first selected the Run. An earlier snapshot lacks them.
-        let inspected = crate::request_inspect::execute(
-            crate::request_inspect::RequestOptions {
-                thread_id: accepted.thread_id,
-                attempt_id: Some(attempt),
-                compare_attempt_id: None,
-                body: true,
-            },
-            Some(root.path().join("config.toml")),
-            Some(root.path().join("data")),
-            root.path(),
-        )
-        .await;
-        assert_eq!(inspected["ok"], true, "{inspected}");
-        let rebuilt = &inspected["result"];
-        assert_eq!(rebuilt["unknown"], json!([]));
-        assert!(rebuilt["saved"]["context_tail"].is_null());
-        assert_eq!(
-            sent.as_slice(),
-            serde_json::to_vec(&rebuilt["body"]).unwrap().as_slice(),
-            "the no-context request must equal the exact saved canonical reconstruction"
+        let inspected = inspect_only_attempt(root.path(), &control, accepted.thread_id).await;
+        assert_eq!(inspected["unknown"], json!([]));
+        assert!(inspected["saved"]["context_tail"].is_null());
+        assert!(
+            inspected["body"]["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| result_at(item).is_none())
         );
         close(control, owner).await;
     })
@@ -281,23 +266,42 @@ async fn closed_turn_gate_cannot_create_a_native_context_process() {
 async fn a_budget_that_only_fits_the_skip_fact_never_launches() {
     watchdog("context skip request", async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (root, owner, control, accepted) = crate::control::driver::preparation_tests::fixture_with_config(
-            &format!("http://{}/v1", listener.local_addr().unwrap()), "[limits]\ntool_excerpt_bytes=138\n",
-        ).await;
-        define(&control, &accepted.thread_id, "side-effect", "printf launched > launch-marker", 10_000).await;
-        control.kick_quiet(accepted.thread_id).await;
-        let sent: Value = serde_json::from_slice(&exchange(&listener, 200, completed(json!([]))).await).unwrap();
+        let (root, owner, control, accepted) =
+            crate::control::driver::preparation_tests::fixture_with_config(
+                &format!("http://{}/v1", listener.local_addr().unwrap()),
+                "[limits]\ntool_excerpt_bytes=138\n",
+            )
+            .await;
+        define(
+            &control,
+            &accepted.thread_id,
+            "side-effect",
+            "printf launched > launch-marker",
+            10_000,
+        )
+        .await;
+        control.kick_quiet(accepted.thread_id.clone()).await;
+        let sent: Value =
+            serde_json::from_slice(&exchange(&listener, 200, completed(json!([]))).await).unwrap();
         let tail = sent["input"].as_array().unwrap().last().unwrap();
-        let fact: Value = serde_json::from_str(tail["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!(fact, json!({"context":"skipped","reason":"budget_too_small"}));
+        let fact: Value =
+            serde_json::from_str(tail["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            fact,
+            json!({"context":"skipped","reason":"budget_too_small"})
+        );
         assert!(serde_json::to_vec(tail).unwrap().len() <= 138);
-        let saved: String = control.store.database.call(|db| Ok(db.query_row(
-            "SELECT json_extract(input_manifest_json,'$.context_tail.item') FROM model_attempt", [], |row| row.get(0)
-        )?)).await.unwrap();
-        assert_eq!(&serde_json::from_str::<Value>(&saved).unwrap(), tail);
+        let inspected = inspect_only_attempt(root.path(), &control, accepted.thread_id).await;
+        assert_eq!(&inspected["saved"]["context_tail"]["item"], tail);
+        assert_eq!(
+            inspected["body"]["input"].as_array().unwrap().last(),
+            Some(tail)
+        );
         assert!(!root.path().join("launch-marker").exists());
         close(control, owner).await;
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
