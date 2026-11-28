@@ -65,6 +65,11 @@ fn stale() -> ApiError {
     )
     .hint(INSPECT_ATTACHMENTS)
 }
+fn protected_over_limit(bytes: u64, limit: u64) -> ApiError {
+    ApiError::new(ErrorCode::InputLimit, "Current protected attachment files exceed the request limit; request is held for explicit retry")
+        .hint("Reduce the selection with shellboy attachment remove --thread THREAD_ID --attachment ATTACHMENT_ID.")
+        .details(json!({"protected_bytes":bytes,"limit_bytes":limit}))
+}
 fn cancelled() -> ApiError {
     ApiError::new(
         ErrorCode::InvalidState,
@@ -179,6 +184,7 @@ struct Selected {
     active: bool,
     reason: Option<String>,
     sent_fingerprint: Option<String>,
+    recorded_size: Option<u64>,
     observation_hash: Option<String>,
     omission: Option<OmissionReason>,
     previous_state: Option<String>,
@@ -549,13 +555,50 @@ impl AttachmentService {
             });
             groups[group].1.push(index);
         }
+        // Reserve the protected set and newest historical suffix before reading.
+        // Legacy first inclusions without a recorded size reserve the file limit.
+        let reservation = |slot: &Selected| {
+            (slot.active && slot.omission.is_none())
+                .then(|| slot.recorded_size.unwrap_or(file_limit).min(file_limit))
+        };
+        let protected = selected
+            .iter()
+            .filter(|slot| slot.protected)
+            .filter_map(reservation)
+            .try_fold(0u64, u64::checked_add)
+            .ok_or_else(|| io_error("Attachment size overflow"))?;
+        if protected > limit {
+            return Err(protected_over_limit(protected, limit));
+        }
+        let mut remaining = limit - protected;
+        let mut admitted = vec![false; selected.len()];
+        let mut past_full = false;
+        for (index, slot) in selected.iter().enumerate().rev() {
+            let Some(bytes) = reservation(slot) else {
+                continue;
+            };
+            if slot.protected {
+                admitted[index] = true;
+            } else if !past_full && bytes <= remaining {
+                remaining -= bytes;
+                admitted[index] = true;
+            } else {
+                past_full = true;
+            }
+        }
         let mut observed = BTreeMap::new();
-        let mut kept = BTreeMap::<&Path, (ReadEvidence, usize)>::new();
-        let mut past = BTreeMap::<usize, (&Path, u64)>::new();
-        let mut cutoff = None;
-        let mut protected = 0u64;
-        let mut total = 0u64;
+        let mut encoded = BTreeMap::new();
         for (path, slots) in groups {
+            let allowed: Vec<_> = slots
+                .iter()
+                .filter(|&&index| admitted[index])
+                .map(|&index| {
+                    (
+                        selected[index].sent_fingerprint.clone(),
+                        reservation(&selected[index]).expect("admitted reservation"),
+                    )
+                })
+                .collect();
             let read_path = path.to_owned();
             let cache = self.cache.clone();
             let pin = pins.clone();
@@ -566,7 +609,18 @@ impl AttachmentService {
                 self.workers
                     .execute(deadline, cancel.clone(), move || {
                         let _pin = pin;
-                        observe(&read_path, file_limit, force_reload, &cache)
+                        let evidence = observe(&read_path, file_limit, force_reload, &cache)?;
+                        let observation = evidence.observation().clone();
+                        let encoding = allowed
+                            .iter()
+                            .any(|(fingerprint, max)| {
+                                observation.raw_size <= *max
+                                    && fingerprint
+                                        .as_ref()
+                                        .is_none_or(|hash| hash == &observation.hash)
+                            })
+                            .then(|| evidence.encode(&read_path, &cache));
+                        Ok((observation, encoding))
                     })
                     .await
                     .map_err(|e| e.message)
@@ -574,51 +628,27 @@ impl AttachmentService {
             if cancel.is_cancelled() {
                 return Err(cancelled());
             }
-            observed.insert(
-                path.to_owned(),
-                evidence
-                    .as_ref()
-                    .map(|e| e.observation().clone())
-                    .map_err(Clone::clone),
-            );
-            let Ok(evidence) = evidence else { continue };
-            let bytes = evidence.observation().raw_size;
-            let mut refs = 0;
-            for index in slots {
-                let slot = &selected[index];
-                if slot.omission_for(Some(evidence.observation())).is_some() {
-                    continue;
+            match evidence {
+                Ok((observation, encoding)) => {
+                    // A first inclusion may not grow past the bytes it reserved.
+                    // Refuse rather than silently retire a slot for budget growth.
+                    if slots.iter().any(|&index| {
+                        admitted[index]
+                            && selected[index].sent_fingerprint.is_none()
+                            && observation.raw_size
+                                > reservation(&selected[index]).expect("admitted reservation")
+                    }) {
+                        return Err(ApiError::new(ErrorCode::InputLimit,
+                            "An attachment grew beyond its first-send reservation; request is held for explicit retry")
+                            .hint("Remove the attachment and reattach the current file to refresh its reservation."));
+                    }
+                    observed.insert(path.to_owned(), Ok(observation));
+                    if let Some(encoding) = encoding {
+                        encoded.insert(path.to_owned(), encoding);
+                    }
                 }
-                if slot.protected {
-                    protected = protected
-                        .checked_add(bytes)
-                        .ok_or_else(|| io_error("Attachment size overflow"))?;
-                } else if cutoff.is_some_and(|before| index <= before) {
-                    continue;
-                } else {
-                    past.insert(index, (path, bytes));
-                }
-                total = total
-                    .checked_add(bytes)
-                    .ok_or_else(|| io_error("Attachment size overflow"))?;
-                refs += 1;
-            }
-            if protected > limit {
-                return Err(ApiError::new(ErrorCode::InputLimit,"Current protected attachment files exceed the request limit; request is held for explicit retry").hint("Reduce the selection with shellboy attachment remove --thread THREAD_ID --attachment ATTACHMENT_ID.").details(json!({"protected_bytes":protected,"limit_bytes":limit})));
-            }
-            if refs > 0 {
-                kept.insert(path, (evidence, refs));
-            }
-            // Capacity only gets tighter as candidates arrive. Once an old slot
-            // falls outside the retained suffix, it can never qualify again.
-            while total > limit {
-                let (index, (path, bytes)) = past.pop_first().expect("protected fits");
-                cutoff = Some(index);
-                total -= bytes;
-                let (_, refs) = kept.get_mut(path).expect("retained path");
-                *refs -= 1;
-                if *refs == 0 {
-                    kept.remove(path);
+                Err(reason) => {
+                    observed.insert(path.to_owned(), Err(reason));
                 }
             }
         }
@@ -627,8 +657,7 @@ impl AttachmentService {
             .enumerate()
             .filter(|(index, slot)| {
                 slot.active
-                    && !slot.protected
-                    && cutoff.is_some_and(|before| *index <= before)
+                    && !admitted[*index]
                     && slot
                         .omission_for(observed[&slot.path].as_ref().ok())
                         .is_none()
@@ -636,31 +665,6 @@ impl AttachmentService {
             .map(|(_, slot)| slot.id.clone())
             .collect();
         let excluded_set: HashSet<_> = excluded.iter().map(String::as_str).collect();
-        let cache = self.cache.clone();
-        let encoded = if kept.is_empty() {
-            BTreeMap::new()
-        } else {
-            let admitted: Vec<_> = kept
-                .into_iter()
-                .map(|(path, (evidence, _))| (path.to_owned(), evidence))
-                .collect();
-            // Give retained evidence a bounded conversion phase even when a
-            // later read exhausted the observation deadline. No paths are reopened.
-            self.workers
-                .execute(self.deadline(), cancel.clone(), move || {
-                    Ok(admitted
-                        .into_iter()
-                        .map(|(path, evidence)| {
-                            let encoded = evidence.encode(&path, &cache);
-                            (path, encoded)
-                        })
-                        .collect::<BTreeMap<_, _>>())
-                })
-                .await?
-        };
-        if cancel.is_cancelled() {
-            return Err(cancelled());
-        }
         let mut result = PreparedAttachments {
             thread_id: thread_id.into(),
             selection_revision: revision,
@@ -1895,6 +1899,7 @@ mod preparation_tests {
                     active: true,
                     reason: None,
                     sent_fingerprint: None,
+                    recorded_size: Some(8),
                     observation_hash: None,
                     omission: None,
                     previous_state: None,
@@ -1907,7 +1912,7 @@ mod preparation_tests {
     async fn service(path: &Path) -> AttachmentService {
         let db = DbWorker::open(path.join("shellboy.db")).await.unwrap();
         let mut config = Config::default();
-        config.workers.attachment = 2;
+        config.workers.attachment = 1;
         config.workers.control_file = 1;
         config.io.file_prepare_timeout_ms = 30_000;
         AttachmentService::new(db, &config, path.into(), "test".into())
