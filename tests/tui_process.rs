@@ -908,7 +908,8 @@ async fn short_tool_history_wheel_loads_older_without_refollow() {
         collect_matching(&mut terminal,&mut output,"paused older history after saved completion",|bytes| {
             bytes.windows(4).rposition(|b|b==b"\x1b[2J").is_some_and(|i| {
                 let frame=emitted_text(&bytes[i..]);
-                frame.contains("REFRESHED_PAUSED") && frame.match_indices("CMD").any(|(i,_)|frame.get(i+3..i+6).and_then(|n|n.parse::<usize>().ok()).is_some_and(|n|n<70))
+                frame.contains("REFRESHED_PAUSED") && frame.contains(&anchor)
+                    && !frame.contains("SYNTHETIC_FINISHED")
             })
         }).await;
         eprintln!("OLDER_COMMAND_WITNESS before completion={anchor}; after completion still older than initial tail");
@@ -932,6 +933,13 @@ async fn short_tool_history_wheel_loads_older_without_refollow() {
         tokio::pin!(drain);
         let status=tokio::select! {status=child.wait()=>status.unwrap(),_= &mut drain=>child.wait().await.unwrap()};
         assert!(status.success());
+        // The attached client does not write owner-only UI diagnostic traces.
+        // Verify the persisted position through the same owner after client exit.
+        let view = shellboy::ipc::call(&data, shellboy::protocol::Command::DraftGet(shellboy::protocol::DraftGetArgs {
+            thread_id: Some(thread.clone()), operation_id: None,
+        }), None, None).await.unwrap();
+        assert!(view.ok, "{:?}", view.error);
+        assert_eq!(view.result.unwrap()["view"]["follow_tail"], false);
     })).catch_unwind().await;
     if !matches!(&outcome, Ok(Ok(()))) {
         let log =
