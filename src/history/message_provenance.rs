@@ -222,12 +222,10 @@ mod tests {
             }
             let measure = |query: &str| {
                 let mut stmt = db.prepare(query).unwrap();
-                let values = stmt
-                    .query_map([], |r| r.get::<_, i64>(0))
+                stmt.query_map([], |r| r.get::<_, i64>(0))
                     .unwrap()
                     .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap();
-                values
+                    .unwrap()
             };
             let query = "SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')";
             let before = measure(query);
