@@ -55,36 +55,16 @@ fn search(root: &Path, query: &str) -> Value {
 }
 
 #[test]
-fn docs_scope_does_not_create_a_database_and_unknown_scope_is_not_empty_success() {
+fn retired_docs_scope_does_not_create_a_database() {
     let root = tempfile::tempdir().unwrap();
-    let docs = call(
+    let result = call(
         root.path(),
         &["search", "--scope", "docs", "--query", "recovery"],
-        true,
-    );
-    assert!(!docs["result"]["items"].as_array().unwrap().is_empty());
-    assert!(!root.path().join("knowledge.db").exists());
-    assert!(!root.path().join("data").exists());
-    let partial = call(
-        root.path(),
-        &[
-            "search",
-            "--scope",
-            "docs",
-            "--scope",
-            "source:missing",
-            "--query",
-            "recovery",
-        ],
         false,
     );
-    assert!(!partial["result"]["items"].as_array().unwrap().is_empty());
-    assert_eq!(
-        partial["result"]["scope_errors"].as_array().unwrap().len(),
-        1
-    );
-    call(root.path(), &["status"], false);
+    assert_eq!(result["result"]["scope_errors"][0]["code"], "scope_invalid");
     assert!(!root.path().join("knowledge.db").exists());
+    assert!(!root.path().join("data").exists());
 }
 
 #[test]
@@ -358,37 +338,35 @@ async fn history_reader_works_with_live_and_stopped_owner_and_expires_replaced_d
 }
 
 #[test]
-fn bundled_guide_index_has_an_explicit_cost_preview_without_configuration() {
+fn bundled_guide_preview_does_not_initialize_or_export() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    call(root, &["init"], true);
-    let preview = call(
-        root,
-        &[
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .current_dir(root)
+        .env_clear()
+        .args([
+            "--config",
+            "config.toml",
+            "--data-dir",
+            "data",
+            "docs",
             "index",
             "--source",
-            "docs",
-            "--mode",
-            "semantic",
+            "shellboy",
             "--dry-run",
-        ],
-        true,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
     );
-    assert!(preview["result"]["documents"].as_u64().unwrap() > 0);
-    assert!(preview["result"]["text_bytes"].as_u64().unwrap() > 0);
+    let preview: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(preview["result"]["sources"][0]["files"].as_u64().unwrap() > 0);
+    assert!(preview["result"]["sources"][0]["bytes"].as_u64().unwrap() > 0);
     assert_eq!(preview["result"]["embedding_may_charge"], true);
-    assert_eq!(call(root, &["status"], true)["result"]["documents"], 0);
-    assert_eq!(
-        call(root, &["search", "--scope", "", "--query", "復旧"], false)["result"]["scope_errors"]
-            [0]["code"],
-        "scope_invalid"
-    );
-    call(
-        root,
-        &["search", "--scope", "docs", "--query", "recovery"],
-        true,
-    );
-    assert!(!root.join("data/shellboy.db").exists());
+    assert!(!root.join("data").exists());
 }
 
 #[tokio::test]

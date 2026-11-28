@@ -1,5 +1,4 @@
 //! Independent document retrieval. Never starts a conversation owner.
-mod builtin;
 pub mod extract;
 mod history;
 mod provider_breaker;
@@ -32,7 +31,7 @@ pub enum RagCommand {
         command: SourceCommand,
     },
     Index {
-        /// Registered source ID/name, or docs for bundled guides; omitted targets registered materials.
+        /// Registered source ID/name; omitted targets registered materials.
         #[arg(long)]
         source: Option<String>,
         #[arg(long)]
@@ -66,7 +65,7 @@ pub enum RagCommand {
     Search {
         #[arg(long)]
         query: String,
-        /// Repeat docs, history, history:THREAD, or source:ID/name.
+        /// Repeat history, history:THREAD, or source:ID/name.
         #[arg(long)]
         scope: Vec<String>,
         #[arg(long, value_enum, default_value = "keyword")]

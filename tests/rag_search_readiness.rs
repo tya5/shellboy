@@ -118,39 +118,16 @@ async fn unprepared_materials_keep_keyword_ranks_and_group_preparation_warnings(
 }
 
 #[tokio::test]
-async fn missing_docs_database_is_explicit_degradation_without_creating_storage() {
+async fn retired_docs_scope_never_starts_preparation() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
     config(root, "127.0.0.1:9");
-    let hybrid = search(root, &["docs"], SearchMode::Hybrid).await;
-    assert_eq!(hybrid["ok"], true, "{hybrid}");
-    assert_eq!(hybrid["result"]["degraded"], true);
-    let status = &hybrid["result"]["scope_status"][0];
-    assert_eq!(status["reason"], "store_not_initialized");
-    assert!(status["missing_documents"].as_i64().unwrap() > 0);
-    assert!(status["missing_chunks"].is_null());
-    assert_eq!(
-        status["next"]["steps"][0]["command"]
-            .as_array()
-            .unwrap()
-            .last()
-            .unwrap(),
-        "init"
-    );
-    assert_eq!(
-        search(root, &["docs"], SearchMode::Semantic).await["ok"],
-        false
-    );
+    let result = search(root, &["docs"], SearchMode::Hybrid).await;
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["result"]["scope_errors"][0]["code"], "scope_invalid");
+    assert_eq!(result["result"]["degraded"], false);
     assert!(!root.join("knowledge.db").exists());
     assert!(!root.join("data").exists());
-    std::fs::write(root.join("config.toml"), "invalid = [").unwrap();
-    let invalid = search(root, &["docs"], SearchMode::Hybrid).await;
-    assert_eq!(invalid["ok"], false);
-    assert_eq!(
-        invalid["result"]["scope_errors"][0]["code"],
-        "config_invalid"
-    );
-    assert_eq!(invalid["result"]["degraded"], false);
 }
 
 async fn proxy(
@@ -252,8 +229,10 @@ async fn provider_failure_and_incompatible_vector_identity_are_not_successful_fa
     call(root, RagCommand::Init).await;
     source(root, "notes").await;
     assert_eq!(index(root, "notes", IndexMode::Semantic).await["ok"], true);
+    source(root, "second").await;
+    assert_eq!(index(root, "second", IndexMode::Semantic).await["ok"], true);
     code.store(401, Ordering::SeqCst);
-    let failed = search(root, &["source:notes", "docs"], SearchMode::Hybrid).await;
+    let failed = search(root, &["source:notes", "source:second"], SearchMode::Hybrid).await;
     assert_eq!(failed["ok"], false, "{failed}");
     assert_eq!(
         failed["result"]["scope_errors"][0]["code"],
@@ -300,11 +279,14 @@ async fn history_without_selected_space_has_history_specific_next_and_unknown_co
     assert!(!root.join("knowledge.db").exists());
 }
 
-#[test]
-fn degraded_cli_success_has_one_json_and_zero_exit_status() {
+#[tokio::test]
+async fn degraded_cli_success_has_one_json_and_zero_exit_status() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
     config(root, "127.0.0.1:9");
+    call(root, RagCommand::Init).await;
+    source(root, "notes").await;
+    assert_eq!(index(root, "notes", IndexMode::Keyword).await["ok"], true);
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
         .current_dir(root)
         .env_clear()
@@ -317,7 +299,7 @@ fn degraded_cli_success_has_one_json_and_zero_exit_status() {
         .args([
             "search",
             "--scope",
-            "docs",
+            "source:notes",
             "--mode",
             "hybrid",
             "--query",
@@ -334,5 +316,5 @@ fn degraded_cli_success_has_one_json_and_zero_exit_status() {
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["ok"], true);
     assert_eq!(result["result"]["degraded"], true);
-    assert!(!root.join("knowledge.db").exists());
+    assert!(root.join("knowledge.db").exists());
 }

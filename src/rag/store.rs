@@ -22,7 +22,7 @@ CREATE TABLE blocks(revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal I
 CREATE TABLE chunks(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));
 CREATE TABLE spaces(id TEXT PRIMARY KEY,dimension INTEGER NOT NULL,profile TEXT NOT NULL,model TEXT NOT NULL,endpoint_hash TEXT NOT NULL,table_name TEXT NOT NULL);
 CREATE TABLE embeddings(space_id TEXT NOT NULL REFERENCES spaces(id),hash TEXT NOT NULL,vec_rowid INTEGER NOT NULL,PRIMARY KEY(space_id,hash));
-PRAGMA user_version=5;";
+PRAGMA user_version=6;";
 const SOURCE_HASH_SCHEMA: &str = "CREATE TABLE source_chunk_hashes(
     source_id TEXT NOT NULL REFERENCES sources(id),hash TEXT NOT NULL,PRIMARY KEY(source_id,hash));
 CREATE INDEX source_chunk_hashes_by_hash ON source_chunk_hashes(hash,source_id);";
@@ -97,7 +97,7 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
         db.execute_batch("PRAGMA query_only=ON;")?;
     }
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if !matches!(version, 1..=5) {
+    if !matches!(version, 1..=6) {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema is not supported; no migration was attempted",
@@ -126,13 +126,13 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
     Ok(Store {
         db,
         uuid,
-        migrated_from_schema: (write && version < 5).then_some(version),
+        migrated_from_schema: (write && version < 6).then_some(version),
         _lock: lock,
     })
 }
 fn validate_schema(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 5 {
+    if version != 6 {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema requires migration before reading",
@@ -201,7 +201,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
         drop(_lock);
         let s = open(path, true)?;
         return Ok(
-            json!({"database_uuid":s.uuid,"already_initialized":true,"schema_version":5,"migrated_from_schema":s.migrated_from_schema,"next":"Knowledge database is ready. Optional: register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+            json!({"database_uuid":s.uuid,"already_initialized":true,"schema_version":6,"migrated_from_schema":s.migrated_from_schema,"next":"Knowledge database is ready. Optional: register materials with rag source add PATH --name NAME, then rag index --dry-run"}),
         );
     }
     crate::storage::register_vec()
@@ -215,14 +215,17 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     let uuid = format!("rag-{}", uuid::Uuid::new_v4());
     tx.execute("INSERT INTO meta VALUES('uuid',?1)", [&uuid])?;
     tx.execute("INSERT INTO meta VALUES('generation','0')", [])?;
-    tx.execute("INSERT INTO sources(id,name,root,kind) VALUES('@docs','@docs','','builtin'),('@derived','derived','','derived')",[])?;
+    tx.execute(
+        "INSERT INTO sources(id,name,root,kind) VALUES('@derived','derived','','derived')",
+        [],
+    )?;
     tx.commit()?;
     Ok(
-        json!({"database_uuid":uuid,"already_initialized":false,"schema_version":5,"migrated_from_schema":null,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+        json!({"database_uuid":uuid,"already_initialized":false,"schema_version":6,"migrated_from_schema":null,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run"}),
     )
 }
 pub(super) fn resolve_source(db: &Connection, id: &str) -> Result<String> {
-    db.query_row("SELECT id FROM sources WHERE (id=?1 OR name=?1) AND kind!='builtin' ORDER BY CASE WHEN id=?1 THEN 0 ELSE 1 END",[id],|r|r.get(0)).optional()?.ok_or_else(||err("source_not_found","Registered source does not exist"))
+    db.query_row("SELECT id FROM sources WHERE (id=?1 OR name=?1) ORDER BY CASE WHEN id=?1 THEN 0 ELSE 1 END",[id],|r|r.get(0)).optional()?.ok_or_else(||err("source_not_found","Registered source does not exist"))
 }
 pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) -> Result<Value> {
     let write = !matches!(command, SourceCommand::List);
@@ -245,7 +248,7 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
                 || name.len() > 128
                 || name.starts_with('@')
                 || name.contains(':')
-                || matches!(name.as_str(), "docs" | "history" | "derived")
+                || matches!(name.as_str(), "history" | "derived")
             {
                 return Err(err(
                     "invalid_argument",
@@ -297,11 +300,8 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
                     format!("Path is already registered as {registered}; use that source name"),
                 ));
             }
-            let count: i64 = s.db.query_row(
-                "SELECT COUNT(*) FROM sources WHERE kind!='builtin'",
-                [],
-                |r| r.get(0),
-            )?;
+            let count: i64 =
+                s.db.query_row("SELECT COUNT(*) FROM sources", [], |r| r.get(0))?;
             if count >= 200 {
                 return Err(err(
                     "input_limit",
@@ -321,7 +321,7 @@ pub(super) fn source_command(path: &Path, command: SourceCommand, cwd: &Path) ->
             Ok(json!({"source_id":id,"name":name,"root":root,"existing":false,"exclude":exclude}))
         }
         SourceCommand::List => {
-            let mut q=s.db.prepare("SELECT id,name,root,kind,last_scan,error,exclude_json FROM sources WHERE kind!='builtin' ORDER BY name LIMIT 201")?;
+            let mut q=s.db.prepare("SELECT id,name,root,kind,last_scan,error,exclude_json FROM sources ORDER BY name LIMIT 201")?;
             let items=q.query_map([],|r|Ok(json!({"source_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"last_scan":r.get::<_,Option<String>>(4)?,"error":r.get::<_,Option<String>>(5)?,"exclude":serde_json::from_str::<Value>(&r.get::<_,String>(6)?).unwrap_or(Value::Null)})))?.collect::<std::result::Result<Vec<_>,_>>()?;
             if items.len() > 200 {
                 return Err(err(
@@ -499,9 +499,6 @@ pub(super) async fn index(
     dry_run: bool,
     mode: IndexMode,
 ) -> Result<Value> {
-    if source.is_some_and(|id| matches!(id, "docs" | "@docs")) {
-        return super::builtin::index(context, dry_run, mode).await;
-    }
     let mut s = open(&context.database, !dry_run)?;
     let selected = source.map(|id| resolve_source(&s.db, id)).transpose()?;
     let sources = {
@@ -706,7 +703,7 @@ pub(super) fn ingest(
     if id.is_empty() || id.len() > 512 {
         return Err(err(
             "invalid_argument",
-            "Ingest id must contain 1..=512 bytes",
+            "Ingest id must contain 1..=612 bytes",
         ));
     }
     let text = if let Some(text) = owned_text {

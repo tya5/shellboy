@@ -1434,7 +1434,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::RagScopes,
         default_origin: DefaultOrigin::None,
         label: "検索する資料領域",
-        help: "docs/history/history:THREAD/source:IDまたは名前を繰り返します。",
+        help: "history/history:THREAD/source:IDまたは名前を繰り返します。",
         kind: FieldType::TextList,
         discovery: Discovery::RagSourceList,
     },

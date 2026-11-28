@@ -2,7 +2,7 @@
 use super::{BlockRanges, Connection, HOT_QUERY_INDEXES, Result, SOURCE_HASH_SCHEMA, err};
 
 pub(super) fn run(db: &Connection, version: i64) -> Result<()> {
-    if version == 5 {
+    if version == 6 {
         return Ok(());
     }
     let tx = db.unchecked_transaction()?;
@@ -50,10 +50,13 @@ pub(super) fn run(db: &Connection, version: i64) -> Result<()> {
         DROP TABLE chunks;
         ALTER TABLE chunks_v4 RENAME TO chunks;")?;
     }
-    tx.execute_batch(SOURCE_HASH_SCHEMA)?;
-    tx.execute_batch("INSERT OR IGNORE INTO source_chunk_hashes SELECT d.source_id,c.hash FROM chunks c JOIN revisions r ON r.id=c.revision_id JOIN documents d ON d.id=r.document_id;")?;
-    tx.execute_batch(HOT_QUERY_INDEXES)?;
-    tx.pragma_update(None, "user_version", 5)?;
+    if version < 5 {
+        tx.execute_batch(SOURCE_HASH_SCHEMA)?;
+        tx.execute_batch("INSERT OR IGNORE INTO source_chunk_hashes SELECT d.source_id,c.hash FROM chunks c JOIN revisions r ON r.id=c.revision_id JOIN documents d ON d.id=r.document_id;")?;
+        tx.execute_batch(HOT_QUERY_INDEXES)?;
+    }
+    tx.execute_batch(include_str!("next_retire_builtin_docs.sql"))?;
+    tx.pragma_update(None, "user_version", 6)?;
     tx.commit()?;
     Ok(())
 }
