@@ -344,9 +344,6 @@ fn child(
         return Ok(None);
     };
     let rel = child_path(parent, name);
-    if rel.len() > 4096 {
-        return Err("path_too_long".into());
-    }
     // The parent was checked when opening its sorted name list. Do not follow a child symlink.
     let meta = fs::symlink_metadata(root.join(&rel)).map_err(io_error)?;
     if !(meta.is_dir() || (meta.is_file() && name.ends_with(".md"))) {
@@ -604,16 +601,7 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
             sources,
             limit: count,
             cursor,
-        } => search(
-            query,
-            parent,
-            sources,
-            count,
-            cursor,
-            rows,
-            version,
-            SEARCH_DIRECTORY_BYTES,
-        ),
+        } => search(query, parent, sources, count, cursor, rows, version),
         other => super::execute(other),
     }
 }
@@ -654,9 +642,6 @@ struct Frame {
     after: Vec<u8>,
     revision: String,
 }
-
-// Keep enough room for the last native filename and 32 directory revision witnesses.
-const SEARCH_DIRECTORY_BYTES: usize = 3072;
 
 #[derive(Default, Serialize, Deserialize)]
 struct SearchMark {
@@ -777,7 +762,6 @@ fn search(
     cursor: Option<String>,
     rows: &[Registration],
     version: &str,
-    directory_bytes: usize,
 ) -> Result<Value, String> {
     limit(count, SEARCH_WORK)?;
     if query.trim().is_empty() || query.len() > 4096 {
@@ -907,11 +891,6 @@ fn search(
         if pos.frames.is_empty() {
             work += 1;
             let rel = root_rel;
-            if rel.len() > directory_bytes {
-                unavailable.push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
-                pos.source += 1;
-                continue;
-            }
             match under(root, rel) {
                 Ok(path) if path.is_dir() => pos.frames.push(Frame {
                     name: rel.into(),
@@ -978,10 +957,7 @@ fn search(
             let name = name.to_string_lossy().into_owned();
             let rev = revision(&path);
             if directory {
-                if rel.len() > directory_bytes {
-                    unavailable
-                        .push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
-                } else if pos.frames.len() >= 32 {
+                if pos.frames.len() >= 32 {
                     unavailable.push(json!({"source":row.name,"path":rel,"reason":"depth_limit"}));
                 } else {
                     pos.frames.push(Frame {
@@ -999,19 +975,55 @@ fn search(
             pos.source += 1;
         }
     }
-    let next = if pos.source < rows.len() || pos.bundled < bundled.len() {
-        Some(next_cursor(
-            version,
-            &scope,
-            SearchMark::from_position(&pos),
-        ))
-    } else {
-        None
-    };
+    let next = search_continuation(
+        &mut pos,
+        version,
+        &scope,
+        rows,
+        bundled.len(),
+        &mut unavailable,
+    );
     Ok(paginated(
         json!({"version":version,"mode":"keyword","items":hits,"unavailable":unavailable}),
         next,
     ))
+}
+
+fn search_continuation(
+    pos: &mut SearchPosition,
+    version: &str,
+    scope: &str,
+    rows: &[Registration],
+    bundled_len: usize,
+    unavailable: &mut Vec<Value>,
+) -> Option<String> {
+    while pos.source < rows.len() || pos.bundled < bundled_len {
+        let mark = SearchMark::from_position(pos);
+        let cursor = next_cursor(version, scope, &mark);
+        if cursor.len() <= CURSOR_BYTES {
+            return Some(cursor);
+        }
+        let had_file = pos.file.is_some();
+        let path = if let Some((name, _, _)) = pos.file.take() {
+            child_path(&frame_path(&pos.frames), &name)
+        } else {
+            frame_path(&pos.frames)
+        };
+        unavailable
+            .push(json!({"source":rows[pos.source].name,"path":path,"reason":"path_too_long"}));
+        // If just the file chunk cannot fit, try continuing after that file.
+        if had_file && !pos.frames.is_empty() {
+            let after_file = next_cursor(version, scope, SearchMark::from_position(pos));
+            if after_file.len() <= CURSOR_BYTES {
+                return Some(after_file);
+            }
+        }
+        // Continue after the closest ancestor whose actual marker fits.
+        if pos.frames.pop().is_none() || pos.frames.is_empty() {
+            pos.source += 1;
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1020,7 +1032,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn deep_escaped_search_resumes_and_reports_a_path_that_cannot_be_continued() {
+    fn deep_escaped_search_resumes_with_the_production_cursor_limit() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().canonicalize().unwrap();
         let component = "\"".repeat(180);
@@ -1042,7 +1054,6 @@ mod tests {
                 cursor,
                 &rows,
                 "fixture",
-                650,
             )
             .unwrap()
         };
@@ -1051,12 +1062,44 @@ mod tests {
         let cursor = first["next_cursor"].as_str().unwrap();
         let second = search(Some(cursor.into()));
         assert_eq!(second["items"][0]["id"], format!("local/{relative}/b.md"));
-        let last = search(Some(second["next_cursor"].as_str().unwrap().into()));
-        assert_eq!(last["unavailable"][0]["reason"], "path_too_long");
+    }
+
+    #[test]
+    fn real_cursor_envelope_skips_only_the_branch_that_does_not_fit() {
+        // Model a directory beyond this host's full-path syscall limit. Use
+        // ordinary native components, genuine revision widths and the live codec.
+        let component = "\"".repeat(250);
+        let mut pos = SearchPosition {
+            frames: (0..17)
+                .map(|i| Frame {
+                    name: if i == 0 {
+                        String::new()
+                    } else {
+                        component.clone()
+                    },
+                    after: component.as_bytes().to_vec(),
+                    revision: "0123456789abcdef".into(),
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let rows = [Registration {
+            name: "local".into(),
+            path: PathBuf::new(),
+        }];
+        let (version, scope) = ("catalogue", hash("filters"));
+        let branch = frame_path(&pos.frames);
+        let mut unavailable = Vec::new();
+        let cursor =
+            search_continuation(&mut pos, version, &scope, &rows, 0, &mut unavailable).unwrap();
         assert_eq!(
-            last["unavailable"][0]["path"],
-            format!("{relative}/z{component}")
+            unavailable,
+            [json!({"source":"local","path":branch,"reason":"path_too_long"})]
         );
+        let mark: SearchMark = decode_cursor(Some(&cursor), version, &scope, CURSOR_BYTES).unwrap();
+        let resumed = mark.resume("").unwrap();
+        assert_eq!(resumed.frames.len(), 16);
+        assert_eq!(resumed.frames.last().unwrap().after, component.as_bytes());
     }
 
     #[test]
