@@ -176,11 +176,15 @@ mod native {
             let mut owner_command=command(&home);
             crate::pty_session::isolate_child(&mut owner_command);
             let mut owner=owner_command.arg("--config").arg(&config).arg("--data-dir").arg(&data).current_dir(root.path()).stdin(Stdio::from(slave.try_clone().unwrap())).stdout(Stdio::from(slave.try_clone().unwrap())).stderr(Stdio::from(slave)).kill_on_drop(true).spawn().unwrap();
+            eprintln!("OSC {mode}: PTY readiness");
             let mut bytes=Vec::new();read_until(&master,&mut bytes,|bytes|{let text=String::from_utf8_lossy(bytes);text.contains("Ready for input")||text.contains("入力できます")}).await;
             let created=cli(&home,&data,&["thread","create"]).await;let id=created["thread_id"].as_str().unwrap();let terminal_id=shellboy::program_status::thread_id(id);
             let sent=cli(&home,&data,&["message","send","--thread",id,"--text","fixture work"]).await;
+            eprintln!("OSC {mode}: waiting for provider request");
             received.await.unwrap();
+            eprintln!("OSC {mode}: waiting for working");
             if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("working")&&p.get("id")==Some(&terminal_id))).await;}
+            eprintln!("OSC {mode}: waiting for completion");
             let _=release.send(());
             let conditions=json!([{"type":"run_ended","run_id":sent["run_id"]}]).to_string();cli(&home,&data,&["wait","--conditions-json",&conditions,"--timeout-ms","60000"]).await;
             if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("done")&&p.get("id")==Some(&terminal_id))).await;}
@@ -188,9 +192,12 @@ mod native {
             // This UI started on an unsaved draft; selecting this thread has no prior
             // thread-scoped OSC state to clear. The next auth request emits its own state.
             cli(&home,&data,&["message","send","--thread",id,"--text","auth fixture"]).await;
+            eprintln!("OSC {mode}: waiting for auth response");
             server.await.unwrap();
+            eprintln!("OSC {mode}: waiting for blocked");
             if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("blocked")&&p.get("kind").map(String::as_str)==Some("auth"))).await; }
-            master.get_ref().write_all(&[17]).unwrap();
+            eprintln!("OSC {mode}: client quit");
+            master.get_ref().write_all(b"/quit\r").unwrap();
 
             // Keep consuming output while the final redraw and OSC clear drain.
             crate::test_watchdog::watchdog("native PTY owner shutdown", async {

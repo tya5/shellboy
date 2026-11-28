@@ -652,7 +652,7 @@ impl<'a> HistoryReader<'a> {
     /// display extent at offset 0; current execution facts are one saved read.
     pub(super) async fn links(
         &self,
-        thread_id: &str,
+        _thread_id: &str,
         node_ids: Vec<String>,
     ) -> Result<DetailSourceSnapshot, ApiError> {
         if node_ids.is_empty()
@@ -681,34 +681,31 @@ impl<'a> HistoryReader<'a> {
                 };
                 displays.push(display);
             }
-            let observation = owner.window(HistoryWindowArgs {
-                thread_id: thread_id.to_owned(), include_observation: true,
-                observe_node_ids: node_ids.clone(), items: false, ordinal: None,
-                node_id: None, expect_node_id: None, before: 0, after: 0, excerpt_chars: 0,
-            }).await?.observation.ok_or_else(|| ApiError::new(ErrorCode::IoFailed, "Missing detail observation"))?;
+            use crate::protocol::{Command, HistoryNodeAvailability, HistoryNodeSelection, HistoryReadArgs};
+            let observation: HistoryNodeSelection = owner.call(Command::HistoryRead(HistoryReadArgs {
+                node_ids: Some(node_ids.clone()), node_id: String::new(), display: None,
+                end_message_only: false, parts: false, limit_bytes: crate::protocol::MAX_BODY_BYTES,
+                cursor: None, encoding: "UTF-8".into(),
+            })).await?;
+            if !observation.items.iter().map(|item| &item.node_id).eq(node_ids.iter()) {
+                return Err(ApiError::new(ErrorCode::IoFailed, "Invalid exact node selection"));
+            }
             let read_revision = observation.read_sequence;
             let observed_at = chrono::DateTime::parse_from_rfc3339(&observation.observed_at)
                 .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Invalid detail observation time"))?
                 .with_timezone(&chrono::Utc).format("%Y-%m-%d %H:%M:%S UTC").to_string();
-            let current = node_ids.iter().map(|id| {
-                let mut calls = observation.tools.calls.iter().filter(|call| &call.node_id == id).collect::<Vec<_>>();
-                calls.sort_by_key(|call| (call.ordinal, &call.call_id));
-                let truncated = calls.len() > 16 || observation.tools.limited_node_ids.contains(id);
-                let fields = calls.into_iter().take(16).map(|call| (
-                    (call.call_id.len() <= 512).then(|| call.call_id.clone()),
-                    call.shell_state.as_ref().and(call.execution_id.clone()),
-                    call.shell_state.clone(), call.shell_exit_code,
+            let rows = observation.items.into_iter().zip(displays).map(|(item, display)| {
+                let fields = item.tools.into_iter().map(|call| (
+                    (call.call_id.len() <= 512).then_some(call.call_id),
+                    call.shell_state.as_ref().and(call.execution_id),
+                    call.shell_state, call.shell_exit_code,
                     call.output_revision.map(|(_, complete)| complete),
                     call.retention_generation, call.has_output,
                 )).collect::<Vec<_>>();
-                (fields, truncated)
+                let display = display.filter(|display| item.availability == HistoryNodeAvailability::Available
+                    && item.source_revision == Some(display.source_revision));
+                (item.node_id, display, (fields, item.tools_truncated))
             }).collect::<Vec<_>>();
-            let rows = node_ids
-                .into_iter()
-                .zip(displays)
-                .zip(current)
-                .map(|((id, display), current)| (id, display, current))
-                .collect::<Vec<_>>();
             let width=self.width;
             let language = self.language;
             presentation_work(move || {

@@ -1620,6 +1620,7 @@ fn typed_conversation_has_inline_markers_and_details_copy_full_urls_without_chan
         _ => panic!("original action"),
     };
     let body = shellboy::protocol::HistoryBody {
+ observation: None,
         display: None,
         context: serde_json::from_value(serde_json::json!({"state":"present","node_id":node_id,"created_at":"2026-10-25T00:00:00Z"})).unwrap(),
         provenance: shellboy_provenance_fixture(),

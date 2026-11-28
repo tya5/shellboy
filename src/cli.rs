@@ -1566,8 +1566,8 @@ pub struct HistoryReadOptions {
     /// Read the display source around this character offset from its end.
     #[arg(long, conflicts_with_all = ["parts", "end_message_only"])]
     pub from_end: Option<u64>,
-    #[arg(long = "node")]
-    pub node_id: String,
+    #[arg(long = "node", required = true)]
+    pub node_ids: Vec<String>,
     #[arg(long,default_value_t=wire::MAX_BODY_BYTES)]
     pub limit_bytes: u32,
     #[arg(long)]
@@ -2438,7 +2438,8 @@ impl Cli {
                     after: a.after,
                     excerpt_chars: a.excerpt_chars,
                 }),
-                HistoryCommand::Read(a) => C::HistoryRead(wire::HistoryReadArgs {
+                HistoryCommand::Read(mut a) => C::HistoryRead(wire::HistoryReadArgs {
+                    node_ids: (a.node_ids.len() > 1).then(|| std::mem::take(&mut a.node_ids)),
                     display: a
                         .offset
                         .map(|offset| wire::HistoryDisplayPosition::Absolute { offset })
@@ -2453,7 +2454,7 @@ impl Cli {
                         }),
                     end_message_only: a.end_message_only,
                     parts: a.parts,
-                    node_id: a.node_id,
+                    node_id: a.node_ids.pop().unwrap_or_default(),
                     limit_bytes: a.limit_bytes,
                     cursor: a.cursor,
                     encoding: a.encoding,

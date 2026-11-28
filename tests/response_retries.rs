@@ -3102,6 +3102,7 @@ async fn output_limit_stop_matches_wire_in_live_ends_and_saved_usage() {
             let history = request(
                 &fixture.control,
                 Command::HistoryRead(HistoryReadArgs {
+                    node_ids: None,
                     display: None,
                     node_id: node,
                     end_message_only: false,

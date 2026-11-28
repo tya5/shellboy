@@ -1787,6 +1787,7 @@ impl Form {
                         .into());
                     }
                     Ok(Command::HistoryRead(HistoryReadArgs {
+                        node_ids: None,
                         display: position.map(|position| HistoryDisplayRead {
                             position,
                             selection: None,

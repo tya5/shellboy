@@ -938,6 +938,7 @@ fn read_node(
         &args.node_id,
     )?;
     let body = HistoryBody {
+        observation: None,
         display: display_page,
         context: crate::context::for_node(connection, &args.node_id)?,
         provenance: relations::projected_provenance(connection, &args.node_id, None)?,

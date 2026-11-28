@@ -2747,7 +2747,7 @@ async fn run_client(
                         let sender = updates.worker();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             match (native_history::Owner { data_dir: &data_dir, instance: &instance }).call::<HistoryBody>(
-                                Command::HistoryRead(HistoryReadArgs { display: None, end_message_only: false, parts: false,
+                                Command::HistoryRead(HistoryReadArgs { node_ids: None, display: None, end_message_only: false, parts: false,
                                     node_id,
                                     cursor,
                                     limit_bytes: MAX_BODY_BYTES,

@@ -2171,6 +2171,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .await;
     assert!(canonical.starts_with(&(first.text.clone() + &second.text)));
     send.send(UiAction::Manage(Command::HistoryRead(HistoryReadArgs {
+        node_ids: None,
         display: None,
         end_message_only: false,
         parts: false,
@@ -3522,6 +3523,7 @@ async fn external_input_copy_keeps_only_canonical_body_and_code_not_sender_metad
     );
     let original = History::new(control.store.database.clone())
         .read(HistoryReadArgs {
+            node_ids: None,
             display: None,
             node_id: "external-copy".into(),
             end_message_only: false,

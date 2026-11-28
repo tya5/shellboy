@@ -53,6 +53,7 @@ async fn source(
     for _ in 0..SOURCE_PAGES {
         let body: HistoryBody = owner
             .call(Command::HistoryRead(HistoryReadArgs {
+                node_ids: None,
                 display: None,
                 end_message_only: false,
                 parts: false,

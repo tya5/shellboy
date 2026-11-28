@@ -165,6 +165,7 @@ impl Owner<'_> {
         position: HistoryDisplayPosition,
     ) -> Result<DisplayExtent, ApiError> {
         let mut args = HistoryReadArgs {
+            node_ids: None,
             display: Some(HistoryDisplayRead {
                 position,
                 selection,

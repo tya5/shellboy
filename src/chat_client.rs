@@ -638,6 +638,7 @@ impl<W: Write> Chat<'_, W> {
         for _ in 0..65 {
             let page: HistoryBody = self
                 .call(Command::HistoryRead(HistoryReadArgs {
+                    node_ids: None,
                     display: None,
                     end_message_only: self.until != ResultMode::Reply,
                     parts: false,

@@ -715,6 +715,28 @@ impl HistoryListArgs {
 
 impl HistoryReadArgs {
     pub(crate) fn validate(&self) -> Result<(), ApiError> {
+        if let Some(ids) = &self.node_ids {
+            if self.limit_bytes != MAX_BODY_BYTES
+                || !self.encoding.eq_ignore_ascii_case("UTF-8")
+                || !self.node_id.is_empty()
+                || self.display.is_some()
+                || self.parts
+                || self.end_message_only
+                || self.cursor.is_some()
+            {
+                return Err(invalid(
+                    "Exact node selection cannot be combined with body options",
+                ));
+            }
+            if ids.is_empty()
+                || ids.len() > MAX_LIST_LIMIT as usize
+                || ids.iter().any(|id| id.is_empty() || id.len() > 256)
+                || ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len()
+            {
+                return Err(invalid("Expected a bounded list of distinct node IDs"));
+            }
+            return Ok(());
+        }
         nonempty(&self.node_id, "node_id")?;
         nonempty(&self.encoding, "encoding")?;
         limit(self.limit_bytes, MAX_BODY_BYTES)?;

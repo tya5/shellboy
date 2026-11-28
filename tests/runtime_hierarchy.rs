@@ -209,6 +209,7 @@ async fn full_history(owner: &DataOwner, node: &str) -> String {
     loop {
         let body = shellboy::history::History::new(owner.db.clone())
             .read(HistoryReadArgs {
+                node_ids: None,
                 display: None,
                 end_message_only: false,
                 parts: false,
@@ -504,6 +505,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
     );
     let original = shellboy::history::History::new(owner.db.clone())
         .read(HistoryReadArgs {
+            node_ids: None,
             display: None,
             end_message_only: false,
             parts: false,

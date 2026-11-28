@@ -189,6 +189,7 @@ async fn ambiguous_or_oversized_direct_receipts_do_not_project_operation_id() {
         .unwrap();
     let get = || {
         request(Command::HistoryRead(HistoryReadArgs {
+            node_ids: None,
             display: None,
             node_id: node.clone(),
             ..serde_json::from_value(serde_json::json!({"node_id":node})).unwrap()

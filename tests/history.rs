@@ -36,6 +36,7 @@ async fn append(database: &DbWorker, id: &str, kind: &str, payload: Value) {
 
 fn body(node: &str, limit: u32, cursor: Option<String>) -> HistoryReadArgs {
     HistoryReadArgs {
+        node_ids: None,
         display: None,
         end_message_only: false,
         parts: false,
@@ -973,6 +974,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     assert!(default.text.contains("private reasoning"));
     assert!(default.text.contains("later commentary"));
     let request = HistoryReadArgs {
+        node_ids: None,
         display: None,
         end_message_only: true,
         parts: false,
@@ -985,6 +987,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     while let Some(next) = cursor {
         let part = history
             .read(HistoryReadArgs {
+                node_ids: None,
                 display: None,
                 cursor: Some(next),
                 ..request.clone()
@@ -1005,6 +1008,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     assert!(
         history
             .read(HistoryReadArgs {
+                node_ids: None,
                 display: None,
                 cursor: ordinary.next_cursor,
                 ..request

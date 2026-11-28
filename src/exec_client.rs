@@ -201,6 +201,7 @@ impl Session {
             .request(
                 "capability",
                 Command::HistoryRead(HistoryReadArgs {
+                    node_ids: None,
                     display: None,
                     end_message_only: true,
                     parts: false,
@@ -549,6 +550,7 @@ impl Session {
                 .request(
                     "answer",
                     Command::HistoryRead(HistoryReadArgs {
+                        node_ids: None,
                         display: None,
                         end_message_only: mode != ResultMode::Reply,
                         parts: false,

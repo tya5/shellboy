@@ -121,14 +121,10 @@ fn project(
     };
     for item in &active {
         if item.kind == "turn" && item.state == "recovery_wait" {
-            let auth = matches!(
-                item.reason.as_deref(),
-                Some("config_invalid" | "config_missing" | "config_missing_credentials")
-            );
             add(
                 item,
                 State::Blocked,
-                auth,
+                item.authentication_required,
                 item.message.as_deref().unwrap_or("Recovery required"),
             );
         } else if item.kind == "run" {

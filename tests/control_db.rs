@@ -2455,6 +2455,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
             shell_state: None,
         }),
         Command::HistoryRead(HistoryReadArgs {
+            node_ids: None,
             display: None,
             end_message_only: false,
             parts: false,

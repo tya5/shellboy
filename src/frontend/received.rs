@@ -639,6 +639,7 @@ mod tests {
         assert!(list_page(Some("invalid".into())).await.is_err());
         let raw = crate::history::History::new(owner.db.clone())
             .read(crate::protocol::HistoryReadArgs {
+                node_ids: None,
                 display: None,
                 end_message_only: false,
                 parts: false,

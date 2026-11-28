@@ -79,6 +79,7 @@ async fn provenance_records_actual_origin_without_inventing_turns_or_thread_memb
     }).await.unwrap();
     let body = History::new(db.clone())
         .read(HistoryReadArgs {
+            node_ids: None,
             display: None,
             end_message_only: false,
             parts: false,
@@ -125,6 +126,7 @@ async fn summary_and_spill_source_pages_preserve_ordinals_and_recorded_witness_a
     }).await.unwrap();
     let tombstone = History::new(db.clone())
         .read(HistoryReadArgs {
+            node_ids: None,
             display: None,
             end_message_only: false,
             parts: false,

@@ -4187,6 +4187,16 @@
         "node_id": {
           "type": "string"
         },
+        "observation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryNodeSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "previous_node_ids": {
           "items": {
             "type": "string"
@@ -5326,6 +5336,81 @@
       ],
       "type": "object"
     },
+    "HistoryNodeAvailability": {
+      "enum": [
+        "available",
+        "tombstoned",
+        "thread_deleted"
+      ],
+      "type": "string"
+    },
+    "HistoryNodeObservation": {
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/HistoryNodeAvailability"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "notice": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HistoryWindowNotice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_revision": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/definitions/HistoryWindowToolCall"
+          },
+          "type": "array"
+        },
+        "tools_truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_id",
+        "availability",
+        "tools",
+        "tools_truncated"
+      ],
+      "type": "object"
+    },
+    "HistoryNodeSelection": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/HistoryNodeObservation"
+          },
+          "type": "array"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "read_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "read_sequence",
+        "observed_at",
+        "items"
+      ],
+      "type": "object"
+    },
     "HistoryReadArgs": {
       "additionalProperties": false,
       "properties": {
@@ -5362,13 +5447,19 @@
         "node_id": {
           "type": "string"
         },
+        "node_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "parts": {
           "type": "boolean"
         }
       },
-      "required": [
-        "node_id"
-      ],
       "type": "object"
     },
     "HistoryRecallAnchor": {
@@ -16871,6 +16962,9 @@
             "null"
           ]
         },
+        "authentication_required": {
+          "type": "boolean"
+        },
         "compaction_outcome": {
           "anyOf": [
             {
@@ -18000,75 +18094,15 @@
     },
     "history.read": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "properties": {
-        "context": {
-          "$ref": "#/definitions/ExecutionContext"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HistoryNodeSelection"
         },
-        "display": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HistoryDisplayPage"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "kind": {
-          "type": "string"
-        },
-        "next_cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "next_node_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "node_id": {
-          "type": "string"
-        },
-        "previous_node_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "provenance": {
-          "$ref": "#/definitions/NodeProvenance"
-        },
-        "source_node_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "text": {
-          "type": "string"
-        },
-        "tombstone_reason": {
-          "type": [
-            "string",
-            "null"
-          ]
+        {
+          "$ref": "#/definitions/HistoryBody"
         }
-      },
-      "required": [
-        "context",
-        "provenance",
-        "node_id",
-        "kind",
-        "text",
-        "source_node_ids",
-        "previous_node_ids",
-        "next_node_ids"
       ],
-      "title": "HistoryBody",
-      "type": "object"
+      "title": "HistoryReadResult"
     },
     "history.recall": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

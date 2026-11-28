@@ -93,7 +93,7 @@ impl Fixture {
             shellboy::history::append_node(&tx,"reactive","paid-baseline",None,"assistant_response",&json!({"text":"PAID_R6_HISTORY remains visible"}),"now")?;
             if long_usage {
                 // 90 turns x 40 attempts, newest turns hold the only provider usage.
-                tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('lr','reactive','completed','now','now')")?;
+                tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('lr','reactive','completed','2026-01-01T00:00:00Z','2026-01-01T00:01:29Z')")?;
                 for i in 0..90usize {
                     tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,'reactive','lr','completed',?2,?2)",rusqlite::params![format!("lt{i:03}"),format!("2026-01-01T00:{:02}:{:02}Z",i/60,i%60)])?;
                     for a in 0..40usize {
@@ -350,7 +350,10 @@ impl Fixture {
                     self.detail_trace.pop_front();
                 }
             }
-            self.actions.send(action).await.unwrap();
+            if self.actions.send(action).await.is_err() {
+                let exit = watchdog("closed reactivity frontend result", &mut self.bridge).await;
+                panic!("reactivity frontend closed before deferred action: {exit:?}");
+            }
         }
         // Read the completed frame, not TestBackend's diff-applied cells:
         // TestBackend does not clear a wide glyph's trailing cell when a later
@@ -378,7 +381,10 @@ impl Fixture {
                     self.detail_trace.pop_front();
                 }
             }
-            self.actions.send(action).await.unwrap();
+            if self.actions.send(action).await.is_err() {
+                let exit = watchdog("closed reactivity frontend result", &mut self.bridge).await;
+                panic!("reactivity frontend closed before viewport action: {exit:?}");
+            }
         }
         let mut screen = String::new();
         for y in 0..40 {

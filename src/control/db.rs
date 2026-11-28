@@ -1767,9 +1767,12 @@ impl Store {
             Command::HistoryWindow(args) => {
                 MutationResult::value(history::rpc::selected_window(tx, args, operation_id)?)
             }
-            Command::HistoryRead(args) => {
-                MutationResult::value(history::rpc::read(tx, args, operation_id)?)
-            }
+            Command::HistoryRead(args) => MutationResult::value(history::rpc::read(
+                tx,
+                args,
+                operation_id,
+                history_observation::next_read_sequence,
+            )?),
             Command::HistoryExport(args) => MutationResult::value(history::export::read(
                 tx,
                 args,
@@ -5704,6 +5707,7 @@ mod agents_reference_tests {
                     let body = history::read_node_body(
                         db,
                         &HistoryReadArgs {
+                            node_ids: None,
                             display: None,
                             end_message_only: false,
                             parts: false,

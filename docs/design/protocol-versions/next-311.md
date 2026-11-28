@@ -297,3 +297,8 @@ Refusals use `error.details.reason`: `unknown_operation` for an unrecognized
 exact ID, `not_cancellable` for known active work that does not opt in, and
 `already_settled` for an operation that has ended. Refusals identify the
 requested target as `error.details.target_operation_id`.
+
+- `history.read` can observe explicit node IDs independently of the selected path.
+  The owner returns one sequence for the selection, with each source revision,
+  typed availability and bounded tool facts. A retained source shared by a
+  live fork stays available after its origin Thread is deleted.

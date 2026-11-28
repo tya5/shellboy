@@ -53,6 +53,8 @@ pub struct WorkItem {
     pub attempt_connection: Option<String>,
     pub attempt_model: Option<String>,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub authentication_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -318,6 +320,7 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
     }
     if let Some(id) = &item.end_message_node_id {
         links.push(Command::HistoryRead(HistoryReadArgs {
+            node_ids: None,
             display: None,
             end_message_only: false,
             parts: false,
@@ -499,6 +502,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<W
         .max_by_key(|(t, _)| *t)
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Work has no recorded timestamp"))?;
     let mut item = WorkItem {
+        authentication_required: row.get(24).map_err(sql)?,
         kind: kind.as_str().into(),
         id: id.clone(),
         state,
@@ -737,7 +741,20 @@ pub fn snapshot(
       UNION ALL SELECT 'shell',s.id,s.state,r.thread_id,s.owner_run_id,s.turn_id,s.owner_run_id,NULL,s.started_at,s.ended_at,NULL,NULL,NULL,NULL,NULL,s.end_reason,NULL,NULL FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.rowid IN (SELECT rid FROM page_keys WHERE kind='shell')
       UNION ALL SELECT 'message',m.message_node_id,m.state,m.target_thread_id,m.run_id,m.turn_id,NULL,m.created_at,NULL,NULL,NULLIF(m.updated_at,''),CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=m.client_operation_id) THEN m.client_operation_id END,NULL,NULL,NULL,m.hold_reason,NULL,NULL FROM receipt m LEFT JOIN run r ON r.id=m.run_id LEFT JOIN turn t ON t.id=m.turn_id WHERE m.rowid IN (SELECT rid FROM page_keys WHERE kind='message')
       UNION ALL SELECT 'attempt',a.id,a.state,t.thread_id,t.run_id,t.id,NULL,NULL,a.started_at,a.ended_at,NULL,NULL,t.answer_node_id,a.profile_id,a.model_id,CASE WHEN json_valid(a.error_json) THEN COALESCE(json_extract(a.error_json,'$.kind'),json_extract(a.error_json,'$.code')) END,NULL,NULL FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE a.rowid IN (SELECT rid FROM page_keys WHERE kind='attempt')
-    ) SELECT w.*,t.title,t.parent_thread_id,t.profile_id,t.model_id,(SELECT json_object('expect_reply',json_extract(m.result_json,'$.expect_reply'),'reply',json_extract(m.result_json,'$.reply'),'reply_to',json_extract(m.result_json,'$.reply_to')) FROM receipt m WHERE w.kind='message' AND m.message_node_id=w.id),p.watermark FROM page_keys p JOIN work w ON w.kind=p.kind AND w.id=p.id JOIN thread t ON t.id=w.thread_id ORDER BY p.activity DESC,p.kind,p.id"#
+    ) SELECT w.*,t.title,t.parent_thread_id,t.profile_id,t.model_id,(SELECT json_object('expect_reply',json_extract(m.result_json,'$.expect_reply'),'reply',json_extract(m.result_json,'$.reply'),'reply_to',json_extract(m.result_json,'$.reply_to')) FROM receipt m WHERE w.kind='message' AND m.message_node_id=w.id),p.watermark,
+      CASE WHEN w.kind='turn' AND w.state='recovery_wait' THEN EXISTS(
+        SELECT 1 FROM turn u
+        LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id ORDER BY rowid DESC LIMIT 1)
+        WHERE u.id=w.id AND (
+          CASE WHEN json_valid(u.recovery_reason_json) THEN
+            json_extract(u.recovery_reason_json,'$.code')='config_invalid'
+            OR json_extract(u.recovery_reason_json,'$.details.failure_kind') IN ('config_invalid','config_missing','config_missing_credentials')
+          END
+          OR CASE WHEN a.generation=u.generation AND json_valid(a.error_json) THEN
+            json_extract(a.error_json,'$.error.status') IN (401,403)
+          END
+        )) ELSE 0 END
+    FROM page_keys p JOIN work w ON w.kind=p.kind AND w.id=p.id JOIN thread t ON t.id=w.thread_id ORDER BY p.activity DESC,p.kind,p.id"#
     );
     let mut statement = db.prepare(&query).map_err(sql)?;
     let mut rows = statement
