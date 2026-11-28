@@ -25,6 +25,7 @@ pub(super) async fn collect(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     cancel: &CancellationToken,
+    start_gate: Arc<Mutex<bool>>,
 ) -> Result<Option<Value>, ApiError> {
     let thread = snapshot.thread.clone();
     let definitions = control
@@ -38,10 +39,12 @@ pub(super) async fn collect(
     if definitions.is_empty() || cancel.is_cancelled() {
         return Ok(None);
     }
-    let mut remaining = usize::try_from(control.store.config.limits.tool_excerpt_bytes)
+    let limit = usize::try_from(control.store.config.limits.tool_excerpt_bytes)
         .unwrap_or(usize::MAX)
         .min(crate::protocol::MAX_BODY_BYTES as usize);
-    let mut entries = Vec::with_capacity(definitions.len());
+    let mut entries = Vec::new();
+    let mut omitted = false;
+    let mut remaining = limit.saturating_sub(ENVELOPE.len() + SUFFIX.len());
     for definition in definitions {
         if cancel.is_cancelled() {
             return Ok(None);
@@ -62,11 +65,12 @@ pub(super) async fn collect(
             tokio::time::Instant::now() + Duration::from_millis(definition.timeout_ms.into());
         let execution = control
             .shell
-            .spawn_thread_owned(
+            .spawn_guarded(
                 uuid::Uuid::new_v4().to_string(),
                 snapshot.cwd.clone(),
                 args,
                 env,
+                start_gate.clone(),
             )
             .await;
         let mut bytes = Vec::new();
@@ -121,19 +125,64 @@ pub(super) async fn collect(
             stdout.truncate(stdout.floor_char_boundary(remaining));
             truncated = true;
         }
-        remaining -= stdout.len();
-        entries.push(ResultEntry {
+        let mut entry = ResultEntry {
             name: definition.name,
             outcome,
             stdout,
             truncated,
-        });
+        };
+        if !omitted {
+            let comma = usize::from(!entries.is_empty());
+            match fit_entry(&mut entry, remaining.saturating_sub(comma)) {
+                Some(encoded) => {
+                    remaining -= encoded.len() + comma;
+                    entries.push(encoded);
+                }
+                None => omitted = true,
+            }
+        }
     }
-    let text = serde_json::to_string(&json!({"type":"context_commands","results":entries}))
-        .expect("bounded context results serialize");
+    let text = if limit < ENVELOPE.len() + SUFFIX.len() {
+        // A tiny configured budget cannot carry even the omission fact.
+        return Ok(None);
+    } else {
+        format!("{ENVELOPE}{}],\"omitted\":{omitted}}}", entries.join(","))
+    };
     Ok(Some(
         json!({"type":"message","role":"developer","content":[{"type":"input_text","text":text}]}),
     ))
+}
+
+// Reserve the larger boolean spelling, so truncation never grows the envelope.
+const ENVELOPE: &str = "{\"type\":\"context_commands\",\"results\":[";
+const SUFFIX: &str = "],\"omitted\":false}";
+
+fn fit_entry(entry: &mut ResultEntry, limit: usize) -> Option<String> {
+    let encode =
+        |entry: &ResultEntry| serde_json::to_string(entry).expect("context result serializes");
+    let encoded = encode(entry);
+    if encoded.len() <= limit {
+        return Some(encoded);
+    }
+    entry.truncated = true;
+    let stdout = std::mem::take(&mut entry.stdout);
+    let mut best = encode(entry);
+    if best.len() > limit {
+        return None;
+    }
+    let (mut low, mut high) = (1, stdout.len());
+    while low <= high {
+        let mid = low + (high - low) / 2;
+        entry.stdout = stdout[..stdout.floor_char_boundary(mid)].to_owned();
+        let encoded = encode(entry);
+        if encoded.len() <= limit {
+            best = encoded;
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    Some(best)
 }
 
 #[cfg(all(test, unix))]
@@ -147,7 +196,7 @@ mod tests {
         let snapshot = ready(&control, &accepted).await;
         let cancel = CancellationToken::new();
         assert!(
-            collect(&control, &snapshot, &cancel)
+            collect(&control, &snapshot, &cancel, Arc::default())
                 .await
                 .unwrap()
                 .is_none()
@@ -174,7 +223,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let item = collect(&control, &snapshot, &cancel)
+        let item = collect(&control, &snapshot, &cancel, Arc::default())
             .await
             .unwrap()
             .unwrap();
@@ -187,3 +236,6 @@ mod tests {
         close(control, owner).await;
     }
 }
+
+#[cfg(all(test, unix))]
+mod request_tests;

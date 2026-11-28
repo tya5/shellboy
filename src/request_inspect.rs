@@ -445,9 +445,6 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             "attachment notices: depend on attachment state at send time".into(),
         );
     }
-    if let Some(item) = plan.context_tail.as_ref().and_then(|tail| tail.get("item")) {
-        parts.push(Part::Known(item.clone()));
-    }
     // The context line is saved history (#183). The next request appends a new
     // one only when the latest saved line is not the current context.
     if let Some(cwd) = &plan.cwd {
@@ -494,6 +491,9 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             &mut parts,
             "context tail: commands run only during request preparation".into(),
         );
+    }
+    if let Some(item) = plan.context_tail.as_ref().and_then(|tail| tail.get("item")) {
+        parts.push(Part::Known(item.clone()));
     }
     let wire = if unknown.is_empty() {
         let input = parts
