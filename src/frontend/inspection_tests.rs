@@ -1316,9 +1316,9 @@ async fn f8_foreign_attachment_list_tracks_saved_remove_with_exact_thread_and_no
     let inserted_pin = fixture_pin.clone();
     owner.db.call(move |db| {
         db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('attachment-source','user','now','{}');
-        INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES('saved-attachment','attachment-source','/does-not-exist-g5-observation','file','external','now');
+        INSERT INTO attachment_ref VALUES('saved-attachment','attachment-source','/does-not-exist-g5-observation','file','external','now');
         INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order)VALUES('independent','saved-attachment','active','now',0);")?;
-        db.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES('managed-attachment','attachment-source',?1,'image','managed_clipboard','now')", [&managed_path_sql])?;
+        db.execute("INSERT INTO attachment_ref VALUES('managed-attachment','attachment-source',?1,'image','managed_clipboard','now')", [&managed_path_sql])?;
         db.execute("INSERT INTO attachment_selection(thread_id,attachment_id,state,reason,selected_at,selected_order)VALUES('independent','managed-attachment','excluded','fixture exclusion','now',1)", [])?;
         db.execute("INSERT INTO managed_file(id,absolute_path,attachment_id,state,raw_size,created_at)VALUES('example',?1,'managed-attachment','ready',27,'2000-01-01T00:00:00Z')", [&managed_path_sql])?;
         db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES(?2,?1,'managed_file','example',0,'now')", [&current_instance, &inserted_pin])?;

@@ -984,6 +984,5 @@ WHERE sent.state='unavailable' AND EXISTS (
     WHERE attempt.id=sent.attempt_id
       AND json_extract(attempt.input_manifest_json,'$.adoption.outcome')='adopted'
 );
-ALTER TABLE attachment_ref ADD COLUMN registered_raw_size INTEGER CHECK(registered_raw_size IS NULL OR registered_raw_size>=0);
 INSERT INTO schema_migration(version,name) VALUES(72,'next_attachment_omission');
 PRAGMA user_version=72;

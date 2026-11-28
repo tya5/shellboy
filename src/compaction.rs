@@ -4129,7 +4129,7 @@ mod tests {
     async fn replacement_excludes_only_its_thread_binaries_and_preserves_shared_fork() {
         let (_root, db) = database().await;
         db.call(|db|{let tx=db.transaction()?;history::append_node(&tx,"t","source",None,"user",&json!({"role":"user","content":"original"}),"now")?;
-            tx.execute_batch("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES('a','source','/external.bin','file','external','now'); INSERT INTO attachment_selection VALUES('t','a','active',NULL,'now',0,0,1);")?;
+            tx.execute_batch("INSERT INTO attachment_ref VALUES('a','source','/external.bin','file','external','now'); INSERT INTO attachment_selection VALUES('t','a','active',NULL,'now',0,0,1);")?;
             history::fork_thread(&tx,&crate::protocol::ThreadForkArgs{ agents: None,thread_id:"t".into(),node_id:"source".into(),cwd:None},"fork","now").map_err(StorageError::from)?;tx.commit()?;Ok(())}).await.unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
@@ -4250,7 +4250,7 @@ mod tests {
     #[tokio::test]
     async fn failed_path_adoption_rolls_back_binary_exclusion_and_replacement_nodes() {
         let (_root, db) = database().await;
-        db.call(|db|{let tx=db.transaction()?;history::append_node(&tx,"t","source",None,"user",&json!({"role":"user","content":"original"}),"now")?;tx.execute_batch("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES('a','source','/external.bin','file','external','now'); INSERT INTO attachment_selection VALUES('t','a','active',NULL,'now',0,0,1); CREATE TRIGGER reject_adoption BEFORE DELETE ON thread_path BEGIN SELECT RAISE(ABORT,'injected'); END;")?;tx.commit()?;Ok(())}).await.unwrap();
+        db.call(|db|{let tx=db.transaction()?;history::append_node(&tx,"t","source",None,"user",&json!({"role":"user","content":"original"}),"now")?;tx.execute_batch("INSERT INTO attachment_ref VALUES('a','source','/external.bin','file','external','now'); INSERT INTO attachment_selection VALUES('t','a','active',NULL,'now',0,0,1); CREATE TRIGGER reject_adoption BEFORE DELETE ON thread_path BEGIN SELECT RAISE(ABORT,'injected'); END;")?;tx.commit()?;Ok(())}).await.unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let failed = db

@@ -70,7 +70,7 @@ path外通知は既存一覧既定値と同じ最大50件の候補を一回に�
 
 file_prepare_timeout_msは、DBから選択内容を取得した後、一回のprepare内のfile worker枠待ち＋実体読取りに共有する期限とする。DB取得時間まで含めた要求全体のdeadlineではない。同じpathの重複を一度だけ読む現在の順序を保ち、途中で期限に達すれば残りはunavailableとして同じ要求を継続する。各ファイルで期限を更新して総待機をファイル数倍へ延ばす案は採らない。開始済みI/Oは実終了まで既存permit/pinを持ち、timeoutで追加workerを起こさない。個別の再試行は次の明示要求で行い、準備に新しいtimer/設定/queueを足さない。
 
-Request preparation reserves the aggregate byte budget before opening paths: the first adopted send supplies the size and hash for a live slot; a first inclusion uses its registered size (legacy unknown sizes reserve up to the per-file limit). Protected reservations come first, followed by the newest historical suffix. Each distinct path has one deadline-bound worker job, in selection order. That job can encode only for a reserved slot whose fingerprint matches, or a reserved first inclusion that fits. Changed and missing slots release no space to excluded slots during that attempt. A first inclusion that outgrows its reservation holds the request for explicit retry after reattaching the file.
+Request preparation observes each distinct path in selection order with one deadline-bound file job. It keeps raw bytes only for a possible send and applies the aggregate budget in memory to the observed sizes of those slots. Changed and permanently omitted slots do not reserve space. Only admitted bytes are encoded, without reopening a path or acquiring another worker permit.
 
 managed PNGはtemp本文のsync→rename→Unixの両親directoryのsyncを有限file worker内で行い、その成功後にDBのreadyを保存する。親dir同期失敗も既存failed経路へ返す。Windowsのstd rename経路は維持し、Unixのdirectory fsyncと同じ電源断保証は表明しない。実機の電源断耐久性はこの機能試験で検証済みと扱わない。
 
