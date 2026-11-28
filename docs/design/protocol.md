@@ -187,7 +187,7 @@ and ownership contracts.
 that opens artifact content; the version URI's scheme decides what it may read.
 `artifact.list` accepts a current URI `scheme` with optional `thread_id` (or
 a Thread alone). Scheme lists include only live, non-archived Threads and
-return the owning `thread_id` and `owner_title` with each artifact. The title is projected in the same owner query/read as the bounded membership and ordering selection; ordinary per-Thread lists omit it. See [Thread artifacts](thread-artifacts.md) and the [protocol change note](protocol-versions/next-471.md).
+return the owning `thread_id` and `owner_title` with each artifact. The title is projected in the same owner query/read as the bounded membership and ordering selection; ordinary per-Thread lists omit it. See [Thread artifacts](thread-artifacts.md) and the [protocol change note](protocol-versions/51.md).
 
 ## Named service endpoints
 
