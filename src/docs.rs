@@ -45,6 +45,8 @@ pub enum DocsCommand {
     Get {
         #[arg(long)]
         id: String,
+        #[arg(long = "source")]
+        sources: Vec<String>,
         #[arg(long)]
         section: Option<String>,
         #[arg(long, default_value_t = 16384)]
@@ -494,6 +496,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
         }
         DocsCommand::Get {
             id,
+            sources,
             section,
             limit_bytes,
             cursor,
@@ -515,8 +518,8 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
             } else {
                 (0, d.text.len())
             };
-            let scope =
-                serde_json::to_string(&json!(["get", id, section, content_hash])).expect("scope");
+            let scope = serde_json::to_string(&json!(["get", id, section, content_hash, sources]))
+                .expect("scope");
             let offset = if cursor.is_some() {
                 read_cursor(cursor.as_deref(), version, &scope)?
             } else {
@@ -618,6 +621,7 @@ mod tests {
         let mut text = String::new();
         loop {
             let page = execute(DocsCommand::Get {
+                sources: Vec::new(),
                 id: "shellboy/tui".into(),
                 section: None,
                 limit_bytes: 17,
@@ -631,6 +635,7 @@ mod tests {
             }
             assert!(
                 execute(DocsCommand::Get {
+                    sources: Vec::new(),
                     id: "shellboy/delegation".into(),
                     section: None,
                     limit_bytes: 17,
@@ -738,6 +743,7 @@ mod tests {
         let mut text = String::new();
         loop {
             let page = execute(DocsCommand::Get {
+                sources: Vec::new(),
                 id: source.id.clone(),
                 section: Some(section.id.clone()),
                 limit_bytes: 31,

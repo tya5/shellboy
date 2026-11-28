@@ -53,6 +53,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     form.language,
                 )?;
                 Ok(ClientOperation::Docs(DocsCommand::Get {
+                    sources: Vec::new(),
                     id: required(form, "document")?,
                     section: form.optional("section")?,
                     limit_bytes,
