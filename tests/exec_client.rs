@@ -980,7 +980,7 @@ async fn final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_res
             .arg(fixture.root.path().join("data"))
             .args(["history", "read", "--node"])
             .arg(diagnostic["end_message_node_id"].as_str().unwrap())
-            .arg("--end-message-only")
+            .args(["--limit-bytes", "65536"])
             .output(),
     )
     .await
