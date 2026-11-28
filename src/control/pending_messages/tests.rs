@@ -1748,7 +1748,7 @@ async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batche
         };
         let Err(refused) = store
             .execute(
-                Request::new(format!("fixture:resave-{n:03}"), Command::DraftSave(args)),
+                Request::new(store.operation_epoch.mint(), Command::DraftSave(args)),
                 None,
             )
             .await
