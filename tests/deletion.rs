@@ -40,7 +40,7 @@ async fn counts_distinct_shared_nodes_and_direct_sources_without_predicting_gc_o
             INSERT INTO replacement VALUES('rep','summary','key','1','1','completed','now');
             INSERT INTO replacement_source VALUES('rep',0,'private',0,'hash');
             INSERT INTO thread_replacement VALUES('fork','rep');
-            INSERT INTO attachment_ref VALUES('a','shared','/nonexistent/same','file','external','now'),('b','shared','/nonexistent/same','file','external','now'),('c','private','/nonexistent/managed','image','managed_clipboard','now');")?;
+            INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES('a','shared','/nonexistent/same','file','external','now'),('b','shared','/nonexistent/same','file','external','now'),('c','private','/nonexistent/managed','image','managed_clipboard','now');")?;
         let before = db.total_changes();
         let p=preview(db,&request(true)).unwrap();
         assert_eq!(p["selection"]["thread_count"],2);

@@ -257,7 +257,7 @@ mod tests {
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('target','','/','','p','m','now'),('viewer','','/','','p','m','now');
         INSERT INTO node(id,kind,created_at,payload_json)VALUES('source','user','now','{}');
-        INSERT INTO attachment_ref VALUES('a','source','/same','file','external','now'),('b','source','/same','image','managed_clipboard','now');
+        INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES('a','source','/same','file','external','now'),('b','source','/same','image','managed_clipboard','now');
         INSERT INTO attachment_selection(thread_id,attachment_id,state,reason,selected_at,selected_order)VALUES('target','a','excluded','explicitly removed','now',2),('target','b','active',NULL,'now',1);
         INSERT INTO managed_file(id,absolute_path,state,created_at,deleted_reason)VALUES('managed','/same','deleted','now','saved GC');
         INSERT INTO attachment_delivery VALUES('source','target',NULL,'held','op','{}','now');").unwrap();
@@ -350,7 +350,7 @@ mod tests {
     fn seed(db: &Connection, start: usize, end: usize) {
         for n in start..end {
             db.execute(
-                "INSERT INTO attachment_ref VALUES(?1,'source','/same','file','external','now')",
+                "INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES(?1,'source','/same','file','external','now')",
                 [format!("extra-{n:05}")],
             )
             .unwrap();

@@ -1,3 +1,4 @@
+ALTER TABLE attachment_ref ADD COLUMN registered_raw_size INTEGER CHECK(registered_raw_size IS NULL OR registered_raw_size>=0);
 ALTER TABLE attachment_send ADD COLUMN omission_reason TEXT CHECK(omission_reason IN ('attachment_changed','attachment_unavailable'));
 UPDATE attachment_send AS sent
 SET omission_reason='attachment_unavailable'
