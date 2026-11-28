@@ -3,7 +3,7 @@ use super::*;
 use globset::{GlobBuilder, GlobMatcher};
 use std::collections::BTreeMap;
 
-use crate::input_path::FOLDER_WALK_MAX_ENTRIES as MAX_VISITED;
+use crate::input_path::{FOLDER_WALK_MAX_DEPTH, FOLDER_WALK_MAX_ENTRIES as MAX_VISITED};
 const MAX_TARGETS: usize = 10_000;
 const SAMPLE_LIMIT: usize = 20;
 pub(super) fn validate_patterns(patterns: &[String]) -> Result<()> {
@@ -117,7 +117,7 @@ fn walk(
     if depth == 0 {
         scan.visited = 1;
     }
-    if depth > 64 || scan.visited > MAX_VISITED {
+    if depth > FOLDER_WALK_MAX_DEPTH || scan.visited > MAX_VISITED {
         return Err(err(
             "input_limit",
             "Source traversal exceeds 64 levels or 100000 entries; deletion detection was skipped",
