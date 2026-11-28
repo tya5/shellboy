@@ -3300,6 +3300,9 @@ mod message_acknowledgement_tests {
             "storage.collect",
             "config.get",
             "config.set",
+            "docs.source.add",
+            "docs.source.list",
+            "docs.source.remove",
             "credentials.set",
             "credentials.clear",
             "connection.test",
@@ -3331,6 +3334,9 @@ mod message_acknowledgement_tests {
             "usage.get",
             "config.get",
             "config.set",
+            "docs.source.add",
+            "docs.source.list",
+            "docs.source.remove",
         ] {
             assert_ne!(
                 results[name],
