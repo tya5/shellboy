@@ -309,23 +309,25 @@ async fn expired_launch_admission_refuses_without_starting() {
         let guard = gate.lock().await;
         let cancel = CancellationToken::new();
         tokio::time::pause();
-        let future = run(
-            &control,
-            &snapshot,
-            &cancel,
-            gate.clone(),
-            super::super::super::context_command::Definition {
-                name: "expired".into(),
-                command: "printf launched > launch-marker".into(),
-                timeout_ms: 10,
-            },
-            128,
-        );
-        tokio::pin!(future);
-        assert!(futures_util::poll!(&mut future).is_pending());
-        tokio::time::advance(Duration::from_millis(11)).await;
-        drop(guard);
-        let result = serde_json::to_value(future.await).unwrap();
+        let result = {
+            let future = run(
+                &control,
+                &snapshot,
+                &cancel,
+                gate.clone(),
+                super::super::super::context_command::Definition {
+                    name: "expired".into(),
+                    command: "printf launched > launch-marker".into(),
+                    timeout_ms: 10,
+                },
+                128,
+            );
+            tokio::pin!(future);
+            assert!(futures_util::poll!(&mut future).is_pending());
+            tokio::time::advance(Duration::from_millis(11)).await;
+            drop(guard);
+            serde_json::to_value(future.await).unwrap()
+        };
         tokio::time::resume();
         assert_eq!(result["outcome"], "timed_out");
         assert_eq!(result["started"], false);

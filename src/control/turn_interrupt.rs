@@ -685,6 +685,7 @@ mod tests {
                     args,
                     std::collections::BTreeMap::new(),
                     task_gate,
+                    None,
                 )
                 .await
         });
