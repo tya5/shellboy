@@ -67,6 +67,7 @@ pub struct Config {
     pub logging: Logging,
     pub compaction: Compaction,
     pub recovery: Recovery,
+    pub docs: crate::docs::DocsConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

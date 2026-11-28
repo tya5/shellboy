@@ -30,6 +30,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             bounded(limit, 1, 200, "件数", "Count", form.language)?;
             Ok(ClientOperation::Docs(DocsCommand::List {
                 parent: form.optional("doc_parent")?,
+                sources: Vec::new(),
                 limit,
                 cursor: form.optional("cursor")?,
             }))
@@ -72,6 +73,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                 Ok(ClientOperation::Docs(DocsCommand::Search {
                     query: required(form, "query")?,
                     parent: form.optional("doc_parent")?,
+                    sources: Vec::new(),
                     limit,
                     cursor: form.optional("cursor")?,
                 }))

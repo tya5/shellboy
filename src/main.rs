@@ -396,7 +396,9 @@ fn main() -> ExitCode {
             println!("{}", shellboy::protocol::schema_json());
             ExitCode::SUCCESS
         }
-        Some(CliCommand::Docs { command }) => standalone_response(docs_response(command)),
+        Some(CliCommand::Docs { command }) => standalone_response(
+            shellboy::docs::configured_response(command, cli.config.as_deref(), &cwd),
+        ),
         Some(CliCommand::Startup(options)) => standalone_response(runtime.block_on(
             shellboy::startup::execute(options, cli.config, cli.data_dir, &cwd),
         )),
@@ -464,19 +466,6 @@ fn emit_exec(outcome: shellboy::exec_client::Outcome) -> ExitCode {
     }
     let _ = writeln!(std::io::stderr().lock(), "{diagnostics}");
     ExitCode::from(code)
-}
-fn docs_response(command: shellboy::docs::DocsCommand) -> serde_json::Value {
-    match shellboy::docs::execute(command) {
-        Ok(result) => {
-            serde_json::json!({"protocol_version":shellboy::protocol::PROTOCOL_VERSION,"ok":true,"result":result})
-        }
-        Err(message) => {
-            let (code, detail) = message
-                .split_once(": ")
-                .unwrap_or(("invalid_argument", &message));
-            serde_json::json!({"protocol_version":shellboy::protocol::PROTOCOL_VERSION,"ok":false,"error":{"code":code,"message":detail}})
-        }
-    }
 }
 fn standalone_response(response: serde_json::Value) -> ExitCode {
     println!(

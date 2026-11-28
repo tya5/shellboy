@@ -22,6 +22,9 @@ impl Config {
                 "list at most 8 absolute UTF-8 file paths, each at most 4096 bytes",
             ));
         }
+        self.docs
+            .validate()
+            .map_err(|reason| invalid("docs.sources", reason))?;
         self.retention.validate_positive()?;
         self.limits.validate_positive()?;
         self.io.validate_positive()?;

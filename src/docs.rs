@@ -1,17 +1,26 @@
-//! Bundled, owner-independent product documentation.
+//! Owner-independent product documentation.
+mod sources;
 use crate::digest::sha256_hex as hash;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Subcommand;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+pub use sources::{DocsConfig, Registration, SourceCommand, configured_response};
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum DocsCommand {
+    /// Manage registered guide folders in config.toml.
+    Source {
+        #[command(subcommand)]
+        command: SourceCommand,
+    },
     /// List immediate children of a documentation category.
     List {
         #[arg(long)]
         parent: Option<String>,
+        #[arg(long = "source")]
+        sources: Vec<String>,
         #[arg(long, default_value_t = 50)]
         limit: usize,
         #[arg(long)]
@@ -34,6 +43,8 @@ pub enum DocsCommand {
         query: String,
         #[arg(long)]
         parent: Option<String>,
+        #[arg(long = "source")]
+        sources: Vec<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long)]
@@ -434,8 +445,12 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
     let docs: &[Document] = &bundled.docs;
     let version = bundled.version.as_str();
     match command {
+        DocsCommand::Source { .. } => {
+            Err("invalid_argument: Source operations need a configuration context".into())
+        }
         DocsCommand::List {
             parent,
+            sources: _,
             limit: count,
             cursor,
         } => {
@@ -511,6 +526,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
         DocsCommand::Search {
             query,
             parent,
+            sources: _,
             limit: count,
             cursor,
         } => {
@@ -627,6 +643,7 @@ mod tests {
         let page = execute(DocsCommand::Search {
             query: "subagent".into(),
             parent: Some("shellboy/work".into()),
+            sources: Vec::new(),
             limit: 100,
             cursor: None,
         })
@@ -663,6 +680,7 @@ mod tests {
             let page = execute(DocsCommand::Search {
                 query: query.into(),
                 parent: None,
+                sources: Vec::new(),
                 limit: 20,
                 cursor: None,
             })
@@ -725,6 +743,7 @@ mod tests {
     fn list_and_search_cursor_conditions_are_bound() {
         let first = execute(DocsCommand::List {
             parent: Some("shellboy/work".into()),
+            sources: Vec::new(),
             limit: 1,
             cursor: None,
         })
@@ -733,6 +752,7 @@ mod tests {
         assert!(
             execute(DocsCommand::List {
                 parent: Some("shellboy/start".into()),
+                sources: Vec::new(),
                 limit: 1,
                 cursor: Some(cursor.clone())
             })
@@ -740,6 +760,7 @@ mod tests {
         );
         let second = execute(DocsCommand::List {
             parent: Some("shellboy/work".into()),
+            sources: Vec::new(),
             limit: 2,
             cursor: Some(cursor),
         })
@@ -748,6 +769,7 @@ mod tests {
         let first = execute(DocsCommand::Search {
             query: "shellboy".into(),
             parent: None,
+            sources: Vec::new(),
             limit: 1,
             cursor: None,
         })
@@ -757,6 +779,7 @@ mod tests {
             execute(DocsCommand::Search {
                 query: "shell".into(),
                 parent: None,
+                sources: Vec::new(),
                 limit: 1,
                 cursor: Some(cursor)
             })
@@ -766,6 +789,7 @@ mod tests {
             execute(DocsCommand::Search {
                 query: " ".into(),
                 parent: None,
+                sources: Vec::new(),
                 limit: 1,
                 cursor: None
             })
@@ -786,6 +810,7 @@ mod tests {
         assert!(
             execute(DocsCommand::List {
                 parent: None,
+                sources: Vec::new(),
                 limit: 201,
                 cursor: None
             })
