@@ -77,9 +77,10 @@ mod native {
     async fn read_until(
         master: &tokio::io::unix::AsyncFd<File>,
         bytes: &mut Vec<u8>,
+        phase: &'static str,
         predicate: impl Fn(&[u8]) -> bool,
     ) {
-        crate::test_watchdog::watchdog("tests/program_status.rs: read_until", async {
+        crate::test_watchdog::watchdog(phase, async {
             loop {
                 if predicate(bytes) {
                     return;
@@ -92,7 +93,10 @@ mod native {
                     Ok::<_, std::io::Error>((size, buffer))
                 });
                 match result {
-                    Ok(Ok((0, _))) => panic!("PTY ended before expected state"),
+                    Ok(Ok((0, _))) => panic!(
+                        "{phase}: PTY ended; last packet: {:?}",
+                        packets(bytes).last()
+                    ),
                     Ok(Ok((size, buffer))) => {
                         bytes.extend_from_slice(&buffer[..size]);
                         assert!(bytes.len() < 8 * 1024 * 1024);
@@ -103,7 +107,12 @@ mod native {
             }
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|error| {
+            panic!(
+                "{phase}: {error:?}; last packet: {:?}",
+                packets(bytes).last()
+            )
+        });
     }
     async fn request(stream: &mut tokio::net::TcpStream) -> Value {
         let mut bytes = Vec::new();
@@ -139,8 +148,10 @@ mod native {
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn tty_lifecycle_and_shell_osc_are_isolated_in_on_and_off_modes() {
-        crate::test_watchdog::watchdog("tests/program_status.rs: tty_lifecycle_and_shell_osc_are_isolated_in_on_and_off_modes",async {
+        let phase = std::cell::Cell::new(("on", "startup"));
+        crate::test_watchdog::watchdog("native OSC lifecycle",async {
         for mode in ["on","off"] {
+            phase.set((mode, "startup"));
             let root=tempfile::tempdir().unwrap();let home=root.path().join("home");std::fs::create_dir(&home).unwrap();
             let data=root.path().join("owner-data");let config=root.path().join("config.toml");
             let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();let address=listener.local_addr().unwrap();
@@ -176,28 +187,35 @@ mod native {
             let mut owner_command=command(&home);
             crate::pty_session::isolate_child(&mut owner_command);
             let mut owner=owner_command.arg("--config").arg(&config).arg("--data-dir").arg(&data).current_dir(root.path()).stdin(Stdio::from(slave.try_clone().unwrap())).stdout(Stdio::from(slave.try_clone().unwrap())).stderr(Stdio::from(slave)).kill_on_drop(true).spawn().unwrap();
-            eprintln!("OSC {mode}: PTY readiness");
-            let mut bytes=Vec::new();read_until(&master,&mut bytes,|bytes|{let text=String::from_utf8_lossy(bytes);text.contains("Ready for input")||text.contains("入力できます")}).await;
+            let mut bytes=Vec::new();read_until(&master,&mut bytes,"initial readiness",|bytes|{let text=String::from_utf8_lossy(bytes);text.contains("Ready for input")||text.contains("入力できます")}).await;
+            phase.set((mode, "create/send/first provider request"));
             let created=cli(&home,&data,&["thread","create"]).await;let id=created["thread_id"].as_str().unwrap();let terminal_id=shellboy::program_status::thread_id(id);
             let sent=cli(&home,&data,&["message","send","--thread",id,"--text","fixture work"]).await;
             eprintln!("OSC {mode}: waiting for provider request");
             received.await.unwrap();
-            eprintln!("OSC {mode}: waiting for working");
-            if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("working")&&p.get("id")==Some(&terminal_id))).await;}
-            eprintln!("OSC {mode}: waiting for completion");
+            phase.set((mode, "working packet"));
+            if mode=="on" {read_until(&master,&mut bytes,"working packet",|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("working")&&p.get("id")==Some(&terminal_id))).await;}
+            phase.set((mode, "release/owner Wait"));
             let _=release.send(());
             let conditions=json!([{"type":"run_ended","run_id":sent["run_id"]}]).to_string();cli(&home,&data,&["wait","--conditions-json",&conditions,"--timeout-ms","60000"]).await;
-            if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("done")&&p.get("id")==Some(&terminal_id))).await;}
+            phase.set((mode, "done packet"));
+            if mode=="on" {read_until(&master,&mut bytes,"done packet",|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("done")&&p.get("id")==Some(&terminal_id))).await;}
+            phase.set((mode, "switch/auth provider request"));
             master.get_ref().write_all(format!("/switch {id}\r").as_bytes()).unwrap();
             // This UI started on an unsaved draft; selecting this thread has no prior
             // thread-scoped OSC state to clear. The next auth request emits its own state.
-            cli(&home,&data,&["message","send","--thread",id,"--text","auth fixture"]).await;
-            eprintln!("OSC {mode}: waiting for auth response");
+            let auth=cli(&home,&data,&["message","send","--thread",id,"--text","auth fixture"]).await;
             server.await.unwrap();
-            eprintln!("OSC {mode}: waiting for blocked");
-            if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("blocked")&&p.get("kind").map(String::as_str)==Some("auth"))).await; }
-            eprintln!("OSC {mode}: client quit");
-            master.get_ref().write_all(b"/quit\r").unwrap();
+            phase.set((mode, "owner recovery observation"));
+            let conditions=json!([{"type":"turn_completed","turn_id":auth["turn_id"]}]).to_string();
+            let waited=cli(&home,&data,&["wait","--conditions-json",&conditions]).await;
+            assert_eq!(waited["status"],"recovery_wait");
+            let status=cli(&home,&data,&["status","--thread",id]).await;
+            assert!(status["items"].as_array().unwrap().iter().any(|item|item["id"]==auth["turn_id"]&&item["reason"]=="model_auth"),"{status}");
+            phase.set((mode, "blocked packet"));
+            if mode=="on" {read_until(&master,&mut bytes,"blocked packet",|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("blocked")&&p.get("id")==Some(&terminal_id)&&p.get("kind").map(String::as_str)==Some("auth"))).await; }
+            phase.set((mode, "exit and drain"));
+            master.get_ref().write_all(&[17]).unwrap();
 
             // Keep consuming output while the final redraw and OSC clear drain.
             crate::test_watchdog::watchdog("native PTY owner shutdown", async {
@@ -222,6 +240,6 @@ mod native {
             assert!(!bytes.windows(b"\x1b]7501;state=error:app=evil".len()).any(|v|v==b"\x1b]7501;state=error:app=evil"));
             if mode=="off" {assert!(records.is_empty());}
         }
-    }).await.unwrap();
+    }).await.unwrap_or_else(|error| panic!("OSC lifecycle {:?}: {error:?}", phase.get()));
     }
 }
