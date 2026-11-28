@@ -793,11 +793,11 @@ async fn seed_collapsed_history(data: &std::path::Path, cwd: &std::path::Path) -
         use sha2::{Digest, Sha256};
         let tx = db.transaction()?;
         tx.pragma_update(None,"defer_foreign_keys",true)?;
-        tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'Short tools',?2,'AGENTS.md','fixture','fixture-model','2026-01-01')", rusqlite::params![id,cwd])?;
-        tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('old-run',?1,'completed','2026-01-01','2026-01-01')",[&id])?;
-        tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at) VALUES('old-turn',?1,'old-run','completed','2026-01-01','2026-01-01')",[&id])?;
-        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='old-turn'),'old-attempt','old-turn',0,0,'fixture','fixture-model',0,'completed','{}','2026-01-01')",[])?;
-        tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('group','old-attempt','old-turn','completed','2026-01-01')",[])?;
+        tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'Short tools',?2,'AGENTS.md','fixture','fixture-model','2026-01-01T00:00:00Z')", rusqlite::params![id,cwd])?;
+        tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('old-run',?1,'completed','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",[&id])?;
+        tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at) VALUES('old-turn',?1,'old-run','completed','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",[&id])?;
+        tx.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation',(SELECT thread_id FROM turn WHERE id='old-turn'),'old-attempt','old-turn',0,0,'fixture','fixture-model',0,'completed','{}','2026-01-01T00:00:00Z')",[])?;
+        tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('group','old-attempt','old-turn','completed','2026-01-01T00:00:00Z')",[])?;
         let calls = (0..120).map(|i|json!({"type":"function_call","call_id":format!("call-{i}"),"name":"shell","arguments":json!({"command":format!("printf CMD{i:03}")}).to_string(),"status":"completed"})).collect::<Vec<_>>();
         let mut previous: Option<String> = None;
         for ordinal in 0..=120 {
@@ -811,7 +811,7 @@ async fn seed_collapsed_history(data: &std::path::Path, cwd: &std::path::Path) -
             // Deferred foreign keys validate each synthetic node/result pair at commit.
             let raw=payload.to_string();
             let hash=Sha256::digest(raw.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>();
-            tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,'old-turn',?2,'2026-01-01',?3,?4,?5)",rusqlite::params![node,if ordinal==0 {"assistant_response"} else {"tool_result"},raw,raw.len() as i64,hash])?;
+            tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,'old-turn',?2,'2026-01-01T00:00:00Z',?3,?4,?5)",rusqlite::params![node,if ordinal==0 {"assistant_response"} else {"tool_result"},raw,raw.len() as i64,hash])?;
             tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES(?1,?2,?3)",rusqlite::params![id,ordinal,node])?;
             if let Some(prior)=previous {tx.execute("INSERT INTO edge(src,dst) VALUES(?1,?2)",rusqlite::params![prior,node])?;}
             previous=Some(node);
@@ -908,7 +908,8 @@ async fn short_tool_history_wheel_loads_older_without_refollow() {
         collect_matching(&mut terminal,&mut output,"paused older history after saved completion",|bytes| {
             bytes.windows(4).rposition(|b|b==b"\x1b[2J").is_some_and(|i| {
                 let frame=emitted_text(&bytes[i..]);
-                frame.contains("REFRESHED_PAUSED") && frame.match_indices("CMD").any(|(i,_)|frame.get(i+3..i+6).and_then(|n|n.parse::<usize>().ok()).is_some_and(|n|n<70))
+                frame.contains("REFRESHED_PAUSED") && frame.contains(&anchor)
+                    && !frame.contains("SYNTHETIC_FINISHED")
             })
         }).await;
         eprintln!("OLDER_COMMAND_WITNESS before completion={anchor}; after completion still older than initial tail");
@@ -932,13 +933,13 @@ async fn short_tool_history_wheel_loads_older_without_refollow() {
         tokio::pin!(drain);
         let status=tokio::select! {status=child.wait()=>status.unwrap(),_= &mut drain=>child.wait().await.unwrap()};
         assert!(status.success());
-        let log=std::fs::read_to_string(data.join("logs/shellboy.log")).unwrap();
-        let traces=log.lines().filter_map(|line|serde_json::from_str::<serde_json::Value>(line).ok()).filter(|v|v["event"]=="ui_history"&&v["ids"]["thread_id"]==thread).map(|v|v["ui_history"].clone()).collect::<Vec<_>>();
-        eprintln!("SHORT_PTY traces={traces:?}");
-        let pause=traces.iter().position(|v|v["reason"]=="user_follow"&&v["follow_after"]==false).unwrap();
-        // The existing logger suppresses nonshrinking, same-follow windows.
-        // The older command frame is the positive read witness; traces guard follow.
-        assert!(!traces[pause..].iter().any(|v|v["follow_after"]==true));
+        // The attached client does not write owner-only UI diagnostic traces.
+        // Verify the persisted position through the same owner after client exit.
+        let view = shellboy::ipc::call(&data, shellboy::protocol::Command::DraftGet(shellboy::protocol::DraftGetArgs {
+            thread_id: Some(thread.clone()), operation_id: None,
+        }), None, None).await.unwrap();
+        assert!(view.ok, "{:?}", view.error);
+        assert_eq!(view.result.unwrap()["view"]["follow_tail"], false);
     })).catch_unwind().await;
     if !matches!(&outcome, Ok(Ok(()))) {
         let log =
