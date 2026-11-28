@@ -515,7 +515,7 @@ async fn failed_activity_read_stops_the_real_frontend_with_storage_error() {
     .await
     .unwrap();
     owner.db.call(|db| {
-        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('a','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','a','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','a','r','preparing','now');")?;
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('a','/','/AGENTS.md','p','m','2026-01-01T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','a','live','2026-01-01T00:00:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','a','r','preparing','2026-01-01T00:00:00Z');")?;
         Ok(())
     }).await.unwrap();
     let control = Control::new(&owner, root.path().into());
@@ -541,17 +541,26 @@ async fn failed_activity_read_stops_the_real_frontend_with_storage_error() {
     })
     .await
     .unwrap();
-    crate::test_watchdog::watchdog("tests/frontend_activity.rs: failed_activity_read_stops_the_real_frontend_with_storage_error", async {
-        loop {
-            if let Ok(UiUpdate::Activity { snapshot, .. }) = incoming.try_recv() {
-                assert!(snapshot.turn_in_progress);
-                break;
+    let baseline = crate::test_watchdog::receive_until(
+        "initial live Activity before storage fault",
+        &incoming,
+        crate::test_watchdog::WATCHDOG,
+        |update| match update {
+            UiUpdate::Activity {
+                thread_id,
+                snapshot,
+                ..
+            } if thread_id == "a" => Some(snapshot),
+            UiUpdate::LoadFailed {
+                thread_id, message, ..
+            } if thread_id == "a" => {
+                panic!("initial Activity selection failed: {message}");
             }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+            _ => None,
+        },
+    )
+    .await;
+    assert!(baseline.turn_in_progress);
     // Temporarily hide one required table in this disposable DB. The real
     // activity worker must return its read failure, not retain a live clock.
     db.call(|db| {
