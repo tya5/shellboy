@@ -62,6 +62,11 @@ impl Command {
             Self::ServiceStart(_) => ("service.start", CommandRoute::Database),
             Self::ServiceStop(_) => ("service.stop", CommandRoute::Runtime),
             Self::ServiceRemove(_) => ("service.remove", CommandRoute::Runtime),
+            Self::ContextAdd(_) => ("context.add", CommandRoute::Database),
+            Self::ContextList(_) => ("context.list", CommandRoute::Database),
+            Self::ContextGet(_) => ("context.get", CommandRoute::Database),
+            Self::ContextSet(_) => ("context.set", CommandRoute::Database),
+            Self::ContextRemove(_) => ("context.remove", CommandRoute::Database),
             Self::ScheduleAdd(_) => ("schedule.add", CommandRoute::Database),
             Self::ScheduleSet(_) => ("schedule.set", CommandRoute::Database),
             Self::ScheduleEnable(_) => ("schedule.enable", CommandRoute::Database),
@@ -147,6 +152,9 @@ impl Command {
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)
+            | Self::ContextAdd(_)
+            | Self::ContextSet(_)
+            | Self::ContextRemove(_)
             | Self::ScheduleAdd(_)
             | Self::ScheduleSet(_)
             | Self::ScheduleEnable(_)
@@ -184,6 +192,8 @@ impl Command {
             | Self::ThreadBranches(_)
             | Self::ArtifactList(_)
             | Self::ArtifactGet(_)
+            | Self::ContextList(_)
+            | Self::ContextGet(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
             | Self::ServiceGet(_)
@@ -250,6 +260,9 @@ impl Command {
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)
+            | Self::ContextAdd(_)
+            | Self::ContextSet(_)
+            | Self::ContextRemove(_)
             | Self::ScheduleAdd(_)
             | Self::ScheduleSet(_)
             | Self::ScheduleEnable(_)
@@ -273,6 +286,8 @@ impl Command {
             | Self::ArtifactGet(_)
             | Self::ArtifactRead(_)
             | Self::ServiceEndpoint(_)
+            | Self::ContextList(_)
+            | Self::ContextGet(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
             | Self::ServiceGet(_)
@@ -350,6 +365,9 @@ impl Command {
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)
+            | Self::ContextAdd(_)
+            | Self::ContextSet(_)
+            | Self::ContextRemove(_)
             | Self::ScheduleAdd(_)
             | Self::ScheduleSet(_)
             | Self::ScheduleEnable(_)
@@ -392,6 +410,8 @@ impl Command {
             | Self::ArtifactGet(_)
             | Self::ArtifactRead(_)
             | Self::ServiceEndpoint(_)
+            | Self::ContextList(_)
+            | Self::ContextGet(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
             | Self::ServiceGet(_)
@@ -452,6 +472,9 @@ impl Command {
             Self::ArtifactAdd(_)
             | Self::ArtifactUpdate(_)
             | Self::ArtifactRemove(_)
+            | Self::ContextAdd(_)
+            | Self::ContextSet(_)
+            | Self::ContextRemove(_)
             | Self::ScheduleAdd(_)
             | Self::ScheduleSet(_)
             | Self::ScheduleEnable(_)
@@ -471,6 +494,8 @@ impl Command {
             | Self::ArtifactGet(_)
             | Self::ArtifactRead(_)
             | Self::ServiceEndpoint(_)
+            | Self::ContextList(_)
+            | Self::ContextGet(_)
             | Self::ScheduleList(_)
             | Self::ServiceList(_)
             | Self::ServiceGet(_)

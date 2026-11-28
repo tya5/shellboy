@@ -628,6 +628,11 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ServiceStart => local!(language, "サービス · 起動", "Service · Start"),
         OperationId::ServiceStop => local!(language, "サービス · 停止", "Service · Stop"),
         OperationId::ServiceRemove => local!(language, "サービス · 削除", "Service · Remove"),
+        OperationId::ContextAdd => local!(language, "コンテキスト · 追加", "Context · Add"),
+        OperationId::ContextList => local!(language, "コンテキスト · 一覧", "Context · List"),
+        OperationId::ContextGet => local!(language, "コンテキスト · 参照", "Context · Get"),
+        OperationId::ContextSet => local!(language, "コンテキスト · 変更", "Context · Set"),
+        OperationId::ContextRemove => local!(language, "コンテキスト · 削除", "Context · Remove"),
         OperationId::ScheduleAdd => local!(language, "予定 · 追加", "Schedule · Add"),
         OperationId::ScheduleSet => local!(language, "予定 · 変更", "Schedule · Set"),
         OperationId::ScheduleEnable => local!(language, "予定 · 有効化", "Schedule · Enable"),
@@ -905,6 +910,31 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "サービスを停止して削除します。",
             "Stop and remove a service."
+        ),
+        OperationId::ContextAdd => local!(
+            language,
+            "Thread のコンテキストコマンドを追加します。",
+            "Add Thread context commands."
+        ),
+        OperationId::ContextList => local!(
+            language,
+            "Thread のコンテキストコマンドを一覧表示します。",
+            "List Thread context commands."
+        ),
+        OperationId::ContextGet => local!(
+            language,
+            "Thread のコンテキストコマンドを参照します。",
+            "Get Thread context commands."
+        ),
+        OperationId::ContextSet => local!(
+            language,
+            "Thread のコンテキストコマンドを変更します。",
+            "Set Thread context commands."
+        ),
+        OperationId::ContextRemove => local!(
+            language,
+            "Thread のコンテキストコマンドを削除します。",
+            "Remove Thread context commands."
         ),
         OperationId::ScheduleAdd => local!(
             language,
@@ -1294,6 +1324,8 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Cron => local!(language, "cron式", "Cron expression"),
         FieldId::At => local!(language, "日時", "Run at"),
         FieldId::Delay => local!(language, "待ち時間", "Delay"),
+        FieldId::ContextName => local!(language, "コンテキスト名", "Context name"),
+        FieldId::ContextTimeout => local!(language, "待機上限 (ms)", "Timeout (ms)"),
         FieldId::ServiceName => local!(language, "サービス名", "Service name"),
         FieldId::ScheduleDescription => local!(language, "説明文", "Description"),
         FieldId::ScheduleNotify => local!(language, "通知", "Notices"),
@@ -1710,6 +1742,16 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "登録からの相対時間です。",
             "Set a delay from registration."
+        ),
+        FieldId::ContextName => local!(
+            language,
+            "Thread 内で一意の名前です。",
+            "A name unique within this Thread."
+        ),
+        FieldId::ContextTimeout => local!(
+            language,
+            "待機上限をミリ秒で指定します。",
+            "Specify the timeout in milliseconds."
         ),
         FieldId::ServiceName => local!(
             language,

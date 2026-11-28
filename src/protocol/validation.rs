@@ -1025,7 +1025,14 @@ impl Command {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
                 ScheduleNotify::saved(&a.notify).map(drop)
             }
-            Self::ScheduleList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::ContextAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::ContextSet(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
+            Self::ContextGet(a) | Self::ContextRemove(a) => {
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")
+            }
+            Self::ContextList(a) | Self::ScheduleList(a) => {
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")
+            }
             Self::ThreadTags(a) => a.validate(),
             Self::ThreadCwds(a) => a.validate(),
             Self::ThreadBranches(a) => a.validate(),

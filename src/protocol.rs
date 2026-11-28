@@ -1049,6 +1049,9 @@ args!(ScheduleSetArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notify: Option<Vec<ScheduleNotify>>
 });
+args!(ContextAddArgs { thread_id: Option<String>, name: String, command: String, timeout_ms: u32 });
+args!(ContextTarget { thread_id: Option<String>, name: String });
+args!(ContextSetArgs { thread_id: Option<String>, name: String, command: Option<String>, timeout_ms: Option<u32> });
 args!(ScheduleAddArgs {
     thread_id: Option<String>,
     cron: Option<String>,
@@ -1881,6 +1884,16 @@ pub enum Command {
     ServiceStop(ServiceTarget),
     #[serde(rename = "service.remove")]
     ServiceRemove(ServiceTarget),
+    #[serde(rename = "context.add")]
+    ContextAdd(ContextAddArgs),
+    #[serde(rename = "context.list")]
+    ContextList(ThreadTarget),
+    #[serde(rename = "context.get")]
+    ContextGet(ContextTarget),
+    #[serde(rename = "context.set")]
+    ContextSet(ContextSetArgs),
+    #[serde(rename = "context.remove")]
+    ContextRemove(ContextTarget),
     #[serde(rename = "schedule.add")]
     ScheduleAdd(ScheduleAddArgs),
     #[serde(rename = "schedule.list")]

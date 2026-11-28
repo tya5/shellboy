@@ -128,6 +128,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: ServiceCommand,
     },
+    /// Manage Thread context commands.
+    Context {
+        #[command(subcommand)]
+        command: ContextCommand,
+    },
     /// Manage scheduled commands owned by a Thread.
     Schedule {
         #[command(subcommand)]
@@ -2406,6 +2411,7 @@ impl Cli {
                 }),
             },
             CliCommand::Service { command } => command.into(),
+            CliCommand::Context { command } => command.into(),
             CliCommand::Schedule { command } => command.into(),
             CliCommand::Shell { command } => match command {
                 ShellCommand::List(a) => C::ShellList(wire::ShellListArgs {
@@ -2688,4 +2694,81 @@ fn artifact_path_from_cli(path: &str, cwd: &Path) -> Result<String, ApiError> {
         }
     }
     Ok(normalized)
+}
+
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum ContextCommand {
+    Add {
+        #[arg(long = "thread")]
+        thread_id: Option<String>,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        command: String,
+        #[arg(long)]
+        timeout_ms: u32,
+    },
+    List {
+        #[arg(long = "thread")]
+        thread_id: Option<String>,
+    },
+    Get {
+        #[arg(long = "thread")]
+        thread_id: Option<String>,
+        #[arg(long)]
+        name: String,
+    },
+    Set {
+        #[arg(long = "thread")]
+        thread_id: Option<String>,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long)]
+        timeout_ms: Option<u32>,
+    },
+    Remove {
+        #[arg(long = "thread")]
+        thread_id: Option<String>,
+        #[arg(long)]
+        name: String,
+    },
+}
+impl From<ContextCommand> for wire::Command {
+    fn from(value: ContextCommand) -> Self {
+        match value {
+            ContextCommand::Add {
+                thread_id,
+                name,
+                command,
+                timeout_ms,
+            } => Self::ContextAdd(wire::ContextAddArgs {
+                thread_id,
+                name,
+                command,
+                timeout_ms,
+            }),
+            ContextCommand::List { thread_id } => {
+                Self::ContextList(wire::ThreadTarget { thread_id })
+            }
+            ContextCommand::Get { thread_id, name } => {
+                Self::ContextGet(wire::ContextTarget { thread_id, name })
+            }
+            ContextCommand::Set {
+                thread_id,
+                name,
+                command,
+                timeout_ms,
+            } => Self::ContextSet(wire::ContextSetArgs {
+                thread_id,
+                name,
+                command,
+                timeout_ms,
+            }),
+            ContextCommand::Remove { thread_id, name } => {
+                Self::ContextRemove(wire::ContextTarget { thread_id, name })
+            }
+        }
+    }
 }
