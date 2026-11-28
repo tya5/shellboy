@@ -9,15 +9,16 @@ use tokio::{
 pub(in crate::control) async fn fixture(
     url: &str,
 ) -> (tempfile::TempDir, DataOwner, Arc<Control>, MessageAccepted) {
-    fixture_with_policy(url).await
+    fixture_with_config(url, "").await
 }
 
-async fn fixture_with_policy(
+pub(super) async fn fixture_with_config(
     url: &str,
+    extra: &str,
 ) -> (tempfile::TempDir, DataOwner, Arc<Control>, MessageAccepted) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("config.toml");
-    std::fs::write(&path,format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url={url:?}\n")).unwrap();
+    std::fs::write(&path,format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url={url:?}\n{extra}")).unwrap();
     let owner = DataOwner::start(
         Some(path),
         Some(root.path().join("data")),
@@ -2223,7 +2224,7 @@ async fn cancelled_reply_notice_reaches_next_admission_without_changing_current_
 #[cfg(unix)]
 #[tokio::test]
 async fn unknown_arguments_are_ignored_with_a_warning_and_other_calls_continue() {
-    let (root, owner, control, accepted) = fixture_with_policy("http://127.0.0.1:1/v1").await;
+    let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
     let snapshot = ready(&control, &accepted).await;
     let slot = DriverSlot {
         id: id(),

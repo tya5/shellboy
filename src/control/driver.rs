@@ -1319,6 +1319,7 @@ async fn run_shell(
             args.clone(),
             env,
             turn_binding.start_gate.clone(),
+            None,
         )
         .await
     {

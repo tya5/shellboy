@@ -1376,7 +1376,9 @@ without changing execution order. A model shell may omit `--thread` for its own
 Thread. Names are unique within each Thread; resources are not inherited.
 
 Context commands run concurrently in the Thread's effective working directory.
-Each has its own timeout; their results fill the tail in registration order. Each new conversation request runs them once; a provider retry
-reuses that request's prepared output. Core sends bounded stdout and typed outcomes
-in the last request item, not as saved history. `thread request --attempt ATTEMPT` shows the saved
+Each has its own timeout, including launch admission. Results appear in registration
+order; each command gets an equal share of the excerpt budget left after reserving
+outcome metadata. If the metadata cannot fit, no commands run and the request carries
+a skipped fact instead. Each new conversation request prepares the tail once; a
+provider retry reuses it. The tail is the last request item, not saved history. `thread request --attempt ATTEMPT` shows the saved
 tail for an admitted attempt and never runs the commands.

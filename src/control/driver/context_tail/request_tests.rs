@@ -100,8 +100,43 @@ async fn no_definitions_preserve_the_canonical_wire_bytes() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (root, owner, control, accepted) =
             fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
+        // Assemble the ordinary request before starting the driver or admitting
+        // an attempt, without calling the context-aware request assembler.
+        let first = ready(&control, &accepted).await;
+        let instructions = turn_instructions(&control, &first).await.unwrap();
+        let snapshot = ready(&control, &accepted).await;
+        let mut attachments = control
+            .attachments
+            .prepare_at_revision(
+                &snapshot.thread,
+                CancellationToken::new(),
+                false,
+                snapshot.selection,
+            )
+            .await
+            .unwrap();
+        let mut input = request::leading_items(&snapshot.agents, instructions.as_deref()).unwrap();
+        crate::control::attachment_input::bind(
+            snapshot.input.as_ref().unwrap(),
+            &mut attachments,
+            &mut input,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let mut baseline =
+            model::response_request(&snapshot.model, input, snapshot.effort.as_deref(), true);
+        model::apply_thread_max_tokens(&mut baseline, snapshot.max_tokens);
+        model::configure_shell_description(
+            &mut baseline,
+            control.store.config.shell.describe_calls,
+        );
+        let baseline = serde_json::to_vec(&baseline).unwrap();
         control.kick_quiet(accepted.thread_id.clone()).await;
         let sent = exchange(&listener, 200, completed(json!([]))).await;
+        assert_eq!(
+            sent, baseline,
+            "opt-out must leave the independently assembled request unchanged"
+        );
         let parsed: Value = serde_json::from_slice(&sent).unwrap();
         assert!(
             parsed["input"]
@@ -242,25 +277,67 @@ async fn closed_turn_gate_cannot_create_a_native_context_process() {
     .unwrap();
 }
 
-#[test]
-fn escaped_output_and_metadata_fit_the_final_serialized_budget() {
-    let mut entry = ResultEntry {
-        name: "fixture".into(),
-        outcome: Outcome::TimedOut,
-        stdout: "\u{0}\"é".repeat(64),
-        truncated: false,
-    };
-    let limit = entry.stdout.len();
-    let encoded = fit_entry(&mut entry, limit).unwrap();
-    assert!(encoded.len() <= limit);
-    let value: Value = serde_json::from_str(&encoded).unwrap();
-    assert_eq!(value["outcome"], "timed_out");
-    assert_eq!(value["truncated"], true);
-    assert!(!value["stdout"].as_str().unwrap().is_empty());
+#[tokio::test]
+async fn a_budget_that_only_fits_the_skip_fact_never_launches() {
+    watchdog("context skip request", async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (root, owner, control, accepted) = crate::control::driver::preparation_tests::fixture_with_config(
+            &format!("http://{}/v1", listener.local_addr().unwrap()), "[limits]\ntool_excerpt_bytes=138\n",
+        ).await;
+        define(&control, &accepted.thread_id, "side-effect", "printf launched > launch-marker", 10_000).await;
+        control.kick_quiet(accepted.thread_id).await;
+        let sent: Value = serde_json::from_slice(&exchange(&listener, 200, completed(json!([]))).await).unwrap();
+        let tail = sent["input"].as_array().unwrap().last().unwrap();
+        let fact: Value = serde_json::from_str(tail["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(fact, json!({"context":"skipped","reason":"budget_too_small"}));
+        assert!(serde_json::to_vec(tail).unwrap().len() <= 138);
+        let saved: String = control.store.database.call(|db| Ok(db.query_row(
+            "SELECT json_extract(input_manifest_json,'$.context_tail.item') FROM model_attempt", [], |row| row.get(0)
+        )?)).await.unwrap();
+        assert_eq!(&serde_json::from_str::<Value>(&saved).unwrap(), tail);
+        assert!(!root.path().join("launch-marker").exists());
+        close(control, owner).await;
+    }).await.unwrap();
 }
 
 #[tokio::test]
-async fn concurrent_context_commands_fill_a_single_budget_in_definition_order() {
+async fn expired_launch_admission_refuses_without_starting() {
+    watchdog("expired context start gate", async {
+        let (root, owner, control, accepted) = fixture("http://127.0.0.1:1").await;
+        let snapshot = ready(&control, &accepted).await;
+        let gate = Arc::new(Mutex::new(false));
+        let guard = gate.lock().await;
+        let cancel = CancellationToken::new();
+        tokio::time::pause();
+        let future = run(
+            &control,
+            &snapshot,
+            &cancel,
+            gate.clone(),
+            super::super::super::context_command::Definition {
+                name: "expired".into(),
+                command: "printf launched > launch-marker".into(),
+                timeout_ms: 10,
+            },
+            128,
+        );
+        tokio::pin!(future);
+        assert!(futures_util::poll!(&mut future).is_pending());
+        tokio::time::advance(Duration::from_millis(11)).await;
+        drop(guard);
+        let result = serde_json::to_value(future.await).unwrap();
+        tokio::time::resume();
+        assert_eq!(result["outcome"], "timed_out");
+        assert_eq!(result["started"], false);
+        assert!(!root.path().join("launch-marker").exists());
+        close(control, owner).await;
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn concurrent_context_commands_fill_a_equal_shares_in_definition_order() {
     watchdog("concurrent context commands and wire budget", async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (root, owner, control, accepted) =
@@ -310,6 +387,8 @@ async fn concurrent_context_commands_fill_a_single_budget_in_definition_order() 
         );
         assert_eq!(result["results"][0]["truncated"], true);
         assert_eq!(result["outcome"], "truncated");
+        assert_eq!(result["results"][1]["stdout"], "second");
+        assert_eq!(result["results"][1]["truncated"], false);
         close(control, owner).await;
     })
     .await

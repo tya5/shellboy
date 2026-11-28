@@ -6,6 +6,9 @@ in `operation_stability`; unlisted operations have no experimental marker.
 
 The owner stores definitions per Thread, in insertion order, in
 `context_command`. The conversation request owns each supervised process until
-cleanup; cancellation prevents attempt admission. The final serialized tail shares the existing tool excerpt budget across definitions;
-it marks truncated output or omitted results. The tail is never a history node.
+cleanup; cancellation prevents attempt admission. Native launch refuses expired
+commands before spawn (`timed_out`, `started: false`). The serialized tail reserves
+its outcome metadata first, then divides the remaining excerpt budget equally
+across definitions. If the metadata cannot fit, a fixed skipped fact replaces
+the results and no commands run. The tail is never a history node.
 Saved attempt inspection reads the admitted item, hash and zero-based position.
