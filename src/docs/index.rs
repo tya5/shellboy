@@ -1,7 +1,6 @@
 use super::{Registration, hash};
 use crate::{
-    config::{PathEnvironment, resolve_cli_data_dir, resolve_config_path},
-    config_edit,
+    config::{PathEnvironment, resolve_cli_data_dir},
     protocol::{ApiError, ErrorCode, PROTOCOL_VERSION},
     rag::{IndexMode, RagCommand, RagOptions, SourceCommand},
 };
@@ -130,29 +129,17 @@ async fn index(
     data: Option<PathBuf>,
     cwd: &Path,
 ) -> Result<Value, ApiError> {
-    if (names.is_empty() != all) || names.len() > 201 {
+    if names.is_empty() != all {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
             "Choose --source NAME or --all",
         ));
     }
     let env = PathEnvironment::current();
-    let path = resolve_config_path(config.as_deref(), cwd, &env)
-        .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
-    let state = config_edit::read_state(&path)?;
-    let rows = config_edit::parse_file(&state.bytes, &path)
-        .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e))?
-        .docs
-        .sources;
-    if names
-        .iter()
-        .any(|name| name != "shellboy" && !rows.iter().any(|row| row.name == *name))
-    {
-        return Err(ApiError::new(
-            ErrorCode::TargetUnavailable,
-            "Unknown docs source",
-        ));
-    }
+    let (_, _, settings) = super::sources::load_sources(config.as_deref(), cwd)?;
+    let rows = settings.sources;
+    super::sources::selected(&rows, &names)
+        .map_err(|_| ApiError::new(ErrorCode::TargetUnavailable, "Unknown docs source"))?;
     let selected = std::iter::once(("shellboy", None))
         .chain(rows.iter().map(|row| (row.name.as_str(), Some(row))))
         .filter(|(name, _)| all || names.iter().any(|selected| selected.as_str() == *name));
