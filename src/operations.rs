@@ -321,6 +321,7 @@ pub(crate) enum FieldId {
     MaxRepairs,
     ExecResult,
     DocParent,
+    DocSources,
     Document,
     Section,
     Source,
@@ -1300,6 +1301,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         label: "追加修復の上限",
         help: "0..5回、CLI既定2回です。各追加依頼はモデル・tool費用を生じ得ます。",
         kind: FieldType::Unsigned,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::DocSources,
+        default_origin: DefaultOrigin::None,
+        label: "ガイドの登録ソース",
+        help: "対象のソース名を指定します（1行に1件）。空欄ならすべて検索します。",
+        kind: FieldType::TextList,
         discovery: Discovery::None,
     },
     FieldSpec {
@@ -2414,7 +2423,12 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::Inspect,
         confirmation: Confirmation::None,
         route: Route::Docs,
-        fields: &[FieldId::DocParent, FieldId::Limit, FieldId::Cursor],
+        fields: &[
+            FieldId::DocParent,
+            FieldId::DocSources,
+            FieldId::Limit,
+            FieldId::Cursor,
+        ],
     },
     OperationSpec {
         id: OperationId::DocsGet,
@@ -2425,6 +2439,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         route: Route::Docs,
         fields: &[
             FieldId::Document,
+            FieldId::DocSources,
             FieldId::Section,
             FieldId::LimitBytes,
             FieldId::Cursor,
@@ -2440,6 +2455,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         fields: &[
             FieldId::Query,
             FieldId::DocParent,
+            FieldId::DocSources,
             FieldId::Limit,
             FieldId::Cursor,
         ],

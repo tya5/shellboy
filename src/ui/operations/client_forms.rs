@@ -18,6 +18,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
     let limit = |value| f("limit", "取得件数", value, Number);
     let cursor = || f("cursor", "続きcursor（空=先頭）", "", Text);
     let docparent = || f("doc_parent", "ガイド階層ID（空=起点）", "", Text);
+    let docsources = || f("doc_sources", "ガイドの登録ソース", "", Multiline);
     let (fields, build): (Vec<Field>, ClientBuilder) = match operation {
         OpKind::ConfigInit => (Vec::new(), |_, _| {
             Ok(ClientOperation::Config(ConfigCommand::Init))
@@ -25,19 +26,23 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
         OpKind::ConfigCheck => (Vec::new(), |_, _| {
             Ok(ClientOperation::Config(ConfigCommand::Check))
         }),
-        OpKind::DocsList => (vec![docparent(), limit("50"), cursor()], |form, _| {
-            let limit = form.number("limit")?;
-            bounded(limit, 1, 200, "件数", "Count", form.language)?;
-            Ok(ClientOperation::Docs(DocsCommand::List {
-                parent: form.optional("doc_parent")?,
-                sources: Vec::new(),
-                limit,
-                cursor: form.optional("cursor")?,
-            }))
-        }),
+        OpKind::DocsList => (
+            vec![docparent(), docsources(), limit("50"), cursor()],
+            |form, _| {
+                let limit = form.number("limit")?;
+                bounded(limit, 1, 200, "件数", "Count", form.language)?;
+                Ok(ClientOperation::Docs(DocsCommand::List {
+                    parent: form.optional("doc_parent")?,
+                    sources: lines(form, "doc_sources")?,
+                    limit,
+                    cursor: form.optional("cursor")?,
+                }))
+            },
+        ),
         OpKind::DocsGet => (
             vec![
                 f("document", "文書ID", "", Text),
+                docsources(),
                 f("section", "見出し（任意）", "", Text),
                 f("limit", "取得byte数", "16384", Number),
                 cursor(),
@@ -53,7 +58,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     form.language,
                 )?;
                 Ok(ClientOperation::Docs(DocsCommand::Get {
-                    sources: Vec::new(),
+                    sources: lines(form, "doc_sources")?,
                     id: required(form, "document")?,
                     section: form.optional("section")?,
                     limit_bytes,
@@ -65,6 +70,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             vec![
                 f("query", "検索文字列", "", Text),
                 docparent(),
+                docsources(),
                 limit("10"),
                 cursor(),
             ],
@@ -74,7 +80,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                 Ok(ClientOperation::Docs(DocsCommand::Search {
                     query: required(form, "query")?,
                     parent: form.optional("doc_parent")?,
-                    sources: Vec::new(),
+                    sources: lines(form, "doc_sources")?,
                     limit,
                     cursor: form.optional("cursor")?,
                 }))
@@ -696,6 +702,23 @@ mod tests {
             .draw(|frame| operations.draw(frame, frame.area()))
             .unwrap();
     }
+    #[test]
+    fn docs_read_forms_forward_every_source_filter() {
+        for kind in [OpKind::DocsList, OpKind::DocsGet, OpKind::DocsSearch] {
+            let mut form = fixture(kind);
+            set(&mut form, "doc_sources", "shellboy\nteam-notes");
+            let sources = match client(&form) {
+                ClientOperation::Docs(
+                    DocsCommand::List { sources, .. }
+                    | DocsCommand::Get { sources, .. }
+                    | DocsCommand::Search { sources, .. },
+                ) => sources,
+                _ => panic!("expected a docs read"),
+            };
+            assert_eq!(sources, ["shellboy", "team-notes"]);
+        }
+    }
+
     #[test]
     fn every_catalogue_identity_has_one_real_form_and_every_client_builder_matches_its_identity() {
         let ids = OpKind::ALL
