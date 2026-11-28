@@ -72,7 +72,7 @@ fn scalar_limit() -> StorageError {
     )
     .into()
 }
-fn latest_query() -> String {
+fn latest_query(source: &str) -> String {
     format!("SELECT
         CASE WHEN octet_length(a.id)<=?2 THEN a.id END, {},
         CASE WHEN octet_length(a.started_at)<=?2 THEN a.started_at END,
@@ -83,10 +83,27 @@ fn latest_query() -> String {
           OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=t.id AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
         COALESCE(octet_length(a.id)>?2 OR octet_length(a.started_at)>?2
           OR COALESCE(octet_length(a.ended_at)>?2,0),0)
-        FROM thread t CROSS JOIN turn u INDEXED BY turns_by_thread ON u.thread_id=t.id
-        CROSS JOIN model_attempt a INDEXED BY attempts_completed_scope ON a.turn_id=u.id AND a.kind='conversation'
-        WHERE t.id=?1 AND a.state='completed' AND json_extract(a.input_manifest_json,'$.adoption.outcome')='adopted' AND a.profile_id=t.profile_id AND a.model_id=t.model_id
+        {source}
         ORDER BY a.rowid DESC LIMIT 1", usage::sql_projection("a.usage_json"))
+}
+
+const EXACT_ATTEMPTS: &str = "FROM thread t CROSS JOIN turn u INDEXED BY turns_by_thread ON u.thread_id=t.id
+        CROSS JOIN model_attempt a INDEXED BY attempts_completed_scope ON a.turn_id=u.id AND a.kind='conversation'
+        WHERE t.id=?1 AND a.state='completed' AND json_extract(a.input_manifest_json,'$.adoption.outcome')='adopted' AND a.profile_id=t.profile_id AND a.model_id=t.model_id";
+
+// Attempt adoption maintains the partial index transactionally. Staleness and
+// missing usage remain facts about the winner; neither picks an older report.
+const PREFLIGHT_ATTEMPTS: &str = "FROM thread t
+    CROSS JOIN model_attempt a INDEXED BY attempts_latest_adopted
+      ON a.thread_id=t.id AND a.profile_id=t.profile_id AND a.model_id=t.model_id
+    WHERE t.id=?1 AND a.kind='conversation' AND a.state='completed'
+      AND json_extract(a.input_manifest_json,'$.adoption.outcome')='adopted'";
+
+pub(crate) fn read_preflight_usage(
+    db: &Connection,
+    thread: &str,
+) -> Result<RawContextUsage, StorageError> {
+    read_context_usage(db, thread, None, PREFLIGHT_ATTEMPTS)
 }
 
 /// None preserves the canonical CLI scalar contract. Display callers pass512.
@@ -95,6 +112,15 @@ pub(crate) fn read_context_usage_tx(
     db: &Connection,
     thread: &str,
     scalar_bytes: Option<usize>,
+) -> Result<RawContextUsage, StorageError> {
+    read_context_usage(db, thread, scalar_bytes, EXACT_ATTEMPTS)
+}
+
+fn read_context_usage(
+    db: &Connection,
+    thread: &str,
+    scalar_bytes: Option<usize>,
+    source: &str,
 ) -> Result<RawContextUsage, StorageError> {
     if let Some(bytes) = scalar_bytes {
         if bytes == 0 || bytes > 512 {
@@ -133,7 +159,7 @@ pub(crate) fn read_context_usage_tx(
     }
     // The exact saved rowid ordering and replacement timestamp semantics are
     // deliberately shared with the CLI. A newer unknown usage never falls back.
-    let sql = latest_query();
+    let sql = latest_query(source);
     let row = db
         .query_row(&sql, params![thread, limit], |row| {
             Ok((
@@ -611,7 +637,7 @@ mod query_cost_tests {
         db.execute_batch("COMMIT").unwrap();
     }
     fn measure(db: &Connection) -> Latest {
-        let mut statement = db.prepare(&latest_query()).unwrap();
+        let mut statement = db.prepare(&latest_query(EXACT_ATTEMPTS)).unwrap();
         let rows = statement
             .query_map(params!["t", 512], |row| {
                 Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(8)?))
@@ -638,13 +664,46 @@ mod query_cost_tests {
         display
     }
     fn plan(db: &Connection) -> Vec<String> {
-        db.prepare(&format!("EXPLAIN QUERY PLAN {}", latest_query()))
-            .unwrap()
-            .query_map(params!["t", 512], |row| row.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
+        db.prepare(&format!(
+            "EXPLAIN QUERY PLAN {}",
+            latest_query(EXACT_ATTEMPTS)
+        ))
+        .unwrap()
+        .query_map(params!["t", 512], |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
     }
+    #[test]
+    fn preflight_selects_latest_matching_adoption_without_falling_back() {
+        let db = fixture();
+        attempts(&db, "u", "own", 0, 4000);
+        attempts(&db, "other-u", "foreign", 0, 4000);
+        attempts(&db, "u", "tail", 0, 4);
+        db.execute_batch(
+            "UPDATE model_attempt SET usage_json=NULL WHERE id='tail-000000';
+            UPDATE model_attempt SET model_id='another' WHERE id='tail-000001';
+            UPDATE model_attempt SET state='failed' WHERE id='tail-000002';
+            UPDATE model_attempt SET input_manifest_json='{}' WHERE id='tail-000003';",
+        )
+        .unwrap();
+        replacements(&db, "t", "new", 0, 1, "2099-01-01T00:00:00Z");
+        let actual = prepare_context_usage(read_preflight_usage(&db, "t").unwrap()).0;
+        assert_eq!(
+            actual,
+            prepare_context_usage(read_context_usage_tx(&db, "t", None).unwrap()).0
+        );
+        assert_eq!(
+            actual["last_successful_attempt"]["attempt_id"],
+            "tail-000000"
+        );
+        assert!(actual["last_successful_attempt"]["input_tokens"].is_null());
+        assert_eq!(
+            actual["last_successful_attempt"]["next_request_pending"],
+            true
+        );
+    }
+
     #[test]
     fn latest_context_query_is_foreign_scoped_and_finds_the_newest_own_attempt() {
         let db = fixture();

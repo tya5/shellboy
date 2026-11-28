@@ -96,6 +96,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (71, "0071_service_name"),
     (72, "0072_attachment_omission"),
     (73, "next_accepted_receipt_turn"),
+    (74, "next_latest_adopted_attempt"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
