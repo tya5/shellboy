@@ -123,7 +123,12 @@ fn project(
         if item.kind == "turn" && item.state == "recovery_wait" {
             let auth = matches!(
                 item.reason.as_deref(),
-                Some("config_invalid" | "config_missing" | "config_missing_credentials")
+                Some(
+                    "config_invalid"
+                        | "config_missing"
+                        | "config_missing_credentials"
+                        | "model_auth"
+                )
             );
             add(
                 item,
