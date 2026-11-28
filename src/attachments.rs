@@ -924,7 +924,6 @@ pub(crate) fn delivery_status(
     db.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2) THEN 'applied' ELSE COALESCE((SELECT status FROM attachment_delivery WHERE thread_id=?1 AND node_id=?2),'accepted') END",params![thread,source],|r|r.get(0))
 }
 pub const ATTACHMENT_LIST_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason,s.selected_order FROM attachment_selection s INDEXED BY attachment_page_order JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path WHERE s.thread_id=?1 AND s.selected_order<=?2 AND (s.selected_order,s.attachment_id)>(?3,?4) ORDER BY s.selected_order,s.attachment_id LIMIT ?5";
-const ATTACHMENT_POINT_SQL: &str = "SELECT a.id,a.absolute_path,a.input_kind,a.ownership,s.state,s.reason,a.source_node_id,m.state,m.deleted_reason,s.selected_order FROM attachment_selection s JOIN attachment_ref a ON a.id=s.attachment_id LEFT JOIN managed_file m ON m.absolute_path=a.absolute_path WHERE s.thread_id=?1 AND s.attachment_id=?2";
 
 /// Filesystem observations run only on a file/display worker, not the DB lane.
 pub(crate) fn observe_page(items: &[AttachmentDetails]) -> Vec<AttachmentDetails> {
@@ -1047,31 +1046,6 @@ pub fn list_tx(
         .optional()
         .map_err(sql_error)?
         .ok_or_else(|| ApiError::new(ErrorCode::ThreadNotFound, "Thread not found"))?;
-    if let Some(id) = &args.attachment_id {
-        if args.cursor.is_some() || id.is_empty() || id.len() > 256 {
-            return Err(ApiError::new(
-                ErrorCode::InvalidArgument,
-                "exact attachment selection requires a valid ID and no cursor",
-            ));
-        }
-        let mut statement = db.prepare(ATTACHMENT_POINT_SQL).map_err(sql_error)?;
-        let mut rows = statement.query(params![thread_id, id]).map_err(sql_error)?;
-        let items = rows
-            .next()
-            .map_err(sql_error)?
-            .map(|row| saved_selection(db, thread_id, row))
-            .transpose()?
-            .into_iter()
-            .collect();
-        return Ok(RecordPage::new(
-            1,
-            ThreadScopeFilter {
-                thread_id: thread_id.into(),
-            },
-            items,
-            None,
-        ));
-    }
     let (watermark, after_order, after_id) = if let Some(token) = &args.cursor {
         let cursor = PageCursor::decode(token, "attachment.list", thread_id, revision, None)?;
         let (order, id) = cursor.last_sort_key.split_once(':').ok_or_else(|| {

@@ -667,7 +667,9 @@ fn ended_target<T: DeserializeOwned>(
             .and_then(|item| serde_json::from_value(item["state"].clone()).ok())
             .ok_or_else(impossible_wait),
         WaitStatus::Timeout => Err(deadline_expired(target)),
-        WaitStatus::Interrupted => Err(interrupted(target, wait.reason.as_deref())),
+        WaitStatus::Interrupted | WaitStatus::Cancelled => {
+            Err(interrupted(target, wait.reason.as_deref()))
+        }
         WaitStatus::RecoveryWait => Err(Failure::new(4, "recovery_wait", recovery)),
         WaitStatus::Unavailable => Err(wait_unavailable()),
     }

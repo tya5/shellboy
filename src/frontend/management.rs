@@ -1216,7 +1216,7 @@ mod attachment_reference_tests {
     fn selected_record_owns_attachment_thread_and_source_without_viewer_fallback() {
         let value = serde_json::json!({"thread_id":"viewer","attachments":[{"thread_id":"foreign","attachment_id":"a","source_node_id":"source"}]});
         assert!(
-            matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Inspect).unwrap(),Command::AttachmentList(a) if a.thread_id.as_deref()==Some("foreign") && a.attachment_id.as_deref()==Some("a"))
+            matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Inspect).unwrap(),Command::AttachmentList(a) if a.thread_id.as_deref()==Some("foreign") && a.attachment_ids.as_deref()==Some(&["a".to_owned()]))
         );
         assert!(
             matches!(follow_target(&value,"/attachments/0/attachment_id",ManagementFollow::Read).unwrap(),Command::HistoryRead(a) if a.node_id=="source")

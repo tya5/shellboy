@@ -549,13 +549,6 @@ impl Store {
             })
             .await??;
             let next_cursor = page.next_cursor;
-            if args.attachment_id.is_some() {
-                // Exact saved-reference navigation does not probe the source file.
-                return MutationResult::value(crate::protocol::Page {
-                    items: page.items,
-                    next_cursor,
-                });
-            }
             let items = self
                 .instructions
                 .file_work(move || Ok(crate::attachments::observe_page(&page.items)))
