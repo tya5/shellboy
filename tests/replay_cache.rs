@@ -46,9 +46,7 @@ impl Fixture {
         self.db
             .call(move |db| {
                 let tx = db.transaction()?;
-                let lease = cache.load(&tx, &thread)?;
-                tx.commit()?;
-                Ok(lease)
+                cache.load_and_commit(tx, &thread)
             })
             .await
     }
@@ -102,6 +100,32 @@ async fn same_epoch_preserves_reasoning_without_encrypted_content_and_never_fabr
     })
     .await
     .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn failed_commit_cannot_publish_a_prefix_for_reused_ordinals() {
+    let f = Fixture::new().await;
+    f.thread("t").await;
+    f.append("t", "first", user("original")).await;
+    let cache = ReplayCache::new(1_000_000);
+    let _first = f.load(&cache, "t").await;
+    let same_cache = cache.clone();
+    f.db.call(move |db| {
+        db.execute_batch("CREATE TEMP TABLE parent(id INTEGER PRIMARY KEY); CREATE TEMP TABLE child(id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED);")?;
+        let tx = db.transaction()?;
+        append_node(&tx, "t", "tail", None, "user", &user("rolled back"), "now")?;
+        tx.execute("INSERT INTO child VALUES(1)", [])?;
+        assert!(matches!(same_cache.load_and_commit(tx, "t"), Err(StorageError::Sqlite(error)) if error.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation)));
+        let tx = db.transaction()?;
+        append_node(&tx, "t", "tail", None, "user", &user("committed"), "now")?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        f.load(&cache, "t").await.materialize(),
+        [user("original"), user("committed")]
+    );
     f.db.shutdown().await.unwrap();
 }
 

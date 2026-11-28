@@ -1049,11 +1049,11 @@ mod tests {
         .unwrap();
         tx.execute("UPDATE node SET notification_event_id='shell-finished' WHERE id='event-shell-finished'", []).unwrap();
         let cache = super::super::replay::ReplayCache::new(1024 * 1024);
-        let wire = cache.load(&tx, "t").unwrap().materialize();
-        assert_eq!(wire, cache.load(&tx, "t").unwrap().materialize());
+        let wire = cache.load_and_commit(tx, "t").unwrap().materialize();
+        assert_eq!(wire, cache.load(&db, "t").unwrap().materialize());
         assert_eq!(
             wire,
-            super::super::replay::load_uncached(&tx, "t", None, 0)
+            super::super::replay::load_uncached(&db, "t", None, 0)
                 .unwrap()
                 .materialize()
         );
@@ -1080,13 +1080,13 @@ mod tests {
             excerpt_chars: 32,
         };
         assert_eq!(
-            crate::history::window(&tx, &args(false))
+            crate::history::window(&db, &args(false))
                 .unwrap()
                 .items
                 .len(),
             6
         );
-        let out = serde_json::to_value(crate::history::window(&tx, &args(true)).unwrap()).unwrap();
+        let out = serde_json::to_value(crate::history::window(&db, &args(true)).unwrap()).unwrap();
         assert_eq!(
             out["items"][0]["provenance"]["message"]["expect_reply"],
             true

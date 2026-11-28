@@ -778,11 +778,7 @@ async fn next_with_clients(
         let instructions_fixed:bool=tx.query_row("SELECT instruction_snapshot_id IS NOT NULL FROM turn WHERE id=?1",[&turn],|r|r.get(0))?;
         if instructions_fixed { snapshot.ensure_context_tx(&tx,&now())?; }
         snapshot.selection=history::selection_revision(&tx, &thread, history::ThreadScope::Any)?;
-        snapshot.input=Some(replay.load(&tx,&thread)?);
-        if let Err(error) = tx.commit() {
-            replay.discard_uncommitted(&thread);
-            return Err(error.into());
-        }
+        snapshot.input=Some(replay.load_and_commit(tx,&thread)?);
         wait_wakes.publish(keys);Ok(Next::Ready(Box::new(snapshot)))
     }).await.map_err(storage_error);
     if result.is_ok() {
