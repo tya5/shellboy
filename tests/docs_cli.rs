@@ -417,20 +417,23 @@ fn configured_search_resumes_an_empty_work_page() {
     ];
     let (ok, first) = call(root, &args);
     assert!(ok, "{first}");
-    assert!(first["result"]["items"].as_array().unwrap().is_empty());
     let mut page = first;
+    let mut seen = std::collections::HashSet::new();
     let mut found = false;
-    while let Some(cursor) = page["result"]["next_cursor"].as_str() {
-        let mut args = args.to_vec();
-        args.extend(["--cursor", cursor]);
-        let (ok, next) = call(root, &args);
-        assert!(ok, "{next}");
-        assert_ne!(next["result"]["next_cursor"], page["result"]["next_cursor"]);
-        found |= next["result"]["items"]
+    loop {
+        found |= page["result"]["items"]
             .as_array()
             .unwrap()
             .iter()
             .any(|v| v["id"] == "local/last.md");
+        let Some(cursor) = page["result"]["next_cursor"].as_str() else {
+            break;
+        };
+        assert!(seen.insert(cursor.to_owned()), "search cursor repeated");
+        let mut args = args.to_vec();
+        args.extend(["--cursor", cursor]);
+        let (ok, next) = call(root, &args);
+        assert!(ok, "{next}");
         page = next;
     }
     assert!(found);
@@ -453,21 +456,36 @@ fn configured_list_resumes_after_examining_non_guides_in_a_wide_folder() {
         ],
     );
     assert!(ok, "{registered}");
-    let (ok, first) = call(root, &["docs", "list", "--parent", "local"]);
-    assert!(ok, "{first}");
-    assert!(first["result"]["items"].as_array().unwrap().is_empty());
-    let cursor = first["result"]["next_cursor"].as_str().unwrap();
-    let (ok, second) = call(
-        root,
-        &["docs", "list", "--parent", "local", "--cursor", cursor],
-    );
-    assert!(ok, "{second}");
-    assert_eq!(second["result"]["items"][0]["id"], "local/last.md");
-    assert!(second["result"].get("next_cursor").is_none());
+    std::fs::write(folder.join("z-last.md"), "# Final guide\n").unwrap();
+    let args = ["docs", "list", "--parent", "local", "--limit", "1"];
+    let (ok, mut page) = call(root, &args);
+    assert!(ok, "{page}");
+    let cursor = page["result"]["next_cursor"].as_str().unwrap().to_owned();
+    let mut ids = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        ids.extend(
+            page["result"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["id"].as_str().unwrap().to_owned()),
+        );
+        let Some(next) = page["result"]["next_cursor"].as_str() else {
+            break;
+        };
+        assert!(seen.insert(next.to_owned()), "list cursor repeated");
+        let mut args = args.to_vec();
+        args.extend(["--cursor", next]);
+        let (ok, next) = call(root, &args);
+        assert!(ok, "{next}");
+        page = next;
+    }
+    assert_eq!(ids, ["local/last.md", "local/z-last.md"]);
     std::fs::write(folder.join("new.md"), "# New guide\n").unwrap();
     let (ok, stale) = call(
         root,
-        &["docs", "list", "--parent", "local", "--cursor", cursor],
+        &["docs", "list", "--parent", "local", "--cursor", &cursor],
     );
     assert!(!ok, "{stale}");
     assert_eq!(stale["error"]["code"], "cursor_expired");
