@@ -1,7 +1,7 @@
 //! Ordered, Thread-owned definitions. Only the conversation driver runs them.
 use crate::protocol::{
     ApiError, ContextAddArgs, ContextListArgs, ContextSetArgs, ContextTarget, ErrorCode,
-    MAX_FRAME_BYTES, PageCursor,
+    MAX_FRAME_BYTES, PageCursor, Response,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
@@ -60,15 +60,27 @@ pub(super) fn definitions(db: &Connection, thread: &str) -> Result<Vec<Definitio
     .collect::<Result<_, _>>()
     .map_err(storage)
 }
+#[derive(Serialize)]
+struct ListPage<'a> {
+    thread_id: &'a str,
+    items: &'a [Value],
+    next_cursor: Option<&'a str>,
+}
+
+fn serialization_error(_: serde_json::Error) -> ApiError {
+    ApiError::new(
+        ErrorCode::InvalidState,
+        "Cannot serialize context definition page",
+    )
+}
+
 pub(super) fn list(
     db: &Connection,
     thread: &str,
     args: &ContextListArgs,
+    operation_id: &str,
 ) -> Result<Value, ApiError> {
     const SCOPE: &str = "context.list";
-    // JSON-escaped definitions can exceed the frame before the row limit.
-    // Leave room for the RPC envelope and continuation token.
-    const ITEM_BYTES: usize = MAX_FRAME_BYTES - 1024 * 1024;
     exists(db, thread)?;
     let after = args
         .cursor
@@ -90,37 +102,80 @@ pub(super) fn list(
     let mut rows = stmt
         .query(params![thread, after, i64::from(args.limit) + 1])
         .map_err(storage)?;
+    let frame_overhead = |cursor: Option<&str>| {
+        serde_json::to_vec(&Response::success(
+            operation_id,
+            ListPage {
+                thread_id: thread,
+                items: &[],
+                next_cursor: cursor,
+            },
+        ))
+        .map(|bytes| bytes.len())
+        .map_err(serialization_error)
+    };
     let mut items = Vec::new();
-    let mut bytes = 0;
-    let mut last = after;
+    let mut item_bytes = 0;
     let mut next_cursor = None;
-    while let Some(row) = rows.next().map_err(storage)? {
+    let mut row = rows.next().map_err(storage)?;
+    if row.is_none() && frame_overhead(None)? > MAX_FRAME_BYTES {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "Context list response exceeds the frame limit",
+        ));
+    }
+    while let Some(current) = row {
+        let id: i64 = current.get(0).map_err(storage)?;
         let item = json!({
-            "name": row.get::<_, String>(1).map_err(storage)?,
-            "command": row.get::<_, String>(2).map_err(storage)?,
-            "timeout_ms": row.get::<_, u32>(3).map_err(storage)?,
+            "name": current.get::<_, String>(1).map_err(storage)?,
+            "command": current.get::<_, String>(2).map_err(storage)?,
+            "timeout_ms": current.get::<_, u32>(3).map_err(storage)?,
         });
-        let size = item.to_string().len() + 1;
-        if items.len() == args.limit as usize || bytes + size > ITEM_BYTES {
-            next_cursor = Some(
+        // Look ahead so a terminal page pays for null, not a continuation.
+        row = rows.next().map_err(storage)?;
+        let cursor = row
+            .is_some()
+            .then(|| {
                 PageCursor {
                     version: 1,
                     scope: SCOPE.into(),
                     filter: thread.into(),
-                    last_sort_key: last.to_string(),
+                    last_sort_key: id.to_string(),
                     watermark: 0,
                     revision: 0,
                     encoding: None,
                 }
-                .encode()?,
-            );
+                .encode()
+            })
+            .transpose()?;
+        // The envelope already includes the brackets; charge each item and
+        // just the commas between items, without reserializing the prefix.
+        let size = serde_json::to_vec(&item)
+            .map_err(serialization_error)?
+            .len()
+            + usize::from(!items.is_empty());
+        if frame_overhead(cursor.as_deref())? + item_bytes + size > MAX_FRAME_BYTES {
+            if items.is_empty() {
+                return Err(ApiError::new(
+                    ErrorCode::InputLimit,
+                    "Context definition cannot fit in a response frame",
+                ));
+            }
             break;
         }
-        bytes += size;
-        last = row.get(0).map_err(storage)?;
         items.push(item);
+        item_bytes += size;
+        next_cursor = cursor;
+        if items.len() == args.limit as usize {
+            break;
+        }
     }
-    Ok(json!({"thread_id":thread,"items":items,"next_cursor":next_cursor}))
+    serde_json::to_value(ListPage {
+        thread_id: thread,
+        items: &items,
+        next_cursor: next_cursor.as_deref(),
+    })
+    .map_err(serialization_error)
 }
 fn lookup(db: &Connection, thread: &str, name: &str) -> Result<Value, ApiError> {
     db.query_row("SELECT command,timeout_ms FROM context_command WHERE thread_id=?1 AND name=?2",params![thread,name], |r| Ok(json!({"thread_id":thread,"name":name,"command":r.get::<_,String>(0)?,"timeout_ms":r.get::<_,u32>(1)?}))).optional().map_err(storage)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"Context command not found in this Thread"))

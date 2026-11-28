@@ -499,3 +499,59 @@ async fn context_list_resumes_in_definition_order_only_in_the_same_thread() {
     assert_eq!(oversized.error.unwrap().code, ErrorCode::InvalidArgument);
     close(control, owner).await;
 }
+
+#[tokio::test]
+async fn context_list_paginates_escaped_commands_at_the_response_frame_limit() {
+    use crate::protocol::{Command, ContextListArgs, MAX_LIST_LIMIT, Request, encode_frame};
+
+    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let thread = accepted.thread_id;
+    // Valid stored command bytes whose escaped form takes six bytes per control character.
+    // The complete set fits the count limit, but cannot fit in one encoded frame.
+    let command = format!("echo {}", "\x01".repeat(8192 - "echo ".len()));
+    let expected: Vec<_> = (0..MAX_LIST_LIMIT)
+        .rev()
+        .map(|i| format!("escaped-{i:03}"))
+        .collect();
+    for name in &expected {
+        define(&control, &thread, name, &command, 250).await;
+    }
+    let mut offset = 0;
+    let mut cursor = None;
+    loop {
+        let response = control
+            .request(Request::new(
+                format!(
+                    "{}:escaped-context-{offset}",
+                    owner.operation_epoch.current()
+                ),
+                Command::ContextList(ContextListArgs {
+                    thread_id: Some(thread.clone()),
+                    limit: MAX_LIST_LIMIT,
+                    cursor,
+                }),
+            ))
+            .await;
+        assert!(response.ok, "{:?}", response.error);
+        encode_frame(&response).expect("each public page must fit in a transport frame");
+        let result = response.result.unwrap();
+        let items = result["items"].as_array().expect("context definitions");
+        assert!(!items.is_empty(), "a page must make progress");
+        for item in items {
+            assert_eq!(item["name"].as_str(), Some(expected[offset].as_str()));
+            assert!(item["command"].as_str() == Some(command.as_str()));
+            offset += 1;
+        }
+        if offset == expected.len() {
+            assert!(result.get("next_cursor").is_some_and(Value::is_null));
+            break;
+        }
+        cursor = Some(
+            result["next_cursor"]
+                .as_str()
+                .expect("the byte-limited page must continue at the next definition")
+                .to_owned(),
+        );
+    }
+    close(control, owner).await;
+}
