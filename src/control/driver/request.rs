@@ -117,6 +117,7 @@ pub(super) async fn prepare_attempt(
     let linker = snapshot.clone();
     let link_attachments = prepared.clone();
     let digest = client.extra_digest();
+    let tail = tail.cloned();
     let qualify = Box::new(
         move |tx: &rusqlite::Transaction<'_>, row: &mut model::request_path::AttemptAdmission| {
             let admitted = current.admit_attempt_tx(
@@ -128,7 +129,7 @@ pub(super) async fn prepare_attempt(
                 digest,
             )?;
             if admitted && let Some(item) = tail {
-                row.manifest["context_tail"] = item.clone();
+                row.manifest["context_tail"] = item;
             }
             Ok(admitted)
         },
