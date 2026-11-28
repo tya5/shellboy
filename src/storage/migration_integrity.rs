@@ -311,7 +311,11 @@ mod tests {
         db.execute_batch("PRAGMA foreign_keys=OFF;
             INSERT INTO run(id,thread_id,state,created_at) VALUES('unrelated','missing','completed','now');
             PRAGMA foreign_keys=ON;").unwrap();
-        let scope = scope_56_to_62();
+        let scope = Check::Tables(
+            ["schedule", "shell_execution", "history_reasoning_keep"]
+                .map(str::to_owned)
+                .into(),
+        );
         assert_eq!(
             Check::for_migrations(
                 super::super::migrate::MIGRATIONS,
