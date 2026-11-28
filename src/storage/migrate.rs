@@ -380,7 +380,8 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 72,
         sql: include_str!("../../migrations/next_attachment_omission.sql"),
-        foreign_keys: None,
+        // The new column and backfill do not change any foreign-key edges.
+        foreign_keys: Some(Impact::IndexOnly),
     },
 ];
 
