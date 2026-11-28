@@ -1,6 +1,7 @@
 use super::{Registration, hash};
 use crate::{
     config::{PathEnvironment, resolve_cli_data_dir},
+    config_edit,
     protocol::{ApiError, ErrorCode, PROTOCOL_VERSION},
     rag::{IndexMode, RagCommand, RagOptions, SourceCommand},
 };
