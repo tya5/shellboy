@@ -23,6 +23,7 @@ impl ClientOperation {
             Self::Docs(DocsCommand::List { .. }) => Id::DocsList,
             Self::Docs(DocsCommand::Get { .. }) => Id::DocsGet,
             Self::Docs(DocsCommand::Search { .. }) => Id::DocsSearch,
+            Self::Docs(DocsCommand::Source { .. }) => unreachable!("source management is CLI-only"),
             Self::Config(ConfigCommand::Init) => Id::ConfigInit,
             Self::Config(ConfigCommand::Check) => Id::ConfigCheck,
             Self::Exec(_) => Id::Exec,

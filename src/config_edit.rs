@@ -110,6 +110,7 @@ fn fields(config: &Config) -> BTreeMap<String, Leaf> {
         logging,
         compaction,
         recovery,
+        docs,
     } = config;
     let mut out = Fields::default();
     out.plain(&["data_dir"], data_dir);
@@ -134,6 +135,7 @@ fn fields(config: &Config) -> BTreeMap<String, Leaf> {
     out.section("logging", logging);
     out.section("compaction", compaction);
     out.section("recovery", recovery);
+    out.plain(&["docs", "sources"], &docs.sources);
     out.0
 }
 fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
@@ -991,6 +993,47 @@ fn set_field(
         .then(|| file_header(doc))
         .flatten();
     let parent = parent_table(doc, path, true, index)?.expect("created");
+    if path == ["docs", "sources"] {
+        let rows: Vec<crate::docs::Registration> = serde_json::from_value(value.clone())
+            .map_err(|_| change_error(index, "docs.sources must contain name/path pairs"))?;
+        let old = parent.get(last).and_then(Item::as_array_of_tables);
+        let mut tables = toml_edit::ArrayOfTables::new();
+        for row in rows {
+            let mut table = old
+                .and_then(|tables| {
+                    tables.iter().find(|table| {
+                        table.get("name").and_then(Item::as_str) == Some(row.name.as_str())
+                    })
+                })
+                .cloned()
+                .unwrap_or_default();
+            let path = row
+                .path
+                .to_str()
+                .ok_or_else(|| change_error(index, "Docs path must be UTF-8"))?;
+            if table.get("name").is_none() {
+                table.insert("name", toml_edit::value(row.name));
+            }
+            if table.get("path").and_then(Item::as_str) != Some(path) {
+                let mut item = toml_edit::value(path);
+                if let Some(decor) = table
+                    .get("path")
+                    .and_then(Item::as_value)
+                    .map(|v| v.decor().clone())
+                {
+                    *item.as_value_mut().expect("string value").decor_mut() = decor;
+                }
+                table.insert("path", item);
+            }
+            tables.push(table);
+        }
+        if tables.is_empty() {
+            parent.remove(last);
+        } else {
+            parent.insert(last, Item::ArrayOfTables(tables));
+        }
+        return Ok(());
+    }
     match parent.get_mut(last) {
         Some(Item::Value(existing)) => {
             let mut new = toml_value(value, index)?;

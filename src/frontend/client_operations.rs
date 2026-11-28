@@ -22,19 +22,6 @@ fn envelope(result: Result<Value, ApiError>) -> Value {
         }
     }
 }
-fn docs(command: crate::docs::DocsCommand) -> Value {
-    match crate::docs::execute(command) {
-        Ok(value) => {
-            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":true,"result":value})
-        }
-        Err(message) => {
-            let (code, detail) = message
-                .split_once(": ")
-                .unwrap_or(("invalid_argument", &message));
-            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"error":{"code":code,"message":detail}})
-        }
-    }
-}
 fn exec_response(outcome: crate::exec_client::Outcome) -> Value {
     json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":outcome.code==0,"exit_code":outcome.code,"result":outcome.result,"diagnostics":outcome.diagnostics})
 }
@@ -72,7 +59,10 @@ pub(super) async fn execute(
     context: ClientContext,
 ) -> Result<Value, ApiError> {
     if let ClientOperation::Docs(command) = operation {
-        return super::presentation_work(move || docs(command)).await;
+        return super::presentation_work(move || {
+            crate::docs::configured_response(command, context.config_path.as_deref(), &context.cwd)
+        })
+        .await;
     }
     if !context.cwd.is_absolute() {
         return Err(ApiError::new(
