@@ -8494,51 +8494,59 @@ mod layout_cache_tests {
     }
     #[test]
     fn popup_layout_pressure_evicts_older_popup_before_history() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
-        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 12)).unwrap();
-        let source = || {
-            (0..1000)
-                .map(|_| Line::from("popup source".to_owned()))
-                .collect()
+        let mut config = Config::default();
+        config.cache.layout_bytes = 96 * 1024;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 26)).unwrap();
+        let mut paint = |ui: &mut UiState, text: &str| {
+            terminal.draw(|frame| draw(frame, ui)).unwrap();
+            let rendered: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(rendered.contains(text), "missing {text:?}");
         };
-        let mut popup = |ui: &mut UiState, expected_rebuild: bool| {
-            let mut rebuilt = false;
-            terminal
-                .draw(|frame| {
-                    ui.help_cache.render(frame, frame.area(), 1, 0, || {
-                        rebuilt = true;
-                        source()
-                    });
-                })
-                .unwrap();
-            assert_eq!(rebuilt, expected_rebuild);
-            assert!(
-                terminal
-                    .backend()
-                    .buffer()
-                    .content
-                    .iter()
-                    .map(|cell| cell.symbol())
-                    .collect::<String>()
-                    .contains("popup source")
-            );
+        let open = |ui: &mut UiState| {
+            ui.management.open_text(ManagementView {
+                title: "Management fixture".into(),
+                text: "retained management text\n".repeat(20),
+                scroll: 0,
+            });
         };
-        ui.config.cache.layout_bytes = 256 * 1024;
-        ui.set_reader_budgets();
-        popup(&mut ui, true);
-        popup(&mut ui, false);
         ui.select_thread("a".into());
         history(&mut ui, "a", "history a");
-        let a = ui.history_layout(60, 12);
+        open(&mut ui);
+        paint(&mut ui, "retained management text");
+        let popup_builds = ui.management.reader_mut().unwrap().layout_builds();
+        ui.management.close();
+        paint(&mut ui, "history a");
+        open(&mut ui);
+        paint(&mut ui, "retained management text");
+        assert_eq!(
+            ui.management.reader_mut().unwrap().layout_builds(),
+            popup_builds
+        );
+        ui.management.close();
+        paint(&mut ui, "history a");
+        let history_builds = ui.layout_cache.builds;
         ui.select_thread("b".into());
-        history(&mut ui, "b", "history b");
-        ui.config.cache.layout_bytes = 64 * 1024;
-        let frame = Instant::now();
-        let _b = ui.history_layout(60, 12);
-        ui.trim_layouts(frame);
+        history(
+            &mut ui,
+            "b",
+            &"history b pressure and visible text ".repeat(190),
+        );
+        paint(&mut ui, "history b pressure");
+        assert!(ui.layout_cache.builds > history_builds);
+        let history_builds = ui.layout_cache.builds;
         ui.select_thread("a".into());
-        assert!(Arc::ptr_eq(&a, &ui.history_layout(60, 12)));
-        popup(&mut ui, true);
+        paint(&mut ui, "history a");
+        assert_eq!(ui.layout_cache.builds, history_builds);
+        open(&mut ui);
+        paint(&mut ui, "retained management text");
+        assert!(ui.management.reader_mut().unwrap().layout_builds() > popup_builds);
     }
 
     #[test]

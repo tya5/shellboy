@@ -218,7 +218,6 @@ mod tests {
     }
 
     struct Observed {
-        settled_submissions: Vec<String>,
         receipts: Result<Vec<(String, ReceiptStatus)>, ApiError>,
         progress: Option<Result<activity::Projection, ApiError>>,
         view: Option<(
@@ -277,19 +276,14 @@ mod tests {
         let mut observed = Observed {
             receipts: Ok(Vec::new()),
             progress: None,
-            settled_submissions: Vec::new(),
             view: None,
         };
         while let Ok(result) = results.try_recv() {
             if let BackgroundResult::Refreshed {
-                receipts,
-                progress,
-                settled_submissions,
-                ..
+                receipts, progress, ..
             } = result
             {
                 observed.receipts = receipts;
-                observed.settled_submissions = settled_submissions;
                 observed.progress = progress;
             }
         }
@@ -318,57 +312,6 @@ mod tests {
         tokio::spawn(control.clone().serve(dispatcher));
         control.start().await.unwrap();
         (owner, control, server)
-    }
-
-    #[tokio::test]
-    async fn saved_refresh_retires_only_the_observed_submission() {
-        let root = tempfile::tempdir().unwrap();
-        let (owner, control, server) = served(&root).await;
-        owner.db.call(|db| {
-            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','2026-01-01T00:00:00Z')", [])?;
-            Ok(())
-        }).await.unwrap();
-        let submission = |id: &str, revision| KnownSubmission {
-            operation_id: id.into(),
-            draft_id: "fixture-draft".into(),
-            revision,
-        };
-        let mut known = HashMap::from([(
-            "t".to_owned(),
-            vec![submission("first-op", 1), submission("second-op", 2)],
-        )]);
-        for (operation, message, revision) in [
-            ("first-op", "first-message", 1),
-            ("second-op", "second-message", 2),
-        ] {
-            let instance = control.store.instance_id.clone();
-            owner.db.call(move |db| {
-                db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes)VALUES(?1,?2,'null','hash','completed',?3,?4,0)",
-                    rusqlite::params![operation, instance, chrono::Utc::now().to_rfc3339(), json!({"result":{"message_id":message,"thread_id":"t"}}).to_string()])?;
-                Ok(())
-            }).await.unwrap();
-            let observed = refresh_with_submissions(
-                &control,
-                &owner.loaded.data_dir,
-                vec![],
-                None,
-                known.get("t").cloned().unwrap_or_default(),
-            )
-            .await;
-            let (_, _, history, _) = observed.view.expect("saved current view");
-            let UiUpdate::History { pending, .. } = *history else {
-                panic!("expected selected page");
-            };
-            let [submitted] = pending.submitted.as_slice() else {
-                panic!("only the newly settled submission belongs in this refresh");
-            };
-            assert_eq!(submitted.operation_id, operation);
-            assert_eq!(submitted.message_id, message);
-            assert_eq!(submitted.revision, revision);
-            native_page::retire_submissions(&mut known, &observed.settled_submissions);
-        }
-        server.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test]

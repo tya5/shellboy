@@ -64,7 +64,7 @@ pub struct ManagementPopup {
     language: UiLanguage,
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     reader_cache: std::cell::RefCell<popup::ReaderCache>,
-    reader_revision: u64,
+    reader_source: [u8; 32],
     frame: Option<ManagementFrame>,
     pub(super) owner: Option<ManagementContext>,
     pub(super) mode: ManagementMode,
@@ -83,7 +83,7 @@ impl Default for ManagementPopup {
             language: UiLanguage::Ja,
             paint: Default::default(),
             reader_cache: Default::default(),
-            reader_revision: 0,
+            reader_source: [0; 32],
             frame: None,
             owner: None,
             mode: ManagementMode::General,
@@ -182,10 +182,13 @@ impl ManagementPopup {
         }
         false
     }
-    fn reset_reader(&mut self) {
+    fn reset_reader_bounds(&mut self) {
         self.paint.set(None);
-        self.reader_cache.get_mut().clear();
-        self.reader_revision = self.reader_revision.wrapping_add(1);
+        self.reader_cache.get_mut().reset_bounds();
+    }
+    fn reader_source(text: &str) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(text.as_bytes()).into()
     }
     pub fn is_some(&self) -> bool {
         self.frame.is_some()
@@ -206,7 +209,8 @@ impl ManagementPopup {
         self.frame.as_mut()?.structured.as_mut()
     }
     pub(super) fn open_text(&mut self, view: ManagementView) {
-        self.reset_reader();
+        self.reset_reader_bounds();
+        self.reader_source = Self::reader_source(&view.text);
         self.frame = Some(ManagementFrame {
             view,
             structured: None,
@@ -220,7 +224,7 @@ impl ManagementPopup {
         omitted: bool,
         work_status: bool,
     ) {
-        self.reset_reader();
+        self.reset_reader_bounds();
         if work_status {
             self.mode = ManagementMode::Status;
         } else if self.mode == ManagementMode::Status {
@@ -278,7 +282,7 @@ impl ManagementPopup {
         if work_status {
             self.mode = ManagementMode::Status;
         }
-        self.reset_reader();
+        self.reset_reader_bounds();
     }
     pub(super) fn accept_detail(
         &mut self,
@@ -295,8 +299,8 @@ impl ManagementPopup {
             && state.pending_pointer.as_deref() == Some(&pointer)
         {
             self.paint.set(None);
-            self.reader_cache.get_mut().clear();
-            self.reader_revision = self.reader_revision.wrapping_add(1);
+            self.reader_cache.get_mut().reset_bounds();
+            self.reader_source = Self::reader_source(&text);
             state.detail = Some(ManagementPage {
                 source_request_id: request_id,
                 stale: None,
@@ -331,11 +335,9 @@ impl ManagementPopup {
         });
     }
     pub(super) fn close(&mut self) {
-        self.reset_reader();
+        self.reset_reader_bounds();
         self.epoch = self.epoch.wrapping_add(1);
         self.frame = None;
-        self.paint.set(None);
-        self.reader_cache.get_mut().clear();
         self.owner = None;
         self.mode = ManagementMode::General;
         self.scope = None;
@@ -1002,10 +1004,10 @@ impl ManagementPopup {
                         &self.detail_footer(),
                         &self.paint,
                     );
-                    reader_scroll = Some(self.reader_cache.borrow_mut().render(
+                    reader_scroll = Some(self.reader_cache.borrow_mut().render_text(
                         frame,
                         body,
-                        self.reader_revision,
+                        self.reader_source,
                         view.scroll,
                         || {
                             crate::presentation::sanitize_plain(&page.text, 0)
@@ -1154,10 +1156,10 @@ impl ManagementPopup {
                 let body =
                     popup::panel_recorded(frame, area, &view.title, &context, &hints, &self.paint);
                 let body = self.draw_preview(frame, body);
-                reader_scroll = Some(self.reader_cache.borrow_mut().render(
+                reader_scroll = Some(self.reader_cache.borrow_mut().render_text(
                     frame,
                     body,
-                    self.reader_revision,
+                    self.reader_source,
                     view.scroll,
                     || {
                         crate::presentation::sanitize_plain(&view.text, 0)

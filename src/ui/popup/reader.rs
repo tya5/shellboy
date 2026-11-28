@@ -1,6 +1,16 @@
-//! A single popup's finite, styled Ratatui-wrap result. Raw sources stay with owners.
+//! A single popup's budgeted Ratatui raster. Raw sources stay with owners.
 use super::*;
+use ratatui::{
+    buffer::{Buffer, Cell},
+    widgets::Widget,
+};
 use std::mem::size_of;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Revision(u64),
+    Text([u8; 32]),
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::ui) struct ReaderBounds {
@@ -11,10 +21,12 @@ pub(in crate::ui) struct ReaderBounds {
 pub(in crate::ui) struct ReaderCache {
     budget: usize,
     pub touched: Option<std::time::Instant>,
-    key: Option<(u64, u16, Option<u8>)>,
-    rows: Vec<Line<'static>>,
+    key: Option<(Source, u16, Option<u8>)>,
+    raster: Option<Buffer>,
     bytes: usize,
     bounds: ReaderBounds,
+    #[cfg(test)]
+    layout_builds: usize,
 }
 impl Default for ReaderCache {
     fn default() -> Self {
@@ -22,9 +34,11 @@ impl Default for ReaderCache {
             budget: crate::config::Cache::default().layout_bytes as usize,
             touched: None,
             key: None,
-            rows: Vec::new(),
+            raster: None,
             bytes: 0,
             bounds: ReaderBounds::default(),
+            #[cfg(test)]
+            layout_builds: 0,
         }
     }
 }
@@ -38,12 +52,19 @@ impl ReaderCache {
     pub fn clear(&mut self) {
         self.key = None;
         self.touched = None;
-        self.rows = Vec::new();
+        self.raster = None;
         self.bytes = 0;
+        self.bounds = ReaderBounds::default();
+    }
+    pub fn reset_bounds(&mut self) {
         self.bounds = ReaderBounds::default();
     }
     pub fn retained_bytes(&self) -> usize {
         self.bytes
+    }
+    #[cfg(test)]
+    pub fn layout_builds(&self) -> usize {
+        self.layout_builds
     }
     pub fn bounds(&self) -> ReaderBounds {
         self.bounds
@@ -57,23 +78,44 @@ impl ReaderCache {
         requested: u16,
         prepare: impl FnOnce() -> Vec<Line<'static>>,
     ) -> u16 {
-        let width = reader_width(area).max(1);
+        self.render_source(frame, area, Source::Revision(revision), requested, prepare)
+    }
+
+    pub fn render_text(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        digest: [u8; 32],
+        requested: u16,
+        prepare: impl FnOnce() -> Vec<Line<'static>>,
+    ) -> u16 {
+        self.render_source(frame, area, Source::Text(digest), requested, prepare)
+    }
+
+    fn render_source(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        source: Source,
+        requested: u16,
+        prepare: impl FnOnce() -> Vec<Line<'static>>,
+    ) -> u16 {
         if area.width == 0 || area.height == 0 {
             self.bounds = ReaderBounds::default();
             return 0;
         }
-        if self.touch(revision, width) {
+        if self.touch(source, reader_width(area)) {
             return self.paint(frame, area, requested);
         }
-        self.paint_source(frame, area, revision, requested, &prepare())
+        self.paint_source(frame, area, source, requested, &prepare())
     }
 
-    fn touch(&mut self, revision: u64, width: u16) -> bool {
+    fn touch(&mut self, revision: Source, width: u16) -> bool {
         self.touched = Some(std::time::Instant::now());
         self.key == Some(Self::key(revision, width))
     }
 
-    fn key(revision: u64, width: u16) -> (u64, u16, Option<u8>) {
+    fn key(revision: Source, width: u16) -> (Source, u16, Option<u8>) {
         (
             revision,
             width,
@@ -82,55 +124,56 @@ impl ReaderCache {
     }
 
     pub fn row_count(&self, revision: u64, width: u16, lines: &[Line<'static>]) -> usize {
-        if self.key == Some(Self::key(revision, width)) {
-            return self.rows.len();
+        if self.key == Some(Self::key(Source::Revision(revision), width))
+            && let Some(raster) = &self.raster
+        {
+            return usize::from(raster.area.height);
         }
-        prepared(lines).line_count(width)
+        prepared(lines).line_count(width.max(1))
     }
 
     fn paint_source(
         &mut self,
         frame: &mut Frame<'_>,
         area: Rect,
-        revision: u64,
+        source: Source,
         requested: u16,
         lines: &[Line<'static>],
     ) -> u16 {
-        let width = reader_width(area).max(1);
+        let width = reader_width(area);
         self.key = None;
-        self.rows = Vec::new();
+        self.raster = None;
         self.bytes = 0;
-        // Admission only controls retained rows. On a miss that cannot fit,
-        // Ratatui wraps the original and paints only the requested viewport.
-        let paragraph = prepared(lines);
-        let total = paragraph.line_count(width);
-        let row_floor = 2 * size_of::<Line<'static>>();
-        if self.budget != 0 && total <= u16::MAX.into() && total <= self.budget / row_floor {
-            let mut bytes = 0usize;
-            let mut rows = Vec::new();
-            for line in lines {
-                let wrapped = super::super::presentation::hanging_wrap(vec![line.clone()], width);
-                bytes = bytes.saturating_add(wrapped.iter().map(row_bytes).sum::<usize>());
-                if bytes > self.budget {
-                    break;
-                }
-                rows.extend(wrapped);
-            }
+        #[cfg(test)]
+        {
+            self.layout_builds += 1;
+        }
+        let paragraph = prepared(lines).style(normal_style());
+        let total = paragraph.line_count(width.max(1));
+        let cell_bytes = usize::from(width)
+            .saturating_mul(total)
+            .saturating_mul(size_of::<Cell>());
+        // Cache the actual Ratatui output, not lines reconstructed from cells.
+        // Declining retention uses the same paragraph in a viewport-sized buffer.
+        if width != 0 && total != 0 && total <= usize::from(u16::MAX) && cell_bytes <= self.budget {
+            let extent = Rect::new(0, 0, width, total as u16);
+            let mut raster = Buffer::empty(extent);
+            (&paragraph).render(extent, &mut raster);
+            let bytes = raster.content.iter().fold(cell_bytes, |total, cell| {
+                total.saturating_add(cell.symbol().len().saturating_mul(2))
+            });
             if bytes <= self.budget {
-                self.key = Some(Self::key(revision, width));
-                self.rows = rows;
+                self.key = Some(Self::key(source, width));
+                self.raster = Some(raster);
                 self.bytes = bytes;
                 return self.paint(frame, area, requested);
             }
         }
         let scroll = self.set_bounds(total, area.height, requested);
-        frame.render_widget(
-            paragraph.scroll((scroll, 0)).style(normal_style()),
-            Rect {
-                width: reader_width(area),
-                ..area
-            },
-        );
+        let extent = Rect::new(0, 0, width, area.height);
+        let mut viewport = Buffer::empty(extent);
+        paragraph.scroll((scroll, 0)).render(extent, &mut viewport);
+        copy_viewport(frame, area, &viewport, 0);
         if total > usize::from(area.height) {
             scrollbar(frame, area, total, usize::from(scroll));
         }
@@ -149,22 +192,35 @@ impl ReaderCache {
         requested.min(maximum)
     }
     fn paint(&mut self, frame: &mut Frame<'_>, area: Rect, requested: u16) -> u16 {
-        let total = self.rows.len();
+        let total = usize::from(self.raster.as_ref().expect("hit has a raster").area.height);
         let scroll = self.set_bounds(total, area.height, requested);
-        let start = usize::from(scroll);
-        let end = (start + usize::from(area.height)).min(total);
-        let display = super::super::presentation::borrowed(&self.rows[start..end]);
-        frame.render_widget(
-            Paragraph::new(display).style(normal_style()),
-            Rect {
-                width: reader_width(area),
-                ..area
-            },
-        );
+        let raster = self.raster.as_ref().expect("hit has a raster");
+        copy_viewport(frame, area, raster, scroll);
         if total > usize::from(area.height) {
-            scrollbar(frame, area, total, start);
+            scrollbar(frame, area, total, usize::from(scroll));
         }
         scroll
+    }
+}
+fn copy_viewport(frame: &mut Frame<'_>, area: Rect, raster: &Buffer, start: u16) {
+    let extent = area.intersection(*frame.buffer_mut().area());
+    let mut blank = Cell::EMPTY;
+    blank.set_style(normal_style());
+    for y in extent.top()..extent.bottom() {
+        let row = start.saturating_add(y - area.top());
+        for x in extent.left()
+            ..area
+                .left()
+                .saturating_add(raster.area.width)
+                .min(extent.right())
+        {
+            let cell = if row < raster.area.height {
+                &raster[(x - area.left(), row)]
+            } else {
+                &blank
+            };
+            frame.buffer_mut()[(x, y)].clone_from(cell);
+        }
     }
 }
 fn prepared<'a>(lines: &'a [Line<'static>]) -> Paragraph<'a> {
@@ -174,20 +230,6 @@ fn prepared<'a>(lines: &'a [Line<'static>]) -> Paragraph<'a> {
     }
     Paragraph::new(display).wrap(Wrap { trim: false })
 }
-fn row_bytes(row: &Line<'_>) -> usize {
-    // Vec growth is geometric; charge twice the inline row size as well as the
-    // actual span allocation and owned text capacity, rather than text alone.
-    2 * size_of::<Line<'static>>()
-        + row.spans.capacity() * size_of::<Span<'static>>()
-        + row
-            .spans
-            .iter()
-            .map(|span| match &span.content {
-                std::borrow::Cow::Owned(text) => text.capacity(),
-                std::borrow::Cow::Borrowed(_) => 0,
-            })
-            .sum::<usize>()
-}
 pub(in crate::ui) fn reader_cached(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -196,15 +238,15 @@ pub(in crate::ui) fn reader_cached(
     cache: &mut ReaderCache,
     revision: u64,
 ) -> u16 {
-    let width = reader_width(area).max(1);
     if area.width == 0 || area.height == 0 {
         cache.bounds = ReaderBounds::default();
         return 0;
     }
-    if cache.touch(revision, width) {
+    let source = Source::Revision(revision);
+    if cache.touch(source, reader_width(area)) {
         cache.paint(frame, area, requested)
     } else {
-        cache.paint_source(frame, area, revision, requested, lines)
+        cache.paint_source(frame, area, source, requested, lines)
     }
 }
 
@@ -238,6 +280,7 @@ mod tests {
                     Style::default().fg(theme::ATTENTION),
                 ),
                 Span::raw(" next"),
+                Span::styled("  ", Style::default().bg(theme::ATTENTION)),
             ]),
             Line::from(""),
             Line::from("last row"),
@@ -246,6 +289,13 @@ mod tests {
             for requested in [0, 1, 3, u16::MAX] {
                 let mut cache = ReaderCache::default();
                 let (cached, position) = paint(&mut cache, &lines, width, 4, 1, requested);
+                let (hit, hit_position) = paint(&mut cache, &lines, width, 4, 1, requested);
+                assert_eq!((hit, hit_position), (cached.clone(), position));
+                let mut uncached = ReaderCache::default();
+                uncached.set_budget(0);
+                let (miss, miss_position) = paint(&mut uncached, &lines, width, 4, 1, requested);
+                assert_eq!((miss, miss_position), (cached.clone(), position));
+                assert_eq!(uncached.bounds(), cache.bounds());
                 let mut terminal = Terminal::new(TestBackend::new(width, 4)).unwrap();
                 let mut expected = 0;
                 terminal

@@ -250,6 +250,19 @@ pub(crate) async fn fixture_with_language(
     std::sync::Arc<crate::control::Control>,
     crate::ipc::LocalServer,
 ) {
+    let (root, owner, control) = unbound_fixture(language).await;
+    let (rpc, receive) = tokio::sync::mpsc::channel(16);
+    let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+    tokio::spawn(control.clone().serve(receive));
+    (root, owner, control, server)
+}
+async fn unbound_fixture(
+    language: &str,
+) -> (
+    tempfile::TempDir,
+    crate::app::DataOwner,
+    std::sync::Arc<crate::control::Control>,
+) {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[ui]\nlanguage=\"{language}\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n")).unwrap();
@@ -273,11 +286,153 @@ pub(crate) async fn fixture_with_language(
         db.execute("UPDATE turn SET state='running' WHERE id='independent-run'", [])?;
         Ok(())
     }).await.unwrap();
-    let (rpc, receive) = tokio::sync::mpsc::channel(16);
-    let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
-    tokio::spawn(control.clone().serve(receive));
-    (root, owner, control, server)
+    (root, owner, control)
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn normal_refresh_retires_only_the_observed_submission() {
+    use crate::{
+        ipc::{Invocation, LocalServer},
+        protocol::Command,
+        ui::UiUpdate,
+    };
+    use tokio::sync::{mpsc, oneshot};
+
+    crate::test_watchdog::watchdog("native bridge settles each admitted send once", async {
+        let (root, owner, control) = unbound_fixture("en").await;
+        let (rpc, mut receive) = mpsc::channel::<Invocation>(16);
+        let server = LocalServer::bind(&owner, rpc).await.unwrap();
+        let (real, dispatch) = mpsc::channel(16);
+        let dispatcher = tokio::spawn(control.clone().serve(dispatch));
+        let (held, mut submits) = mpsc::channel(2);
+        let relay = tokio::spawn({
+            let real = real.clone();
+            async move {
+                while let Some(invocation) = receive.recv().await {
+                    if matches!(invocation.request.command, Command::DraftSubmit(_)) {
+                        assert!(held.send(invocation).await.is_ok());
+                    } else if real.send(invocation).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        let (sender, receiver) = actions::channel(8);
+        let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+        let bridge = tokio::spawn(crate::frontend::run(
+            control,
+            receiver,
+            updates,
+            root.path().into(),
+            owner,
+            server,
+        ));
+        sender
+            .try_send(UiAction::SelectThread {
+                thread_id: "thread".into(),
+                generation: 7,
+                view_revision: 0,
+                known_view: None,
+            })
+            .unwrap();
+
+        let await_refresh = |operation: Option<String>| {
+            let incoming = &incoming;
+            async move {
+                loop {
+                    match incoming.try_recv() {
+                        Ok(UiUpdate::CurrentView {
+                            generation: 7,
+                            history,
+                            ..
+                        }) => {
+                            let UiUpdate::History {
+                                pending,
+                                selection_revision,
+                                ..
+                            } = *history
+                            else {
+                                panic!("expected selected History");
+                            };
+                            if operation.as_ref().is_none_or(|id| {
+                                pending
+                                    .submitted
+                                    .iter()
+                                    .any(|item| &item.operation_id == id)
+                            }) {
+                                return (selection_revision, pending.submitted);
+                            }
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            panic!("bridge exited before projecting {operation:?}");
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        };
+        let (mut selection_revision, initial) = await_refresh(None).await;
+        assert!(initial.is_empty());
+        let mut replies = Vec::new();
+        for (draft, revision) in [("first-draft", 1), ("second-draft", 2)] {
+            sender
+                .try_send(UiAction::Send {
+                    generation: 7,
+                    selection_revision,
+                    snapshot: None,
+                    draft_id: draft.into(),
+                    revision,
+                    thread_id: Some("thread".into()),
+                    cwd: root.path().into(),
+                    text: draft.into(),
+                    attachments: vec![],
+                    connection: None,
+                    model: None,
+                    effort: None,
+                })
+                .unwrap();
+            let mut invocation = submits.recv().await.unwrap();
+            let operation = invocation.request.operation_id.clone();
+            let (capture, response) = oneshot::channel();
+            let client_reply = std::mem::replace(&mut invocation.reply, capture);
+            assert!(real.send(invocation).await.is_ok());
+            let saved = response.await.unwrap();
+            assert!(saved.ok, "{:?}", saved.error);
+            let message = saved.result.as_ref().unwrap()["message_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            // Delay only the client acknowledgement. The real mutation and Changed
+            // event drive refresh; a post-send projection cannot satisfy this test.
+            replies.push((client_reply, saved));
+            let (revision_after, submitted) = await_refresh(Some(operation.clone())).await;
+            assert_eq!(
+                submitted,
+                vec![crate::ui::SubmittedMessage {
+                    operation_id: operation,
+                    source_draft_id: draft.into(),
+                    revision,
+                    message_id: message,
+                }]
+            );
+            selection_revision = revision_after;
+        }
+        for (reply, saved) in replies {
+            assert!(reply.send(saved).is_ok());
+        }
+        sender.try_send(UiAction::Quit).unwrap();
+        finish_bridge(bridge, &incoming).await;
+        drop(real);
+        relay.await.unwrap();
+        dispatcher.await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn recurring_management_mutations_use_selected_listener_without_fallback() {
     use crate::protocol::{Command, ScheduleAddArgs, ServiceAddArgs};
