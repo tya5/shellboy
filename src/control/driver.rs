@@ -1326,11 +1326,8 @@ async fn run_shell(
     {
         Ok(value) => value,
         Err(error) => {
-            if error
-                .details
-                .as_ref()
-                .is_some_and(|details| details["reason"] == "turn_interrupted_before_spawn")
-            {
+            use crate::shell::SpawnRefusal;
+            if matches!(error, SpawnRefusal::Interrupted) {
                 control.origins.lock().await.remove(&origin.token);
                 let execution_copy = execution.clone();
                 let wait_wakes = control.waits.keyed.clone();
@@ -1350,14 +1347,11 @@ async fn run_shell(
                     true,
                 ));
             }
-            if error
-                .details
-                .as_ref()
-                .is_some_and(|details| details["reason"] == "shutdown_before_spawn")
-            {
+            if matches!(error, SpawnRefusal::Shutdown) {
                 control.origins.lock().await.remove(&origin.token);
                 return cancel_unstarted_shell(&control, &execution).await;
             }
+            let error = ApiError::from(error);
             let execution = execution.clone();
             let saved_error = error.clone();
             control.origins.lock().await.remove(&origin.token);

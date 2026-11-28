@@ -311,23 +311,49 @@ pub struct ShellSupervisor {
     #[cfg(all(unix, test))]
     descriptor_fixture: Arc<StdMutex<Option<descriptor_budget::DescriptorUse>>>,
 }
-fn start_deadline_error() -> ApiError {
-    ApiError::new(
-        ErrorCode::InvalidState,
-        "Shell deadline expired before process creation",
-    )
-    .details(serde_json::json!({"reason":"deadline_before_spawn"}))
+#[derive(Debug)]
+pub(crate) enum SpawnRefusal {
+    Deadline,
+    Interrupted,
+    Shutdown,
+    Other(ApiError),
+}
+impl From<ApiError> for SpawnRefusal {
+    fn from(error: ApiError) -> Self {
+        Self::Other(error)
+    }
+}
+impl From<SpawnRefusal> for ApiError {
+    fn from(error: SpawnRefusal) -> Self {
+        let (message, reason) = match error {
+            SpawnRefusal::Deadline => (
+                "Shell deadline expired before process creation",
+                "deadline_before_spawn",
+            ),
+            SpawnRefusal::Interrupted => (
+                "Turn interrupted before shell spawn",
+                "turn_interrupted_before_spawn",
+            ),
+            SpawnRefusal::Shutdown => (
+                "Owner shutdown cancelled this shell before process creation",
+                "shutdown_before_spawn",
+            ),
+            SpawnRefusal::Other(error) => return error,
+        };
+        ApiError::new(ErrorCode::InvalidState, message)
+            .details(serde_json::json!({"reason":reason}))
+    }
 }
 
 #[cfg(any(unix, windows))]
 async fn lock_start_gate(
     gate: &tokio::sync::Mutex<bool>,
     deadline: Option<tokio::time::Instant>,
-) -> Result<tokio::sync::MutexGuard<'_, bool>, ApiError> {
+) -> Result<tokio::sync::MutexGuard<'_, bool>, SpawnRefusal> {
     match deadline {
         Some(deadline) => tokio::time::timeout_at(deadline, gate.lock())
             .await
-            .map_err(|_| start_deadline_error()),
+            .map_err(|_| SpawnRefusal::Deadline),
         None => Ok(gate.lock().await),
     }
 }
@@ -393,22 +419,18 @@ impl ShellSupervisor {
     pub(crate) fn starts_closed(&self) -> bool {
         self.starts_closed.load(std::sync::atomic::Ordering::SeqCst)
     }
-    fn admit_start(&self, deadline: Option<tokio::time::Instant>) -> Result<(), ApiError> {
+    fn admit_start(&self, deadline: Option<tokio::time::Instant>) -> Result<(), SpawnRefusal> {
         // This load is the start-admission linearization point relative to the
         // Quit store. No await may occur between admission and native creation.
         if self.starts_closed() {
-            Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "Owner shutdown cancelled this shell before process creation",
-            )
-            .details(serde_json::json!({"reason":"shutdown_before_spawn"})))
+            Err(SpawnRefusal::Shutdown)
         } else {
             // Unix only: the caller holds the native ownership lock, so starts
             // are serialized against each other and this live count (#450).
             #[cfg(unix)]
             descriptor_budget::admit(self.observe_descriptors())?;
             if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
-                return Err(start_deadline_error());
+                return Err(SpawnRefusal::Deadline);
             }
             Ok(())
         }
@@ -432,6 +454,7 @@ impl ShellSupervisor {
             SpawnOwner::Run(self.config.limits.shell_raw_bytes),
         )
         .await
+        .map_err(Into::into)
     }
     pub(crate) async fn spawn_thread_owned(
         &self,
@@ -442,6 +465,7 @@ impl ShellSupervisor {
     ) -> Result<ShellExecution, ApiError> {
         self.spawn_inner(execution_id, cwd, args, env, None, None, SpawnOwner::Thread)
             .await
+            .map_err(Into::into)
     }
     pub(crate) async fn spawn_guarded(
         &self,
@@ -451,7 +475,7 @@ impl ShellSupervisor {
         env: BTreeMap<String, String>,
         gate: Arc<tokio::sync::Mutex<bool>>,
         deadline: Option<tokio::time::Instant>,
-    ) -> Result<ShellExecution, ApiError> {
+    ) -> Result<ShellExecution, SpawnRefusal> {
         self.spawn_inner(
             execution_id,
             cwd,
@@ -473,7 +497,7 @@ impl ShellSupervisor {
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
         deadline: Option<tokio::time::Instant>,
         owner: SpawnOwner,
-    ) -> Result<ShellExecution, ApiError> {
+    ) -> Result<ShellExecution, SpawnRefusal> {
         args.validate().map_err(|error| {
             error.hint("Check the shell tool arguments with shellboy docs get --id shellboy/shell.")
         })?;
@@ -481,7 +505,8 @@ impl ShellSupervisor {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
                 "execution_id must not be empty",
-            ));
+            )
+            .into());
         }
         // Resolve both encodings before any process or external side effect.
         resolve_encoding(&args.input_encoding)
@@ -530,7 +555,8 @@ impl ShellSupervisor {
             Err(ApiError::new(
                 ErrorCode::InvalidState,
                 "shell executions are unsupported on this platform",
-            ))
+            )
+            .into())
         }
         #[cfg(unix)]
         {
@@ -562,7 +588,7 @@ impl ShellSupervisor {
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
         deadline: Option<tokio::time::Instant>,
         owner: SpawnOwner,
-    ) -> Result<ShellExecution, ApiError> {
+    ) -> Result<ShellExecution, SpawnRefusal> {
         use std::process::Stdio;
         let mut command = launch_command(&self.config, &args.command);
         let path = env
@@ -588,11 +614,7 @@ impl ShellSupervisor {
             None => None,
         };
         if turn_gate.as_ref().is_some_and(|guard| **guard) {
-            return Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "Turn interrupted before shell spawn",
-            )
-            .details(serde_json::json!({"reason":"turn_interrupted_before_spawn"})));
+            return Err(SpawnRefusal::Interrupted);
         }
         let lifeline = unix_lifeline::Prepared::configure(&mut command).map_err(|error| {
             unix_launch_error("Shell lifeline setup failed", error, LAUNCH_INSPECT)
