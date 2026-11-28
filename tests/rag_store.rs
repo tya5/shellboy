@@ -1391,11 +1391,18 @@ async fn history_cursor_pages_dense_matches_and_checks_scope_query_and_watermark
     }).await.unwrap();
     let mut page = history_page(root, "history", "復旧識別", 3, None).await;
     let first_cursor = page["result"]["next_cursor"].as_str().unwrap().to_owned();
+    call(root, RagCommand::Init).await;
+    std::fs::write(root.join("cursor-notes.md"), "unrelated note").unwrap();
+    add(root, "notes", "cursor-notes.md").await;
+    assert_eq!(
+        index(root, Some("notes"), IndexMode::Keyword).await["ok"],
+        true
+    );
     let mixed = call(
         root,
         RagCommand::Search {
             query: "復旧識別".into(),
-            scope: vec!["docs".into(), "history".into()],
+            scope: vec!["source:notes".into(), "history".into()],
             mode: SearchMode::Keyword,
             limit: 3,
             cursor: None,
@@ -1627,315 +1634,51 @@ async fn legacy_chunks_migrate_without_duplicate_text_and_embed_utf8_ranges() {
 }
 
 #[tokio::test]
-async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides() {
-    use fs2::FileExt;
+async fn retiring_builtin_docs_preserves_embeddings_for_identical_registered_material() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let (requests, fail_at, server) = proxy(root).await;
-    let missing = search(root, "docs", "recovery", SearchMode::Semantic).await;
-    assert_eq!(
-        missing["result"]["scope_errors"][0]["code"], "db_not_found",
-        "{missing}"
-    );
-    let default = call(
-        root,
-        RagCommand::Search {
-            query: "recovery".into(),
-            scope: vec![],
-            mode: SearchMode::Hybrid,
-            limit: 10,
-            cursor: None,
-        },
+    let (requests, _, server) = proxy(root).await;
+    let initialized = call(root, RagCommand::Init).await;
+    assert_eq!(initialized["ok"], true, "{initialized}");
+    std::fs::write(
+        root.join("guide.md"),
+        "# Recovery\n\nUse the saved result.\n",
     )
-    .await;
-    assert_eq!(default["ok"], true);
-    assert_eq!(default["result"]["degraded"], true);
-    assert_eq!(default["result"]["scopes"], json!(["docs"]));
-    assert!(!default["result"]["items"].as_array().unwrap().is_empty());
-    assert!(!root.join("knowledge.db").exists());
-    assert!(!root.join("data").exists());
-    assert_eq!(requests.load(Ordering::SeqCst), 0);
-    init(root).await;
-    let preview = call(
-        root,
-        RagCommand::Index {
-            source: Some("docs".into()),
-            dry_run: true,
-            mode: IndexMode::Semantic,
-        },
-    )
-    .await;
-    assert_eq!(preview["ok"], true, "{preview}");
-    assert!(preview["result"]["documents"].as_u64().unwrap() > 0);
-    assert!(preview["result"]["text_bytes"].as_u64().unwrap() > 0);
-    assert!(preview["result"]["segments"].as_u64().unwrap() > 0);
-    assert_eq!(preview["result"]["embedding_may_charge"], true);
-    assert_eq!(index(root, None, IndexMode::Semantic).await["ok"], true);
+    .unwrap();
+    add(root, "legacy", "guide.md").await;
     assert_eq!(
-        requests.load(Ordering::SeqCst),
-        0,
-        "default index does not opt into bundled guides"
-    );
-    assert_eq!(
-        call(root, RagCommand::Status).await["result"]["documents"],
-        0
-    );
-    let not_ready = search(root, "docs", "recovery", SearchMode::Semantic).await;
-    assert_eq!(
-        not_ready["result"]["scope_errors"][0]["code"],
-        "index_incompatible"
-    );
-    assert_eq!(requests.load(Ordering::SeqCst), 0);
-    fail_at.store(2, Ordering::SeqCst);
-    let failed = index(root, Some("docs"), IndexMode::Semantic).await;
-    assert_eq!(failed["ok"], false, "{failed}");
-    assert_eq!(requests.load(Ordering::SeqCst), 2);
-    let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
-    let cached: i64 = db
-        .query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
-        .unwrap();
-    assert!(cached > 0, "successful batches survive the later failure");
-    assert_eq!(
-        search(root, "docs", "recovery", SearchMode::Semantic).await["ok"],
-        false
-    );
-    assert_eq!(
-        requests.load(Ordering::SeqCst),
-        2,
-        "search cannot retry document embeddings"
-    );
-    fail_at.store(usize::MAX, Ordering::SeqCst);
-    assert_eq!(
-        index(root, Some("docs"), IndexMode::Semantic).await["ok"],
+        index(root, Some("legacy"), IndexMode::Semantic).await["ok"],
         true
     );
-    let indexed = requests.load(Ordering::SeqCst);
+    let before = requests.load(Ordering::SeqCst);
+    assert!(before > 0);
+    {
+        let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
+        db.execute_batch("PRAGMA foreign_keys=OFF;
+           UPDATE documents SET source_id='@docs' WHERE source_id=(SELECT id FROM sources WHERE name='legacy');
+           UPDATE source_chunk_hashes SET source_id='@docs' WHERE source_id=(SELECT id FROM sources WHERE name='legacy');
+           UPDATE sources SET id='@docs',name='@docs',kind='builtin',root='' WHERE name='legacy';
+           PRAGMA user_version=5;").unwrap();
+    }
+    let migrated = call(root, RagCommand::Init).await;
+    assert_eq!(migrated["result"]["migrated_from_schema"], 5, "{migrated}");
+    let old = search(root, "docs", "recovery", SearchMode::Semantic).await;
+    assert_eq!(old["result"]["scope_errors"][0]["code"], "scope_invalid");
     assert_eq!(
-        index(root, Some("@docs"), IndexMode::Semantic).await["ok"],
-        true
+        index(root, Some("@docs"), IndexMode::Semantic).await["error"]["code"],
+        "source_not_found"
     );
+    add(root, "shellboy", "guide.md").await;
+    let indexed = index(root, Some("shellboy"), IndexMode::Semantic).await;
+    assert_eq!(indexed["ok"], true, "{indexed}");
     assert_eq!(
         requests.load(Ordering::SeqCst),
-        indexed,
-        "current successful cache is reused"
+        before,
+        "migration retains paid chunk embeddings"
     );
-    let generation: String = db
-        .query_row("SELECT value FROM meta WHERE key='generation'", [], |r| {
-            r.get(0)
-        })
-        .unwrap();
-    let lock = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(root.join("knowledge.rag-lock"))
-        .unwrap();
-    lock.try_lock_exclusive().unwrap();
-    let found = search(root, "docs", "recovery", SearchMode::Semantic).await;
+    let found = search(root, "source:shellboy", "recovery", SearchMode::Semantic).await;
     assert_eq!(found["ok"], true, "{found}");
     assert!(!found["result"]["items"].as_array().unwrap().is_empty());
-    assert_eq!(
-        requests.load(Ordering::SeqCst),
-        indexed + 1,
-        "only explicit query embedding is billed"
-    );
-    assert_eq!(
-        db.query_row("SELECT value FROM meta WHERE key='generation'", [], |r| {
-            r.get::<_, String>(0)
-        })
-        .unwrap(),
-        generation
-    );
-    let reference = found["result"]["items"][0]["reference"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_eq!(
-        call(
-            root,
-            RagCommand::Get {
-                reference,
-                limit_bytes: 100,
-                cursor: None
-            }
-        )
-        .await["ok"],
-        true
-    );
-    drop(lock);
-    let original_config = std::fs::read_to_string(root.join("config.toml")).unwrap();
-    std::fs::write(
-        root.join("config.toml"),
-        original_config.replace("synthetic", "other-profile-model"),
-    )
-    .unwrap();
-    let profile_missing = search(root, "docs", "recovery", SearchMode::Semantic).await;
-    assert_eq!(
-        profile_missing["result"]["scope_errors"][0]["code"],
-        "index_incompatible"
-    );
-    assert!(
-        profile_missing["result"]["scope_errors"][0]["message"]
-            .as_str()
-            .unwrap()
-            .contains("--source docs")
-    );
-    assert_eq!(requests.load(Ordering::SeqCst), indexed + 1);
-    std::fs::write(root.join("config.toml"), original_config).unwrap();
-    // Simulate a binary whose catalogue added a guide: no current published revision.
-    db.execute("UPDATE documents SET active_revision=NULL WHERE source_id='@docs' AND key=(SELECT key FROM documents WHERE source_id='@docs' LIMIT 1)",[]).unwrap();
-    let unavailable = search(root, "docs", "recovery", SearchMode::Hybrid).await;
-    assert_eq!(unavailable["ok"], true);
-    assert_eq!(unavailable["result"]["degraded"], true);
-    assert!(
-        unavailable["result"]["scope_errors"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        !unavailable["result"]["warnings"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        !unavailable["result"]["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(requests.load(Ordering::SeqCst), indexed + 1);
-    assert_eq!(
-        index(root, Some("docs"), IndexMode::Semantic).await["ok"],
-        true
-    );
-    assert_eq!(
-        requests.load(Ordering::SeqCst),
-        indexed + 1,
-        "restoring publication reuses saved embeddings"
-    );
-    // An obsolete guide is removed only by explicit synchronization, never by search.
-    db.execute(
-        "INSERT INTO documents(id,source_id,key)VALUES('obsolete','@docs','removed-guide')",
-        [],
-    )
-    .unwrap();
-    db.execute("INSERT INTO revisions SELECT 'obsolete-revision','obsolete',source_hash,body_hash,extractor,kind,title,provenance,created_at FROM revisions LIMIT 1",[]).unwrap();
-    db.execute(
-        "UPDATE documents SET active_revision='obsolete-revision' WHERE id='obsolete'",
-        [],
-    )
-    .unwrap();
-    assert_eq!(
-        search(root, "docs", "recovery", SearchMode::Semantic).await["ok"],
-        false
-    );
-    assert_eq!(requests.load(Ordering::SeqCst), indexed + 1);
-    assert!(
-        db.query_row(
-            "SELECT active_revision IS NOT NULL FROM documents WHERE id='obsolete'",
-            [],
-            |r| r.get::<_, bool>(0)
-        )
-        .unwrap()
-    );
-    assert_eq!(
-        index(root, Some("docs"), IndexMode::Semantic).await["result"]["removed"],
-        1
-    );
-    assert_eq!(requests.load(Ordering::SeqCst), indexed + 1);
-    assert!(
-        !db.query_row(
-            "SELECT active_revision IS NOT NULL FROM documents WHERE id='obsolete'",
-            [],
-            |r| r.get::<_, bool>(0)
-        )
-        .unwrap()
-    );
-    assert_eq!(
-        search(root, "", "recovery", SearchMode::Keyword).await["ok"],
-        false
-    );
-    let defaults = call(
-        root,
-        RagCommand::Search {
-            query: "recovery".into(),
-            scope: vec![],
-            mode: SearchMode::Semantic,
-            limit: 10,
-            cursor: None,
-        },
-    )
-    .await;
-    assert_eq!(defaults["ok"], true, "{defaults}");
-    assert_eq!(
-        defaults["result"]["scopes"],
-        json!(["docs"]),
-        "unpopulated automatic derived container is not registered material"
-    );
-    assert_eq!(requests.load(Ordering::SeqCst), indexed + 2);
-    std::fs::write(root.join("notes.md"), "復旧の一次資料").unwrap();
-    add(root, "notes", "notes.md").await;
-    assert_eq!(
-        index(root, Some("notes"), IndexMode::Semantic).await["ok"],
-        true
-    );
-    let before_default = requests.load(Ordering::SeqCst);
-    let with_materials = call(
-        root,
-        RagCommand::Search {
-            query: "recovery".into(),
-            scope: vec![],
-            mode: SearchMode::Semantic,
-            limit: 10,
-            cursor: None,
-        },
-    )
-    .await;
-    assert_eq!(with_materials["ok"], true, "{with_materials}");
-    assert_eq!(
-        with_materials["result"]["scopes"].as_array().unwrap().len(),
-        2
-    );
-    assert_eq!(
-        requests.load(Ordering::SeqCst),
-        before_default + 1,
-        "docs and registered materials share the query embedding"
-    );
-    let ingested = call(
-        root,
-        RagCommand::Ingest {
-            id: "explanation".into(),
-            source_file: root.join("notes.md"),
-            kind: shellboy::rag::IngestKind::LlmExplanation,
-            text_file: Some(root.join("notes.md")),
-            text_stdin: false,
-            metadata_file: None,
-        },
-    )
-    .await;
-    assert_eq!(ingested["ok"], true, "{ingested}");
-    let before_keyword = requests.load(Ordering::SeqCst);
-    let all = call(
-        root,
-        RagCommand::Search {
-            query: "recovery".into(),
-            scope: vec![],
-            mode: SearchMode::Keyword,
-            limit: 10,
-            cursor: None,
-        },
-    )
-    .await;
-    assert_eq!(all["ok"], true, "{all}");
-    assert!(
-        all["result"]["scopes"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("source:@derived")),
-        "populated derived material remains in default search"
-    );
-    assert_eq!(requests.load(Ordering::SeqCst), before_keyword);
     server.abort();
 }
 
