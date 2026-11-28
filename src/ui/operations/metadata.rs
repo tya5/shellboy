@@ -125,6 +125,7 @@ impl Form {
             "max_repairs" => FieldId::MaxRepairs,
             "exec_result" => FieldId::ExecResult,
             "doc_parent" => FieldId::DocParent,
+            "doc_sources" => FieldId::DocSources,
             "document" => FieldId::Document,
             "section" => FieldId::Section,
             "source" => FieldId::Source,
@@ -1367,6 +1368,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         ),
         FieldId::ExecResult => local!(language, "結果モード", "Result mode"),
         FieldId::MaxRepairs => local!(language, "追加修復の上限", "Maximum additional repairs"),
+        FieldId::DocSources => local!(language, "ガイドの登録ソース", "Registered guide sources"),
         FieldId::DocParent => local!(language, "ガイドの親ID", "Guide parent ID"),
         FieldId::Document => local!(language, "文書ID", "Document ID"),
         FieldId::Section => local!(language, "ガイド見出し", "Guide section"),
@@ -1950,6 +1952,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "0..5回、CLI既定2回です。各追加依頼はモデル・tool費用を生じ得ます。",
             "0..5; CLI default is 2. Each additional request can incur model and tool costs."
         ),
+        FieldId::DocSources => local!(
+            language,
+            "対象のソース名を指定します（1行に1件）。空欄ならすべて検索します。",
+            "Enter one source name per line. Leave blank to search all sources."
+        ),
         FieldId::DocParent => local!(
             language,
             "階層を絞る同梱ガイドカテゴリIDです。",
@@ -2022,8 +2029,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::RagScopes => local!(
             language,
-            "docs/history/history:THREAD/source:IDまたは名前を繰り返します。",
-            "Repeat docs/history/history:THREAD/source:ID or names."
+            "history/history:THREAD/source:IDまたは名前を繰り返します。",
+            "Repeat history/history:THREAD/source:ID or names."
         ),
         FieldId::Reference => local!(
             language,
