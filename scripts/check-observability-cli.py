@@ -104,7 +104,7 @@ def main():
             INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,result_json) VALUES('obs-receipt','synthetic-recorded-operation','{"kind":"human"}','obs-root','obs-user','obs-owner','obs-turn','applied','2026-10-25T00:00:01Z','2026-10-25T00:00:03Z','{"message_id":"obs-user","thread_id":"obs-root","delivery_status":"accepted","assignment":"new_run","run_id":"obs-owner","turn_id":"obs-turn"}');
             INSERT INTO replacement VALUES('obs-replacement','obs-summary','synthetic-key','1','1','completed','2026-10-25T00:00:04Z');
             INSERT INTO replacement_source VALUES('obs-replacement',0,'obs-user',0,'synthetic-recorded-witness');
-            INSERT INTO thread_replacement VALUES('visual-summary','obs-replacement');
+            INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('visual-summary','obs-replacement');
         """)
         db.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at) VALUES('obs-attachment','obs-user',?,'file','external','2026-10-25T00:00:01Z')", (str(external),))
     binary = str(args.binary.resolve())
