@@ -244,3 +244,60 @@ fn escaped_output_and_metadata_fit_the_final_serialized_budget() {
     assert_eq!(value["truncated"], true);
     assert!(!value["stdout"].as_str().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn concurrent_context_commands_fill_a_single_budget_in_definition_order() {
+    watchdog("concurrent context commands and wire budget", async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (root, owner, control, accepted) =
+            fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(root.path().join("handoff"))
+                .status()
+                .unwrap()
+                .success()
+        );
+        define(
+            &control,
+            &accepted.thread_id,
+            "first",
+            "IFS= read -r signal < handoff && printf first && head -c 16384 /dev/zero",
+            30_000,
+        )
+        .await;
+        define(
+            &control,
+            &accepted.thread_id,
+            "second",
+            "printf 'ready\\n' > handoff && printf second",
+            30_000,
+        )
+        .await;
+        control.kick_quiet(accepted.thread_id).await;
+        let sent: Value =
+            serde_json::from_slice(&exchange(&listener, 200, completed(json!([]))).await).unwrap();
+        let tail = sent["input"].as_array().unwrap().last().unwrap();
+        assert!(
+            serde_json::to_vec(tail).unwrap().len() as u64
+                <= control.store.config.limits.tool_excerpt_bytes
+        );
+        let result = result_at(tail).unwrap();
+        assert_eq!(result["results"][0]["name"], "first");
+        assert_eq!(
+            result["results"][0]["outcome"], "ok",
+            "first needs the second process to unblock"
+        );
+        assert!(
+            result["results"][0]["stdout"]
+                .as_str()
+                .unwrap()
+                .starts_with("first")
+        );
+        assert_eq!(result["results"][0]["truncated"], true);
+        assert_eq!(result["outcome"], "truncated");
+        close(control, owner).await;
+    })
+    .await
+    .unwrap();
+}
