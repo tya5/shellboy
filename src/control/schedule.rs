@@ -484,7 +484,7 @@ fn add_definition(
                 "Thread not found",
             )
         })?;
-    if !valid_command_field(&input.command) {
+    if !valid_command_field(input.command) {
         return Err(invalid(
             "Shell command must be 1 to 32768 bytes without NUL",
         ));
@@ -1062,6 +1062,10 @@ async fn drain(control: &Control, executions: &[String]) -> Result<(), ApiError>
         }
         changed.await;
     }
+}
+
+pub(super) fn valid_command_field(command: &str) -> bool {
+    !command.is_empty() && command.len() <= 32 * 1024 && !command.contains('\0')
 }
 
 #[cfg(test)]
@@ -2582,8 +2586,4 @@ mod tests {
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
-}
-
-pub(super) fn valid_command_field(command: &str) -> bool {
-    !command.is_empty() && command.len() <= 32 * 1024 && !command.contains('\0')
 }
