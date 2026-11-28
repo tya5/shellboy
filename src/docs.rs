@@ -467,150 +467,74 @@ fn paginated(mut page: Value, cursor: Option<String>) -> Value {
     page
 }
 
-/// Execute locally. Errors have a stable code prefix for the standalone envelope.
-pub fn execute(command: DocsCommand) -> Result<Value, String> {
-    // The bundled catalogue is immutable; build and hash it once per process.
+fn bundled_get(
+    id: String,
+    sources: Vec<String>,
+    section: Option<String>,
+    limit_bytes: usize,
+    cursor: Option<String>,
+) -> Result<Value, String> {
     let bundled = &*BUNDLED;
-    let docs: &[Document] = &bundled.docs;
+    let docs = &bundled.docs;
     let version = bundled.version.as_str();
-    match command {
-        DocsCommand::Source { .. } | DocsCommand::Index { .. } => {
-            Err("invalid_argument: Source operations need a configuration context".into())
-        }
-        DocsCommand::List {
-            parent,
-            sources: _,
-            limit: count,
-            cursor,
-        } => {
-            limit(count, 200)?;
-            if let Some(p) = &parent {
-                find(docs, p)?;
-            }
-            let scope = serde_json::to_string(&json!(["list", parent])).expect("scope");
-            let offset = read_cursor(cursor.as_deref(), version, &scope)?;
-            let items: Vec<_> = docs
-                .iter()
-                .filter(|d| {
-                    parent
-                        .as_ref()
-                        .map_or(d.parent_id.is_empty(), |p| &d.parent_id == p)
-                })
-                .collect();
-            if offset > items.len() {
-                return Err("cursor_expired: Offset is outside list".into());
-            }
-            let end = offset.saturating_add(count).min(items.len());
-            Ok(paginated(
-                json!({"version":version,"items":items[offset..end].iter().map(|d|summary(d,version)).collect::<Vec<_>>()}),
-                (end < items.len()).then(|| next_cursor(version, &scope, end)),
-            ))
-        }
-        DocsCommand::Get {
-            id,
-            sources,
-            section,
-            limit_bytes,
-            cursor,
-        } => {
-            limit(limit_bytes, 65536)?;
-            let d = find(docs, &id)?;
-            let index = docs
-                .iter()
-                .position(|candidate| candidate.id == d.id)
-                .expect("found document is in the catalogue");
-            let content_hash = bundled.hashes[index].get_or_init(|| hash(&d.text));
-            let sections = bundled.sections[index].get_or_init(|| sections(&d.text));
-            let (start, end) = if let Some(s) = &section {
-                let sec = sections
-                    .iter()
-                    .find(|sec| &sec.id == s)
-                    .ok_or("target_unavailable: Unknown section ID")?;
-                (sec.start, sec.end)
-            } else {
-                (0, d.text.len())
-            };
-            let scope = serde_json::to_string(&json!(["get", id, section, content_hash, sources]))
-                .expect("scope");
-            let offset = if cursor.is_some() {
-                read_cursor(cursor.as_deref(), version, &scope)?
-            } else {
-                start
-            };
-            if offset < start || offset > end || !d.text.is_char_boundary(offset) {
-                return Err("cursor_expired: Invalid text offset".into());
-            }
-            let page_end = d
-                .text
-                .floor_char_boundary(offset.saturating_add(limit_bytes).min(end));
-            if page_end == offset && offset < end {
-                return Err(
-                    "invalid_argument: Byte limit cannot hold the next UTF-8 character".into(),
-                );
-            }
-            Ok(paginated(
-                json!({"id":d.id,"title":d.title,"version":version,"content_hash":content_hash,"text":&d.text[offset..page_end],"start":offset,"end":page_end,"total_bytes":d.text.len(),"section":section,"sections":sections,"links":bundled.links[index].get_or_init(|| links(d, docs))}),
-                (page_end < end).then(|| next_cursor(version, &scope, page_end)),
-            ))
-        }
-        DocsCommand::Search {
-            query,
-            parent,
-            sources: _,
-            limit: count,
-            cursor,
-        } => {
-            limit(count, 100)?;
-            if query.trim().is_empty() || query.len() > 4096 {
-                return Err("invalid_argument: Query must contain 1 to 4096 bytes".into());
-            }
-            if let Some(p) = &parent {
-                find(docs, p)?;
-            }
-            let scope = serde_json::to_string(&json!(["search", query, parent])).expect("scope");
-            let offset = read_cursor(cursor.as_deref(), version, &scope)?;
-            let needle = query.to_lowercase();
-            let mut hits = Vec::new();
-            for d in docs {
-                if category(&d.id)
-                    || parent
-                        .as_ref()
-                        .is_some_and(|p| d.id != *p && !descendant(d, p, docs))
-                {
-                    continue;
-                }
-                let lowered = d.text.to_lowercase();
-                let Some(at) = lowered.find(&needle) else {
-                    continue;
-                };
-                let (original_start, end) = original_span(&d.text, at, at + needle.len());
-                let excerpt_start = d.text.ceil_char_boundary(original_start.saturating_sub(96));
-                let excerpt_end = d
-                    .text
-                    .floor_char_boundary(end.saturating_add(192).min(d.text.len()));
-                hits.push(json!({"id":d.id,"title":d.title,"parent_id":d.parent_id,"version":version,"content_hash":hash(&d.text),"excerpt":&d.text[excerpt_start..excerpt_end],"spans":[{"start":original_start,"end":end}],"score":lowered.matches(&needle).count()}));
-            }
-            hits.sort_by(|a, b| {
-                b["score"]
-                    .as_u64()
-                    .cmp(&a["score"].as_u64())
-                    .then_with(|| a["id"].as_str().cmp(&b["id"].as_str()))
-            });
-            if offset > hits.len() {
-                return Err("cursor_expired: Offset is outside search".into());
-            }
-            let end = offset.saturating_add(count).min(hits.len());
-            Ok(paginated(
-                json!({"version":version,"mode":"keyword","items":hits[offset..end]}),
-                (end < hits.len()).then(|| next_cursor(version, &scope, end)),
-            ))
-        }
+    limit(limit_bytes, 65536)?;
+    let d = find(docs, &id)?;
+    let index = docs
+        .iter()
+        .position(|candidate| candidate.id == d.id)
+        .expect("found document is in the catalogue");
+    let content_hash = bundled.hashes[index].get_or_init(|| hash(&d.text));
+    let sections = bundled.sections[index].get_or_init(|| sections(&d.text));
+    let (start, end) = if let Some(s) = &section {
+        let sec = sections
+            .iter()
+            .find(|sec| &sec.id == s)
+            .ok_or("target_unavailable: Unknown section ID")?;
+        (sec.start, sec.end)
+    } else {
+        (0, d.text.len())
+    };
+    let scope =
+        serde_json::to_string(&json!(["get", id, section, content_hash, sources])).expect("scope");
+    let offset = if cursor.is_some() {
+        read_cursor(cursor.as_deref(), version, &scope)?
+    } else {
+        start
+    };
+    if offset < start || offset > end || !d.text.is_char_boundary(offset) {
+        return Err("cursor_expired: Invalid text offset".into());
     }
+    let page_end = d
+        .text
+        .floor_char_boundary(offset.saturating_add(limit_bytes).min(end));
+    if page_end == offset && offset < end {
+        return Err("invalid_argument: Byte limit cannot hold the next UTF-8 character".into());
+    }
+    Ok(paginated(
+        json!({"id":d.id,"title":d.title,"version":version,"content_hash":content_hash,"text":&d.text[offset..page_end],"start":offset,"end":page_end,"total_bytes":d.text.len(),"section":section,"sections":sections,"links":bundled.links[index].get_or_init(|| links(d, docs))}),
+        (page_end < end).then(|| next_cursor(version, &scope, page_end)),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn execute(mut command: DocsCommand) -> Result<Value, String> {
+        match &mut command {
+            DocsCommand::List { sources, .. }
+            | DocsCommand::Get { sources, .. }
+            | DocsCommand::Search { sources, .. } => sources.push("shellboy".into()),
+            _ => unreachable!("bundled read fixture"),
+        }
+        let response = configured_response(command, None, std::path::Path::new("."));
+        if response["ok"] == true {
+            Ok(response["result"].clone())
+        } else {
+            Err(response["error"]["code"].as_str().unwrap().into())
+        }
+    }
+
     #[test]
     fn catalogue_is_connected_and_links_resolve() {
         let docs = catalogue();
@@ -695,6 +619,31 @@ mod tests {
                 .all(|d| d["parent_id"] == "shellboy/work")
         );
     }
+    #[test]
+    fn bundled_search_keeps_score_order_across_pages() {
+        let search = |cursor| {
+            execute(DocsCommand::Search {
+                query: "shellboy".into(),
+                parent: None,
+                sources: Vec::new(),
+                limit: 1,
+                cursor,
+            })
+            .unwrap()
+        };
+        let mut page = search(None);
+        let mut scores = Vec::new();
+        loop {
+            scores.push(page["items"][0]["score"].as_u64().unwrap());
+            let Some(cursor) = page["next_cursor"].as_str() else {
+                break;
+            };
+            page = search(Some(cursor.into()));
+        }
+        assert!(scores.windows(2).any(|p| p[0] > p[1]));
+        assert!(scores.windows(2).all(|p| p[0] >= p[1]));
+    }
+
     #[test]
     fn bundled_schedule_queries_reach_the_schedule_command_section() {
         let guide = documents()
