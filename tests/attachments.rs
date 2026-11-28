@@ -582,6 +582,23 @@ async fn per_file_failure_continues_conversation_and_zero_cache_does_not_reject(
     let result = f.prepare().await;
     assert_eq!(result.manifest[0].state, "ready");
     assert_eq!(result.manifest[1].state, "unavailable");
+    assert!(
+        result.placements[0]
+            .content
+            .iter()
+            .any(|part| part["type"] == "input_file")
+    );
+    assert!(
+        result.placements[1]
+            .content
+            .iter()
+            .all(|part| part["type"] == "input_text")
+    );
+    assert!(result.placements[1].content.iter().any(|part| {
+        part["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("attachment_unavailable"))
+    }));
     assert_eq!(f.service.cache_stats().retained_bytes, 0);
     assert!(f.service.cache_stats().pinned_bytes > 0);
     drop(result);
