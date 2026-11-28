@@ -436,6 +436,37 @@ mod tests {
         .unwrap()
     }
     #[test]
+    fn accepted_turn_input_keeps_saved_order_among_unrelated_receipts() {
+        let db = fixture();
+        db.execute_batch("INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('foreign-turn','t','old','stopped','before');
+            WITH RECURSIVE seq(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM seq WHERE i<4000)
+            INSERT INTO node(id,turn_id,kind,created_at,payload_json)
+            SELECT 'foreign-'||i,'foreign-turn','user','before','{}' FROM seq;
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,path_admission)
+            SELECT id,id,'null','t',id,'old','foreign-turn','accepted','before','unadmitted' FROM node;").unwrap();
+        for (id, at) in [
+            ("first-tie", "later"),
+            ("oldest", "before"),
+            ("second-tie", "later"),
+            ("held", "before"),
+        ] {
+            input(&db, id, "unadmitted", at);
+            if id != "held" {
+                db.execute("UPDATE receipt SET state='accepted' WHERE id=?1", [id])
+                    .unwrap();
+            }
+        }
+        let (receipts, _) = plan_turn_input(&db, "t", "old-turn", "now").unwrap();
+        assert_eq!(receipts, ["oldest", "first-tie", "second-tie"]);
+        assert!(
+            plan_turn_input(&db, "t", "absent-turn", "now")
+                .unwrap()
+                .0
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn saved_message_context_reason_and_original_body_are_public_without_resend() {
         let db = fixture();
         input(&db, "saved-held", "unadmitted", "saved-at");
