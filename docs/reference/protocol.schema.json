@@ -588,6 +588,16 @@
             "null"
           ]
         },
+        "omission_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OmissionReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "path": {
           "type": "string"
         },
@@ -7951,6 +7961,14 @@
         "exited",
         "failed",
         "stopped"
+      ],
+      "type": "string"
+    },
+    "OmissionReason": {
+      "enum": [
+        "spilled",
+        "attachment_changed",
+        "attachment_unavailable"
       ],
       "type": "string"
     },
@@ -18636,6 +18654,7 @@
     "schedule.list": true,
     "schedule.remove": true,
     "schedule.set": true,
+    "service.add": true,
     "service.endpoint": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -18658,7 +18677,11 @@
       "type": "object"
     },
     "service.get": true,
+    "service.list": true,
+    "service.remove": true,
     "service.set": true,
+    "service.start": true,
+    "service.stop": true,
     "shell.background": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {

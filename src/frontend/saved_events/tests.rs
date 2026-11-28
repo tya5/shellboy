@@ -174,7 +174,11 @@ async fn shown_config_result_is_read_again_when_a_saved_credential_change_wakes_
                 changed = true;
                 let response = control
                     .request(Request::new(
-                        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                        format!(
+                            "{}:{}",
+                            control.store.operation_epoch.current(),
+                            uuid::Uuid::new_v4()
+                        ),
                         Command::CredentialsSet(CredentialsSetArgs {
                             connection: "fixture".into(),
                             value: "sk-fixture-key".into(),
@@ -193,7 +197,11 @@ async fn shown_config_result_is_read_again_when_a_saved_credential_change_wakes_
         let held = slots.clone().acquire_owned().await.unwrap();
         let response = control
             .request(Request::new(
-                format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                format!(
+                    "{}:{}",
+                    control.store.operation_epoch.current(),
+                    uuid::Uuid::new_v4()
+                ),
                 Command::CredentialsClear(CredentialsClearArgs {
                     connection: "fixture".into(),
                 }),

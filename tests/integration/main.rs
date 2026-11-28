@@ -135,8 +135,6 @@ mod request_inspect;
 mod response_retries;
 #[path = "../response_upload_recovery.rs"]
 mod response_upload_recovery;
-#[path = "../retained_sources.rs"]
-mod retained_sources;
 #[path = "../revisit.rs"]
 mod revisit;
 #[path = "../runtime.rs"]
