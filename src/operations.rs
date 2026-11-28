@@ -1330,7 +1330,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::Source,
         default_origin: DefaultOrigin::None,
         label: "登録資料ソース",
-        help: "登録ソースのIDまたは名前です。rag indexのdocsは同梱ガイドです。",
+        help: "登録ソースのIDまたは名前です。",
         kind: FieldType::Text,
         discovery: Discovery::RagSourceList,
     },

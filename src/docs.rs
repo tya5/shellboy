@@ -41,7 +41,7 @@ pub enum DocsCommand {
         #[arg(long)]
         cursor: Option<String>,
     },
-    /// Read a bundled guide or one of its sections.
+    /// Read a guide or one of its sections.
     Get {
         #[arg(long)]
         id: String,

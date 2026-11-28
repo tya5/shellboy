@@ -2185,3 +2185,85 @@ async fn scoped_history_deleted_during_query_embedding_reports_thread_not_found(
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
 }
+
+#[tokio::test]
+async fn docs_index_exports_to_a_stable_generic_rag_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let (requests, _, provider) = proxy(root).await;
+    let data = root.join("data");
+    let index = || {
+        shellboy::docs::index(
+            vec!["shellboy".into()],
+            false,
+            false,
+            Some(root.join("config.toml")),
+            Some(data.clone()),
+            root,
+        )
+    };
+    let first = index().await;
+    assert_eq!(first["ok"], true, "{first}");
+    let registration = &first["result"]["sources"][0]["registration"]["result"];
+    let id = registration["source_id"].as_str().unwrap();
+    let export = data.join("docs-export/shellboy");
+    assert_eq!(
+        Path::new(registration["root"].as_str().unwrap()),
+        export.canonicalize().unwrap()
+    );
+    let paid = requests.load(Ordering::SeqCst);
+    assert!(paid > 0);
+
+    let second = index().await;
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(
+        second["result"]["sources"][0]["registration"]["result"]["source_id"],
+        id
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        paid,
+        "unchanged guides reuse their saved chunks"
+    );
+    let found = execute(
+        RagOptions {
+            db: None,
+            command: RagCommand::Search {
+                query: "recovery".into(),
+                scope: vec!["source:shellboy".into()],
+                mode: SearchMode::Semantic,
+                limit: 5,
+                cursor: None,
+            },
+        },
+        Some(root.join("config.toml")),
+        Some(data.clone()),
+        root,
+    )
+    .await;
+    assert_eq!(found["ok"], true, "{found}");
+    let reference = found["result"]["items"][0]["reference"].as_str().unwrap();
+    let read = execute(
+        RagOptions {
+            db: None,
+            command: RagCommand::Get {
+                reference: reference.into(),
+                limit_bytes: 512,
+                cursor: None,
+            },
+        },
+        Some(root.join("config.toml")),
+        Some(data.clone()),
+        root,
+    )
+    .await;
+    assert_eq!(read["ok"], true, "{read}");
+    assert!(!read["result"]["text"].as_str().unwrap().is_empty());
+
+    std::fs::write(export.join("user-owned.md"), "do not touch").unwrap();
+    let refused = index().await;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["result"]["sources"][0]["export"]["ok"], false);
+    assert!(export.join("user-owned.md").is_file());
+    provider.abort();
+}
