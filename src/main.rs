@@ -396,6 +396,21 @@ fn main() -> ExitCode {
             println!("{}", shellboy::protocol::schema_json());
             ExitCode::SUCCESS
         }
+        Some(CliCommand::Docs {
+            command:
+                shellboy::docs::DocsCommand::Index {
+                    sources,
+                    all,
+                    dry_run,
+                },
+        }) => standalone_response(runtime.block_on(shellboy::docs::index(
+            sources,
+            all,
+            dry_run,
+            cli.config,
+            cli.data_dir,
+            &cwd,
+        ))),
         Some(CliCommand::Docs { command }) => standalone_response(
             shellboy::docs::configured_response(command, cli.config.as_deref(), &cwd),
         ),
