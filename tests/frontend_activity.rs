@@ -326,20 +326,17 @@ async fn activity_delivery_observes_the_new_selection() {
         "tests/frontend_activity.rs: activity_delivery_observes_the_new_selection",
         async {
             loop {
-                match incoming.try_recv() {
-                    Ok(UiUpdate::Activity {
-                        thread_id,
-                        generation,
-                        snapshot,
-                        ..
-                    }) => {
-                        if thread_id == "b" {
-                            assert_eq!(generation, 2);
-                            assert_eq!(snapshot.phase, ActivityPhase::Completed);
-                            break;
-                        }
-                    }
-                    _ => {}
+                if let Ok(UiUpdate::Activity {
+                    thread_id,
+                    generation,
+                    snapshot,
+                    ..
+                }) = incoming.try_recv()
+                    && thread_id == "b"
+                {
+                    assert_eq!(generation, 2);
+                    assert_eq!(snapshot.phase, ActivityPhase::Completed);
+                    break;
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
