@@ -4543,7 +4543,7 @@ mod receipt_wait_tests {
         old_source.draft.text = "must not restore".into();
         let refused = store
             .execute(
-                Request::new("current:stale-source", Command::DraftSave(old_source)),
+                Request::new("current.0:stale-source", Command::DraftSave(old_source)),
                 None,
             )
             .await

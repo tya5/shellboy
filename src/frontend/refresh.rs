@@ -918,7 +918,7 @@ mod tests {
         assert_eq!(observation.activity.turn_id.as_deref(), Some("u"));
         assert!(observation.committed_attempts.is_empty());
         owner.db.call(|db| {
-            db.execute("UPDATE receipt SET path_admission='unknown',result_json='{\"deliver\":\"complete\",\"reply\":{\"state\":\"pending\"}}' WHERE message_node_id='held-paired'", [])?;
+            db.execute("UPDATE receipt SET path_admission='unknown',result_json='{\"deliver\":\"complete\",\"reply\":{\"state\":\"pending\"},\"delivery_context\":{\"reason\":\"run_completion\"}}' WHERE message_node_id='held-paired'", [])?;
             Ok(())
         }).await.unwrap();
         let response = crate::ipc::call_selected_operation(
