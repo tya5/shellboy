@@ -429,6 +429,7 @@ async fn summary_stage(
     let closed = match boundary
         .pause(
             &admission_wait,
+            WaitCancellation::Interruptible,
             automatic.observed(
                 control,
                 closed_stage,
@@ -504,6 +505,7 @@ async fn summary_stage(
             let result = match boundary
                 .pause(
                     &admission_wait,
+                    WaitCancellation::Interruptible,
                     automatic.observed(
                         control,
                         active_stage,

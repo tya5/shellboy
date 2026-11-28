@@ -163,7 +163,9 @@ pub(super) async fn retry_or_recover(
     if failure.error.is_context_limit()
         && let super::proactive::ThreadJob::Retained(job) = proactive_job
     {
-        let waited = boundary_guard.pause(&slot.stop, job.join()).await;
+        let waited = boundary_guard
+            .pause(&slot.stop, WaitCancellation::Interruptible, job.join())
+            .await;
         let joined = match waited {
             Ok(joined) => joined,
             Err(_) if slot.stop.is_cancelled() => return Ok(()),

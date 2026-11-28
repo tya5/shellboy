@@ -1,7 +1,8 @@
 //! Per-Thread model/tool loop. A long wait keeps its IPC slot for the whole wait.
 mod adoption;
 mod context_tail;
-pub(crate) use context_tail::minimum_budget as context_tail_minimum_budget;
+pub(crate) use crate::compaction::boundary::WaitCancellation;
+use context_tail::minimum_budget as context_tail_minimum_budget;
 mod notification_admission;
 mod overflow;
 pub(super) mod proactive;
@@ -532,7 +533,12 @@ impl RequestCaller for ConversationCaller<'_, '_> {
         cancel: &'a CancellationToken,
         wait: impl Future<Output = T> + Send + 'a,
     ) -> futures_util::future::BoxFuture<'a, Option<T>> {
-        Box::pin(async move { self.boundary.pause(cancel, wait).await.ok() })
+        Box::pin(async move {
+            self.boundary
+                .pause(cancel, WaitCancellation::Interruptible, wait)
+                .await
+                .ok()
+        })
     }
     fn release_pins(&mut self) {
         self.snapshot.input.take();
@@ -566,8 +572,9 @@ impl RequestCaller for ConversationCaller<'_, '_> {
             let cancel = &self.slot.stop;
             let result = self
                 .boundary
-                .pause_owned(
+                .pause(
                     cancel,
+                    WaitCancellation::Owned,
                     context_tail::collect(
                         self.control,
                         &self.snapshot,

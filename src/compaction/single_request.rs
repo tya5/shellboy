@@ -1,6 +1,7 @@
 //! The owned summary transaction shared by closed, overflow, and active-Turn
 //! entry points. Request trials end here; adoption performs atomic revalidation.
 use super::*;
+use crate::compaction::boundary::WaitCancellation;
 use crate::model;
 
 /// Request construction consumes an already-resolved output policy.
@@ -261,7 +262,10 @@ impl model::request_path::RequestCaller for SummaryCaller<'_, '_, '_> {
                 DispatchOwner::Manual {
                     boundary: Some(boundary),
                     ..
-                } => boundary.pause(cancel, wait).await.ok(),
+                } => boundary
+                    .pause(cancel, WaitCancellation::Interruptible, wait)
+                    .await
+                    .ok(),
                 _ => Some(wait.await),
             }
         })
