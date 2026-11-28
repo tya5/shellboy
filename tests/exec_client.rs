@@ -2466,23 +2466,24 @@ async fn chat_follow_reads_the_turn_after_the_wait_returns() {
     let out = String::from_utf8(out).unwrap();
     assert_eq!(result.unwrap(), 0, "{out}");
     assert!(out.contains("done"), "{out}");
-    let trace = fixture.seen.lock().unwrap();
-    let (held, operation) = trace
-        .iter()
-        .enumerate()
-        .find_map(|(index, event)| event.strip_prefix("FollowHeld:").map(|id| (index, id)))
-        .expect("a cursor-bearing follow invocation was held");
-    let order: Vec<_> = trace[held + 1..]
-        .iter()
-        .filter(|event| event.starts_with("FollowReply:") || event.as_str() == "TurnGet")
-        .take(2)
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        order,
-        [format!("FollowReply:{operation}").as_str(), "TurnGet"]
-    );
-    drop(trace);
+    {
+        let trace = fixture.seen.lock().unwrap();
+        let (held, operation) = trace
+            .iter()
+            .enumerate()
+            .find_map(|(index, event)| event.strip_prefix("FollowHeld:").map(|id| (index, id)))
+            .expect("a cursor-bearing follow invocation was held");
+        let order: Vec<_> = trace[held + 1..]
+            .iter()
+            .filter(|event| event.starts_with("FollowReply:") || event.as_str() == "TurnGet")
+            .take(2)
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            order,
+            [format!("FollowReply:{operation}").as_str(), "TurnGet"]
+        );
+    }
     fixture.close().await;
 }
 
