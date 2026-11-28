@@ -389,6 +389,11 @@ pub(crate) struct OperationField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Stability {
+    #[allow(
+        dead_code,
+        reason = "retained in the public operation stability schema"
+    )]
+    Stable,
     Experimental,
 }
 
