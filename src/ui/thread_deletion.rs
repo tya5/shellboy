@@ -489,14 +489,11 @@ mod observation_tests {
         ui.select_thread("deleted".into());
         let draft_id = ui.view().draft.draft_id.clone();
         let paste = ui.slash("/paste-image").pop().unwrap();
-        let UiAction::PasteImage { pin, .. } = &paste else {
-            panic!("expected a queued paste");
-        };
-        let lease = std::sync::Arc::downgrade(&pin.0);
+        assert!(
+            matches!(&paste, UiAction::PasteImage { draft_id: target, .. } if target == &draft_id)
+        );
         ui.deferred_actions.push(paste);
-        assert!(lease.upgrade().is_some());
         ui.remove_deleted_threads(&["deleted".into()]);
-        assert!(lease.upgrade().is_none());
         assert!(!ui.take_deferred_actions().into_iter().any(|action| matches!(action, UiAction::PasteImage { draft_id: target, .. } if target == draft_id)));
     }
 

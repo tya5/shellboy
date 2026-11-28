@@ -247,6 +247,14 @@ mod tests {
         let queued = ui.slash("/image").pop().unwrap();
         ui.config.cache.body_bytes = 0;
         ui.new_chat();
+        ui.trim_bodies();
+        let actions = ui.select_thread(target.clone());
+        assert!(
+            actions.iter().any(
+                |a| matches!(a, UiAction::ActivateDraft { draft_id } if draft_id == &original)
+            )
+        );
+        ui.new_chat();
         drop(queued);
         ui.trim_bodies();
         let actions = ui.select_thread(target);
