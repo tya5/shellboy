@@ -497,16 +497,17 @@ fn failed_submissions_restore_only_an_unchanged_composer_including_attachment_me
     for edited in [false, true] {
         let mut ui = ui();
         ui.insert("original", false);
-        ui.apply(UiUpdate::ClipboardAttachment {
+        ui.apply(UiUpdate::ClipboardPasteSettled {
+            pin: Default::default(),
             draft_id: ui.view().draft.draft_id.clone(),
             revision: ui.view().draft.revision,
-            attachment: UiAttachment {
+            attachment: Some(UiAttachment {
                 id: "attachment".into(),
                 kind: "file".into(),
                 path: "/synthetic".into(),
                 state: "ready".into(),
                 position: Some(8),
-            },
+            }),
         });
         let original = ui.view().draft.clone();
         let action = ui.submit().remove(0);

@@ -338,10 +338,13 @@ mod tests {
             loop {
                 let update = observed.recv().await.unwrap();
                 if let UiUpdate::CommandOutcome {
-                    result: Err(error), ..
+                    submission,
+                    result: Err(error),
                 } = &update
                 {
-                    assert!(error.message.contains("Disconnected"));
+                    assert_eq!(submission.draft_id, draft_id);
+                    assert_eq!(submission.revision, revision);
+                    assert_eq!(error.code, ErrorCode::IoFailed);
                     failures += 1;
                 }
                 let settled = matches!(
@@ -427,10 +430,11 @@ mod tests {
         ui.insert("前", false);
         ui.insert(&"日本語\n".repeat(50), true);
         let fold = ui.view().draft.folds[0].clone();
-        ui.apply(UiUpdate::ClipboardAttachment {
+        ui.apply(UiUpdate::ClipboardPasteSettled {
+            pin: Default::default(),
             draft_id: ui.view().draft.draft_id.clone(),
             revision: ui.view().draft.revision,
-            attachment: attachment("after", Some(fold.end)),
+            attachment: Some(attachment("after", Some(fold.end))),
         });
         ui.view_mut().draft.cursor = fold.start;
         ui.event(Event::Key(KeyEvent::new(
@@ -513,10 +517,11 @@ mod tests {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.insert("前後", false);
         ui.view_mut().draft.cursor = "前".len();
-        ui.apply(UiUpdate::ClipboardAttachment {
+        ui.apply(UiUpdate::ClipboardPasteSettled {
+            pin: Default::default(),
             draft_id: ui.view().draft.draft_id.clone(),
             revision: ui.view().draft.revision,
-            attachment: attachment("a", Some(3)),
+            attachment: Some(attachment("a", Some(3))),
         });
         ui.insert("中", false);
         assert_eq!(ui.view().draft.text, format!("前{MARKER}中後"));
@@ -578,10 +583,11 @@ mod tests {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.insert("前後", false);
         ui.view_mut().draft.cursor = 3;
-        ui.apply(UiUpdate::ClipboardAttachment {
+        ui.apply(UiUpdate::ClipboardPasteSettled {
+            pin: Default::default(),
             draft_id: ui.view().draft.draft_id.clone(),
             revision: ui.view().draft.revision,
-            attachment: attachment("a", Some(3)),
+            attachment: Some(attachment("a", Some(3))),
         });
         let snapshot = ui.view().draft.clone();
         let actions = ui.event(Event::Key(KeyEvent::new(
@@ -604,10 +610,11 @@ mod tests {
     fn slash_operations_keep_owned_chips_and_rejection_restores_original_positions() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("thread".into());
-        ui.apply(UiUpdate::ClipboardAttachment {
+        ui.apply(UiUpdate::ClipboardPasteSettled {
+            pin: Default::default(),
             draft_id: ui.view().draft.draft_id.clone(),
             revision: ui.view().draft.revision,
-            attachment: attachment("a", Some(0)),
+            attachment: Some(attachment("a", Some(0))),
         });
         ui.insert("/attachments", false);
         ui.event(Event::Key(KeyEvent::new(

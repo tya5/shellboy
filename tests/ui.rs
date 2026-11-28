@@ -429,31 +429,33 @@ fn clipboard_result_is_bound_to_draft_revision_and_does_not_follow_switch() {
     let draft_id = ui.view().draft.draft_id.clone();
     let revision = ui.view().draft.revision;
     ui.select_thread("two".into());
-    ui.apply(UiUpdate::ClipboardAttachment {
+    ui.apply(UiUpdate::ClipboardPasteSettled {
+        pin: Default::default(),
         draft_id: draft_id.clone(),
         revision,
-        attachment: UiAttachment {
+        attachment: Some(UiAttachment {
             id: "img".into(),
             path: cwd().join("fixture.png"),
             kind: "image".into(),
             state: "ready".into(),
             position: None,
-        },
+        }),
     });
     assert!(ui.view().draft.attachments.is_empty());
     ui.select_thread("one".into());
     assert_eq!(ui.view().draft.attachments.len(), 1);
     text(&mut ui, "edit");
-    ui.apply(UiUpdate::ClipboardAttachment {
+    ui.apply(UiUpdate::ClipboardPasteSettled {
+        pin: Default::default(),
         draft_id,
         revision,
-        attachment: UiAttachment {
+        attachment: Some(UiAttachment {
             id: "late".into(),
             path: cwd().join("late.png"),
             kind: "image".into(),
             state: "ready".into(),
             position: None,
-        },
+        }),
     });
     assert_eq!(ui.view().draft.attachments.len(), 1);
 }
@@ -3504,16 +3506,17 @@ fn editing_while_accepting_uses_next_inputs_own_byte_budget_and_preserves_frozen
     config.limits.draft_bytes = 11;
     let mut ui = UiState::new(&config, cwd());
     ui.insert("日本", false);
-    ui.apply(UiUpdate::ClipboardAttachment {
+    ui.apply(UiUpdate::ClipboardPasteSettled {
+        pin: Default::default(),
         draft_id: ui.view().draft.draft_id.clone(),
         revision: ui.view().draft.revision,
-        attachment: UiAttachment {
+        attachment: Some(UiAttachment {
             id: "image".into(),
             path: cwd().join("image.png"),
             kind: "image".into(),
             state: "ready".into(),
             position: None,
-        },
+        }),
     });
     let actions = enter(&mut ui);
     let (draft_id, revision) = sent(&actions);
@@ -3556,16 +3559,17 @@ fn slash_rejection_restores_the_complete_input_without_relying_on_status_text() 
         let mut ui = state();
         ui.select_thread("saved".into());
         ui.insert(command, false);
-        ui.apply(UiUpdate::ClipboardAttachment {
+        ui.apply(UiUpdate::ClipboardPasteSettled {
+            pin: Default::default(),
             draft_id: ui.view().draft.draft_id.clone(),
             revision: ui.view().draft.revision,
-            attachment: UiAttachment {
+            attachment: Some(UiAttachment {
                 id: "attachment".into(),
                 path: cwd().join("not-read.png"),
                 kind: "image".into(),
                 state: "ready".into(),
                 position: None,
-            },
+            }),
         });
         ui.event(key(KeyCode::Left));
         let original = ui.view().draft.clone();
@@ -3624,16 +3628,17 @@ fn late_slash_failure_preserves_new_text_and_clipboard_and_targets_its_own_view(
     let submission = submission.clone();
     // A clipboard reply received during the operation becomes a newer draft.
     let cleared = ui.view().draft.clone();
-    ui.apply(UiUpdate::ClipboardAttachment {
+    ui.apply(UiUpdate::ClipboardPasteSettled {
+        pin: Default::default(),
         draft_id: cleared.draft_id,
         revision: cleared.revision,
-        attachment: UiAttachment {
+        attachment: Some(UiAttachment {
             id: "new-image".into(),
             path: cwd().join("not-read.png"),
             kind: "image".into(),
             state: "ready".into(),
             position: None,
-        },
+        }),
     });
     let with_image = ui.view().draft.clone();
     ui.apply(UiUpdate::CommandOutcome {

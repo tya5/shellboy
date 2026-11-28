@@ -179,7 +179,11 @@ impl UiState {
             | UiUpdate::SavedMessagePending { draft_id, .. }
             | UiUpdate::AgentsSelected { draft_id, .. }
             | UiUpdate::Receipt { draft_id, .. }
-            | UiUpdate::ClipboardAttachment { draft_id, .. }
+            | UiUpdate::ClipboardPasteSettled {
+                draft_id,
+                attachment: Some(_),
+                ..
+            }
             | UiUpdate::RestoredSnapshot { draft_id, .. } => Some(draft_id.as_str()),
             UiUpdate::DraftRecovery { target, .. } => Some(target.draft_id.as_str()),
             UiUpdate::CommandOutcome { submission, .. } => Some(submission.draft_id.as_str()),

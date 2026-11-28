@@ -1196,11 +1196,6 @@ pub enum UiUpdate {
         revision: u64,
         attachment: Option<UiAttachment>,
     },
-    ClipboardAttachment {
-        draft_id: String,
-        revision: u64,
-        attachment: UiAttachment,
-    },
     Progress {
         thread_id: String,
         tool_calls: u64,
@@ -3689,19 +3684,9 @@ impl UiState {
                 attachment,
             } => {
                 drop(pin);
-                if let Some(attachment) = attachment {
-                    self.apply_inner(UiUpdate::ClipboardAttachment {
-                        draft_id,
-                        revision,
-                        attachment,
-                    });
-                }
-            }
-            UiUpdate::ClipboardAttachment {
-                draft_id,
-                revision,
-                attachment,
-            } => {
+                let Some(attachment) = attachment else {
+                    return;
+                };
                 let attachment_id = attachment.id.clone();
                 let limit = self.config.limits.draft_bytes as usize;
                 let accepted =

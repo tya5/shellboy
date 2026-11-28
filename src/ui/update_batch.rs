@@ -26,7 +26,6 @@ impl UiUpdate {
             | Self::BranchesLoaded { .. }
             | Self::RewindResult { .. }
             | Self::SavedMessage { .. }
-            | Self::ClipboardAttachment { .. }
             | Self::ClipboardPasteSettled { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
             Self::ManagementDetailFailure { .. }

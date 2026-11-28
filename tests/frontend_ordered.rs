@@ -236,16 +236,17 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
         ("image", image, "image", "中"),
         ("file", file, "file", "後"),
     ] {
-        ui.apply(UiUpdate::ClipboardAttachment {
+        ui.apply(UiUpdate::ClipboardPasteSettled {
+            pin: Default::default(),
             draft_id: ui.view().draft.draft_id.clone(),
             revision: ui.view().draft.revision,
-            attachment: UiAttachment {
+            attachment: Some(UiAttachment {
                 id: id.into(),
                 path,
                 kind: kind.into(),
                 state: "ready".into(),
                 position: None,
-            },
+            }),
         });
         ui.insert(text, false);
     }
