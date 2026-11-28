@@ -504,8 +504,8 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
     tokio::spawn(control.clone().serve(rpc_receive));
     let (send, receive) = tokio::sync::mpsc::channel(16);
-    let (updates, mut incoming) = std::sync::mpsc::sync_channel(128);
-    let bridge = tokio::spawn(frontend::run_with_clipboard(
+    let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+    let mut bridge = tokio::spawn(frontend::run_with_clipboard(
         control,
         receive,
         updates,
@@ -531,10 +531,15 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     })
     .await
     .unwrap();
-    let attachment: UiAttachment = next_update(&mut incoming, |update| match update {
-        UiUpdate::ClipboardAttachment { attachment, .. } => Some(attachment),
-        _ => None,
-    })
+    let attachment: UiAttachment = next_clipboard_update(
+        "clipboard image lease",
+        &incoming,
+        &mut bridge,
+        |update| match update {
+            UiUpdate::ClipboardAttachment { attachment, .. } => Some(attachment),
+            _ => None,
+        },
+    )
     .await;
     assert!(attachment.path.exists());
     send.send(UiAction::ClipboardDecision {
@@ -561,14 +566,19 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     })
     .await
     .unwrap();
-    let thread: String = next_update(&mut incoming, |update| match update {
-        UiUpdate::Receipt {
-            status: ReceiptStatus::Accepted,
-            thread_id: Some(id),
-            ..
-        } => Some(id),
-        _ => None,
-    })
+    let thread: String = next_clipboard_update(
+        "accepted image send",
+        &incoming,
+        &mut bridge,
+        |update| match update {
+            UiUpdate::Receipt {
+                status: ReceiptStatus::Accepted,
+                thread_id: Some(id),
+                ..
+            } => Some(id),
+            _ => None,
+        },
+    )
     .await;
     // Acceptance makes the message and its attachment durable. The driver adds
     // it to thread_path later, so copy must not depend on that adoption timing.
@@ -603,10 +613,15 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     })
     .await
     .unwrap();
-    let bytes: Vec<u8> = next_update(&mut incoming, |update| match update {
-        UiUpdate::TerminalRequest { bytes } => Some(bytes),
-        _ => None,
-    })
+    let bytes: Vec<u8> = next_clipboard_update(
+        "OSC52 original body request",
+        &incoming,
+        &mut bridge,
+        |update| match update {
+            UiUpdate::TerminalRequest { bytes } => Some(bytes),
+            _ => None,
+        },
+    )
     .await;
     assert_eq!(
         bytes,
@@ -616,10 +631,15 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
         )
         .unwrap()
     );
-    let notice = next_update(&mut incoming, |update| match update {
-        UiUpdate::Status { text, .. } if text.contains("コピー要求") => Some(text),
-        _ => None,
-    })
+    let notice = next_clipboard_update(
+        "OSC52 original body status",
+        &incoming,
+        &mut bridge,
+        |update| match update {
+            UiUpdate::Status { text, .. } if text.contains("コピー要求") => Some(text),
+            _ => None,
+        },
+    )
     .await;
     assert_eq!(
         notice,
@@ -631,19 +651,29 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     })
     .await
     .unwrap();
-    let code = next_update(&mut incoming, |update| match update {
-        UiUpdate::TerminalRequest { bytes } => Some(bytes),
-        _ => None,
-    })
+    let code = next_clipboard_update(
+        "OSC52 code block request",
+        &incoming,
+        &mut bridge,
+        |update| match update {
+            UiUpdate::TerminalRequest { bytes } => Some(bytes),
+            _ => None,
+        },
+    )
     .await;
     assert_eq!(
         code,
         shellboy::attachments::clipboard::osc52("copy me\n", MAX_BODY_BYTES as usize).unwrap()
     );
-    let notice = next_update(&mut incoming, |update| match update {
-        UiUpdate::Status { text, .. } if text.contains("コピー要求") => Some(text),
-        _ => None,
-    })
+    let notice = next_clipboard_update(
+        "OSC52 code block status",
+        &incoming,
+        &mut bridge,
+        |update| match update {
+            UiUpdate::Status { text, .. } if text.contains("コピー要求") => Some(text),
+            _ => None,
+        },
+    )
     .await;
     assert_eq!(
         notice,
@@ -700,31 +730,8 @@ async fn next_update<T>(
     watchdog("frontend synchronous update channel", async {
         loop {
             match receive.try_recv() {
-                Ok(UiUpdate::SavedMessage {
-                    draft_id,
-                    revision,
-                    thread_id,
-                    status,
-                    history,
-                    ..
-                }) => {
-                    // Product applies both together; these observer assertions
-                    // inspect each fact without changing UI delivery ordering.
-                    if let Some(value) = select(UiUpdate::Receipt {
-                        draft_id,
-                        revision,
-                        thread_id: Some(thread_id),
-                        status,
-                        message: None,
-                    }) {
-                        return value;
-                    }
-                    if let Some(value) = select(*history) {
-                        return value;
-                    }
-                }
                 Ok(update) => {
-                    if let Some(value) = select(update) {
+                    if let Some(value) = select_frontend_update(update, &mut select) {
                         return value;
                     }
                 }
@@ -737,6 +744,63 @@ async fn next_update<T>(
     })
     .await
     .unwrap()
+}
+
+fn select_frontend_update<T>(
+    update: UiUpdate,
+    select: &mut impl FnMut(UiUpdate) -> Option<T>,
+) -> Option<T> {
+    match update {
+        UiUpdate::SavedMessage {
+            draft_id,
+            revision,
+            thread_id,
+            status,
+            history,
+            ..
+        } => {
+            // The UI applies both facts together; the fixture may inspect either.
+            select(UiUpdate::Receipt {
+                draft_id,
+                revision,
+                thread_id: Some(thread_id),
+                status,
+                message: None,
+            })
+            .or_else(|| select(*history))
+        }
+        update => select(update),
+    }
+}
+
+async fn next_clipboard_update<T>(
+    phase: &'static str,
+    incoming: &std::sync::mpsc::Receiver<UiUpdate>,
+    bridge: &mut tokio::task::JoinHandle<Result<(), shellboy::protocol::ApiError>>,
+    mut select: impl FnMut(UiUpdate) -> Option<T>,
+) -> T {
+    let deadline = crate::test_watchdog::Deadline::new(phase);
+    let mut observed = 0;
+    loop {
+        match tokio::task::block_in_place(|| deadline.receive(incoming)) {
+            Ok(update) => {
+                observed += 1;
+                if let Some(value) = select_frontend_update(update, &mut select) {
+                    return value;
+                }
+            }
+            Err(error)
+                if error == std::sync::mpsc::RecvTimeoutError::Disconnected
+                    || bridge.is_finished() =>
+            {
+                let ended = watchdog("join closed clipboard frontend", bridge).await;
+                panic!("{phase}: {error} after {observed} updates; frontend returned {ended:?}");
+            }
+            Err(error) => {
+                panic!("{phase}: {error} after {observed} updates; frontend still running")
+            }
+        }
+    }
 }
 
 // Targeted state-driven receiver: the existing shared diagnostic budget is
