@@ -510,6 +510,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     .await
     .unwrap();
     send.send(UiAction::PasteImage {
+        pin: Default::default(),
         position: 0,
         draft_id: "image-draft".into(),
         revision: 0,
@@ -518,7 +519,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     .await
     .unwrap();
     let attachment: UiAttachment = next_update(&mut incoming, |update| match update {
-        UiUpdate::ClipboardAttachment { attachment, .. } => Some(attachment),
+        UiUpdate::ClipboardPasteSettled { attachment, .. } => attachment,
         _ => None,
     })
     .await;

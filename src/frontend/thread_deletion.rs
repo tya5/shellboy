@@ -619,6 +619,7 @@ mod tests {
                     revision: 1,
                 },
                 action: Box::new(UiAction::PasteImage {
+                    pin: Default::default(),
                     draft_id: "slash".into(),
                     revision: 1,
                     position: 0,
@@ -628,6 +629,7 @@ mod tests {
             .unwrap();
         sender
             .try_send(UiAction::PasteImage {
+                pin: Default::default(),
                 draft_id: "bare".into(),
                 revision: 1,
                 position: 0,

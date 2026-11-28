@@ -214,40 +214,166 @@ mod tests {
     fn clipboard_paste_survives_switch_under_body_pressure() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         let key = ui.active.clone();
+        let refused = ui.slash("/paste-image").pop().unwrap();
         let action = ui.slash("/paste-image").pop().unwrap();
         let UiAction::PasteImage {
-            draft_id, revision, ..
+            pin,
+            draft_id,
+            revision,
+            ..
         } = action
         else {
             panic!("expected clipboard paste");
         };
         ui.config.cache.body_bytes = 0;
         ui.new_chat();
-        assert_ne!(ui.view().draft.draft_id, draft_id);
-        ui.apply(UiUpdate::ClipboardAttachment {
+        drop(refused);
+        ui.trim_bodies();
+        ui.apply(UiUpdate::ClipboardPasteSettled {
+            pin,
             draft_id,
             revision,
-            attachment: attachment("captured", Some(0)),
+            attachment: Some(attachment("captured", Some(0))),
         });
         ui.select_thread(format!("draft:{key}"));
         assert_eq!(ui.view().draft.attachments[0].id, "captured");
         assert!(ui.take_deferred_actions().iter().any(|action| matches!(action, UiAction::ClipboardDecision { attachment_id, accepted: true, .. } if attachment_id == "captured")));
     }
     #[test]
-    fn clipboard_failure_and_admission_rejection_release_only_their_paste() {
+    fn dropping_last_queued_paste_releases_empty_draft() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
-        let key = ui.active.clone();
-        let draft_id = ui.view().draft.draft_id.clone();
-        let _in_flight = ui.slash("/image").pop().unwrap();
-        let rejected = ui.slash("/image").pop().unwrap();
+        let original = ui.active.clone();
+        let target = format!("draft:{original}");
+        let queued = ui.slash("/image").pop().unwrap();
         ui.config.cache.body_bytes = 0;
         ui.new_chat();
-        ui.action_rejected(&rejected);
-        assert!(ui.views.contains_key(&key), "the other paste is still live");
-        ui.apply(UiUpdate::ClipboardPasteFailed { draft_id });
+        drop(queued);
+        ui.trim_bodies();
+        let actions = ui.select_thread(target);
         assert!(
-            !ui.views.contains_key(&key),
-            "failed paste releases the empty draft"
+            !actions.iter().any(
+                |a| matches!(a, UiAction::ActivateDraft { draft_id } if draft_id == &original)
+            )
+        );
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn disconnected_paste_refuses_once_and_releases_its_target() {
+        use crate::{
+            frontend::control_tests::fixture,
+            protocol::{ApiError, ErrorCode},
+        };
+        struct Offline;
+        impl crate::frontend::ClipboardBackend for Offline {
+            fn capture(
+                &self,
+                _: u64,
+                _: tokio_util::sync::CancellationToken,
+            ) -> crate::frontend::ClipboardFuture<'_, crate::attachments::clipboard::ClipboardPixels>
+            {
+                Box::pin(async {
+                    Err(ApiError::new(
+                        ErrorCode::AppNotRunning,
+                        "capture fixture disconnected",
+                    ))
+                })
+            }
+            fn copy(
+                &self,
+                _: String,
+                _: crate::config::CopyBackend,
+                _: usize,
+                _: u64,
+                _: tokio_util::sync::CancellationToken,
+            ) -> crate::frontend::ClipboardFuture<'_, crate::attachments::clipboard::CopyOutcome>
+            {
+                unreachable!("copy not requested")
+            }
+        }
+        let (root, owner, control, server) = fixture().await;
+        let (send, receive) = crate::ui::actions::channel(16);
+        let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+        let bridge = tokio::spawn(crate::frontend::run_with_clipboard(
+            control,
+            receive,
+            updates,
+            root.path().into(),
+            owner,
+            server,
+            std::sync::Arc::new(Offline),
+        ));
+        let mut ui = UiState::new(&Config::default(), root.path().into());
+        let draft_id = ui.view().draft.draft_id.clone();
+        let revision = ui.view().draft.revision;
+        let first = ui.slash("/image").pop().unwrap();
+        let refused = ui.slash("/image").pop().unwrap();
+        ui.config.cache.body_bytes = 0;
+        ui.new_chat();
+        let (relay, mut observed) = tokio::sync::mpsc::unbounded_channel();
+        let relay_task = tokio::task::spawn_blocking(move || {
+            for update in incoming {
+                if relay.send(update).is_err() {
+                    break;
+                }
+            }
+        });
+        send.try_send(first).unwrap();
+        crate::test_watchdog::watchdog("clipboard disconnect and refusal", async {
+            loop {
+                let update = observed.recv().await.unwrap();
+                let settled = matches!(&update, UiUpdate::ClipboardPasteSettled { .. });
+                ui.apply(update);
+                if settled {
+                    break;
+                }
+            }
+            send.try_send(UiAction::SubmittedCommand {
+                submission: crate::ui::CommandSubmission {
+                    draft_id: draft_id.clone(),
+                    revision,
+                },
+                action: Box::new(refused),
+            })
+            .unwrap();
+            let mut failures = 0;
+            loop {
+                let update = observed.recv().await.unwrap();
+                if let UiUpdate::CommandOutcome {
+                    result: Err(error), ..
+                } = &update
+                {
+                    assert!(error.message.contains("Disconnected"));
+                    failures += 1;
+                }
+                let settled = matches!(
+                    &update,
+                    UiUpdate::ClipboardPasteSettled {
+                        attachment: None,
+                        ..
+                    }
+                );
+                ui.apply(update);
+                if settled {
+                    break;
+                }
+            }
+            assert_eq!(failures, 1);
+        })
+        .await
+        .unwrap();
+        let actions = ui.select_thread(format!("draft:{draft_id}"));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, UiAction::ActivateDraft { draft_id: id } if id == &draft_id))
+        );
+        send.try_send(UiAction::Quit).unwrap();
+        bridge.await.unwrap().unwrap();
+        relay_task.await.unwrap();
+        assert!(
+            !std::iter::from_fn(|| observed.try_recv().ok()).any(|update| matches!(
+                update,
+                UiUpdate::CommandOutcome { .. } | UiUpdate::ClipboardPasteSettled { .. }
+            ))
         );
     }
     #[test]

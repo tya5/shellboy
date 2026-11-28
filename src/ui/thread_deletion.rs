@@ -484,6 +484,17 @@ mod observation_tests {
     use serde_json::json;
 
     #[test]
+    fn deleting_a_thread_discards_its_queued_clipboard_paste() {
+        let mut ui = UiState::new(&crate::config::Config::default(), std::env::temp_dir());
+        ui.select_thread("deleted".into());
+        let draft_id = ui.view().draft.draft_id.clone();
+        let paste = ui.slash("/paste-image").pop().unwrap();
+        ui.deferred_actions.push(paste);
+        ui.remove_deleted_threads(&["deleted".into()]);
+        assert!(!ui.take_deferred_actions().into_iter().any(|action| matches!(action, UiAction::PasteImage { draft_id: target, .. } if target == draft_id)));
+    }
+
+    #[test]
     fn duplicate_preview_cannot_replace_the_original_evidence() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         let action = ui.begin_thread_deletion("thread".into()).pop().unwrap();

@@ -466,6 +466,10 @@ pub struct ToolObservation {
     pub view_revision: u64,
     pub nodes: Vec<UiNode>,
 }
+/// A pending clipboard action is the only strong owner of its retention pin.
+#[derive(Clone, Debug, Default)]
+pub struct ClipboardPastePin(Arc<()>);
+
 #[derive(Clone, Debug)]
 pub enum UiAction {
     ExternalObserved {
@@ -755,6 +759,7 @@ pub enum UiAction {
         source_hash: String,
     },
     PasteImage {
+        pin: ClipboardPastePin,
         draft_id: String,
         revision: u64,
         thread_id: Option<String>,
@@ -1185,8 +1190,11 @@ pub enum UiUpdate {
         thread_id: Option<String>,
         text: String,
     },
-    ClipboardPasteFailed {
+    ClipboardPasteSettled {
+        pin: ClipboardPastePin,
         draft_id: String,
+        revision: u64,
+        attachment: Option<UiAttachment>,
     },
     ClipboardAttachment {
         draft_id: String,
@@ -1745,7 +1753,6 @@ pub struct UiState {
     diagnostics: Option<crate::diagnostics::Diagnostics>,
     bell: bell::Bell,
     autosave: autosave::Autosave,
-    clipboard_pastes: BTreeMap<String, usize>,
     batching_updates: bool,
     retention_pending: bool,
     #[cfg(test)]
@@ -1955,7 +1962,6 @@ impl UiState {
             queue_notifications: VecDeque::new(),
             next_model_request: 0,
             autosave: Default::default(),
-            clipboard_pastes: BTreeMap::new(),
             view_cache_clock: 0,
             batching_updates: false,
             retention_pending: false,
@@ -3676,13 +3682,26 @@ impl UiState {
                         .promote_status_notice(history_interaction::NoticeKind::Info);
                 }
             }
-            UiUpdate::ClipboardPasteFailed { draft_id } => self.finish_clipboard_paste(&draft_id),
+            UiUpdate::ClipboardPasteSettled {
+                pin,
+                draft_id,
+                revision,
+                attachment,
+            } => {
+                drop(pin);
+                if let Some(attachment) = attachment {
+                    self.apply_inner(UiUpdate::ClipboardAttachment {
+                        draft_id,
+                        revision,
+                        attachment,
+                    });
+                }
+            }
             UiUpdate::ClipboardAttachment {
                 draft_id,
                 revision,
                 attachment,
             } => {
-                self.finish_clipboard_paste(&draft_id);
                 let attachment_id = attachment.id.clone();
                 let limit = self.config.limits.draft_bytes as usize;
                 let accepted =
@@ -3969,19 +3988,7 @@ impl UiState {
         }
     }
 
-    fn finish_clipboard_paste(&mut self, draft_id: &str) {
-        if let Some(count) = self.clipboard_pastes.get_mut(draft_id) {
-            *count -= 1;
-            if *count == 0 {
-                self.clipboard_pastes.remove(draft_id);
-            }
-        }
-    }
     pub fn action_rejected(&mut self, action: &UiAction) {
-        if let UiAction::PasteImage { draft_id, .. } = action {
-            self.finish_clipboard_paste(draft_id);
-            self.trim_bodies();
-        }
         let navigation = match action {
             UiAction::LoadNodeWindow {
                 thread_id,
@@ -4087,8 +4094,7 @@ impl UiState {
                     ),
                 )),
             );
-            if matches!(action.as_ref(), UiAction::PasteImage { .. })
-                || matches!(action.as_ref(), UiAction::ManagementIntent { action, .. } if matches!(action.as_ref(), UiAction::IndexPreview { .. }))
+            if matches!(action.as_ref(), UiAction::ManagementIntent { action, .. } if matches!(action.as_ref(), UiAction::IndexPreview { .. }))
             {
                 self.action_rejected(action);
             } else if matches!(action.as_ref(), UiAction::ManagementIntent { .. }) {
@@ -5317,17 +5323,16 @@ cursor: None,
             "/reasoning" => self.toggle_reasoning(argument),
             "/image" | "/paste-image" => {
                 let view = self.view();
+                let pin = ClipboardPastePin::default();
                 let action = UiAction::PasteImage {
+                    pin: pin.clone(),
                     draft_id: view.draft.draft_id.clone(),
                     revision: view.draft.revision,
-                    thread_id: view
-                        .thread_id
-                        .clone()
-                        .or_else(|| view.draft.edit.as_ref().map(|edit| edit.thread_id.clone())),
+                    thread_id: view.thread_id.clone().or_else(|| view.draft.edit.as_ref().map(|edit| edit.thread_id.clone())),
                     position: view.draft.cursor,
                 };
-                let draft_id = view.draft.draft_id.clone();
-                *self.clipboard_pastes.entry(draft_id).or_default() += 1;
+                let view = self.active_view_mut();
+                view.clipboard_pins.push((view.draft.draft_id.clone(), Arc::downgrade(&pin.0)));
                 vec![action]
             }
             "/copy" => {
@@ -6242,15 +6247,7 @@ cursor: None,
         let working = self.retained_working_node_ids();
         let active_retained = retained_body_bytes(self.view(), &working);
         let mut retained = active_retained;
-        let mut pinned: usize = self
-            .clipboard_pastes
-            .keys()
-            .map(|id| {
-                id.capacity()
-                    + std::mem::size_of::<(String, usize)>()
-                    + 4 * std::mem::size_of::<usize>()
-            })
-            .sum();
+        let mut pinned: usize = 0;
         for (key, view) in &mut self.views {
             view.retain_source_ids();
             let weight = view
@@ -6259,7 +6256,10 @@ cursor: None,
                 .saturating_add(self.autosave.cache_bytes(key));
             if key == &self.active {
                 pinned = pinned.saturating_add(weight.saturating_sub(active_retained));
-            } else if self.clipboard_pastes.contains_key(&view.draft.draft_id)
+            } else if view
+                .clipboard_pins
+                .iter()
+                .any(|(draft, _)| draft == &view.draft.draft_id)
                 || view.selecting_agents.is_some()
                 || view.pending.values().any(|pending| {
                     matches!(

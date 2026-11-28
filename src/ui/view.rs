@@ -35,6 +35,7 @@ pub struct ThreadView {
     pub draft: DraftSnapshot,
     pub generation: u64,
     pub(super) cache_touch: u64,
+    pub(super) clipboard_pins: Vec<(String, std::sync::Weak<()>)>,
     nodes: Vec<UiNode>,
     pub(super) provisional_nodes: BTreeSet<String>,
     // At most one saved correspondence per retained provisional node.
@@ -367,6 +368,7 @@ impl ThreadView {
             draft: DraftSnapshot::default(),
             generation: 0,
             cache_touch: 0,
+            clipboard_pins: Vec::new(),
             nodes: Vec::new(),
             provisional_nodes: BTreeSet::new(),
             committed_nodes: BTreeMap::new(),
@@ -1781,6 +1783,11 @@ impl ThreadView {
 
 impl ThreadView {
     pub(super) fn retain_source_ids(&mut self) {
+        self.clipboard_pins
+            .retain(|(_, pin)| pin.upgrade().is_some());
+        if self.clipboard_pins.is_empty() {
+            self.clipboard_pins = Vec::new();
+        }
         let ids = self
             .nodes
             .iter()
@@ -1911,6 +1918,12 @@ impl ThreadView {
         ];
         let mut bytes = size_of::<(String, Self)>()
             + 4 * size_of::<usize>()
+            + self.clipboard_pins.capacity() * size_of::<(String, std::sync::Weak<()>)>()
+            + self
+                .clipboard_pins
+                .iter()
+                .map(|(id, _)| id.capacity() + 2 * size_of::<usize>())
+                .sum::<usize>()
             + self.cwd.capacity()
             + strings
                 .into_iter()

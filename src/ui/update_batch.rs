@@ -27,7 +27,7 @@ impl UiUpdate {
             | Self::RewindResult { .. }
             | Self::SavedMessage { .. }
             | Self::ClipboardAttachment { .. }
-            | Self::ClipboardPasteFailed { .. } => true,
+            | Self::ClipboardPasteSettled { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
             Self::ManagementDetailFailure { .. }
             | Self::WatchDetails { .. }

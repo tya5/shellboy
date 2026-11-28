@@ -388,10 +388,11 @@ enum BackgroundResult {
     },
     Image {
         ticket: u64,
+        pin: crate::ui::ClipboardPastePin,
         draft_id: String,
         revision: u64,
         position: usize,
-        error_reported: bool,
+        submission: Option<CommandSubmission>,
         result: Result<UiAttachment, ApiError>,
     },
     Copied {
@@ -457,6 +458,38 @@ async fn command_outcome<T>(
         )
         .await;
     }
+}
+async fn settle_paste(
+    updates: &BufferedUpdates,
+    submission: Option<CommandSubmission>,
+    pin: crate::ui::ClipboardPastePin,
+    draft_id: String,
+    revision: u64,
+    result: Result<UiAttachment, ApiError>,
+) {
+    if submission.is_none()
+        && let Err(error) = &result
+    {
+        update(
+            updates,
+            UiUpdate::DraftStatus {
+                draft_id: draft_id.clone(),
+                text: error.to_string(),
+            },
+        )
+        .await;
+    }
+    command_outcome(updates, submission, &result).await;
+    update(
+        updates,
+        UiUpdate::ClipboardPasteSettled {
+            pin,
+            draft_id,
+            revision,
+            attachment: result.ok(),
+        },
+    )
+    .await;
 }
 fn management_outcome(result: &Result<Value, ApiError>) -> Result<(), ApiError> {
     match result {
@@ -1284,9 +1317,12 @@ async fn run_client(
                 #[cfg(test)] stream_metrics::FRONTEND_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if compose_disconnected.load(Ordering::Acquire) && !matches!(action, UiAction::ReconnectCompose | UiAction::Quit | UiAction::ForceQuit | UiAction::WaitForShutdown) {
                     let text = i18n::local!(language, "接続が切れました。/reconnect または /quit を使用してください", "Disconnected. Use /reconnect or /quit");
-                    match &action {
+                    match action {
+                        UiAction::PasteImage { pin, draft_id, revision, .. } => {
+                            settle_paste(&updates, submission, pin, draft_id, revision, Err(ApiError::new(ErrorCode::IoFailed, text))).await;
+                        }
                         UiAction::Send { draft_id, revision, .. } | UiAction::SendEdited { draft_id, revision, .. } => {
-                            update(&updates, UiUpdate::Receipt { draft_id: draft_id.clone(), revision: *revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(text.into()) }).await;
+                            update(&updates, UiUpdate::Receipt { draft_id: draft_id.clone(), revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(text.into()) }).await;
                         }
                         UiAction::SaveDraft { thread_id, .. } => {
                             update(&updates, UiUpdate::StorageFailed { thread_id: thread_id.clone(), message: text.into() }).await;
@@ -2635,32 +2671,13 @@ async fn run_client(
                         images.decision(draft_id, attachment_id, accepted);
                     }
                     UiAction::PasteImage {
-                        draft_id,
-                        revision,
-                        position,
-                        thread_id,
+                        pin, draft_id, revision, position, thread_id,
                     } => {
                         let Ok(permit) = clipboard_slots.clone().try_acquire_owned() else {
-                            command_outcome::<()>(
-                                &updates,
-                                submission,
-                                &Err(ApiError::new(
-                                    ErrorCode::InvalidState,
-                                    "画像の準備中です。完了後に再操作してください",
-                                )),
-                            )
-                            .await;
-                            if !has_submission {
-                                update(
-                                    &updates,
-                                    UiUpdate::DraftStatus {
-                                        draft_id: draft_id.clone(),
-                                        text: i18n::local!(language, "画像の準備中です。完了後に再操作してください", "Preparing an image. Wait for completion, then try again").into(),
-                                    },
-                                )
-                                .await;
-                            }
-                            update(&updates, UiUpdate::ClipboardPasteFailed { draft_id }).await;
+                            settle_paste(&updates, submission, pin, draft_id, revision, Err(ApiError::new(
+                                ErrorCode::InvalidState,
+                                i18n::local!(language, "画像の準備中です。完了後に再操作してください", "Preparing an image. Wait for completion, then try again"),
+                            ))).await;
                             continue;
                         };
                         update(
@@ -2678,7 +2695,6 @@ async fn run_client(
                         let timeout = config.io.file_prepare_timeout_ms;
                         let cancel = cancel.child_token();
                         let sender = background_tx.clone();
-                        let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result = async {
                                 let pixels = clipboard.capture(timeout, cancel).await?;
@@ -2686,15 +2702,15 @@ async fn run_client(
                                 draft_images::upload(&native_history::Owner { data_dir: &data_dir, instance: &instance }, &draft_id, png).await
                             }
                             .await.map_err(|error| image_acquisition_error(error, language));
-                            command_outcome(&outcomes, submission, &result).await;
                             {
                                 let _ = sender
                                     .send(BackgroundResult::Image {
                                         ticket,
+                                        pin,
                                         draft_id,
                                         revision,
                                         position,
-                                        error_reported: has_submission,
+                                        submission,
                                         result,
                                     })
                                     .await;
@@ -3242,12 +3258,7 @@ async fn run_client(
                     }
                 },
                 Some(BackgroundResult::Image {
-                    ticket,
-                    draft_id,
-                    revision,
-                    position,
-                    error_reported,
-                    result,
+                    ticket, pin, draft_id, revision, position, submission, mut result,
                 }) => {
                     if let Err(error) = &result && compose_transport_error(error) {
                         compose_disconnected.store(true, Ordering::Release);
@@ -3256,32 +3267,18 @@ async fn run_client(
                         }
                         status(&updates, None, compose_disconnected_message(error)).await;
                     }
-                    let Some(threadless) = images.accept_image(ticket) else {
-                        if let Ok(attachment) = result { images.reject(draft_id.clone(), attachment.id); }
-                        update(&updates, UiUpdate::ClipboardPasteFailed { draft_id }).await;
-                        continue;
-                    };
-                    match result {
-                    Ok(mut attachment) => {
-                        attachment.position = Some(position);
-                        if threadless { images.insert(draft_id.clone(), revision, attachment.id.clone()); }
-                        update(
-                            &updates,
-                            UiUpdate::ClipboardAttachment {
-                                draft_id,
-                                revision,
-                                attachment,
-                            },
-                        )
-                        .await;
-                    }
-                    Err(error) => {
-                        if !error_reported {
-                            update(&updates, UiUpdate::DraftStatus { draft_id: draft_id.clone(), text: error.to_string() }).await;
+                    match (images.accept_image(ticket), &mut result) {
+                        (Some(threadless), Ok(attachment)) => {
+                            attachment.position = Some(position);
+                            if threadless { images.insert(draft_id.clone(), revision, attachment.id.clone()); }
                         }
-                        update(&updates, UiUpdate::ClipboardPasteFailed { draft_id }).await;
+                        (None, Ok(attachment)) => {
+                            images.reject(draft_id.clone(), attachment.id.clone());
+                            result = Err(ApiError::new(ErrorCode::TargetUnavailable, "Clipboard image target is no longer available"));
+                        }
+                        (_, Err(_)) => {}
                     }
-                    }
+                    settle_paste(&updates, submission, pin, draft_id, revision, result).await;
                     images.prune_owners();
                 },
                 Some(BackgroundResult::Copied {
