@@ -192,6 +192,7 @@ mod tests {
                 ..Default::default()
             },
             "fixture",
+            "fixture.0",
         )
         .unwrap();
         let counts = page.activity_counts.unwrap();

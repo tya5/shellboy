@@ -1745,6 +1745,8 @@ async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batche
             }),
             anchor: crate::ui::ViewAnchor::default(),
             follow_tail: true,
+            expected_source_message: None,
+            expected_thread_revision: None,
         };
         let Err(refused) = store
             .execute(

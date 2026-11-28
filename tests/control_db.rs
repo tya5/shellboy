@@ -2179,9 +2179,7 @@ async fn normal_receipt_saturation_preserves_bounded_run_and_shell_stop_admissio
             .execute(
                 request_in(
                     &store,
-                    Command::RunStop(shellboy::protocol::RunStopTarget::Run {
-                        run_id: run_id.clone()
-                    })
+                    Command::RunStop(shellboy::protocol::RunStopTarget::exact(run_id.clone()))
                 ),
                 None
             )

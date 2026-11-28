@@ -770,30 +770,27 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
             })))
             .unwrap();
     }
-    crate::test_watchdog::watchdog(
-        "ordinary wait admission fills",
-        async {
-            loop {
-                drain(&incoming);
-                let count: i64 = control
-                    .store
-                    .database
-                    .call(|db| {
-                        Ok(db.query_row(
-                            "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
-                            [],
-                            |row| row.get(0),
-                        )?)
-                    })
-                    .await
-                    .unwrap();
-                if count == 2 && slots.available_permits() == 0 {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    crate::test_watchdog::watchdog("ordinary wait admission fills", async {
+        loop {
+            drain(&incoming);
+            let count: i64 = control
+                .store
+                .database
+                .call(|db| {
+                    Ok(db.query_row(
+                        "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
+                        [],
+                        |row| row.get(0),
+                    )?)
+                })
+                .await
+                .unwrap();
+            if count == 2 && slots.available_permits() == 0 {
+                break;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
     .await
     .unwrap();
     let instance = control.store.instance_id.clone();
@@ -856,30 +853,27 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
             thread_id: "thread".into(),
         })
         .unwrap();
-    crate::test_watchdog::watchdog(
-        "priority Thread stop settles",
-        async {
-            loop {
-                drain(&incoming);
-                let state: String = control
-                    .store
-                    .database
-                    .call(|db| {
-                        Ok(db.query_row(
-                            "SELECT state FROM run WHERE id='target-run'",
-                            [],
-                            |row| row.get(0),
-                        )?)
-                    })
-                    .await
-                    .unwrap();
-                if state == "stopped" {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    crate::test_watchdog::watchdog("priority Thread stop settles", async {
+        loop {
+            drain(&incoming);
+            let state: String = control
+                .store
+                .database
+                .call(|db| {
+                    Ok(
+                        db.query_row("SELECT state FROM run WHERE id='target-run'", [], |row| {
+                            row.get(0)
+                        })?,
+                    )
+                })
+                .await
+                .unwrap();
+            if state == "stopped" {
+                break;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
     .await
     .unwrap();
     assert_eq!(
@@ -1371,9 +1365,10 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
     // A real RunStop completion emits canonical Changed. No history reload
     // is requested after it; the already-exited shell remains terminal.
     let response = control
-        .request(super::selected_owner(&control).operation(Command::RunStop(
-            crate::protocol::RunStopTarget::exact("target-run".into()),
-        )))
+        .request(crate::protocol::Request::new(
+            control.store.operation_epoch.mint(),
+            Command::RunStop(crate::protocol::RunStopTarget::exact("target-run".into())),
+        ))
         .await;
     assert!(response.ok, "{response:?}");
     crate::test_watchdog::watchdog(
@@ -2032,7 +2027,10 @@ async fn slow_usage_trigger_and_scope_follow_existing_owner_request_workers_with
     for command in commands {
         let response = crate::usage_totals::with_test_elapsed(
             std::time::Duration::from_millis(100),
-            control.request(super::selected_owner(&control).operation(command)),
+            control.request(crate::protocol::Request::new(
+                control.store.operation_epoch.mint(),
+                command,
+            )),
         )
         .await;
         assert!(response.ok, "{response:?}");

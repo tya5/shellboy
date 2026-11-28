@@ -1404,7 +1404,11 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
     let retried = f
         .control
         .request(Request::new(
-            format!("{}:{}", f.control.store.operation_epoch.current(), uuid::Uuid::new_v4()),
+            format!(
+                "{}:{}",
+                f.control.store.operation_epoch.current(),
+                uuid::Uuid::new_v4()
+            ),
             Command::RunRetry(shellboy::protocol::RunRetryArgs::exact(
                 f.accepted.run_id.clone().unwrap(),
             )),

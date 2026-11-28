@@ -205,16 +205,30 @@ async fn management_request(
     cancel: CancellationToken,
 ) -> Result<Value, ApiError> {
     let is_read_projection = !command.requires_receipt();
-    let request = owner.operation(command);
-    let is_wait = matches!(request.command, Command::Wait(_));
-    let operation = request.operation_id.clone();
-    let mut dispatch = std::pin::pin!(owner.dispatch(request));
+    let is_wait = matches!(command, Command::Wait(_));
+    let operation = if is_wait {
+        tokio::select! { biased;
+            _ = cancel.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
+            id = owner.mint_operation() => match id {
+                Ok(id) => Some(id),
+                Err(error) => return Ok(management::native_failure(error)),
+            },
+        }
+    } else {
+        None
+    };
+    let mut dispatch = std::pin::pin!(crate::ipc::call_selected_operation(
+        owner.data_dir,
+        owner.instance,
+        command,
+        operation.clone()
+    ));
     let mut cancel_error = None;
     let response = tokio::select! { biased;
         _ = cancel.cancelled(), if is_read_projection => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
         response = &mut dispatch => response,
         _ = cancel.cancelled(), if is_wait => {
-            let signal = owner.call::<Value>(Command::OperationCancel(crate::protocol::OperationTarget { operation_id: operation }));
+            let signal = owner.call::<Value>(Command::OperationCancel(crate::protocol::OperationTarget { operation_id: operation.expect("Wait has a selected operation ID") }));
             tokio::pin!(signal);
             tokio::select! { biased;
                 response = &mut dispatch => response,
@@ -699,7 +713,7 @@ pub(crate) const COMMAND_CAPACITY: usize = 32;
 /// Run the terminal client against the already handshaken owner instance.
 pub async fn run_attached(
     loaded: crate::config::LoadedConfig,
-    instance: String,
+    welcome: crate::ipc::Welcome,
     cwd: PathBuf,
     actions: impl Into<crate::ui::actions::ActionReceiver>,
     updates: SyncSender<UiUpdate>,
@@ -717,7 +731,7 @@ pub async fn run_attached(
         cwd,
         context,
         Arc::new(loaded.config),
-        instance,
+        welcome.instance_id,
         failures,
         std::future::pending(),
         Arc::new(ClipboardAdapter::new()?),
@@ -1416,16 +1430,19 @@ async fn run_client(
                         model,
                         effort,
                     } => {
+                        let operation_id = match selected.mint_operation().await {
+                            Ok(id) => id,
+                            Err(error) => {
+                                update(&updates, UiUpdate::Receipt { draft_id, revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(error.to_string()) }).await;
+                                continue;
+                            }
+                        };
                         let diagnostics = diagnostics.clone();
                         let trace = MessageSendTrace {
                             stage: MessageSendStage::Queued,
                             draft_id: draft_id.clone(),
                             revision,
-                            operation_id: format!(
-                                "{}:{}",
-                                event_instance,
-                                uuid::Uuid::new_v4()
-                            ),
+                            operation_id,
                             message_id: None,
                         };
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, thread_id.as_deref(), None);
@@ -2008,16 +2025,19 @@ async fn run_client(
                         model,
                         effort,
                     } => {
+                        let operation_id = match selected.mint_operation().await {
+                            Ok(id) => id,
+                            Err(error) => {
+                                update(&updates, UiUpdate::Receipt { draft_id, revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(error.to_string()) }).await;
+                                continue;
+                            }
+                        };
                         let diagnostics = diagnostics.clone();
                         let trace = MessageSendTrace {
                             stage: MessageSendStage::Queued,
                             draft_id: draft_id.clone(),
                             revision,
-                            operation_id: format!(
-                                "{}:{}",
-                                event_instance,
-                                uuid::Uuid::new_v4()
-                            ),
+                            operation_id,
                             message_id: None,
                         };
                         trace_send(&diagnostics, &trace, MessageSendStage::Queued, Some(source_thread_id.as_str()), None);
@@ -4010,7 +4030,6 @@ async fn save_draft(
     follow_tail: bool,
 ) -> Result<(), ApiError> {
     let expected_source = draft.restored_source.take();
-    let operation = format!("{}:{}", owner.instance, uuid::Uuid::new_v4());
     compose_call::<crate::protocol::Accepted>(
         owner,
         Command::DraftSave(crate::protocol::DraftSaveArgs {
@@ -4023,7 +4042,7 @@ async fn save_draft(
             anchor,
             follow_tail,
         }),
-        Some(operation),
+        None,
     )
     .await
     .map(|_| ())

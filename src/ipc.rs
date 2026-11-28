@@ -614,6 +614,21 @@ async fn connect_with_capability(
     .await
 }
 
+pub(crate) async fn mint_selected_operation(
+    data_dir: &Path,
+    instance: &str,
+) -> Result<String, ApiError> {
+    let endpoint = read_endpoint(data_dir).await?;
+    if endpoint.instance_id != instance {
+        return Err(endpoint_mismatch());
+    }
+    let mut stream = open_transport(&endpoint, true)
+        .await?
+        .ok_or_else(|| io_error(std::io::ErrorKind::NotFound.into()))?;
+    let welcome = exchange_hello(&mut stream, &endpoint).await?;
+    Ok(crate::control::mint_operation_id(&welcome.operation_epoch))
+}
+
 pub(crate) async fn probe_selected(data_dir: &Path) -> Result<Option<Welcome>, ApiError> {
     let Some(endpoint) = read_endpoint_if_present(data_dir).await? else {
         return Ok(None);

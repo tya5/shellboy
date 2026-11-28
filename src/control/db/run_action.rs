@@ -182,15 +182,25 @@ mod tests {
     async fn retry_requires_exact_recovery_generation_and_uses_existing_quiet_wake() {
         crate::test_watchdog::watchdog("guarded Run mutation and cleanup", async {
             let (_root, store) = fixture().await;
-            let first = execute(&store, "fixture.0:retry".into(), expected(), RunAction::Retry)
-                .await
-                .unwrap();
+            let first = execute(
+                &store,
+                "fixture.0:retry".into(),
+                expected(),
+                RunAction::Retry,
+            )
+            .await
+            .unwrap();
             assert_eq!(first.quiet_wake_threads, ["t"]);
             assert!(first.stop_runs.is_empty());
             assert_ne!(state(&store).await.1, "recovery_wait");
-            let replay = execute(&store, "fixture.0:retry".into(), expected(), RunAction::Retry)
-                .await
-                .unwrap();
+            let replay = execute(
+                &store,
+                "fixture.0:retry".into(),
+                expected(),
+                RunAction::Retry,
+            )
+            .await
+            .unwrap();
             no_effects(&replay);
             let mut current = expected();
             current.turn_generation = Some(5);

@@ -673,7 +673,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     let (updates_send, updates_receive) = std::sync::mpsc::sync_channel(128);
     let bridge = runtime.spawn(shellboy::frontend::run_attached(
         loaded,
-        welcome.instance_id,
+        welcome,
         cwd,
         actions_receive,
         updates_send,

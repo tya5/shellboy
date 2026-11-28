@@ -1530,6 +1530,7 @@ mod tests {
                     thread_ids: vec![],
                     timeout_ms: 600_000,
                     include_text,
+                    include_output: false,
                     include_reasoning_activity: false,
                 })
             };

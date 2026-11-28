@@ -244,11 +244,23 @@ pub(super) async fn cancel(
     target: DraftRecoveryTarget,
     ids: Vec<String>,
 ) {
-    let operation = owner.operation(Command::MessageCancel(MessageCancelArgs {
-        message_ids: ids,
-    }));
-    let notification_id = operation.operation_id.clone();
-    let result = owner.dispatch(operation).await.and_then(|response| {
+    let reply = crate::ipc::call_selected_operation(
+        owner.data_dir,
+        owner.instance,
+        Command::MessageCancel(MessageCancelArgs { message_ids: ids }),
+        None,
+    )
+    .await;
+    let notification_id = match &reply {
+        Ok(response) => Some(response.operation_id.clone()),
+        Err(error) => error
+            .details
+            .as_ref()
+            .and_then(|details| details.get("operation_id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    };
+    let result = reply.and_then(|response| {
         if response.ok {
             serde_json::from_value::<MessageCancelResult>(response.result.unwrap_or(Value::Null))
                 .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Invalid cancellation reply"))
@@ -273,7 +285,7 @@ pub(super) async fn cancel(
                         UiLanguage::Ja => format!("取消できません: {error}"),
                         UiLanguage::En => format!("Cancellation failed: {error}"),
                     },
-                    notification_id: Some(notification_id),
+                    notification_id,
                 },
             )
             .await;
@@ -347,7 +359,7 @@ pub(super) async fn cancel(
             target,
             draft: (restorable && newly_cancelled > 0).then(|| Box::new(combined)),
             message,
-            notification_id: Some(notification_id),
+            notification_id,
         },
     )
     .await;

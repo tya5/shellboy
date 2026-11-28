@@ -1802,7 +1802,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         presentation::{BlockKind, PresentationKind},
         protocol::*,
     };
-    use std::{sync::Arc, time::Duration};
+    use std::sync::Arc;
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config, "").unwrap();
@@ -2390,8 +2390,8 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
             if let Some(operation_id) = pending {
                 break operation_id;
             }
-        },
-    )
+        }
+    })
     .await
     .unwrap();
     send.send(UiAction::CancelWait).await.unwrap();

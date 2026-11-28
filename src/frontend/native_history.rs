@@ -3,7 +3,7 @@ use crate::protocol::{
     ApiError, Command, ErrorCode, HistoryBody, HistoryDisplayOutline, HistoryDisplayPage,
     HistoryDisplayPosition, HistoryDisplayRange, HistoryDisplayRead, HistoryDisplaySelection,
     HistoryReadArgs, HistorySnippet, HistoryWindow, HistoryWindowArgs, HistoryWindowObservation,
-    MAX_BODY_BYTES, Request, Response,
+    MAX_BODY_BYTES,
 };
 use std::path::Path;
 
@@ -18,24 +18,8 @@ pub(crate) struct Owner<'a> {
 }
 
 impl Owner<'_> {
-    pub(super) fn operation(&self, command: Command) -> Request {
-        Request::new(
-            format!("{}:{}", self.instance, uuid::Uuid::new_v4()),
-            command,
-        )
-    }
-
-    pub(super) async fn dispatch(
-        &self,
-        request: Request,
-    ) -> Result<Response<serde_json::Value>, ApiError> {
-        crate::ipc::call_selected_operation(
-            self.data_dir,
-            self.instance,
-            request.command,
-            Some(request.operation_id),
-        )
-        .await
+    pub(super) async fn mint_operation(&self) -> Result<String, ApiError> {
+        crate::ipc::mint_selected_operation(self.data_dir, self.instance).await
     }
 
     pub(crate) async fn call<T: serde::de::DeserializeOwned>(

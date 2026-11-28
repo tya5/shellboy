@@ -935,7 +935,7 @@ mod response_node_tests {
             count: MAX_LIST_LIMIT,
             capped: true,
         };
-        let counts = snapshot(&db, &args, "fixture")
+        let counts = snapshot(&db, &args, "fixture", "fixture.0")
             .unwrap()
             .activity_counts
             .unwrap();
@@ -949,7 +949,7 @@ mod response_node_tests {
             count: MAX_LIST_LIMIT,
             capped: false,
         };
-        let counts = snapshot(&db, &args, "fixture")
+        let counts = snapshot(&db, &args, "fixture", "fixture.0")
             .unwrap()
             .activity_counts
             .unwrap();
@@ -976,7 +976,7 @@ mod response_node_tests {
             limit: 1,
             ..Default::default()
         };
-        let first = snapshot(&db, &args, "fixture").unwrap();
+        let first = snapshot(&db, &args, "fixture", "fixture.0").unwrap();
         assert_eq!(first.page.items[0].id, "newer");
         let cursor = Some(first.page.next_cursor.unwrap());
         let next = snapshot(
@@ -986,6 +986,7 @@ mod response_node_tests {
                 ..args.clone()
             },
             "fixture",
+            "fixture.0",
         )
         .unwrap();
         assert_eq!(next.page.items[0].id, "new");
@@ -996,7 +997,9 @@ mod response_node_tests {
             ..args
         };
         assert_eq!(
-            snapshot(&db, &changed, "fixture").unwrap_err().code,
+            snapshot(&db, &changed, "fixture", "fixture.0")
+                .unwrap_err()
+                .code,
             ErrorCode::CursorExpired
         );
     }
