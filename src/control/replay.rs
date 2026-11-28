@@ -5,7 +5,7 @@ use crate::{
     protocol::{ApiError, ErrorCode},
     storage::StorageError,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
@@ -544,20 +544,23 @@ impl ReplayCache {
             settings_reuses: state.settings_reuses,
         }
     }
-    // A failed commit can recycle both ordinals and a path revision. Drop
-    // the tentative entry on the DB lane before another load can observe it.
-    pub(super) fn discard_uncommitted(&self, thread: &str) {
-        let mut state = self.state.lock().expect("replay cache poisoned");
-        if let Some(entry) = state.entries.remove(thread) {
-            state.retained = state.retained.saturating_sub(entry.bytes);
-            state.order.retain(|id| id != thread);
-            state.compact_metadata();
-        }
+    /// Assemble inside the snapshot and publish reuse only after it commits.
+    pub fn load_and_commit(
+        &self,
+        tx: Transaction<'_>,
+        thread: &str,
+    ) -> Result<ReplayLease, StorageError> {
+        let (lease, entry) = self.prepare(&tx, thread)?;
+        tx.commit()?;
+        self.publish(thread, entry);
+        Ok(lease)
     }
 
-    /// Call in the DB snapshot transaction. History fences the validated prefix;
-    /// only rows beyond it are read while its revision and conversion match.
     pub fn load(&self, db: &Connection, thread: &str) -> Result<ReplayLease, StorageError> {
+        self.load_and_commit(db.unchecked_transaction()?, thread)
+    }
+
+    fn prepare(&self, db: &Connection, thread: &str) -> Result<(ReplayLease, Entry), StorageError> {
         let context=db.query_row("SELECT replay_path_revision,profile_revision,profile_id,model_id,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|row|Ok(Context{thread:thread.into(),path_revision:row.get(0)?,profile_revision:row.get(1)?,profile:row.get(2)?,model:row.get(3)?,epoch:row.get(4)?,adapter_version:ADAPTER_VERSION,tool_schema_version:TOOL_SCHEMA_VERSION}))?;
         let mut work = AssemblyBudget(MAX_RESPONSE_BYTES);
         work.charge(context.bytes())?;
@@ -669,24 +672,29 @@ impl ReplayCache {
             context.bytes() + frames.capacity() * size_of::<Arc<Frame>>() + thread.len() * 2;
         let bytes = overhead.saturating_add(frames.iter().map(|frame| frame.bytes).sum::<usize>());
         drop(stamps);
+        let lease = ReplayLease::new(&frames, Some(&work))?;
+        Ok((
+            lease,
+            Entry {
+                context,
+                frames,
+                last_ordinal,
+                bytes,
+                overhead,
+            },
+        ))
+    }
+
+    fn publish(&self, thread: &str, entry: Entry) {
+        let mut state = self.state.lock().expect("replay cache poisoned");
         if let Some(previous) = state.entries.remove(thread) {
             state.retained = state.retained.saturating_sub(previous.bytes);
             state.order.retain(|id| id != thread);
         }
-        let lease = ReplayLease::new(&frames, Some(&work))?;
-        if self.budget > 0 && bytes <= self.budget {
-            state.retained = state.retained.saturating_add(bytes);
+        if self.budget > 0 && entry.bytes <= self.budget {
+            state.retained = state.retained.saturating_add(entry.bytes);
             state.order.push_back(thread.into());
-            state.entries.insert(
-                thread.into(),
-                Entry {
-                    context,
-                    frames,
-                    last_ordinal,
-                    bytes,
-                    overhead,
-                },
-            );
+            state.entries.insert(thread.into(), entry);
             while state.retained_bytes() > self.budget {
                 let Some(old) = state.order.pop_front() else {
                     break;
@@ -699,7 +707,6 @@ impl ReplayCache {
             }
         }
         state.compact_metadata();
-        Ok(lease)
     }
 }
 pub(crate) fn convert(value: Value, epoch: i64) -> Vec<Value> {
