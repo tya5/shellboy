@@ -988,12 +988,12 @@ INSERT INTO schema_migration(version,name) VALUES(72,'0072_attachment_omission')
 PRAGMA user_version=72;
 -- Exact accepted Turn input, in delivery order (rowid breaks timestamp ties).
 CREATE INDEX receipt_accepted_turn ON receipt(turn_id,created_at) WHERE state='accepted';
-INSERT INTO schema_migration(version,name) VALUES(73,'next_accepted_receipt_turn');
+INSERT INTO schema_migration(version,name) VALUES(73,'0073_accepted_receipt_turn');
 PRAGMA user_version=73;
 -- Equality on all three keys permits a reverse walk of the implicit rowid tie-breaker.
 CREATE INDEX attempts_latest_adopted ON model_attempt(thread_id,profile_id,model_id)
  WHERE kind='conversation' AND state='completed' AND json_extract(input_manifest_json,'$.adoption.outcome')='adopted';
-INSERT INTO schema_migration(version,name) VALUES(74,'next_latest_adopted_attempt');
+INSERT INTO schema_migration(version,name) VALUES(74,'0074_latest_adopted_attempt');
 PRAGMA user_version=74;
 -- History owns the replay-prefix revision. Tail append preserves the prefix;
 -- every edit invalidates it in the same transaction, including shared nodes.
@@ -1056,7 +1056,7 @@ BEGIN
  UPDATE thread SET replay_path_revision=replay_path_revision+1
  WHERE id IN (SELECT thread_id FROM thread_path WHERE node_id IN (OLD.message_node_id,NEW.message_node_id));
 END;
-INSERT INTO schema_migration(version,name) VALUES(75,'next_replay_path_revision');
+INSERT INTO schema_migration(version,name) VALUES(75,'0075_replay_path_revision');
 PRAGMA user_version=75;
 CREATE TABLE history_reasoning_keep(
  thread_id TEXT NOT NULL REFERENCES thread(id), epoch INTEGER NOT NULL, node_id TEXT NOT NULL,
@@ -1069,7 +1069,7 @@ INSERT OR IGNORE INTO history_reasoning_keep(thread_id,epoch,node_id)
  AND json_type(CASE WHEN json_valid(m.value) THEN m.value ELSE '{}' END,'$.epoch')='integer'
  AND json_extract(CASE WHEN json_valid(m.value) THEN m.value ELSE '{}' END,'$.epoch')=t.reasoning_epoch;
 DELETE FROM app_meta WHERE key GLOB 'reasoning.keep.*';
-INSERT INTO schema_migration(version,name) VALUES(76,'next_history_reasoning_keep');
+INSERT INTO schema_migration(version,name) VALUES(76,'0076_history_reasoning_keep');
 PRAGMA user_version=76;
 -- The replacement owner maintains the creation key alongside membership.
 ALTER TABLE thread_replacement ADD COLUMN replacement_created_at TEXT;
@@ -1079,5 +1079,5 @@ CREATE TRIGGER thread_replacement_created_insert AFTER INSERT ON thread_replacem
  UPDATE thread_replacement SET replacement_created_at=(SELECT created_at FROM replacement WHERE id=NEW.replacement_id)
  WHERE thread_id=NEW.thread_id AND replacement_id=NEW.replacement_id;
 END;
-INSERT INTO schema_migration(version,name) VALUES(77,'next_ordered_thread_replacement');
+INSERT INTO schema_migration(version,name) VALUES(77,'0077_ordered_thread_replacement');
 PRAGMA user_version=77;

@@ -385,27 +385,27 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 73,
-        sql: include_str!("../../migrations/next_accepted_receipt_turn.sql"),
+        sql: include_str!("../../migrations/0073_accepted_receipt_turn.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 74,
-        sql: include_str!("../../migrations/next_latest_adopted_attempt.sql"),
+        sql: include_str!("../../migrations/0074_latest_adopted_attempt.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 75,
-        sql: include_str!("../../migrations/next_replay_path_revision.sql"),
+        sql: include_str!("../../migrations/0075_replay_path_revision.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
         version: 76,
-        sql: include_str!("../../migrations/next_history_reasoning_keep.sql"),
+        sql: include_str!("../../migrations/0076_history_reasoning_keep.sql"),
         foreign_keys: Some(Impact::Tables(&["history_reasoning_keep"])),
     },
     Migration {
         version: 77,
-        sql: include_str!("../../migrations/next_ordered_thread_replacement.sql"),
+        sql: include_str!("../../migrations/0077_ordered_thread_replacement.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
 ];

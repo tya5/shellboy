@@ -6,5 +6,5 @@ CREATE TRIGGER thread_replacement_created_insert AFTER INSERT ON thread_replacem
  UPDATE thread_replacement SET replacement_created_at=(SELECT created_at FROM replacement WHERE id=NEW.replacement_id)
  WHERE thread_id=NEW.thread_id AND replacement_id=NEW.replacement_id;
 END;
-INSERT INTO schema_migration(version,name) VALUES(77,'next_ordered_thread_replacement');
+INSERT INTO schema_migration(version,name) VALUES(77,'0077_ordered_thread_replacement');
 PRAGMA user_version=77;

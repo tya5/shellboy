@@ -59,5 +59,5 @@ BEGIN
  UPDATE thread SET replay_path_revision=replay_path_revision+1
  WHERE id IN (SELECT thread_id FROM thread_path WHERE node_id IN (OLD.message_node_id,NEW.message_node_id));
 END;
-INSERT INTO schema_migration(version,name) VALUES(75,'next_replay_path_revision');
+INSERT INTO schema_migration(version,name) VALUES(75,'0075_replay_path_revision');
 PRAGMA user_version=75;

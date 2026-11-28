@@ -9,5 +9,5 @@ INSERT OR IGNORE INTO history_reasoning_keep(thread_id,epoch,node_id)
  AND json_type(CASE WHEN json_valid(m.value) THEN m.value ELSE '{}' END,'$.epoch')='integer'
  AND json_extract(CASE WHEN json_valid(m.value) THEN m.value ELSE '{}' END,'$.epoch')=t.reasoning_epoch;
 DELETE FROM app_meta WHERE key GLOB 'reasoning.keep.*';
-INSERT INTO schema_migration(version,name) VALUES(76,'next_history_reasoning_keep');
+INSERT INTO schema_migration(version,name) VALUES(76,'0076_history_reasoning_keep');
 PRAGMA user_version=76;
