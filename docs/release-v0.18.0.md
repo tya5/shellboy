@@ -17,10 +17,9 @@
 
 - **More room for the conversation:** Empty work and held-input sections no longer take up conversation rows. Markdown rendering retries for omitted content stay within the loaded history window (#432).
 
-<!-- #311: Add only the Core changes that land on main before the tag. -->
-
 ## Guides and reliability
 
+- **Fixed attachment slots (#469):** The first adopted send fixes the attachment's slot. An unavailable file becomes a permanent omission on adoption. A change observed on a later adopted send also replaces the bytes in that slot with a permanent omission. Failed attempts do not fix or retire a slot. Attach the file again to send its current contents under a new attachment ID.
 - **Shell starts account for available descriptors (#450 item 3):** On Unix, admission checks live descriptor use, the cost of starting the shell, and headroom for owner IPC. A refused start reports `descriptor_budget` without launching the command or retrying it automatically. This applies to Run shells, services, and scheduled work.
 - **Instruction snapshots (#450 item 1):** Consecutive Turns reuse an unchanged instruction snapshot. History collection can reclaim snapshots no Turn references.
 - **Recover receipt capacity without a restart (#450 item 2):** When receipt space remains exhausted after reclamation and eligible current-epoch receipts exist, the owner can rotate its operation epoch. The triggering request is refused without being applied; older completed receipts become eligible for ordinary retention. Saved receipts keep replaying their saved outcomes while retained, and unknown old-epoch IDs cannot execute.
@@ -29,13 +28,10 @@
 - **More reliable regression tests (#442, #447, #454):** Tests check saved outcomes and public reads instead of private bookkeeping, and use controlled observations for deadline and shutdown cases. These are test changes, not new runtime behavior.
 - **Guides and examples (#438, #439, #456):** The README includes a terminal demo. The guides explain when to delegate with an Ask, how to reuse project procedures and existing skills or MCP servers, and how to recover an uncertain result over IPC.
 
-<!-- #465: Add only the Core changes that land on main before the tag. -->
-<!-- #469: Add only the Core changes that land on main before the tag. -->
-
 ## Upgrade notes
 
-- **Backup and compatibility:** Back up the entire data directory before starting the new owner. Upgrade all components that connect to the owner at the same time. Database migrations 66 through 71 cover Run stop diagnostics, open reply duties, schedule notices, instruction-snapshot retention, artifact scheme indexing, and optional service names.
-- **Protocol: 36 -> 50.** Versions 37-40 cover delivery observation, the exact Background result, the operation receipt result, and the shell output tail. Versions 41-44 remove immediate delivery and add Run stop diagnostics, shell foreground placement, and the open ask-back state. Versions 45-47 update shell list fields, schedule notices, and artifact content reads. Version 48 adds artifact scheme filtering; 49 adds named local service endpoints; 50 adds the operation epoch.
+- **Backup and compatibility:** Back up the entire data directory before starting the new owner. Upgrade all components that connect to the owner at the same time. Database migrations 66 through 72 cover Run stop diagnostics, open reply duties, schedule notices, instruction-snapshot retention, artifact scheme indexing, optional service names, and saved attachment omissions.
+- **Protocol: 36 -> 51.** Versions 37-40 cover delivery observation, the exact Background result, the operation receipt result, and the shell output tail. Versions 41-44 remove immediate delivery and add Run stop diagnostics, shell foreground placement, and the open ask-back state. Versions 45-47 update shell list fields, schedule notices, and artifact content reads. Version 48 adds artifact scheme filtering; 49 adds named local service endpoints; 50 adds the operation epoch; 51 adds the owning Thread's title to scheme-filtered artifact lists (#471).
 
 - **Operation IDs (protocol 50):** When minting operation IDs over RPC, read `operation_epoch` from `Welcome` or `status`, rather than using `instance_id`. A refusal with `storage_limit`, reason `operation_epoch_rolled`, and `request_may_have_been_applied: false` means the request did not execute. A new attempt needs a fresh ID in the new epoch; reusing the refused ID returns `operation_expired`. This does not authorize retrying an uncertain outcome.
 
@@ -69,6 +65,7 @@
 
 ### ガイドと信頼性
 
+- **添付の送信位置を固定 (#469):** 応答が初めて採用された送信で添付の位置が決まります。ファイルを利用できなかった要求や、以後にファイルの変更を観測した要求の応答が採用されると、その位置では以後、実データの代わりに省略情報を送ります。失敗した試行は位置の確定や省略に影響しません。現在の内容を送るには、新しい添付IDで添付し直してください。
 - **シェル開始時のファイル記述子確認 (#450 item 3):** Unixでは使用中の記述子、起動に必要な数、IPC用の余裕を確認します。不足時は `descriptor_budget` を返し、起動や自動再試行はしません。Runのシェル、サービス、スケジュールに適用します。
 - **指示スナップショット (#450 item 1):** 指示が変わらない連続したTurnはスナップショットを再利用します。どのTurnからも参照されなくなったものは履歴の回収対象になります。
 - **再起動せずに操作レシートの容量を回復 (#450 item 2):** 回収しても容量が不足し、現エポックに回収可能な完了済みレシートがある場合、オーナーは操作エポックを更新できます。きっかけとなった要求は適用せずに拒否し、以前のエポックの完了済みレシートは通常の保持ルールに従います。保存中の結果は引き続き再照会でき、以前の未登録IDは実行できません。
@@ -78,7 +75,7 @@
 
 ### アップグレード
 
-- **バックアップと互換性:** 起動前にデータディレクトリ全体をバックアップし、接続するすべてのコンポーネントを同時に更新してください。DBマイグレーション66〜71は、Run停止診断、開いた返信義務、スケジュール通知、指示スナップショットの保持、成果物のURIスキーム索引、サービス名に対応します。
-- **プロトコル: 36 → 50。** 37〜40は配達の観測、バックグラウンド移動の結果、操作レシート、シェル出力の末尾読み取りに対応します。41〜44では即時配達を廃止し、停止診断、シェルの配置、聞き返し中の返信義務を追加します。45〜47はシェル一覧、スケジュール通知、成果物の読み取りを更新し、48は成果物のスキーム検索、49は名前付きサービスの接続先、50は操作エポックを追加します。
+- **バックアップと互換性:** 起動前にデータディレクトリ全体をバックアップし、接続するすべてのコンポーネントを同時に更新してください。DBマイグレーション66〜72は、Run停止診断、開いた返信義務、スケジュール通知、指示スナップショットの保持、成果物のURIスキーム索引、サービス名、添付の省略情報の保存に対応します。
+- **プロトコル: 36 → 51。** 37〜40は配達の観測、バックグラウンド移動の結果、操作レシート、シェル出力の末尾読み取りに対応します。41〜44では即時配達を廃止し、停止診断、シェルの配置、聞き返し中の返信義務を追加します。45〜47はシェル一覧、スケジュール通知、成果物の読み取りを更新し、48は成果物のスキーム検索、49は名前付きサービスの接続先、50は操作エポックを追加します。51では、スキームで絞り込んだ成果物一覧に所有Threadのタイトルを追加します (#471)。
 - **操作ID (プロトコル50):** RPCでIDを生成する場合、`instance_id` ではなく `Welcome` または `status` の `operation_epoch` を使います。`storage_limit` の理由が `operation_epoch_rolled` で `request_may_have_been_applied: false` のとき、その要求は未実行です。試し直す場合は新しいエポックの新しいIDを使います。拒否されたIDを再使用すると `operation_expired` になります。結果が不明な操作も同様に試し直せるという意味ではありません。
 - **その他の変更:** 返信義務には `pending` に加えて `awaiting_own_ask` があります。`command_characters` の省略を0と解釈しないでください。`schedule.set` には説明と `notify` のいずれか、または両方を指定できます。
