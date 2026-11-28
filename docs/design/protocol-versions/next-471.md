@@ -1,0 +1,14 @@
+# Protocol next (#471)
+
+## Scheme artifact pages include owner title
+
+Scheme-filtered `artifact.list` rows add optional `owner_title`, the title of the
+owning Thread. Core projects it in the same bounded indexed owner query that
+selects scheme membership, visibility, ordering and latest artifact metadata.
+The global and Thread-scoped scheme forms both include it. Ordinary
+Thread-scoped listing without a scheme omits the field.
+
+Clients no longer need a separate Thread-header read to label scheme rows; this
+prevents deletion or other owner changes between page selection and a title
+lookup from invalidating an otherwise valid page. Scheme cursor, filtering,
+archive exclusion, candidate bound and ordering are unchanged.
