@@ -1,8 +1,10 @@
 //! Owner-independent product documentation.
+mod index;
 mod sources;
 use crate::digest::sha256_hex as hash;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Subcommand;
+pub use index::execute as index;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -10,6 +12,19 @@ pub use sources::{DocsConfig, Registration, SourceCommand, configured_response};
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum DocsCommand {
+    /// Explicitly send documentation material to semantic retrieval.
+    Index {
+        #[arg(
+            long = "source",
+            conflicts_with = "all",
+            required_unless_present = "all"
+        )]
+        sources: Vec<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Manage registered guide folders in config.toml.
     Source {
         #[command(subcommand)]
