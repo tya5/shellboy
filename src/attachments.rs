@@ -612,17 +612,22 @@ impl AttachmentService {
                 .into_iter()
                 .map(|(path, (evidence, _))| (path.to_owned(), evidence))
                 .collect();
-            self.workers
-                .execute_owned(move || {
-                    Ok(admitted
-                        .into_iter()
-                        .map(|(path, evidence)| {
-                            let encoded = evidence.encode(&path, &cache);
-                            (path, encoded)
-                        })
-                        .collect::<BTreeMap<_, _>>())
-                })
-                .await?
+            // A timed-out OS read may still own the attachment worker permit.
+            // Encoding needs no filesystem access and must not wait behind it.
+            let encode = self.control_workers.execute_owned(move || {
+                Ok(admitted
+                    .into_iter()
+                    .map(|(path, evidence)| {
+                        let encoded = evidence.encode(&path, &cache);
+                        (path, encoded)
+                    })
+                    .collect::<BTreeMap<_, _>>())
+            });
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(cancelled()),
+                result = encode => result?,
+            }
         };
         if cancel.is_cancelled() {
             return Err(cancelled());
