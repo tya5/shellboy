@@ -349,9 +349,17 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
         .expect("version"),
     );
     let version = version.as_str();
+    if let DocsCommand::Get { id, sources, .. } = &command {
+        selected(rows, sources)?;
+        let name = id.split('/').next().unwrap_or_default();
+        if !included(sources, name) {
+            return Err("target_unavailable: Guide is outside the selected sources".into());
+        }
+    }
     match command {
         DocsCommand::Get {
             id,
+            sources,
             section,
             limit_bytes,
             cursor,
@@ -367,7 +375,8 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
                 return Err("target_unavailable: Unknown docs guide".into());
             }
             let scope = hash(
-                serde_json::to_vec(&json!(["get", id, section, revision(&path)])).expect("scope"),
+                serde_json::to_vec(&json!(["get", id, section, revision(&path), sources]))
+                    .expect("scope"),
             );
             let offset = read_cursor(cursor.as_deref(), version, &scope)?;
             if offset as u64 > kind.len() {
@@ -795,6 +804,23 @@ mod tests {
         assert_eq!(
             list["result"]["items"][0]["summary"],
             "Look up frobnicate here."
+        );
+        let get = |sources| {
+            run(DocsCommand::Get {
+                id: "recipes/demo/SKILL.md".into(),
+                sources,
+                section: None,
+                limit_bytes: 64,
+                cursor: None,
+            })
+        };
+        assert_eq!(
+            get(vec!["shellboy".into()])["error"]["code"],
+            "target_unavailable"
+        );
+        assert_eq!(
+            get(vec!["shellboy".into(), "recipes".into()])["result"]["text"],
+            "# Literal heading\n\nLook up frobnicate here.\n"
         );
         let query = run(DocsCommand::Search {
             parent: None,

@@ -36,7 +36,7 @@ shellboy docs search --query 'background' --parent shellboy/work
 shellboy docs search --source shellboy --source team --query 'recovery'
 ```
 
-The bundled catalogue is English. Search uses case-insensitive literal substring matching, not query translation. Japanese literals present in quoted UI captions can also match without word spacing. Repeat `--source` to select multiple branches with list or search; it intersects `--parent`. Search scans bundled guides first, then registered folders in config order and files in path order. Scores describe individual hits, not a globally ranked list. A bounded page may contain no hits and still have a cursor. A search excerpt is not the full document. Use its `id` with `docs get` to read the source. Explicitly select `rag search` for semantic search or searches spanning guides and other documents.
+The bundled catalogue is English. Search uses case-insensitive literal substring matching, not query translation. Japanese literals present in quoted UI captions can also match without word spacing. Repeat `--source` to select multiple branches with list, search or get; it intersects `--parent` or the requested ID. Search scans bundled guides first, then registered folders in config order and files in path order. Scores describe individual hits, not a globally ranked list. A bounded page may contain no hits and still have a cursor. A search excerpt is not the full document. Use its `id` with `docs get` to read the source. Explicitly select `rag search` for semantic search or searches spanning guides and other documents.
 
 ## Semantic indexing
 
