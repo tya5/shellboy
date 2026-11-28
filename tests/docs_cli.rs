@@ -121,23 +121,22 @@ fn protocol_recovery_hint_finds_real_offline_shell_examples() {
     );
     let value = serde_json::to_value(response).unwrap();
     let hint = value["error"]["hint"].as_str().unwrap();
-    let query = hint
-        .split("--query '")
-        .nth(1)
-        .unwrap()
-        .split('\'')
-        .next()
-        .unwrap();
-    let (success, found) = call(root.path(), &["docs", "search", "--query", query]);
+    let command = hint.split_once("shellboy docs ").unwrap().1;
+    let words = ["docs"]
+        .into_iter()
+        .chain(command.split_ascii_whitespace())
+        .collect::<Vec<_>>();
+    std::fs::write(root.path().join("missing.toml"), "[broken\n").unwrap();
+    let (success, found) = call(root.path(), &words);
     assert!(success && found["ok"] == true, "{found}");
+    assert_eq!(found["result"]["id"], "shellboy/shell");
     assert!(
-        found["result"]["items"]
-            .as_array()
+        found["result"]["text"]
+            .as_str()
             .unwrap()
-            .iter()
-            .any(|item| item["id"] == "shellboy/shell"),
-        "Recovery hint must find executable shell examples: {found}"
+            .contains("shell background --execution")
     );
+    std::fs::remove_file(root.path().join("missing.toml")).unwrap();
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
 }
 
