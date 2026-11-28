@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     cli::ThreadCreateOptions,
     config_setup::ConfigCommand,
-    docs::DocsRead,
+    docs::{DOCS_LIST_MAX, DOCS_READ_MAX_BYTES, DOCS_SEARCH_MAX, DocsRead},
     exec_client::ExecOptions,
     rag::{IndexMode, IngestKind, RagCommand, RagOptions, SearchMode, SourceCommand},
 };
@@ -30,7 +30,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             vec![docparent(), docsources(), limit("50"), cursor()],
             |form, _| {
                 let limit = form.number("limit")?;
-                bounded(limit, 1, 200, "件数", "Count", form.language)?;
+                bounded(limit, 1, DOCS_LIST_MAX, "件数", "Count", form.language)?;
                 Ok(ClientOperation::Docs(DocsRead::List {
                     parent: form.optional("doc_parent")?,
                     sources: lines(form, "doc_sources")?,
@@ -52,7 +52,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                 bounded(
                     limit_bytes,
                     1,
-                    65536,
+                    DOCS_READ_MAX_BYTES,
                     "取得byte数",
                     "Read size in bytes",
                     form.language,
@@ -76,7 +76,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             ],
             |form, _| {
                 let limit = form.number("limit")?;
-                bounded(limit, 1, 100, "件数", "Count", form.language)?;
+                bounded(limit, 1, DOCS_SEARCH_MAX, "件数", "Count", form.language)?;
                 Ok(ClientOperation::Docs(DocsRead::Search {
                     query: required(form, "query")?,
                     parent: form.optional("doc_parent")?,

@@ -12,8 +12,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-const LIST_WORK: usize = 200;
-const SEARCH_WORK: usize = 100;
+pub(crate) const DOCS_LIST_MAX: usize = 200;
+pub(crate) const DOCS_SEARCH_MAX: usize = 100;
 const TEXT_WORK: usize = 65536;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -382,7 +382,7 @@ fn list_directory(
     }
     let mut items = Vec::new();
     let source = id.split('/').next().expect("source ID");
-    for name in names.iter().skip(offset).take(LIST_WORK) {
+    for name in names.iter().skip(offset).take(DOCS_LIST_MAX) {
         offset += 1;
         let Ok(Some((rel, path, directory))) = child(root, tail, name) else {
             continue;
@@ -543,7 +543,7 @@ fn browse(command: DocsRead, rows: &[Registration]) -> Result<Value, String> {
             limit: count,
             cursor,
         } => {
-            limit(count, LIST_WORK)?;
+            limit(count, DOCS_LIST_MAX)?;
             selected(rows, &sources)?;
             let scope = hash(serde_json::to_vec(&json!(["list", parent, sources])).expect("scope"));
             let mut items = Vec::new();
@@ -572,22 +572,33 @@ fn browse(command: DocsRead, rows: &[Registration]) -> Result<Value, String> {
                 if included(&sources, "shellboy") {
                     items = bundled_list(None)?;
                 }
-                for row in rows.iter().filter(|r| included(&sources, &r.name)) {
-                    items.push(branch(
-                        &row.name,
-                        canonical_root(&row.path).is_ok_and(|p| fs::read_dir(p).is_ok()),
-                        version,
-                    ));
-                }
             }
+            let registered = rows
+                .iter()
+                .filter(|r| parent.is_none() && included(&sources, &r.name));
             let offset = read_cursor(cursor.as_deref(), version, &scope)?;
-            if offset > items.len() {
+            let total = items.len() + registered.clone().count();
+            if offset > total {
                 return Err("cursor_expired: Offset is outside list".into());
             }
-            let end = (offset + count).min(items.len());
+            let end = (offset + count).min(total);
+            let registered_skip = offset.saturating_sub(items.len());
+            let mut page: Vec<_> = items.into_iter().skip(offset).take(count).collect();
+            page.extend(
+                registered
+                    .skip(registered_skip)
+                    .take(count - page.len())
+                    .map(|row| {
+                        branch(
+                            &row.name,
+                            canonical_root(&row.path).is_ok_and(|p| fs::read_dir(p).is_ok()),
+                            version,
+                        )
+                    }),
+            );
             Ok(paginated(
-                json!({"version":version,"items":items[offset..end]}),
-                (end < items.len()).then(|| next_cursor(version, &scope, end)),
+                json!({"version":version,"items":page}),
+                (end < total).then(|| next_cursor(version, &scope, end)),
             ))
         }
         DocsRead::Search {
@@ -721,7 +732,7 @@ struct SearchMark {
     bundled: usize,
     source: usize,
     walk: FolderWalk,
-    file: Option<(String, usize, String)>,
+    file: Option<(String, usize, usize, String)>,
 }
 
 fn hit(
@@ -731,15 +742,25 @@ fn hit(
     text: &str,
     needle: &str,
     offset: usize,
+    scanned: usize,
     version: &str,
 ) -> Option<Value> {
     let lowered = text.to_lowercase();
-    let at = lowered.find(needle)?;
+    let overlap = text.floor_char_boundary(scanned.saturating_sub(offset).min(text.len()));
+    let boundary = text[..overlap]
+        .chars()
+        .flat_map(char::to_lowercase)
+        .map(char::len_utf8)
+        .sum::<usize>();
+    let mut matches = lowered
+        .match_indices(needle)
+        .filter(|(at, _)| at + needle.len() > boundary);
+    let (at, _) = matches.next()?;
     let (start, end) = original_span(text, at, at + needle.len());
     let before = text.ceil_char_boundary(start.saturating_sub(96));
     let after = text.floor_char_boundary((end + 192).min(text.len()));
     Some(
-        json!({"id":id,"title":title,"parent_id":parent,"version":version,"excerpt":&text[before..after],"spans":[{"start":offset+start,"end":offset+end}],"score":lowered.matches(needle).count()}),
+        json!({"id":id,"title":title,"parent_id":parent,"version":version,"excerpt":&text[before..after],"spans":[{"start":offset+start,"end":offset+end}],"score":1 + matches.count()}),
     )
 }
 fn search(
@@ -751,7 +772,7 @@ fn search(
     rows: &[Registration],
     version: &str,
 ) -> Result<Value, String> {
-    limit(count, SEARCH_WORK)?;
+    limit(count, DOCS_SEARCH_MAX)?;
     if query.trim().is_empty() || query.len() > 4096 {
         return Err("invalid_argument: Query must contain 1 to 4096 bytes".into());
     }
@@ -772,7 +793,7 @@ fn search(
         .as_deref()
         .and_then(|p| p.split_once('/'))
         .map_or("", |p| p.1);
-    let mut pos: SearchMark = decode_cursor(cursor.as_deref(), version, &scope, CURSOR_BYTES)?;
+    let mut pos: SearchMark = decode_cursor(cursor.as_deref(), version, &scope)?;
     let depth = if pos.walk.path == root_rel {
         Some(0)
     } else {
@@ -791,13 +812,13 @@ fn search(
             || pos
                 .file
                 .as_ref()
-                .is_some_and(|(name, _, _)| name.contains('/'))))
+                .is_some_and(|(name, _, _, _)| name.contains('/'))))
         || (pos.walk.levels.is_empty()
             && (!pos.walk.path.is_empty()
                 || pos
                     .file
                     .as_ref()
-                    .is_some_and(|(name, _, _)| name != root_rel)))
+                    .is_some_and(|(name, _, _, _)| name != root_rel)))
     {
         return Err("cursor_expired: Invalid search position".into());
     }
@@ -808,14 +829,28 @@ fn search(
     let bundled = &BUNDLED.docs;
     let mut bundled_hits: Vec<_> = bundled
         .iter()
-        .filter(|d| {
+        .enumerate()
+        .filter(|(_, d)| {
             included(&sources, "shellboy")
                 && !category(&d.id)
                 && parent
                     .as_ref()
                     .is_none_or(|p| d.id == *p || descendant(d, p, bundled))
         })
-        .filter_map(|d| hit(&d.id, &d.title, &d.parent_id, &d.text, &needle, 0, version))
+        .filter_map(|(index, d)| {
+            let mut found = hit(
+                &d.id,
+                &d.title,
+                &d.parent_id,
+                &d.text,
+                &needle,
+                0,
+                0,
+                version,
+            )?;
+            found["content_hash"] = json!(BUNDLED.hashes[index].get_or_init(|| hash(&d.text)));
+            Some(found)
+        })
         .collect();
     bundled_hits.sort_by(|a, b| {
         b["score"]
@@ -829,9 +864,10 @@ fn search(
     let bundled_count = bundled_hits.len();
     hits.extend(bundled_hits.into_iter().skip(pos.bundled).take(count));
     pos.bundled += hits.len();
+    let cursor_fits = |mark: &SearchMark| next_cursor(version, &scope, mark).len() <= CURSOR_BYTES;
     let mut dirs = BTreeMap::new();
     let mut current_root = None;
-    while pos.source < rows.len() && hits.len() < count && work < SEARCH_WORK {
+    while pos.source < rows.len() && hits.len() < count && work < DOCS_SEARCH_MAX {
         let row = &rows[pos.source];
         if !included(&sources, &row.name)
             || parent
@@ -860,7 +896,7 @@ fn search(
             }
         }
         let (_, root) = current_root.as_ref().expect("opened source root");
-        if let Some((name, offset, rev)) = pos.file.take() {
+        if let Some((name, offset, scanned, rev)) = pos.file.take() {
             work += 1;
             let rel = child_path(&pos.walk.path, &name);
             let observation = under(root, &rel).and_then(|path| {
@@ -871,14 +907,13 @@ fn search(
                 Ok(value) => value,
                 Err(reason) => {
                     unavailable.push(json!({"source":row.name,"path":rel,"reason":reason}));
-                    if pos.walk.levels.is_empty() {
-                        pos.source += 1;
-                    }
+                    pos.advance_source_if_idle();
                     continue;
                 }
             };
             if revision(&path) != rev
-                || offset as u64 > meta.len()
+                || offset > scanned
+                || scanned as u64 > meta.len()
                 || !meta.is_file()
                 || !rel.ends_with(".md")
             {
@@ -888,9 +923,7 @@ fn search(
                 Ok(value) => value,
                 Err(reason) => {
                     unavailable.push(json!({"source":row.name,"path":rel,"reason":reason}));
-                    if pos.walk.levels.is_empty() {
-                        pos.source += 1;
-                    }
+                    pos.advance_source_if_idle();
                     continue;
                 }
             };
@@ -901,38 +934,35 @@ fn search(
             } else {
                 basename.into()
             };
-            if let Some(h) = hit(&id, &title, dir, &text, &needle, offset, version) {
+            if let Some(h) = hit(&id, &title, dir, &text, &needle, offset, scanned, version) {
                 hits.push(h);
             }
             if more {
                 // Repeat only enough UTF-8 text to catch a match across chunks.
                 let overlap = text.ceil_char_boundary(text.len().saturating_sub(query.len() * 4));
-                pos.file = Some((name, offset + overlap, rev));
-                if next_cursor(version, &scope, &pos).len() > CURSOR_BYTES {
-                    pos.file = None;
-                    unavailable
-                        .push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
-                    if pos.walk.levels.is_empty() {
-                        pos.source += 1;
-                    }
+                if !pos.admit_file(
+                    (name, offset + overlap, offset + text.len(), rev),
+                    &cursor_fits,
+                ) {
+                    unavailable.push(long_path(&row.name, &rel));
                 }
-            } else if pos.walk.levels.is_empty() {
-                pos.source += 1;
+            } else {
+                pos.advance_source_if_idle();
             }
             continue;
         }
         work += 1;
         if pos.walk.levels.is_empty() {
             match under(root, root_rel) {
-                Ok(path) if path.is_dir() => pos.walk.enter(root_rel.into(), &path),
+                Ok(path) if path.is_dir() => {
+                    if !pos.admit_folder(root_rel, &path, &cursor_fits) {
+                        unavailable.push(long_path(&row.name, root_rel));
+                        continue;
+                    }
+                }
                 Ok(path) if path.is_file() && root_rel.ends_with(".md") => {
-                    pos.file = Some((root_rel.into(), 0, revision(&path)));
-                    if next_cursor(version, &scope, &pos).len() > CURSOR_BYTES {
-                        pos.file = None;
-                        unavailable.push(
-                            json!({"source":row.name,"path":root_rel,"reason":"path_too_long"}),
-                        );
-                        pos.source += 1;
+                    if !pos.admit_file((root_rel.into(), 0, 0, revision(&path)), &cursor_fits) {
+                        unavailable.push(long_path(&row.name, root_rel));
                     }
                     continue;
                 }
@@ -942,40 +972,22 @@ fn search(
                     continue;
                 }
             }
-            if !folder_cursor_fits(&mut pos, version, &scope) {
-                unavailable
-                    .push(json!({"source":row.name,"path":root_rel,"reason":"path_too_long"}));
-                pos.walk.leave();
-                pos.source += 1;
-                continue;
-            }
         }
         match pos.walk.step(root, &mut dirs)? {
             WalkStep::Directory(rel, path) => {
-                pos.walk.enter(rel.clone(), &path);
-                if !folder_cursor_fits(&mut pos, version, &scope) {
-                    pos.walk.leave();
-                    unavailable
-                        .push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
+                if !pos.admit_folder(&rel, &path, &cursor_fits) {
+                    unavailable.push(long_path(&row.name, &rel));
                 }
             }
             WalkStep::File(rel, path) => {
-                pos.file = Some((
-                    rel.rsplit('/').next().expect("guide filename").into(),
-                    0,
-                    revision(&path),
-                ));
-                if next_cursor(version, &scope, &pos).len() > CURSOR_BYTES {
-                    pos.file = None;
-                    unavailable
-                        .push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
+                let name = rel.rsplit('/').next().expect("guide filename");
+                if !pos.admit_file((name.into(), 0, 0, revision(&path)), &cursor_fits) {
+                    unavailable.push(long_path(&row.name, &rel));
                 }
             }
             WalkStep::Unavailable(path, reason) => {
                 unavailable.push(json!({"source":row.name,"path":path,"reason":reason}));
-                if pos.walk.levels.is_empty() {
-                    pos.source += 1;
-                }
+                pos.advance_source_if_idle();
             }
             WalkStep::Done => pos.source += 1,
             WalkStep::Advanced => {}
@@ -989,12 +1001,47 @@ fn search(
     ))
 }
 
-fn folder_cursor_fits(pos: &mut SearchMark, version: &str, scope: &str) -> bool {
-    // A directory accepted now must remain resumable after its last entry.
-    pos.walk.levels.last_mut().expect("entered folder").1 = FOLDER_WALK_MAX_ENTRIES;
-    let fits = next_cursor(version, scope, &*pos).len() <= CURSOR_BYTES;
-    pos.walk.levels.last_mut().expect("entered folder").1 = 0;
-    fits
+impl SearchMark {
+    fn admit_folder(&mut self, rel: &str, path: &Path, fits: &impl Fn(&Self) -> bool) -> bool {
+        self.walk.enter(rel.into(), path);
+        self.walk.levels.last_mut().expect("entered folder").1 = FOLDER_WALK_MAX_ENTRIES;
+        if fits(self) {
+            self.walk.levels.last_mut().expect("entered folder").1 = 0;
+            return true;
+        }
+        self.walk.leave();
+        self.advance_source_if_idle();
+        false
+    }
+
+    fn admit_file(
+        &mut self,
+        mut file: (String, usize, usize, String),
+        fits: &impl Fn(&Self) -> bool,
+    ) -> bool {
+        // Reserve the full integer widths at entry so a later chunk always fits.
+        let (offset, scanned) = (file.1, file.2);
+        (file.1, file.2) = (usize::MAX, usize::MAX);
+        self.file = Some(file);
+        if fits(self) {
+            let file = self.file.as_mut().expect("admitted file");
+            (file.1, file.2) = (offset, scanned);
+            return true;
+        }
+        self.file = None;
+        self.advance_source_if_idle();
+        false
+    }
+
+    fn advance_source_if_idle(&mut self) {
+        if self.walk.levels.is_empty() {
+            self.source += 1;
+        }
+    }
+}
+
+fn long_path(source: &str, path: &str) -> Value {
+    json!({"source":source,"path":path,"reason":"path_too_long"})
 }
 
 #[cfg(test)]
@@ -1033,6 +1080,89 @@ mod tests {
         let cursor = first["next_cursor"].as_str().unwrap();
         let second = search(Some(cursor.into()));
         assert_eq!(second["items"][0]["id"], format!("local/{relative}/b.md"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn search_refuses_an_oversized_file_marker_and_keeps_its_sibling() {
+        let root = tempfile::tempdir_in("/tmp").unwrap();
+        let path = root.path().canonicalize().unwrap();
+        let component = "\x01".repeat(26);
+        let relative = vec![component.as_str(); 26].join("/");
+        let deep = path.join(&relative);
+        fs::create_dir_all(&deep).unwrap();
+        let oversized = "\x01".repeat(246) + ".md";
+        fs::write(deep.join(&oversized), "cursor-witness").unwrap();
+        fs::write(deep.join("a.md"), "cursor-witness").unwrap();
+        let page = browse(
+            DocsRead::Search {
+                query: "cursor-witness".into(),
+                parent: Some("local".into()),
+                sources: vec!["local".into()],
+                limit: 1,
+                cursor: None,
+            },
+            &[Registration {
+                name: "local".into(),
+                path,
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            page["unavailable"],
+            json!([{"source":"local","path":format!("{relative}/{oversized}"),"reason":"path_too_long"}])
+        );
+        assert_eq!(page["items"][0]["id"], format!("local/{relative}/a.md"));
+    }
+
+    #[test]
+    fn search_overlap_yields_crossing_match_but_not_a_duplicate() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
+        let needle = "match-token";
+        let first = TEXT_WORK - needle.len() * 2;
+        let crossing = TEXT_WORK - 3;
+        let text =
+            "x".repeat(first) + needle + &"x".repeat(crossing - first - needle.len()) + needle;
+        fs::write(path.join("guide.md"), text).unwrap();
+        let rows = [Registration {
+            name: "local".into(),
+            path,
+        }];
+        let run = |cursor| {
+            browse(
+                DocsRead::Search {
+                    query: needle.into(),
+                    parent: Some("local/guide.md".into()),
+                    sources: vec!["local".into()],
+                    limit: 1,
+                    cursor,
+                },
+                &rows,
+            )
+            .unwrap()
+        };
+        let mut page = run(None);
+        let mut spans = Vec::new();
+        let mut seen = HashSet::new();
+        loop {
+            for hit in page["items"].as_array().unwrap() {
+                assert_eq!(hit["score"], 1);
+                spans.push(hit["spans"][0].clone());
+            }
+            let Some(cursor) = page["next_cursor"].as_str() else {
+                break;
+            };
+            assert!(seen.insert(cursor.to_owned()));
+            page = run(Some(cursor.into()));
+        }
+        assert_eq!(
+            spans,
+            [
+                json!({"start":first,"end":first+needle.len()}),
+                json!({"start":crossing,"end":crossing+needle.len()})
+            ]
+        );
     }
 
     #[test]
