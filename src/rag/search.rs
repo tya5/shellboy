@@ -288,39 +288,6 @@ pub(super) fn keyword_score(text: &str, query: &str) -> Option<f64> {
     let count = text.matches(&query).count();
     (count > 0).then_some(count as f64)
 }
-fn docs_keyword(query: &str) -> Vec<Hit> {
-    let mut hits = Vec::new();
-    for doc in crate::docs::documents() {
-        if let Some(score) = keyword_score(&doc.text, query) {
-            let reference = Reference {
-                version: 1,
-                store: "builtin-docs".into(),
-                kind: "docs".into(),
-                id: doc.id.clone(),
-                revision: hash(doc.text.as_bytes()),
-                hash: hash(doc.text.as_bytes()),
-                witness: None,
-            };
-            hits.push(Hit {
-                reference,
-                excerpt: excerpt(&doc.text),
-                title: doc.title,
-                kind: "guide".into(),
-                location: json!({"document_id":doc.id}),
-                provenance: json!({"parent_id":doc.parent_id,"source":"bundled_guide"}),
-                scopes: vec!["docs".into()],
-                thread_scopes: vec![],
-                score,
-                distance: None,
-                space: None,
-                method: "keyword".into(),
-            });
-        }
-    }
-    hits.sort_by(Hit::compare);
-    hits
-}
-
 fn material_provenance(row: &rusqlite::Row<'_>, error_column: usize) -> rusqlite::Result<Value> {
     let source: String = row.get(6)?;
     let state: String = row.get(7)?;
@@ -408,11 +375,7 @@ pub(super) async fn material_semantic(
     while let Some(row) = rows.next()? {
         let revision: String = row.get(1)?;
         let ordinal: i64 = row.get(0)?;
-        let unique = if source == "@docs" {
-            revision.clone()
-        } else {
-            format!("{revision}:{ordinal}")
-        };
+        let unique = format!("{revision}:{ordinal}");
         if !seen.insert(unique) {
             continue;
         }
@@ -502,11 +465,7 @@ fn preparation_next(
         "--db".into(),
         context.database.to_string_lossy().into_owned(),
     ]);
-    let selected = if scope == "docs" {
-        "docs"
-    } else {
-        source.expect("resolved source")
-    };
+    let selected = source.expect("resolved source");
     let mut steps = Vec::new();
     if preparation.reason == "store_not_initialized" {
         let mut init = prefix.clone();
@@ -536,9 +495,6 @@ fn preparation_next(
 fn preparation_reason(code: &str) -> Option<(&'static str, &'static str)> {
     match code {
         "rag_semantic_store_missing" => Some(("store_not_initialized", "db_not_found")),
-        "rag_semantic_guides_missing" => {
-            Some(("guide_catalogue_not_indexed", "index_incompatible"))
-        }
         "rag_semantic_profile_missing" => Some(("profile_not_indexed", "index_incompatible")),
         "rag_semantic_coverage_missing" => Some(("embeddings_incomplete", "index_incompatible")),
         "rag_semantic_history_missing" => {
@@ -561,9 +517,7 @@ fn diagnose_preparation(
         missing_documents: None,
         missing_chunks: None,
     };
-    let observation = if scope == "docs" {
-        super::builtin::preparation(context).ok().flatten()
-    } else if history_scope(scope).is_some() {
+    let observation = if history_scope(scope).is_some() {
         None
     } else {
         store::open(&context.database, false).ok().and_then(|s| {
@@ -661,12 +615,11 @@ pub(super) async fn search(
     let mut scopes = scopes.to_vec();
     let mut discovery_error = None;
     if scopes.is_empty() {
-        scopes.push("docs".into());
         if context.database.exists() {
             match store::open(&context.database, false) {
                 Ok(s) => {
                     let mut q =
-                        s.db.prepare("SELECT id FROM sources WHERE kind!='builtin' AND (kind!='derived' OR EXISTS(SELECT 1 FROM documents d WHERE d.source_id=sources.id AND d.active_revision IS NOT NULL)) ORDER BY id")?;
+                        s.db.prepare("SELECT id FROM sources WHERE (kind!='derived' OR EXISTS(SELECT 1 FROM documents d WHERE d.source_id=sources.id AND d.active_revision IS NOT NULL)) ORDER BY id")?;
                     for id in q.query_map([], |r| r.get::<_, String>(0))? {
                         scopes.push(format!("source:{}", id?));
                     }
@@ -711,24 +664,6 @@ pub(super) async fn search(
         let mut duplicate = false;
         let mut next_cursor = None;
         let result: Result<()> = async {
-            if scope == "docs" {
-                if mode != SearchMode::Semantic {
-                    lists.push(docs_keyword(query));
-                    keyword = "ok";
-                }
-                if mode != SearchMode::Keyword {
-                    semantic = "error";
-                    if breaker.paused() {
-                        return Err(err(
-                            "embedding_paused",
-                            "Provider failure paused semantic search; no request was sent",
-                        ));
-                    }
-                    lists.push(super::builtin::semantic(context, &mut query_embedding).await?);
-                    semantic = "ok";
-                }
-                return Ok(());
-            }
             if let Some(thread) = history_scope(scope) {
                 if thread.is_some_and(str::is_empty) {
                     return Err(err("scope_invalid", "history: requires a Thread ID"));
@@ -785,7 +720,7 @@ pub(super) async fn search(
             let source = scope.strip_prefix("source:").ok_or_else(|| {
                 err(
                     "scope_invalid",
-                    "Scope must be docs, history, history:THREAD, or source:ID",
+                    "Scope must be history, history:THREAD, or source:ID",
                 )
             })?;
             let s = store::open(&context.database, false)?;
@@ -925,28 +860,6 @@ pub(super) fn get(
         return Err(err("revision_unavailable", "Unsupported reference version"));
     }
     let (text, provenance) = match reference.kind.as_str() {
-        "docs" => {
-            if reference.store != "builtin-docs" {
-                return Err(err(
-                    "revision_unavailable",
-                    "Guide reference belongs to another store",
-                ));
-            }
-            let doc = crate::docs::documents()
-                .into_iter()
-                .find(|d| d.id == reference.id)
-                .ok_or_else(|| err("revision_unavailable", "Guide is unavailable"))?;
-            if hash(doc.text.as_bytes()) != reference.hash || reference.revision != reference.hash {
-                return Err(err(
-                    "revision_unavailable",
-                    "Guide revision changed with the installed binary",
-                ));
-            }
-            (
-                doc.text,
-                json!({"title":doc.title,"parent_id":doc.parent_id}),
-            )
-        }
         "material" => {
             let s = store::open(&context.database, false)?;
             if s.uuid != reference.store {
@@ -1008,7 +921,6 @@ mod preparation_tests {
             "History index endpoint/model identity is unverified",
         ] {
             let failure = err("index_incompatible", message);
-            assert!(diagnose_preparation(&context, "docs", None, &failure).is_none());
             assert!(diagnose_preparation(&context, "history", None, &failure).is_none());
             assert!(diagnose_preparation(&context, "source:any", Some("any"), &failure).is_none());
         }

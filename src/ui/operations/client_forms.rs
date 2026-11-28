@@ -863,7 +863,7 @@ mod tests {
         set(
             &mut search,
             "rag_scopes",
-            "docs\nhistory:thread\nsource:folder name",
+            "history\nhistory:thread\nsource:folder name",
         );
         set(&mut search, "search_mode", "hybrid");
         set(&mut search, "limit", "17");
@@ -871,7 +871,7 @@ mod tests {
             panic!()
         };
         assert!(
-            matches!(options.command,RagCommand::Search{scope,mode:SearchMode::Hybrid,limit:17, cursor: None,..}if scope==["docs","history:thread","source:folder name"])
+            matches!(options.command,RagCommand::Search{scope,mode:SearchMode::Hybrid,limit:17, cursor: None,..}if scope==["history","history:thread","source:folder name"])
         );
         let mut continuation = fixture(OpKind::RagSearch);
         set(&mut continuation, "query", "previous query");
