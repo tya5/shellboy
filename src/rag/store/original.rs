@@ -67,15 +67,19 @@ pub(in crate::rag) fn read(
         {
             return Err(unavailable());
         }
-        let candidate = root.join(relative);
-        if candidate.canonicalize().ok().as_ref() != Some(&candidate) {
-            return Err(unavailable());
+        if root.is_file() {
+            if root.file_name() != Some(relative.as_os_str()) {
+                return Err(unavailable());
+            }
+            root.to_owned()
+        } else {
+            root.join(relative)
         }
-        candidate
     } else {
         return Err(unavailable());
     };
-    let bytes = bounded_read(&path).map_err(|error| {
+    let file = open_original(&path).map_err(|_| unavailable())?;
+    let bytes = bounded_read_file(file).map_err(|error| {
         if error.code == "input_limit" {
             error
         } else {
@@ -83,11 +87,70 @@ pub(in crate::rag) fn read(
         }
     })?;
     let current = hash(&bytes);
-    let text = std::str::from_utf8(&bytes)
-        .map_err(|_| err("invalid_argument", "Original file is not UTF-8"))?;
-    let mut result = page(text, &format!("{reference}@{current}"), limit, cursor)?;
+    let mut result = original_page(&bytes, &format!("{reference}@{current}"), limit, cursor)?;
     result["ref"] = json!(reference);
     result["fingerprint"] = json!(current);
     result["matches_indexed"] = json!(observed == current);
     Ok(result)
+}
+
+#[cfg(unix)]
+fn open_original(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::ffi::OsStrExt,
+    };
+    use std::path::Component;
+    let mut parts = path.components().peekable();
+    if parts.next() != Some(Component::RootDir) {
+        return Err(std::io::ErrorKind::InvalidInput.into());
+    }
+    // Do not resolve any component through a symlink; each descent uses the opened parent.
+    let mut current = std::fs::File::open("/")?;
+    while let Some(Component::Normal(part)) = parts.next() {
+        let part = std::ffi::CString::new(part.as_bytes())?;
+        let mut flags = libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK;
+        if parts.peek().is_some() {
+            flags |= libc::O_DIRECTORY;
+        }
+        // The CString and parent descriptor live through the call; a successful fd is owned.
+        let fd = unsafe { libc::openat(current.as_raw_fd(), part.as_ptr(), flags) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        current = unsafe { std::fs::File::from_raw_fd(fd) };
+        if parts.peek().is_none() {
+            return Ok(current);
+        }
+    }
+    Err(std::io::ErrorKind::InvalidInput.into())
+}
+
+#[cfg(windows)]
+fn open_original(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::{ffi::OsStringExt, fs::OpenOptionsExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_OPEN_REPARSE_POINT, GetFinalPathNameByHandleW,
+    };
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let mut name = vec![0u16; 32768];
+    // Resolve the already open handle, not a second lookup of the supplied path.
+    let len = unsafe {
+        GetFinalPathNameByHandleW(
+            file.as_raw_handle(),
+            name.as_mut_ptr(),
+            name.len() as u32,
+            0,
+        )
+    } as usize;
+    if len == 0
+        || len >= name.len()
+        || Path::new(&std::ffi::OsString::from_wide(&name[..len])) != path
+    {
+        return Err(std::io::ErrorKind::PermissionDenied.into());
+    }
+    Ok(file)
 }

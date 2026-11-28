@@ -107,6 +107,25 @@ fn file_owner_read_observes_live_bytes_without_replacing_the_indexed_excerpt() {
 }
 
 #[test]
+fn directly_registered_file_reads_by_advertised_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("direct.md"), "direct fixture contents").unwrap();
+    call(root, &["init"], true);
+    call(
+        root,
+        &["source", "add", "direct.md", "--name", "notes"],
+        true,
+    );
+    call(root, &["index", "--source", "notes"], true);
+    let hits = search(root, "direct fixture");
+    let hit = &hits["result"]["items"][0];
+    let read = call(root, &["get", "--ref", hit["ref"].as_str().unwrap()], true);
+    assert_eq!(read["result"]["text"], "direct fixture contents");
+    assert_eq!(read["result"]["fingerprint"], hit["indexed_fingerprint"]);
+}
+
+#[test]
 fn literal_japanese_search_diff_sync_saved_revision_and_unregister_preserve_originals() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
@@ -357,10 +376,39 @@ async fn history_reader_works_with_live_and_stopped_owner_and_expires_replaced_d
     ];
     let live = call(root, &args, true);
     assert_eq!(live["result"]["items"][0]["ref"], "history:history-source");
-    assert_eq!(
-        live["result"]["items"][0]["owner_read"]["args"],
-        serde_json::json!(["history", "read", "--node", "history-source"])
+    let control = shellboy::control::Control::new(&owner, root.into());
+    control.start().await.unwrap();
+    let (send, receive) = tokio::sync::mpsc::channel(8);
+    let server = shellboy::ipc::LocalServer::bind(&owner, send)
+        .await
+        .unwrap();
+    let serving = tokio::spawn(control.clone().serve(receive));
+    let hit = &live["result"]["items"][0];
+    let advertised = hit["owner_read"]["args"].as_array().unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .current_dir(root)
+        .env_clear()
+        .args(advertised.iter().map(|arg| arg.as_str().unwrap()))
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
     );
+    let read: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        read["result"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("SHELLBOY_READ_ONLY_HISTORY_V1")
+    );
+    let fingerprint = read["result"]["fingerprint"].as_str().unwrap();
+    assert_eq!(hit["indexed_fingerprint"], fingerprint);
+    server.shutdown().await.unwrap();
+    serving.await.unwrap();
+    control.shutdown().await.unwrap();
     let reference = live["result"]["items"][0]["reference"].as_str().unwrap();
     assert_eq!(
         live["result"]["items"][0]["provenance"]["current_thread_paths"][0],

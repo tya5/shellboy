@@ -2,7 +2,7 @@
 use super::{BlockRanges, Connection, HOT_QUERY_INDEXES, Result, SOURCE_HASH_SCHEMA, err};
 
 pub(super) fn run(db: &Connection, version: i64) -> Result<()> {
-    if version == 6 {
+    if version == 7 {
         return Ok(());
     }
     let tx = db.unchecked_transaction()?;
@@ -55,8 +55,28 @@ pub(super) fn run(db: &Connection, version: i64) -> Result<()> {
         tx.execute_batch("INSERT OR IGNORE INTO source_chunk_hashes SELECT d.source_id,c.hash FROM chunks c JOIN revisions r ON r.id=c.revision_id JOIN documents d ON d.id=r.document_id;")?;
         tx.execute_batch(HOT_QUERY_INDEXES)?;
     }
-    tx.execute_batch(include_str!("next_retire_builtin_docs.sql"))?;
-    tx.pragma_update(None, "user_version", 6)?;
+    if version < 6 {
+        tx.execute_batch(include_str!("next_retire_builtin_docs.sql"))?;
+    }
+    tx.execute_batch("ALTER TABLE revisions ADD COLUMN reference TEXT NOT NULL DEFAULT ''; ALTER TABLE revisions ADD COLUMN reader_args TEXT NOT NULL DEFAULT '[]';")?;
+    {
+        let mut query = tx.prepare(
+            "SELECT r.id,d.source_id,d.key FROM revisions r JOIN documents d ON d.id=r.document_id",
+        )?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let source: String = row.get(1)?;
+            let key: String = row.get(2)?;
+            let reference = super::records::file_ref(&source, &key);
+            let args = serde_json::json!(["rag", "get", "--ref", reference]).to_string();
+            tx.execute(
+                "UPDATE revisions SET reference=?2,reader_args=?3 WHERE id=?1",
+                rusqlite::params![id, reference, args],
+            )?;
+        }
+    }
+    tx.pragma_update(None, "user_version", 7)?;
     tx.commit()?;
     Ok(())
 }

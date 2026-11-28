@@ -448,6 +448,37 @@ fn revision(path: &Path) -> String {
     };
     hash(format!("{}:{:?}", meta.len(), meta.modified().ok()))[..16].into()
 }
+fn readable_sections(head: &str, truncated: bool) -> Vec<Section> {
+    let mut headings = sections(head);
+    if truncated {
+        headings.retain(|section| section.end < head.len());
+    }
+    headings
+}
+
+fn attach_reader(hit: &mut Value, guide: &str, headings: &[Section], fingerprint: &str) {
+    let span = &hit["spans"][0];
+    let section = span["start"]
+        .as_u64()
+        .zip(span["end"].as_u64())
+        .and_then(|(start, end)| {
+            headings
+                .iter()
+                .rev()
+                .find(|section| section.start as u64 <= start && end <= section.end as u64)
+        });
+    let mut args = vec!["docs", "get", "--id", guide];
+    let reference = if let Some(section) = section {
+        args.extend(["--section", &section.id]);
+        format!("docs:{guide}#{}", section.id)
+    } else {
+        format!("docs:{guide}")
+    };
+    hit["ref"] = json!(reference);
+    hit["indexed_fingerprint"] = json!(fingerprint);
+    hit["owner_read"] = json!({"program":"shellboy", "args":args});
+}
+
 fn source_for<'a>(id: &str, rows: &'a [Registration]) -> Result<&'a Registration, String> {
     let name = id.split('/').next().unwrap_or_default();
     rows.iter()
@@ -495,8 +526,9 @@ fn browse(command: DocsRead, rows: &[Registration]) -> Result<Value, String> {
             if !kind.is_file() || !id.ends_with(".md") {
                 return Err("target_unavailable: Unknown docs guide".into());
             }
+            let fingerprint = revision(&path);
             let scope = hash(
-                serde_json::to_vec(&json!(["get", id, section, revision(&path), sources]))
+                serde_json::to_vec(&json!(["get", id, section, fingerprint, sources]))
                     .expect("scope"),
             );
             let offset = read_cursor(cursor.as_deref(), version, &scope)?;
@@ -504,10 +536,7 @@ fn browse(command: DocsRead, rows: &[Registration]) -> Result<Value, String> {
                 return Err("cursor_expired: File offset out of range".into());
             }
             let (head, truncated) = prefix(&path, 0, TEXT_WORK)?;
-            let mut headings = sections(&head);
-            if truncated {
-                headings.retain(|section| section.end < head.len());
-            }
+            let headings = readable_sections(&head, truncated);
             let (start, end) = match &section {
                 None => (
                     0,
@@ -532,7 +561,7 @@ fn browse(command: DocsRead, rows: &[Registration]) -> Result<Value, String> {
             let page_end = offset + text.len();
             let (title, _) = metadata(&head, id.rsplit('/').next().unwrap_or(&id));
             Ok(paginated(
-                json!({"id":id,"title":title,"version":version,"text":text,"start":offset,"end":page_end,"total_bytes":kind.len(),"section":section,"sections":headings,"links":[]}),
+                json!({"id":id,"title":title,"version":version,"text":text,"start":offset,"end":page_end,"total_bytes":kind.len(),"fingerprint":fingerprint,"section":section,"sections":headings,"links":[]}),
                 (page_end < end && page_end > offset)
                     .then(|| next_cursor(version, &scope, page_end)),
             ))
@@ -876,7 +905,10 @@ fn search(
             )
             .expect("valid initial position")
             .0?;
-            found["content_hash"] = json!(BUNDLED.hashes[index].get_or_init(|| hash(&d.text)));
+            let fingerprint = BUNDLED.hashes[index].get_or_init(|| hash(&d.text));
+            let headings = BUNDLED.sections[index].get_or_init(|| sections(&d.text));
+            attach_reader(&mut found, &d.id, headings, fingerprint);
+            found["content_hash"] = json!(fingerprint);
             Some(found)
         })
         .collect();
@@ -963,7 +995,18 @@ fn search(
                 basename.into()
             };
             let (found, matched_end) = hit(&id, &title, dir, &text, &needle, position, version)?;
-            if let Some(h) = found {
+            if let Some(mut h) = found {
+                let headings = if offset == 0 {
+                    readable_sections(&text, more)
+                } else if offset < TEXT_WORK {
+                    prefix(&path, 0, TEXT_WORK).map_or_else(
+                        |_| Vec::new(),
+                        |(head, more)| readable_sections(&head, more),
+                    )
+                } else {
+                    Vec::new()
+                };
+                attach_reader(&mut h, &id, &headings, &rev);
                 hits.push(h);
             }
             if more {

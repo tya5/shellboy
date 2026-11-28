@@ -2055,6 +2055,7 @@ mod tests {
     fn localized_original_worker_output_renders_without_changing_raw_content() {
         fn configure(ui: &mut UiState) {
             let body = HistoryBody {
+                fingerprint: None,
                 node_id: "node-fixture".into(), kind: "assistant_response".into(),
                 text: "RAW-ORIGINAL-CONTENT".into(),
                 context: serde_json::from_value(serde_json::json!({"state":"present","node_id":"node-fixture","created_at":"2026-10-25T00:00:00Z"})).unwrap(),
@@ -2127,6 +2128,7 @@ mod tests {
         let ui = state();
         let original = "RAW ORIGINAL: abc 123\nsecond line".to_owned();
         let body = HistoryBody {
+            fingerprint: None,
             node_id: "source-node".into(),
             kind: "assistant_response".into(),
             text: original.clone(),
@@ -3323,6 +3325,7 @@ mod tests {
             matches!(action,Outcome::Action(action) if matches!(&*action,UiAction::LoadOriginal{node_id,..}if node_id=="source-node"))
         );
         let body = HistoryBody {
+            fingerprint: None,
             node_id: "source-node".into(),
             kind: "assistant_response".into(),
             text: (0..100).map(|index| format!("row {index:03}\n")).collect(),
@@ -3546,6 +3549,7 @@ mod tests {
         details.request_id = 9;
         let text = "\x1b[31m\t日本語の原文\n".repeat(2000);
         let body = HistoryBody {
+            fingerprint: None,
             node_id: "source-node".into(),
             kind: "assistant_response".into(),
             text: text.clone(),

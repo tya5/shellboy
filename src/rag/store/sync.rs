@@ -28,7 +28,6 @@ impl FileIndexPolicy {
             && current_hash == &source_hash
             && previous_extractor == "text:utf8-v1"
         {
-            counts.unchanged += 1;
             let (segments, bytes): (i64, i64) = store.db.query_row(
                 "SELECT COUNT(*),COALESCE(SUM(end-start),0) FROM chunks WHERE revision_id=?1",
                 [revision],
@@ -49,14 +48,15 @@ impl FileIndexPolicy {
                     publish(store, document, revision)?;
                 }
             }
+            counts.unchanged += 1;
             return Ok(());
         }
-        counts.changed += 1;
         if self.dry_run {
             let text = std::str::from_utf8(&bytes)
                 .map_err(|_| err("extractor_failed", "Text input must be UTF-8"))?;
             counts.text_bytes += text.len();
             counts.segments += crate::index::split_text(text, SPLIT, 0).len();
+            counts.changed += 1;
             return Ok(());
         }
         let extracted =
@@ -67,18 +67,13 @@ impl FileIndexPolicy {
                 "Source changed during extraction; retry synchronization",
             ));
         }
-        counts.text_bytes += extracted.text.len();
-        counts.segments += extracted
-            .blocks
-            .iter()
-            .map(|block| crate::index::split_text(&block.text, SPLIT, 0).len())
-            .sum::<usize>();
         let provenance = json!({"path":path.to_string_lossy(),"source_hash":source_hash,"content_kind":"extracted"});
         let reference = records::file_ref(source, key);
-        records::admit(
+        records::admit_batch(
             store,
-            records::Record {
+            [records::Record {
                 reference: &reference,
+                reader_args: &["rag", "get", "--ref", &reference],
                 material: RevisionInput {
                     source,
                     key,
@@ -88,10 +83,19 @@ impl FileIndexPolicy {
                     title: key,
                     provenance: &provenance,
                 },
-            },
+            }],
             self.profile.as_ref(),
         )
-        .await?;
+        .await?
+        .pop()
+        .expect("single record outcome")?;
+        counts.text_bytes += extracted.text.len();
+        counts.segments += extracted
+            .blocks
+            .iter()
+            .map(|block| crate::index::split_text(&block.text, SPLIT, 0).len())
+            .sum::<usize>();
+        counts.changed += 1;
         counts.processed += 1;
         Ok(())
     }

@@ -73,14 +73,16 @@ The old `--scope docs` is retired. Run `shellboy docs index --source shellboy`, 
 
 If hybrid keyword search succeeds and the only confirmed semantic issue is an uncreated index, unindexed current profile, or missing embeddings, it returns keyword results with `ok:true`, exit code 0, and `result.degraded:true`. `scope_status` reports each scope's keyword/semantic usage, reason, missing document/chunk counts, and recovery commands in `next.steps[].command` with explicit source selection. Repeated degradation reasons appear only in `warnings`; `scope_errors` is reserved for actual scope failures. Unknown missing counts are null. Invalid/missing configuration, authentication, communication, DB/identity mismatches, and similar faults remain actual errors. Explicit semantic searches do not fall back to keyword. `shellboy docs` keyword search remains available without a DB or API.
 
-Result excerpts are not full text. Retrieve originals through the returned reference:
+Result excerpts are not full text. Use the opaque `reference` to retrieve the saved indexed text:
 
 ```bash
 shellboy rag get --ref REFERENCE --limit-bytes 16384
 shellboy rag get --ref REFERENCE --limit-bytes 16384 --cursor CURSOR
 ```
 
-The body is in `result.text`, with `next_cursor` for continuation. Keep using the same reference. A reclaimed saved revision returns `revision_unavailable`, never the current revision's text as a substitute. Document retrieval uses `provenance.retrieval_unit=block` (an extracted block such as a page or sheet); a guide's unit is the entire document, and history's unit is the referenced body kind. get offsets are UTF-8 bytes within that retrieval unit. Location `source` is the original location reported by the backend; `chunk_start_bytes/end_bytes` describe saved extracted text, not byte offsets in the original file.
+For the current original, run the hit's `owner_read` command instead and compare the returned fingerprint with `indexed_fingerprint`. File owner reads return `text` for UTF-8 or `bytes_base64` for binary originals, with a `next_cursor` when more bytes remain. These reads do not substitute the saved extraction if the original is missing.
+
+The saved body is in `result.text`, with `next_cursor` for continuation. Keep using the same reference. A reclaimed saved revision returns `revision_unavailable`, never the current revision's text as a substitute. Document retrieval uses `provenance.retrieval_unit=block` (an extracted block such as a page or sheet); a guide's unit is the entire document, and history's unit is the referenced body kind. get offsets are UTF-8 bytes within that retrieval unit. Location `source` is the original location reported by the backend; `chunk_start_bytes/end_bytes` describe saved extracted text, not byte offsets in the original file.
 
 Actual failures in some scopes return partial results, per-scope errors, and a nonzero exit code. Only the confirmed not-ready warnings described above count as degraded success. Within one search, scopes with the same provider request identity (connection, endpoint, model and dimensions) reuse a successful query embedding. A later search may charge again. Distances from different embedding spaces are not comparable, so combined search fuses ranks. Multiple scopes do not form one simultaneous snapshot. History keyword search scans through its initial watermark using short reads and validates references by revision/hash. Search again to include newly appended history.
 

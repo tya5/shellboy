@@ -750,6 +750,10 @@ pub fn read_node_body(
     read_node(connection, args).map(|(body, _)| body)
 }
 
+pub(crate) fn original_fingerprint(node_id: &str, revision: i64) -> String {
+    crate::digest::sha256_hex(format!("history-node-v1:{revision}:{node_id}").as_bytes())
+}
+
 /// `read_node_body`, plus the per-part facts when `args.parts` selects a summary's parts.
 fn read_node(
     connection: &Connection,
@@ -923,6 +927,7 @@ fn read_node(
         context: crate::context::for_node(connection, &args.node_id)?,
         provenance: relations::projected_provenance(connection, &args.node_id, None)?,
         node_id: args.node_id.clone(),
+        fingerprint: has_payload.then(|| original_fingerprint(&args.node_id, revision)),
         kind,
         text,
         source_node_ids: sources,

@@ -120,13 +120,9 @@ fn make_hit(
 ) -> Result<search::Hit> {
     let db = &reader.connection;
     let (score, distance, space) = ranking;
-    let (kind, revision, payload, payload_hash) = node(db, id)?;
-    let original = search::Original::history(
-        id,
-        payload_hash
-            .clone()
-            .unwrap_or_else(|| hash(payload.to_string().as_bytes())),
-    );
+    let (kind, revision, _, payload_hash) = node(db, id)?;
+    let original =
+        search::Original::history(id, crate::history::original_fingerprint(id, revision));
     let provenance = provenance(db, id)?;
     let reference = Reference {
         version: 1,
@@ -226,7 +222,7 @@ pub(super) struct KeywordPage {
     pub restart: String,
 }
 pub(super) fn keyword(
-    path: &Path,
+    context: &search::Context,
     query: &str,
     thread: Option<&str>,
     limit: usize,
@@ -238,7 +234,7 @@ pub(super) fn keyword(
     }
     // Reuse one finite reader and fetch only 32 IDs at a time. Release each
     // node snapshot; source witnesses, not one whole-history transaction, bind hits.
-    let db = open(path)?;
+    let db = open(&context.history)?;
     validate_thread(&db.connection, thread)?;
     let watermark =
         db.connection
@@ -429,7 +425,7 @@ pub(super) fn keyword(
                 if hits.len() == limit {
                     break;
                 }
-                let size = serde_json::to_vec(&hit.value(Path::new("")))
+                let size = serde_json::to_vec(&hit.value(context))
                     .expect("hit serializes")
                     .len()
                     + 1;

@@ -3,6 +3,7 @@ use super::*;
 
 pub(super) struct Record<'a> {
     pub reference: &'a str,
+    pub reader_args: &'a [&'a str],
     pub material: RevisionInput<'a>,
 }
 
@@ -12,7 +13,24 @@ pub(super) struct Admission {
     pub created: bool,
 }
 
-pub(super) async fn admit(
+pub(super) async fn admit_batch<'a>(
+    store: &mut Store,
+    records: impl IntoIterator<Item = Record<'a>>,
+    profile: Option<&search::Profile>,
+) -> Result<Vec<Result<Admission>>> {
+    const MAX_RECORDS: usize = 32;
+    let records: Vec<_> = records.into_iter().take(MAX_RECORDS + 1).collect();
+    if records.len() > MAX_RECORDS {
+        return Err(err("input_limit", "Record batch exceeds 32 records"));
+    }
+    let mut outcomes = Vec::with_capacity(records.len());
+    for record in records {
+        outcomes.push(admit(store, record, profile).await);
+    }
+    Ok(outcomes)
+}
+
+async fn admit(
     store: &mut Store,
     record: Record<'_>,
     profile: Option<&search::Profile>,
@@ -23,22 +41,24 @@ pub(super) async fn admit(
             "Record ref must contain 1..=8192 bytes",
         ));
     }
-    let Some(mut metadata) = record.material.provenance.as_object().cloned() else {
-        return Err(err("invalid_argument", "Record metadata must be an object"));
-    };
-    metadata.insert("ref".into(), json!(record.reference));
-    let provenance = Value::Object(metadata);
-    let (document, revision, created) = prepare(
-        store,
-        RevisionInput {
-            provenance: &provenance,
-            ..record.material
-        },
-    )?;
-    if let Some(profile) = profile {
-        search::embed_revision(store, &revision, profile).await?;
+    if record.material.provenance.to_string().len() > 64 * 1024 {
+        return Err(err("input_limit", "Record metadata exceeds 64 KiB"));
     }
-    publish(store, &document, &revision)?;
+    let reader_args = serde_json::json!(record.reader_args).to_string();
+    if reader_args.len() > 64 * 1024 {
+        return Err(err("input_limit", "Record reader exceeds 64 KiB"));
+    }
+    if record.material.extracted.text.len() > MAX_INPUT {
+        return Err(err("input_limit", "Extracted text exceeds 16 MiB"));
+    }
+    if let Some(profile) = profile {
+        search::embed_material(store, profile, record.material.extracted).await?;
+    }
+    let tx = store.db.transaction()?;
+    let (document, revision, created) =
+        prepare(&tx, record.material, record.reference, &reader_args)?;
+    activate(&tx, &document, &revision)?;
+    tx.commit()?;
     Ok(Admission {
         document,
         revision,
@@ -104,6 +124,7 @@ mod tests {
         let metadata = json!({"original_path": root.path().join("nonexistent")});
         let record = |key| Record {
             reference: key,
+            reader_args: &["fixture"],
             material: RevisionInput {
                 source: "@derived",
                 key,
@@ -114,28 +135,31 @@ mod tests {
                 provenance: &metadata,
             },
         };
-        let first = admit(&mut store, record("opaque:first"), None)
-            .await
-            .unwrap();
-        let second = admit(&mut store, record("opaque:second"), None)
-            .await
-            .unwrap();
-        let active = |s: &Store, id: &str| {
-            s.db.query_row(
-            "SELECT d.active_revision,r.source_hash,json_extract(r.provenance,'$.ref') FROM documents d LEFT JOIN revisions r ON d.active_revision=r.id WHERE d.id=?1",
-            [id], |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?)),
-        ).unwrap()
+        let invalid_metadata = json!({"too_large": "x".repeat(64 * 1024)});
+        let mut invalid = record("opaque:rejected");
+        invalid.material.provenance = &invalid_metadata;
+        let mut outcomes = admit_batch(
+            &mut store,
+            [record("opaque:first"), invalid, record("opaque:second")],
+            None,
+        )
+        .await
+        .unwrap()
+        .into_iter();
+        let first = outcomes.next().unwrap().unwrap();
+        assert!(matches!(outcomes.next(), Some(Err(error)) if error.code == "input_limit"));
+        outcomes.next().unwrap().unwrap();
+        let visible = |store: &Store| {
+            let mut titles: Vec<_> = search::material_hits(store, "@derived", text)
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.title)
+                .collect();
+            titles.sort();
+            titles
         };
-        assert_eq!(
-            active(&store, &first.document),
-            (
-                Some(first.revision),
-                Some(fingerprint.clone()),
-                Some("opaque:first".into())
-            )
-        );
+        assert_eq!(visible(&store), ["opaque:first", "opaque:second"]);
         retire(&mut store, &first.document).unwrap();
-        assert_eq!(active(&store, &first.document), (None, None, None));
-        assert_eq!(active(&store, &second.document).0, Some(second.revision));
+        assert_eq!(visible(&store), ["opaque:second"]);
     }
 }

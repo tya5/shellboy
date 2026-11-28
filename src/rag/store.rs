@@ -22,12 +22,12 @@ const SCHEMA: &str = "
 CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE sources(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,root TEXT NOT NULL,kind TEXT NOT NULL,last_scan TEXT,error TEXT,exclude_json TEXT NOT NULL DEFAULT '[]');
 CREATE TABLE documents(id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES sources(id),key TEXT NOT NULL,active_revision TEXT,status TEXT NOT NULL DEFAULT 'ready',error TEXT,UNIQUE(source_id,key));
-CREATE TABLE revisions(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id),source_hash TEXT NOT NULL,body_hash TEXT NOT NULL,extractor TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,provenance TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE revisions(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id),source_hash TEXT NOT NULL,body_hash TEXT NOT NULL,extractor TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,provenance TEXT NOT NULL,created_at TEXT NOT NULL,reference TEXT NOT NULL,reader_args TEXT NOT NULL);
 CREATE TABLE blocks(revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,text TEXT NOT NULL,location TEXT NOT NULL,PRIMARY KEY(revision_id,ordinal));
 CREATE TABLE chunks(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));
 CREATE TABLE spaces(id TEXT PRIMARY KEY,dimension INTEGER NOT NULL,profile TEXT NOT NULL,model TEXT NOT NULL,endpoint_hash TEXT NOT NULL,table_name TEXT NOT NULL);
 CREATE TABLE embeddings(space_id TEXT NOT NULL REFERENCES spaces(id),hash TEXT NOT NULL,vec_rowid INTEGER NOT NULL,PRIMARY KEY(space_id,hash));
-PRAGMA user_version=6;";
+PRAGMA user_version=7;";
 const SOURCE_HASH_SCHEMA: &str = "CREATE TABLE source_chunk_hashes(
     source_id TEXT NOT NULL REFERENCES sources(id),hash TEXT NOT NULL,PRIMARY KEY(source_id,hash));
 CREATE INDEX source_chunk_hashes_by_hash ON source_chunk_hashes(hash,source_id);";
@@ -102,7 +102,7 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
         db.execute_batch("PRAGMA query_only=ON;")?;
     }
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if !matches!(version, 1..=6) {
+    if !matches!(version, 1..=7) {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema is not supported; no migration was attempted",
@@ -131,13 +131,13 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
     Ok(Store {
         db,
         uuid,
-        migrated_from_schema: (write && version < 6).then_some(version),
+        migrated_from_schema: (write && version < 7).then_some(version),
         _lock: lock,
     })
 }
 fn validate_schema(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 6 {
+    if version != 7 {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema requires migration before reading",
@@ -367,7 +367,12 @@ pub(super) struct RevisionInput<'a> {
     pub title: &'a str,
     pub provenance: &'a Value,
 }
-pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String, String, bool)> {
+pub(super) fn prepare(
+    tx: &rusqlite::Transaction<'_>,
+    input: RevisionInput<'_>,
+    reference: &str,
+    reader_args: &str,
+) -> Result<(String, String, bool)> {
     let RevisionInput {
         source,
         key,
@@ -384,12 +389,12 @@ pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String
     let body_hash = hash(extracted.text.as_bytes());
     let revision = hash(
         format!(
-            "{document}\0{source_hash}\0{body_hash}\0{}\0{kind}\0{}",
+            "{document}\0{source_hash}\0{body_hash}\0{}\0{kind}\0{}\0{reference}\0{reader_args}",
             extracted.extractor, provenance
         )
         .as_bytes(),
     );
-    let exists: bool = s.db.query_row(
+    let exists: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM revisions WHERE id=?1)",
         [&revision],
         |r| r.get(0),
@@ -397,13 +402,12 @@ pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String
     if exists {
         return Ok((document, revision, false));
     }
-    let tx = s.db.transaction()?;
     tx.execute(
         "INSERT OR IGNORE INTO documents(id,source_id,key)VALUES(?1,?2,?3)",
         params![document, source, key],
     )?;
     tx.execute(
-        "INSERT INTO revisions VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        "INSERT INTO revisions VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         params![
             revision,
             document,
@@ -413,7 +417,9 @@ pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String
             kind,
             title,
             provenance.to_string(),
-            chrono::Utc::now().to_rfc3339()
+            chrono::Utc::now().to_rfc3339(),
+            reference,
+            reader_args
         ],
     )?;
     let mut offset = 0usize;
@@ -466,11 +472,16 @@ pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String
         }
         offset += block.text.len() + 1;
     }
-    tx.commit()?;
     Ok((document, revision, true))
 }
 pub(super) fn publish(s: &mut Store, document: &str, revision: &str) -> Result<()> {
     let tx = s.db.transaction()?;
+    activate(&tx, document, revision)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn activate(tx: &rusqlite::Transaction<'_>, document: &str, revision: &str) -> Result<()> {
     let previous: Option<String> = tx.query_row(
         "SELECT active_revision FROM documents WHERE id=?1",
         [document],
@@ -494,7 +505,6 @@ pub(super) fn publish(s: &mut Store, document: &str, revision: &str) -> Result<(
         "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='generation'",
         [],
     )?;
-    tx.commit()?;
     Ok(())
 }
 
@@ -594,7 +604,6 @@ pub(super) async fn index(
                 }
                 if !dry_run {
                     let saved_error = json!({"code":error.code,"message":error.message.chars().take(2048).collect::<String>(),"hint":error.hint()}).to_string();
-                    s.db.execute("INSERT OR IGNORE INTO documents(id,source_id,key,status,error)VALUES(?1,?2,?3,'failed',?4)",params![hash(format!("{source}\0{key}").as_bytes()),source,key,saved_error])?;
                     s.db.execute("UPDATE documents SET status=CASE WHEN active_revision IS NULL THEN 'failed' ELSE 'stale' END,error=?3 WHERE source_id=?1 AND key=?2",params![source,key,saved_error])?;
                 }
             } else {
@@ -760,10 +769,11 @@ pub(super) async fn ingest(
         document,
         revision,
         created,
-    } = records::admit(
+    } = records::admit_batch(
         &mut s,
-        records::Record {
+        [records::Record {
             reference: &reference,
+            reader_args: &["rag", "get", "--ref", &reference],
             material: RevisionInput {
                 source: "@derived",
                 key: id,
@@ -773,10 +783,12 @@ pub(super) async fn ingest(
                 title: id,
                 provenance: &provenance,
             },
-        },
+        }],
         None,
     )
-    .await?;
+    .await?
+    .pop()
+    .expect("single record outcome")?;
     Ok(
         json!({"document_id":document,"revision":revision,"created":created,"source_id":"@derived","kind":kind}),
     )

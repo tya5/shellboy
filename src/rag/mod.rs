@@ -232,7 +232,7 @@ struct Cursor {
     reference: String,
     offset: usize,
 }
-pub(crate) fn page(text: &str, reference: &str, limit: u32, cursor: Option<&str>) -> Result<Value> {
+fn page_start(reference: &str, limit: u32, cursor: Option<&str>) -> Result<usize> {
     if !(1..=65536).contains(&limit) {
         return Err(err("invalid_argument", "limit-bytes must be 1..=65536"));
     }
@@ -246,6 +246,10 @@ pub(crate) fn page(text: &str, reference: &str, limit: u32, cursor: Option<&str>
     } else {
         0
     };
+    Ok(start)
+}
+pub(crate) fn page(text: &str, reference: &str, limit: u32, cursor: Option<&str>) -> Result<Value> {
+    let start = page_start(reference, limit, cursor)?;
     if start > text.len() || !text.is_char_boundary(start) {
         return Err(err("cursor_expired", "Retrieval position is unavailable"));
     }
@@ -267,13 +271,42 @@ pub(crate) fn page(text: &str, reference: &str, limit: u32, cursor: Option<&str>
         json!({"text": &text[start..end], "next_cursor":next,"truncated":next.is_some(),"offset_bytes":start,"total_bytes":text.len()}),
     )
 }
+fn original_page(bytes: &[u8], reference: &str, limit: u32, cursor: Option<&str>) -> Result<Value> {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return page(text, reference, limit, cursor);
+    }
+    let start = page_start(reference, limit, cursor)?;
+    if start > bytes.len() {
+        return Err(err("cursor_expired", "Retrieval position is unavailable"));
+    }
+    let end = bytes.len().min(start + limit as usize);
+    let next = (end < bytes.len()).then(|| {
+        encode(&Cursor {
+            version: 1,
+            reference: reference.into(),
+            offset: end,
+        })
+    });
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes[start..end]);
+    Ok(
+        json!({"bytes_base64":encoded,"next_cursor":next,"truncated":next.is_some(),"offset_bytes":start,"total_bytes":bytes.len()}),
+    )
+}
+
 pub(crate) fn bounded_read(path: &Path) -> Result<Vec<u8>> {
-    use std::io::Read;
     if !std::fs::metadata(path)?.is_file() {
         return Err(err("invalid_argument", "Input must be a regular file"));
     }
-    let file = std::fs::File::open(path)?;
-    if file.metadata()?.len() > MAX_INPUT as u64 {
+    bounded_read_file(std::fs::File::open(path)?)
+}
+
+fn bounded_read_file(file: std::fs::File) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(err("invalid_argument", "Input must be a regular file"));
+    }
+    if metadata.len() > MAX_INPUT as u64 {
         return Err(err("input_limit", "Input exceeds 16 MiB"));
     }
     let mut result = Vec::new();

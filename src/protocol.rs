@@ -2633,7 +2633,7 @@ record!(HistorySnippet {
     #[serde(default, skip_serializing_if = "Option::is_none")] execution_count_exact: Option<bool>,
     executions_truncated: bool
 });
-record!(HistoryBody { context: crate::context::ExecutionContext, provenance: NodeProvenance, node_id: String, kind: String, text: String, source_node_ids: Vec<String>, previous_node_ids: Vec<String>, next_node_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] tombstone_reason: Option<String> });
+record!(HistoryBody { context: crate::context::ExecutionContext, provenance: NodeProvenance, node_id: String, #[serde(default, skip_serializing_if = "Option::is_none")] fingerprint: Option<String>, kind: String, text: String, source_node_ids: Vec<String>, previous_node_ids: Vec<String>, next_node_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] tombstone_reason: Option<String> });
 record!(SearchMatch {
     node_id: String,
     excerpt: String,

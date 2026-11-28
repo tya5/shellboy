@@ -519,7 +519,7 @@ fn bundled_get(
         return Err("invalid_argument: Byte limit cannot hold the next UTF-8 character".into());
     }
     Ok(paginated(
-        json!({"id":d.id,"title":d.title,"version":version,"content_hash":content_hash,"text":&d.text[offset..page_end],"start":offset,"end":page_end,"total_bytes":d.text.len(),"section":section,"sections":sections,"links":bundled.links[index].get_or_init(|| links(d, docs))}),
+        json!({"id":d.id,"title":d.title,"version":version,"content_hash":content_hash,"fingerprint":content_hash,"text":&d.text[offset..page_end],"start":offset,"end":page_end,"total_bytes":d.text.len(),"section":section,"sections":sections,"links":bundled.links[index].get_or_init(|| links(d, docs))}),
         (page_end < end).then(|| next_cursor(version, &scope, page_end)),
     ))
 }
@@ -696,6 +696,36 @@ mod tests {
                 "query {query:?} did not reach the schedule section: {page}"
             );
         }
+    }
+
+    #[test]
+    fn docs_search_ref_opens_the_matching_section() {
+        let id = "shellboy/user-guide";
+        let results = execute(DocsRead::Search {
+            query: "schedule add".into(),
+            parent: Some(id.into()),
+            sources: vec!["shellboy".into()],
+            limit: 20,
+            cursor: None,
+        })
+        .unwrap();
+        let item = &results["items"][0];
+        let prefix = format!("docs:{id}#");
+        let section = item["ref"].as_str().unwrap().strip_prefix(&prefix).unwrap();
+        assert_eq!(
+            item["owner_read"]["args"],
+            json!(["docs", "get", "--id", id, "--section", section])
+        );
+        let page = execute(DocsRead::Get {
+            id: id.into(),
+            sources: vec!["shellboy".into()],
+            section: Some(section.into()),
+            limit_bytes: DOCS_READ_MAX_BYTES,
+            cursor: None,
+        })
+        .unwrap();
+        assert_eq!(page["fingerprint"], item["indexed_fingerprint"]);
+        assert!(page["text"].as_str().unwrap().contains("schedule add"));
     }
 
     #[test]

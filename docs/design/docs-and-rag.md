@@ -291,3 +291,11 @@ unlinked vectors. The table grows with the number of distinct pairs ever
 prepared, which is unbounded under repeated edits; keyword-only preparation can
 also add pairs with no vector. Explicit source removal ends that source's
 ownership. Sync does not delete associations or embeddings.
+
+### History original fingerprints
+
+History owns the fingerprint of a retained node original. Search and
+`history read` identify the same node payload revision, regardless of page
+size or text projection. Tombstones do not advertise a current fingerprint.
+The saved RAG retrieval token is separate and still identifies the indexed
+unit, including its raw-output witness where applicable.
