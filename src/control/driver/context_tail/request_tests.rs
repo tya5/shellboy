@@ -532,6 +532,7 @@ async fn context_list_paginates_escaped_commands_at_the_response_frame_limit() {
             .await;
         assert!(response.ok, "{:?}", response.error);
         encode_frame(&response).expect("each public page must fit in a transport frame");
+        let mut expanded = response.clone();
         let result = response.result.unwrap();
         let items = result["items"].as_array().expect("context definitions");
         assert!(!items.is_empty(), "a page must make progress");
@@ -549,6 +550,32 @@ async fn context_list_paginates_escaped_commands_at_the_response_frame_limit() {
                 .as_str()
                 .expect("the byte-limited page must continue at the next definition")
                 .to_owned(),
+        );
+        let next = control
+            .request(Request::new(
+                format!(
+                    "{}:next-escaped-context-{offset}",
+                    owner.operation_epoch.current()
+                ),
+                Command::ContextList(ContextListArgs {
+                    thread_id: Some(thread.clone()),
+                    limit: 1,
+                    cursor: cursor.clone(),
+                }),
+            ))
+            .await;
+        assert!(next.ok, "{:?}", next.error);
+        let next = next.result.unwrap();
+        assert_eq!(next["items"][0]["name"], expected[offset]);
+        let candidate = expanded.result.as_mut().unwrap();
+        candidate["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(next["items"][0].clone());
+        candidate["next_cursor"] = next["next_cursor"].clone();
+        assert!(
+            encode_frame(&expanded).is_err(),
+            "the first omitted row would fit"
         );
     }
     close(control, owner).await;

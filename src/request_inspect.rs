@@ -285,9 +285,7 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
         attachments_known_empty: manifest["attachments"]
             .as_array()
             .is_some_and(Vec::is_empty),
-        context_tail: manifest
-            .get("context_tail")
-            .map(|tail| tail.get("item").unwrap_or(tail).clone()),
+        context_tail: manifest.get("context_tail").cloned(),
         context_pending: false,
         saved: Some(json!({
             "input_characters": manifest["input_characters"],
