@@ -779,7 +779,10 @@ async fn next_with_clients(
         if instructions_fixed { snapshot.ensure_context_tx(&tx,&now())?; }
         snapshot.selection=history::selection_revision(&tx, &thread, history::ThreadScope::Any)?;
         snapshot.input=Some(replay.load(&tx,&thread)?);
-        tx.commit()?;
+        if let Err(error) = tx.commit() {
+            replay.discard_uncommitted(&thread);
+            return Err(error.into());
+        }
         wait_wakes.publish(keys);Ok(Next::Ready(Box::new(snapshot)))
     }).await.map_err(storage_error);
     if result.is_ok() {

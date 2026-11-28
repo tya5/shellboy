@@ -825,3 +825,13 @@ workflow remains available. On completion, a broad or unverifiable file ACL is
 reported as a warning, including when replacement preserved an existing
 credential file's ACL. This does not modify the data directory or its existing
 ACLs, and does not make a lossless export safe to share.
+
+### Replay prefix revision (#465)
+
+History owns `thread.replay_path_revision`. A true tail append preserves the
+validated prefix. Non-tail path writes and edits to selected node payload,
+tombstone, replacement, or admission-preamble facts invalidate it in the same
+transaction, including on other Threads selecting a shared node. The existing
+Replay entry reuses frames only when this revision and the conversion context
+match; it seeks from the last validated ordinal, or reloads on a mismatch.
+This does not change replay ordering, lease lifetime, or the wire contract.

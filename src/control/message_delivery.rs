@@ -78,16 +78,38 @@ pub(crate) fn settle_notification_tx(
 }
 
 /// Call only at an actual message-delivery path boundary, not generic history selection.
+#[cfg(test)]
 pub(crate) fn mark_admitted_tx(
     db: &Connection,
     thread: &str,
     nodes: &[String],
     at: &str,
+) -> Result<(), StorageError> {
+    record_path_admission(db, thread, nodes, at, true)?;
+    collect_admitted_submissions(db, thread, nodes)
+}
+
+fn record_path_admission(
+    db: &Connection,
+    thread: &str,
+    nodes: &[String],
+    at: &str,
+    require_selected: bool,
 ) -> rusqlite::Result<()> {
     for node in nodes {
         // A pending duty saves when it entered the Thread: only an own ask sent
         // after this time can keep the duty open at Run end (#433).
-        db.execute("UPDATE receipt SET path_admission='admitted',result_json=CASE WHEN json_extract(result_json,'$.reply.state')='pending' THEN json_set(result_json,'$.reply.admitted_at',?3) ELSE result_json END WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node,at])?;
+        db.execute("UPDATE receipt SET path_admission='admitted',result_json=CASE WHEN json_extract(result_json,'$.reply.state')='pending' THEN json_set(result_json,'$.reply.admitted_at',?3) ELSE result_json END WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND (NOT ?4 OR EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2))", params![thread,node,at,require_selected])?;
+    }
+    Ok(())
+}
+
+fn collect_admitted_submissions(
+    db: &Connection,
+    thread: &str,
+    nodes: &[String],
+) -> Result<(), StorageError> {
+    for node in nodes {
         let operation: Option<String> = db.query_row("SELECT client_operation_id FROM receipt WHERE target_thread_id=?1 AND message_node_id=?2",params![thread,node],|r|r.get(0)).optional()?;
         if let Some(operation) = operation {
             super::submission_retention::collect_operation(db, &operation)?;
@@ -265,8 +287,11 @@ pub(crate) fn append_admission_plan_tx(
         .into());
     }
     let nodes = plan.admitted_nodes.as_slice();
+    // Save preamble facts before the path append so only already-selected
+    // copies need invalidation. Neither change is visible unless both commit.
+    record_path_admission(tx, thread, nodes, at, false)?;
     history::append_existing_nodes(tx, thread, revision, nodes, at)?;
-    mark_admitted_tx(tx, thread, nodes, at)?;
+    collect_admitted_submissions(tx, thread, nodes)?;
     Ok(())
 }
 
