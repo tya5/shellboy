@@ -119,7 +119,7 @@ async fn summary_can_precede_existing_suffix_and_fork_keeps_shared_sources() {
         tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('summary','summary','now','{\"text\":\"summary text\"}')",[])?;
         tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('rep','summary','ordered a,b','1','1','ready','now')",[])?;
         tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision) VALUES('rep',0,'b',0),('rep',1,'a',0)",[])?;
-        tx.execute("INSERT INTO thread_replacement VALUES('thread','rep')",[])?;
+        tx.execute("INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('thread','rep')",[])?;
         select_path(&tx,"thread",3,&["summary".into(),"c".into()],"now")?;
         tx.commit()?;
         Ok(())

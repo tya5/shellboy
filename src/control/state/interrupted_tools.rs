@@ -896,7 +896,7 @@ mod tests {
                     tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES('replacement','summary','fixture','summary-v1','fixture','completed','old')",[]).unwrap();
                     tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision)VALUES('replacement',0,'source',1)",[]).unwrap();
                     tx.execute(
-                        "INSERT INTO thread_replacement VALUES('live','replacement')",
+                        "INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('live','replacement')",
                         [],
                     )
                     .unwrap();

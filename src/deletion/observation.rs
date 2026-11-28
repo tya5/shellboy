@@ -544,8 +544,11 @@ mod tests {
         replacement(&db, "rb", "b", "completed");
         replacement(&db, "not-completed", "a", "pending");
         path(&db, "outside", "output-ra", 1);
-        db.execute("INSERT INTO thread_replacement VALUES('outside','rb')", [])
-            .unwrap();
+        db.execute(
+            "INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('outside','rb')",
+            [],
+        )
+        .unwrap();
         for (id, ownership) in [("external", "external"), ("managed", "managed_clipboard")] {
             db.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES(?1,'a','/synthetic','file',?2,'now')",params![id,ownership]).unwrap();
         }
@@ -687,7 +690,7 @@ mod tests {
             let id = format!("foreign-{i}");
             thread(&db, &id, None, true);
             db.execute(
-                "INSERT INTO thread_replacement VALUES(?1,'unrelated')",
+                "INSERT INTO thread_replacement(thread_id,replacement_id) VALUES(?1,'unrelated')",
                 [id],
             )
             .unwrap();

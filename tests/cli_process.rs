@@ -1088,7 +1088,7 @@ async fn thread_export_streams_saved_sources_and_tombstone() {
             INSERT INTO replacement VALUES('rep-second','summary','k2','f','p','completed','now');
             INSERT INTO replacement_source VALUES('rep-second',7,'collected',0,NULL),('rep-second',12,'one',0,NULL);
             INSERT INTO edge VALUES('one','two'),('two','collected'),('external','collected');")?;
-        db.execute("INSERT INTO thread_replacement VALUES(?1,'rep')",[thread])?;
+        db.execute("INSERT INTO thread_replacement(thread_id,replacement_id) VALUES(?1,'rep')",[thread])?;
         Ok(())
     }).await.unwrap();
     let control = Control::new(&owner, root.path().into());
@@ -1207,7 +1207,7 @@ async fn thread_import_validates_and_atomically_round_trips_saved_history() {
           INSERT INTO edge VALUES('old','inner'),('inner','summary'),('call','summary'),('result','summary'),('summary','anchored'),('anchored-source','anchored'),('anchored','original');
         "#)?;
         db.execute("INSERT INTO thread_path VALUES(?1,0,'summary'),(?1,1,'anchored'),(?1,2,'original')",[source])?;
-        db.execute("INSERT INTO thread_replacement VALUES(?1,'original-group'),(?1,'top-group'),(?1,'anchored-group')",[source])?;
+        db.execute("INSERT INTO thread_replacement(thread_id,replacement_id) VALUES(?1,'original-group'),(?1,'top-group'),(?1,'anchored-group')",[source])?;
         Ok(())
     }).await.unwrap();
     let control = Control::new(&owner, root.path().into());

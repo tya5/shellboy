@@ -403,7 +403,7 @@ fn summarized(state: &str) -> String {
         node("tail", "message", 6, "{\"text\":\"x\"}"),
         path("T", &["x", "s", "tail"]),
         format!("INSERT INTO replacement VALUES('r1','s','k','1','1','{state}','now');"),
-        "INSERT INTO replacement_source VALUES('r1',0,'a',0,NULL),('r1',1,'b',0,NULL),('r1',2,'c',0,NULL);INSERT INTO thread_replacement VALUES('T','r1');".into(),
+        "INSERT INTO replacement_source VALUES('r1',0,'a',0,NULL),('r1',1,'b',0,NULL),('r1',2,'c',0,NULL);INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('T','r1');".into(),
     ]
     .concat()
 }
@@ -611,7 +611,7 @@ async fn every_candidate_summary_is_tried_not_only_the_newest() {
     let script = [
         summarized("completed"),
         node("dead", "summary", 9, "{\"text\":\"d\"}"),
-        "INSERT INTO replacement VALUES('r2','dead','k2','1','1','completed','zzzz');INSERT INTO replacement_source VALUES('r2',0,'b',0,NULL);INSERT INTO thread_replacement VALUES('T','r2');".into(),
+        "INSERT INTO replacement VALUES('r2','dead','k2','1','1','completed','zzzz');INSERT INTO replacement_source VALUES('r2',0,'b',0,NULL);INSERT INTO thread_replacement(thread_id,replacement_id) VALUES('T','r2');".into(),
     ]
     .concat();
     let f = Fixture::new(script).await;
