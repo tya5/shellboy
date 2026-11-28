@@ -8495,7 +8495,7 @@ mod layout_cache_tests {
     #[test]
     fn popup_layout_pressure_evicts_older_popup_before_history() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
-        let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 12)).unwrap();
         let source = || {
             (0..1000)
                 .map(|_| Line::from("popup source".to_owned()))

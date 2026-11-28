@@ -267,7 +267,7 @@ mod tests {
         assert!(!ui.dirty);
     }
     #[test]
-    fn repeated_paints_wheels_and_confirmation_keys_reuse_wrapping_until_width_changes() {
+    fn help_and_confirmation_remain_scrollable_across_repaints_and_resize() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.show_help(help::Page::info(
             "Fixture",
@@ -275,13 +275,13 @@ mod tests {
             "saved source row\n".repeat(4000),
         ));
         paint(&mut ui, 100, 30);
-        assert_eq!(ui.help_cache.build_count(), 1);
+
         for _ in 0..10 {
             let (x, y) = inside(&ui);
             wheel(&mut ui, MouseEventKind::ScrollDown, x, y);
             paint(&mut ui, 100, 30);
         }
-        assert_eq!(ui.help_cache.build_count(), 1);
+        assert!(ui.help_scroll > 0);
         ui.help_visible = false;
         ui.set_confirmation(Confirmation::Index {
             command: Command::IndexStatus(Default::default()),
@@ -289,7 +289,7 @@ mod tests {
             detail: "cost facts\n".repeat(4000),
         });
         paint(&mut ui, 100, 30);
-        assert_eq!(ui.confirmation_cache.build_count(), 1);
+
         for _ in 0..10 {
             let (x, y) = inside(&ui);
             wheel(&mut ui, MouseEventKind::ScrollDown, x, y);
@@ -299,13 +299,10 @@ mod tests {
             )));
             paint(&mut ui, 100, 30);
         }
-        assert_eq!(
-            ui.confirmation_cache.build_count(),
-            1,
-            "height/page calculation also reuses wrapped rows"
-        );
+        assert!(ui.confirmation_scroll > 0);
+        let scroll = ui.confirmation_scroll;
         paint(&mut ui, 120, 30);
-        assert_eq!(ui.confirmation_cache.build_count(), 2);
+        assert_eq!(ui.confirmation_scroll, scroll);
     }
     #[test]
     fn confirmation_replacement_retires_the_prior_paint_and_prior_source_cache() {

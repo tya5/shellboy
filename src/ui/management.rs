@@ -123,7 +123,6 @@ impl ManagementPopup {
         if self.language != language {
             self.language = language;
             let mut reader = self.reader_cache.borrow_mut();
-            reader.set_language(language);
             reader.clear();
         }
     }

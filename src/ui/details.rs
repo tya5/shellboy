@@ -1466,7 +1466,6 @@ impl Details {
     ) -> Vec<crate::terminal_links::LinkRegion> {
         let sep = crate::ui::text_width::glyphs::separator();
         self.language.set(language);
-        self.reader_cache.borrow_mut().set_language(language);
         if let Some(choices) = &self.copy_choices {
             choices.draw(frame, area, &self.paint, language);
             return vec![];
