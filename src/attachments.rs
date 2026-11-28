@@ -184,7 +184,6 @@ struct Selected {
     active: bool,
     reason: Option<String>,
     sent_fingerprint: Option<String>,
-    recorded_size: Option<u64>,
     observation_hash: Option<String>,
     omission: Option<OmissionReason>,
     previous_state: Option<String>,
@@ -555,54 +554,18 @@ impl AttachmentService {
             });
             groups[group].1.push(index);
         }
-        // Reserve the protected set and newest historical suffix before reading.
-        // Legacy first inclusions without a recorded size reserve the file limit.
-        let reservation = |slot: &Selected| {
-            (slot.active && slot.omission.is_none())
-                .then(|| slot.recorded_size.unwrap_or(file_limit).min(file_limit))
-        };
-        let protected = selected
-            .iter()
-            .filter(|slot| slot.protected)
-            .filter_map(reservation)
-            .try_fold(0u64, u64::checked_add)
-            .ok_or_else(|| io_error("Attachment size overflow"))?;
-        if protected > limit {
-            return Err(protected_over_limit(protected, limit));
-        }
-        let mut remaining = limit - protected;
-        let mut admitted = vec![false; selected.len()];
-        let mut past_full = false;
-        for (index, slot) in selected.iter().enumerate().rev() {
-            let Some(bytes) = reservation(slot) else {
-                continue;
-            };
-            if slot.protected {
-                admitted[index] = true;
-            } else if !past_full && bytes <= remaining {
-                remaining -= bytes;
-                admitted[index] = true;
-            } else {
-                past_full = true;
-            }
-        }
         let mut observed = BTreeMap::new();
-        let mut encoded = BTreeMap::new();
+        let mut kept = BTreeMap::<&Path, (ReadEvidence, usize)>::new();
+        let mut past = BTreeMap::<usize, (&Path, u64)>::new();
+        let mut cutoff = None;
+        let mut protected = 0u64;
+        let mut total = 0u64;
         for (path, slots) in groups {
-            let allowed: Vec<_> = slots
-                .iter()
-                .filter(|&&index| admitted[index])
-                .map(|&index| {
-                    (
-                        selected[index].sent_fingerprint.clone(),
-                        reservation(&selected[index]).expect("admitted reservation"),
-                    )
-                })
-                .collect();
             let read_path = path.to_owned();
             let cache = self.cache.clone();
             let pin = pins.clone();
             let observe = observe.clone();
+            let candidates: Vec<_> = slots.iter().map(|&i| selected[i].clone()).collect();
             let evidence = if Instant::now() >= deadline {
                 Err("File preparation timed out before observation".into())
             } else {
@@ -611,16 +574,11 @@ impl AttachmentService {
                         let _pin = pin;
                         let evidence = observe(&read_path, file_limit, force_reload, &cache)?;
                         let observation = evidence.observation().clone();
-                        let encoding = allowed
+                        let retained = candidates
                             .iter()
-                            .any(|(fingerprint, max)| {
-                                observation.raw_size <= *max
-                                    && fingerprint
-                                        .as_ref()
-                                        .is_none_or(|hash| hash == &observation.hash)
-                            })
-                            .then(|| evidence.encode(&read_path, &cache));
-                        Ok((observation, encoding))
+                            .any(|slot| slot.omission_for(Some(&observation)).is_none())
+                            .then_some(evidence);
+                        Ok((observation, retained))
                     })
                     .await
                     .map_err(|e| e.message)
@@ -628,27 +586,53 @@ impl AttachmentService {
             if cancel.is_cancelled() {
                 return Err(cancelled());
             }
-            match evidence {
-                Ok((observation, encoding)) => {
-                    // A first inclusion may not grow past the bytes it reserved.
-                    // Refuse rather than silently retire a slot for budget growth.
-                    if slots.iter().any(|&index| {
-                        admitted[index]
-                            && selected[index].sent_fingerprint.is_none()
-                            && observation.raw_size
-                                > reservation(&selected[index]).expect("admitted reservation")
-                    }) {
-                        return Err(ApiError::new(ErrorCode::InputLimit,
-                            "An attachment grew beyond its first-send reservation; request is held for explicit retry")
-                            .hint("Remove the attachment and reattach the current file to refresh its reservation."));
-                    }
-                    observed.insert(path.to_owned(), Ok(observation));
-                    if let Some(encoding) = encoding {
-                        encoded.insert(path.to_owned(), encoding);
-                    }
+            observed.insert(
+                path.to_owned(),
+                evidence
+                    .as_ref()
+                    .map(|(observation, _)| observation.clone())
+                    .map_err(Clone::clone),
+            );
+            let Ok((observation, Some(evidence))) = evidence else {
+                continue;
+            };
+            let bytes = observation.raw_size;
+            let mut refs = 0;
+            for index in slots {
+                let slot = &selected[index];
+                if slot.omission_for(Some(&observation)).is_some() {
+                    continue;
                 }
-                Err(reason) => {
-                    observed.insert(path.to_owned(), Err(reason));
+                if slot.protected {
+                    protected = protected
+                        .checked_add(bytes)
+                        .ok_or_else(|| io_error("Attachment size overflow"))?;
+                } else if cutoff.is_some_and(|before| index <= before) {
+                    continue;
+                } else {
+                    past.insert(index, (path, bytes));
+                }
+                total = total
+                    .checked_add(bytes)
+                    .ok_or_else(|| io_error("Attachment size overflow"))?;
+                refs += 1;
+            }
+            if protected > limit {
+                return Err(protected_over_limit(protected, limit));
+            }
+            if refs > 0 {
+                kept.insert(path, (evidence, refs));
+            }
+            // Capacity only gets tighter as candidates arrive. Once an old slot
+            // falls outside the retained suffix, it can never qualify again.
+            while total > limit {
+                let (index, (path, bytes)) = past.pop_first().expect("protected fits");
+                cutoff = Some(index);
+                total -= bytes;
+                let (_, refs) = kept.get_mut(path).expect("retained path");
+                *refs -= 1;
+                if *refs == 0 {
+                    kept.remove(path);
                 }
             }
         }
@@ -657,7 +641,8 @@ impl AttachmentService {
             .enumerate()
             .filter(|(index, slot)| {
                 slot.active
-                    && !admitted[*index]
+                    && !slot.protected
+                    && cutoff.is_some_and(|before| *index <= before)
                     && slot
                         .omission_for(observed[&slot.path].as_ref().ok())
                         .is_none()
@@ -665,6 +650,16 @@ impl AttachmentService {
             .map(|(_, slot)| slot.id.clone())
             .collect();
         let excluded_set: HashSet<_> = excluded.iter().map(String::as_str).collect();
+        let mut encoded = BTreeMap::new();
+        for (path, (evidence, _)) in kept {
+            if cancel.is_cancelled() {
+                return Err(cancelled());
+            }
+            encoded.insert(path.to_owned(), evidence.encode(path, &self.cache));
+        }
+        if cancel.is_cancelled() {
+            return Err(cancelled());
+        }
         let mut result = PreparedAttachments {
             thread_id: thread_id.into(),
             selection_revision: revision,
@@ -1899,7 +1894,6 @@ mod preparation_tests {
                     active: true,
                     reason: None,
                     sent_fingerprint: None,
-                    recorded_size: Some(8),
                     observation_hash: None,
                     omission: None,
                     previous_state: None,

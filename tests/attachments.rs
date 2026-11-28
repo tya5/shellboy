@@ -431,7 +431,7 @@ async fn changed_slot_keeps_its_notice_without_charging_or_pinning_unsent_bytes(
     config.limits.attachment_request_bytes = 10;
     config.cache.attachment_base64_bytes = 0;
     let f = Fixture::new(config).await;
-    f.add("unchanged", b"1234").await;
+    f.add("unchanged", b"12345").await;
     let changed_id = f.add("changed", b"x").await;
     drop(f.adopt(f.prepare().await, true).await);
     std::fs::write(f.path.join("changed"), b"1234567890").unwrap();

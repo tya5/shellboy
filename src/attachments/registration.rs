@@ -113,7 +113,7 @@ pub fn add_tx(
         } else {
             "external"
         };
-        tx.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at,registered_raw_size)VALUES(?1,?2,?3,?4,?5,?6,?7)",params![attachment,source_node_id,file.path.to_string_lossy(),kind,ownership,now(),file.observed_bytes.and_then(|bytes|i64::try_from(bytes).ok())]).map_err(sql_error)?;
+        tx.execute("INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES(?1,?2,?3,?4,?5,?6)",params![attachment,source_node_id,file.path.to_string_lossy(),kind,ownership,now()]).map_err(sql_error)?;
         tx.execute("INSERT INTO attachment_selection(thread_id,attachment_id,state,selected_at,selected_order,revision,protected)VALUES(?1,?2,'active',?3,?4,0,1)",params![plan.thread_id,attachment,now(),order]).map_err(sql_error)?;
         if let Some(managed) = &managed_id {
             tx.execute(
