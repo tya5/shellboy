@@ -248,8 +248,44 @@ pub(super) async fn embed_revision(
 }
 
 #[derive(Clone)]
+pub(super) struct Original {
+    reference: String,
+    fingerprint: String,
+    args: Vec<String>,
+}
+impl Original {
+    fn file(reference: String, fingerprint: String) -> Self {
+        Self {
+            args: vec![
+                "rag".into(),
+                "get".into(),
+                "--ref".into(),
+                reference.clone(),
+            ],
+            reference,
+            fingerprint,
+        }
+    }
+    pub(super) fn docs(id: &str, fingerprint: String) -> Self {
+        Self {
+            reference: format!("docs:{id}"),
+            fingerprint,
+            args: vec!["docs".into(), "get".into(), "--id".into(), id.into()],
+        }
+    }
+    pub(super) fn history(id: &str, fingerprint: String) -> Self {
+        Self {
+            reference: format!("history:{id}"),
+            fingerprint,
+            args: vec!["history".into(), "read".into(), "--node".into(), id.into()],
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct Hit {
     pub reference: Reference,
+    pub original: Original,
     pub excerpt: String,
     pub title: String,
     pub kind: String,
@@ -269,8 +305,18 @@ impl Hit {
             .then_with(|| a.reference.id.cmp(&b.reference.id))
     }
 
-    pub(super) fn value(&self) -> Value {
+    pub(super) fn value(&self, database: &Path) -> Value {
         let mut value = json!({"reference":encode(&self.reference),"revision":self.reference.revision,"hash":self.reference.hash,"title":self.title,"excerpt":self.excerpt,"kind":self.kind,"location":self.location,"provenance":self.provenance,"scopes":self.scopes,"score":self.score,"distance":self.distance,"embedding_space":self.space,"method":self.method});
+        value["ref"] = json!(self.original.reference);
+        value["indexed_fingerprint"] = json!(self.original.fingerprint);
+        let mut args = self.original.args.clone();
+        if self.original.reference.starts_with("file:") {
+            args.splice(
+                1..1,
+                ["--db".into(), database.to_string_lossy().into_owned()],
+            );
+        }
+        value["owner_read"] = json!({"program":"shellboy","args":args});
         if self.thread_scopes.len() == 1 {
             value["thread_scope"] = json!(self.thread_scopes[0]);
         } else if !self.thread_scopes.is_empty() {
@@ -300,8 +346,26 @@ fn material_provenance(row: &rusqlite::Row<'_>, error_column: usize) -> rusqlite
     Ok(provenance)
 }
 
+fn material_original(
+    source: &str,
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<Original> {
+    let key: String = row.get(column)?;
+    let fingerprint = row.get(column + 1)?;
+    if source == "@docs" {
+        return Ok(Original::docs(&key, fingerprint));
+    }
+    let provenance: String = row.get(6)?;
+    let saved = serde_json::from_str::<Value>(&provenance).unwrap_or(Value::Null);
+    let reference = saved["ref"]
+        .as_str()
+        .map_or_else(|| store::file_ref(source, &key), str::to_owned);
+    Ok(Original::file(reference, fingerprint))
+}
+
 fn material_hits(s: &store::Store, source: &str, query: &str) -> Result<Vec<Hit>> {
-    let mut q=s.db.prepare("SELECT b.ordinal,b.revision_id,b.text,b.location,r.kind,r.title,r.provenance,d.status,d.id,d.error FROM blocks b JOIN revisions r ON r.id=b.revision_id JOIN documents d ON d.active_revision=r.id WHERE d.source_id=?1 ORDER BY b.revision_id,b.ordinal")?;
+    let mut q=s.db.prepare("SELECT b.ordinal,b.revision_id,b.text,b.location,r.kind,r.title,r.provenance,d.status,d.id,d.error,d.key,r.source_hash FROM blocks b JOIN revisions r ON r.id=b.revision_id JOIN documents d ON d.active_revision=r.id WHERE d.source_id=?1 ORDER BY b.revision_id,b.ordinal")?;
     let mut rows = q.query([source])?;
     let mut hits = Vec::new();
     while let Some(row) = rows.next()? {
@@ -309,7 +373,7 @@ fn material_hits(s: &store::Store, source: &str, query: &str) -> Result<Vec<Hit>
         if let Some(score) = keyword_score(&text, query) {
             let ordinal: i64 = row.get(0)?;
             let content_hash = hash(text.as_bytes());
-            hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision:row.get(1)?,hash:content_hash,witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"block_offset_bytes":0,"block_end_bytes":text.len(),"coordinate":"extracted_utf8_bytes"}),provenance:material_provenance(row, 9)?,scopes:vec![format!("source:{source}")],thread_scopes:vec![],score,distance:None,space:None,method:"keyword".into()});
+            hits.push(Hit{original: material_original(source, row, 10)?, reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision:row.get(1)?,hash:content_hash,witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"block_offset_bytes":0,"block_end_bytes":text.len(),"coordinate":"extracted_utf8_bytes"}),provenance:material_provenance(row, 9)?,scopes:vec![format!("source:{source}")],thread_scopes:vec![],score,distance:None,space:None,method:"keyword".into()});
             hits.sort_by(Hit::compare);
             hits.truncate(100);
         }
@@ -368,7 +432,7 @@ pub(super) async fn material_semantic(
     }
     // Exact L2 is supplied by sqlite-vec. Full saved blocks are retrieval units;
     // indexed chunk ranges remain explicit UTF-8 coordinates in extracted text.
-    let mut q=snapshot.prepare(&format!("WITH positioned AS(SELECT revision_id,ordinal,text,location,COALESCE(SUM(length(CAST(text AS BLOB))+1) OVER(PARTITION BY revision_id ORDER BY ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS start FROM blocks) SELECT b.ordinal,c.revision_id,b.text,b.location,r.kind,r.title,r.provenance,d.status,d.id,vec_distance_L2(v.embedding,?3) distance,c.start,c.end,d.error FROM chunks c JOIN documents d ON d.active_revision=c.revision_id JOIN revisions r ON r.id=c.revision_id JOIN positioned b ON b.revision_id=c.revision_id AND c.start>=b.start AND c.end<=b.start+length(CAST(b.text AS BLOB)) JOIN embeddings e ON e.hash=c.hash AND e.space_id=?2 JOIN {table} v ON v.rowid=e.vec_rowid WHERE d.source_id=?1 ORDER BY distance,c.id"))?;
+    let mut q=snapshot.prepare(&format!("WITH positioned AS(SELECT revision_id,ordinal,text,location,COALESCE(SUM(length(CAST(text AS BLOB))+1) OVER(PARTITION BY revision_id ORDER BY ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS start FROM blocks) SELECT b.ordinal,c.revision_id,b.text,b.location,r.kind,r.title,r.provenance,d.status,d.id,vec_distance_L2(v.embedding,?3) distance,c.start,c.end,d.error,d.key,r.source_hash FROM chunks c JOIN documents d ON d.active_revision=c.revision_id JOIN revisions r ON r.id=c.revision_id JOIN positioned b ON b.revision_id=c.revision_id AND c.start>=b.start AND c.end<=b.start+length(CAST(b.text AS BLOB)) JOIN embeddings e ON e.hash=c.hash AND e.space_id=?2 JOIN {table} v ON v.rowid=e.vec_rowid WHERE d.source_id=?1 ORDER BY distance,c.id"))?;
     let mut rows = q.query(params![source, profile.id, vector])?;
     let mut hits = Vec::new();
     let mut seen = HashSet::new();
@@ -381,7 +445,7 @@ pub(super) async fn material_semantic(
         }
         let text: String = row.get(2)?;
         let distance: f64 = row.get(9)?;
-        hits.push(Hit{reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision,hash:hash(text.as_bytes()),witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"chunk_start_bytes":row.get::<_,i64>(10)?,"chunk_end_bytes":row.get::<_,i64>(11)?,"coordinate":"extracted_utf8_bytes"}),provenance:material_provenance(row, 12)?,scopes:vec![format!("source:{source}")],thread_scopes:vec![],score:distance,distance:Some(distance),space:Some(profile.id.clone()),method:"semantic".into()});
+        hits.push(Hit{original: material_original(source, row, 13)?, reference:Reference{version:1,store:s.uuid.clone(),kind:"material".into(),id:row.get(8)?,revision,hash:hash(text.as_bytes()),witness:Some(json!({"block_ordinal":ordinal}))},excerpt:excerpt(&text),title:row.get(5)?,kind:row.get(4)?,location:json!({"source":serde_json::from_str::<Value>(&row.get::<_,String>(3)?).unwrap_or(Value::Null),"block_ordinal":ordinal,"chunk_start_bytes":row.get::<_,i64>(10)?,"chunk_end_bytes":row.get::<_,i64>(11)?,"coordinate":"extracted_utf8_bytes"}),provenance:material_provenance(row, 12)?,scopes:vec![format!("source:{source}")],thread_scopes:vec![],score:distance,distance:Some(distance),space:Some(profile.id.clone()),method:"semantic".into()});
         if hits.len() >= 100 {
             break;
         }
@@ -817,7 +881,7 @@ pub(super) async fn search(
     let mut hits = fuse(lists);
     hits.sort_by(Hit::compare);
     hits.truncate(limit as usize);
-    let mut result = json!({"items":hits.iter().map(Hit::value).collect::<Vec<_>>(),"scopes":scopes,"mode":match mode{SearchMode::Keyword=>"keyword",SearchMode::Semantic=>"semantic",SearchMode::Hybrid=>"hybrid"},"rank_fusion":"rrf_k60","snapshot":"independent_sources_history_watermark_per_node_witness","scope_errors":failures,"scope_status":statuses,"degraded":!warnings.is_empty(),"warnings":warnings.into_values().collect::<Vec<_>>()});
+    let mut result = json!({"items":hits.iter().map(|hit| hit.value(&context.database)).collect::<Vec<_>>(),"scopes":scopes,"mode":match mode{SearchMode::Keyword=>"keyword",SearchMode::Semantic=>"semantic",SearchMode::Hybrid=>"hybrid"},"rank_fusion":"rrf_k60","snapshot":"independent_sources_history_watermark_per_node_witness","scope_errors":failures,"scope_status":statuses,"degraded":!warnings.is_empty(),"warnings":warnings.into_values().collect::<Vec<_>>()});
     if scopes.len() == 1 && history_scope(&scopes[0]).is_some() {
         result["next_cursor"] = result["scope_status"][0]["next_cursor"].clone();
     }
@@ -940,6 +1004,7 @@ mod fusion_tests {
     use super::*;
     fn hit(id: &str, method: &str, scope: &str, thread: Option<&str>) -> Hit {
         Hit {
+            original: Original::history(id, "fixture".into()),
             reference: Reference {
                 version: 1,
                 store: "history-fixture".into(),

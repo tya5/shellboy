@@ -470,7 +470,18 @@ async fn run(
             reference,
             limit_bytes,
             cursor,
-        } => search::get(&context, &reference, limit_bytes, cursor.as_deref())?,
+        } => {
+            if reference.starts_with("file:") {
+                store::read_file_original(
+                    &context.database,
+                    &reference,
+                    limit_bytes,
+                    cursor.as_deref(),
+                )?
+            } else {
+                search::get(&context, &reference, limit_bytes, cursor.as_deref())?
+            }
+        }
     };
     if value.get("partial_failure").and_then(Value::as_bool) == Some(true) {
         Ok(

@@ -68,6 +68,45 @@ fn retired_docs_scope_does_not_create_a_database() {
 }
 
 #[test]
+fn file_owner_read_observes_live_bytes_without_replacing_the_indexed_excerpt() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    setup(root);
+    let found = search(root, "SHELLBOY_KNOWLEDGE_OLD");
+    let hit = &found["result"]["items"][0];
+    let locator = hit["ref"].as_str().unwrap();
+    assert!(locator.starts_with("file:") && locator.ends_with("/notes.md"));
+    assert!(
+        hit["excerpt"]
+            .as_str()
+            .unwrap()
+            .contains("SHELLBOY_KNOWLEDGE_OLD")
+    );
+    let original = call(root, &["get", "--ref", locator, "--limit-bytes", "8"], true);
+    assert_eq!(
+        original["result"]["fingerprint"],
+        hit["indexed_fingerprint"]
+    );
+    assert_eq!(original["result"]["matches_indexed"], true);
+    let cursor = original["result"]["next_cursor"].as_str().unwrap();
+    let path = root.join("materials/notes.md");
+    std::fs::write(&path, "current owner bytes").unwrap();
+    let changed = call(root, &["get", "--ref", locator], true);
+    assert_eq!(changed["result"]["text"], "current owner bytes");
+    assert_eq!(changed["result"]["matches_indexed"], false);
+    assert_ne!(changed["result"]["fingerprint"], hit["indexed_fingerprint"]);
+    let stale = call(root, &["get", "--ref", locator, "--cursor", cursor], false);
+    assert_eq!(stale["error"]["code"], "cursor_expired");
+    std::fs::remove_file(path).unwrap();
+    let gone = call(root, &["get", "--ref", locator], false);
+    assert_eq!(gone["error"]["code"], "original_unavailable");
+    assert_eq!(
+        search(root, "SHELLBOY_KNOWLEDGE_OLD")["result"]["items"][0]["excerpt"],
+        hit["excerpt"]
+    );
+}
+
+#[test]
 fn literal_japanese_search_diff_sync_saved_revision_and_unregister_preserve_originals() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
@@ -317,6 +356,11 @@ async fn history_reader_works_with_live_and_stopped_owner_and_expires_replaced_d
         "SHELLBOY_READ_ONLY_HISTORY_V1",
     ];
     let live = call(root, &args, true);
+    assert_eq!(live["result"]["items"][0]["ref"], "history:history-source");
+    assert_eq!(
+        live["result"]["items"][0]["owner_read"]["args"],
+        serde_json::json!(["history", "read", "--node", "history-source"])
+    );
     let reference = live["result"]["items"][0]["reference"].as_str().unwrap();
     assert_eq!(
         live["result"]["items"][0]["provenance"]["current_thread_paths"][0],

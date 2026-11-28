@@ -1,10 +1,14 @@
 mod migrate;
 mod observation;
+mod original;
+pub(super) use original::read as read_file_original;
+
 mod records;
 mod scan;
 mod sync;
 use super::*;
 use fs2::FileExt;
+pub(super) use records::file_ref;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::{

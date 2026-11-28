@@ -120,7 +120,13 @@ fn make_hit(
 ) -> Result<search::Hit> {
     let db = &reader.connection;
     let (score, distance, space) = ranking;
-    let (kind, revision, _, payload_hash) = node(db, id)?;
+    let (kind, revision, payload, payload_hash) = node(db, id)?;
+    let original = search::Original::history(
+        id,
+        payload_hash
+            .clone()
+            .unwrap_or_else(|| hash(payload.to_string().as_bytes())),
+    );
     let provenance = provenance(db, id)?;
     let reference = Reference {
         version: 1,
@@ -132,6 +138,7 @@ fn make_hit(
         witness: Some(json!({"body_kind":body.kind,"payload_hash":payload_hash,"raw":body.raw})),
     };
     Ok(search::Hit {
+        original,
         reference,
         excerpt: body.text.chars().take(500).collect(),
         title: kind.clone(),
@@ -422,7 +429,7 @@ pub(super) fn keyword(
                 if hits.len() == limit {
                     break;
                 }
-                let size = serde_json::to_vec(&hit.value())
+                let size = serde_json::to_vec(&hit.value(Path::new("")))
                     .expect("hit serializes")
                     .len()
                     + 1;

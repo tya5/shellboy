@@ -60,7 +60,7 @@ pub(super) fn retire(store: &mut Store, document: &str) -> Result<()> {
 
 // Encode components, preserving only relative-path separators. Producer and
 // reader use the same byte encoding; admission treats the result as opaque.
-pub(super) fn file_ref(source: &str, relative: &str) -> String {
+pub(in crate::rag) fn file_ref(source: &str, relative: &str) -> String {
     fn component(value: &str) -> String {
         use std::fmt::Write;
         let mut encoded = String::new();
