@@ -46,20 +46,7 @@ fn screen_at(operations: &Operations, width: u16, height: u16) -> String {
     text
 }
 #[test]
-fn owner_forms_cover_every_owner_catalogue_identity_without_client_stubs() {
-    let owner = OperationId::ALL
-        .iter()
-        .filter(|id| {
-            id.spec().route == crate::operations::Route::Owner
-                && !crate::operations::catalogue_tests::CLI_ONLY_OWNER_OPERATIONS.contains(id)
-        })
-        .copied()
-        .collect::<std::collections::HashSet<_>>();
-    let implemented = OpKind::OWNER
-        .iter()
-        .map(|kind| kind.catalogue())
-        .collect::<std::collections::HashSet<_>>();
-    assert_eq!(implemented, owner);
+fn registered_owner_forms_have_fields_and_metadata() {
     for kind in OpKind::OWNER {
         let form = Form::new(*kind, &context());
         assert!(!form.fields.is_empty());

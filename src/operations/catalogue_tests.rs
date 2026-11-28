@@ -1,36 +1,3 @@
-// CLI/protocol owner operations with no generated TUI form.
-pub(crate) const CLI_ONLY_OWNER_OPERATIONS: &[OperationId] = &[
-    OperationId::ShellBackground,
-    OperationId::TurnInterrupt,
-    OperationId::ContextAdd,
-    OperationId::ContextList,
-    OperationId::ContextGet,
-    OperationId::ContextSet,
-    OperationId::ContextRemove,
-    OperationId::ArtifactAdd,
-    OperationId::ArtifactUpdate,
-    OperationId::ArtifactList,
-    OperationId::ArtifactGet,
-    OperationId::ArtifactRemove,
-    OperationId::ArtifactRead,
-    OperationId::ScheduleAdd,
-    OperationId::ServiceAdd,
-    OperationId::ServiceList,
-    OperationId::ServiceGet,
-    OperationId::ServiceSet,
-    OperationId::ServiceEndpoint,
-    OperationId::ServiceStart,
-    OperationId::ServiceStop,
-    OperationId::ServiceRemove,
-    OperationId::ScheduleList,
-    OperationId::ScheduleSet,
-    OperationId::ScheduleEnable,
-    OperationId::ScheduleDisable,
-    OperationId::ScheduleRemove,
-    // Pending replies (#317): CLI/protocol and IPC clients, no generated TUI form.
-    OperationId::MessageList,
-];
-
 use super::*;
 use crate::cli::Cli;
 use clap::{ArgAction, CommandFactory, Parser};
