@@ -14,4 +14,4 @@ commands before spawn (`timed_out`, `started: false`). The serialized tail reser
 its outcome metadata first, then divides the remaining excerpt budget equally
 across definitions. If the metadata cannot fit, a fixed skipped fact replaces
 the results and no commands run. The tail is never a history node.
-Saved attempt inspection reads the admitted item, hash and zero-based position.
+Saved attempt inspection exposes the admitted item in the reconstructed request.

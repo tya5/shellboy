@@ -1,5 +1,6 @@
 //! Request-local context commands, owned until native cleanup completes.
 use super::*;
+use crate::model::wire_bytes::{escaped_len, json_len};
 use crate::shell::{OutputStream, ShellEvent};
 use serde::Serialize;
 use std::time::Duration;
@@ -31,46 +32,23 @@ pub(super) async fn collect(
 ) -> Result<Option<Value>, ApiError> {
     let thread = snapshot.thread.clone();
     let turn = snapshot.turn.clone();
-    let (definitions, request_index) = control
+    let limit = control.store.config.limits.tool_excerpt_bytes;
+    let admitted = control
         .store
         .database
-        .call(move |db| {
-            let definitions = super::super::context_command::definitions(db, &thread)?;
-            // Every adopted tool group starts one continuation; retry attempts do not.
-            let request_index = if definitions.is_empty() {
-                0
-            } else {
-                db.query_row(
-                    "SELECT count(*) FROM tool_group WHERE turn_id=?1",
-                    [&turn],
-                    |row| row.get::<_, i64>(0),
-                )?
-            };
-            Ok::<_, StorageError>((definitions, request_index))
-        })
+        .call(move |db| admit(db, &thread, &turn, limit))
         .await
         .map_err(storage_error)?;
-    if definitions.is_empty() || cancel.is_cancelled() {
+    if cancel.is_cancelled() {
         return Ok(None);
     }
-    let limit =
-        usize::try_from(control.store.config.limits.tool_excerpt_bytes).unwrap_or(usize::MAX);
-    let reserved = serde_json::to_vec(&tail(
-        definitions.iter().map(|def| ResultEntry {
-            name: def.name.clone(),
-            outcome: Outcome::Cancelled,
-            started: Some(false),
-            stdout: String::new(),
-            truncated: false,
-        }),
-        true,
-    ))
-    .expect("context metadata serializes")
-    .len();
-    let Some(available) = limit.checked_sub(reserved) else {
+    let Some((definitions, available, request_index)) = admitted else {
         return Ok(Some(item(SKIPPED.to_owned())));
     };
-    let share = available / definitions.len();
+    if definitions.is_empty() {
+        return Ok(None);
+    }
+    let share = usize::try_from(available / definitions.len() as u64).unwrap_or(usize::MAX);
     let results = futures_util::future::join_all(definitions.into_iter().map(|definition| {
         run(
             control,
@@ -90,6 +68,66 @@ pub(super) async fn collect(
     Ok(Some(tail(results.into_iter(), truncated)))
 }
 
+struct Definition {
+    name: String,
+    command: String,
+    timeout_ms: u32,
+}
+
+fn admit(
+    db: &mut rusqlite::Connection,
+    thread: &str,
+    turn: &str,
+    limit: u64,
+) -> Result<Option<(Vec<Definition>, u64, i64)>, StorageError> {
+    let tx = db.transaction()?;
+    let mut reserved = json_len(&tail(std::iter::empty(), true)).expect("context tail serializes");
+    {
+        let mut stmt =
+            tx.prepare("SELECT name FROM context_command WHERE thread_id=?1 ORDER BY id")?;
+        let mut rows = stmt.query([thread])?;
+        let mut comma = 0;
+        while let Some(row) = rows.next()? {
+            let entry = ResultEntry {
+                name: row.get(0)?,
+                outcome: Outcome::Cancelled,
+                started: Some(false),
+                stdout: String::new(),
+                truncated: false,
+            };
+            let serialized = serde_json::to_string(&entry).expect("context metadata serializes");
+            reserved += comma + escaped_len(&serialized);
+            if reserved > limit {
+                return Ok(None);
+            }
+            comma = 1;
+        }
+        if comma == 0 {
+            return Ok(Some((Vec::new(), 0, 0)));
+        }
+    }
+    // Stay in the same snapshot when materializing the admitted commands and ordinal.
+    let mut stmt = tx.prepare(
+        "SELECT name,command,timeout_ms FROM context_command WHERE thread_id=?1 ORDER BY id",
+    )?;
+    let definitions = stmt
+        .query_map([thread], |row| {
+            Ok(Definition {
+                name: row.get(0)?,
+                command: row.get(1)?,
+                timeout_ms: row.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    // Every adopted tool group starts one continuation; retries do not.
+    let ordinal = tx.query_row(
+        "SELECT count(*) FROM tool_group WHERE turn_id=?1",
+        [turn],
+        |row| row.get(0),
+    )?;
+    Ok(Some((definitions, limit - reserved, ordinal)))
+}
+
 fn tail(entries: impl Iterator<Item = ResultEntry>, truncated: bool) -> Value {
     item(
         json!({"type":"context_commands", "results": entries.collect::<Vec<_>>(),
@@ -107,7 +145,7 @@ async fn run(
     snapshot: &Snapshot,
     cancel: &CancellationToken,
     start_gate: Arc<Mutex<bool>>,
-    definition: super::super::context_command::Definition,
+    definition: Definition,
     share: usize,
     request_index: i64,
 ) -> ResultEntry {
@@ -193,9 +231,7 @@ async fn run(
 const SKIPPED: &str = r#"{"context":"skipped","reason":"budget_too_small"}"#;
 
 pub(crate) fn minimum_budget() -> u64 {
-    serde_json::to_vec(&item(SKIPPED.to_owned()))
-        .expect("skip item serializes")
-        .len() as u64
+    json_len(&item(SKIPPED.to_owned())).expect("skip item serializes")
 }
 
 struct Excerpt {
