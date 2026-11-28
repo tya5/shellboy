@@ -90,6 +90,11 @@ fn operation_result_schemas(
     result!("service.endpoint", ServiceEndpoint);
     opaque!("schedule.add");
     opaque!("schedule.list");
+    opaque!("service.add");
+    opaque!("service.list");
+    opaque!("service.start");
+    opaque!("service.stop");
+    opaque!("service.remove");
     opaque!("schedule.set");
     opaque!("schedule.enable");
     opaque!("schedule.disable");

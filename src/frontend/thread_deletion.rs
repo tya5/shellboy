@@ -447,7 +447,7 @@ mod tests {
     }
     #[tokio::test]
     async fn failed_saved_view_cleanup_rolls_back_thread_deletion_and_draft_cleanup() {
-        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
         let client = selected_owner(&control);
         save_draft(
             &client,
@@ -487,6 +487,29 @@ mod tests {
             .err()
             .expect("delete must fail");
         assert_eq!(error.code, ErrorCode::SaveFailed);
+        let refused = client
+            .call::<crate::protocol::DraftState>(draft_get())
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::InvalidState);
+        server.shutdown().await.unwrap();
+        assert_eq!(
+            control.shutdown().await.unwrap_err().code,
+            ErrorCode::SaveFailed
+        );
+        owner.shutdown().await.unwrap();
+
+        let owner = crate::app::DataOwner::start(
+            Some(root.path().join("config.toml")),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = crate::control::Control::new(&owner, root.path().into());
+        let (rpc, receive) = tokio::sync::mpsc::channel(16);
+        let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+        tokio::spawn(control.clone().serve(receive));
         let after: crate::protocol::DraftState =
             selected_owner(&control).call(draft_get()).await.unwrap();
         assert_eq!(after.draft, before.draft);

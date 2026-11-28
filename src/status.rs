@@ -130,9 +130,9 @@ impl ActivityCounts {
                 "SELECT
                  (SELECT count(*) FROM (SELECT 1 FROM run INDEXED BY one_live_run
                     WHERE state IN ('live','stopping') LIMIT ?1)),
-                 (SELECT count(*) FROM (SELECT 1 FROM receipt INDEXED BY receipt_pending_to
+                 (SELECT count(*) FROM (SELECT 1 FROM receipt INDEXED BY receipt_human_reply_pending
                     WHERE json_extract(result_json,'$.reply.state')='pending'
-                      AND json_extract(result_json,'$.ask_name')='human' LIMIT ?1))",
+                      AND json_extract(result_json,'$.to_human')=1 LIMIT ?1))",
                 [MAX_LIST_LIMIT + 1],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -908,7 +908,7 @@ mod response_node_tests {
                 SELECT id,'message','2026-11-24T00:00:00Z' FROM thread;
             INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
                 SELECT id,id,'null',id,id,'applied','2026-11-24T00:00:00Z',
-                    json_object('ask_name','human','reply',json_object('state','pending')) FROM thread;
+                    json_object('to_human',json('true'),'reply',json_object('state','pending')) FROM thread;
         "#, MAX_LIST_LIMIT + 1)).unwrap();
         let args = StatusArgs {
             limit: 1,

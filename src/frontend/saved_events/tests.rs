@@ -281,7 +281,7 @@ async fn native_preview_is_scoped_answer_only_and_instance_fenced() {
 pub(in crate::frontend) async fn install_preview_attempt(control: &crate::control::Control) {
     control.store.database.call(|db| {
         db.execute("UPDATE turn SET state='running' WHERE id='target-run'", [])?;
-        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation','thread','fixture-attempt','target-run',0,0,'fixture','fixture-model',0,'inflight','{}','now')", [])?;
+        db.execute("INSERT INTO model_attempt(kind,thread_id,id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('conversation','thread','fixture-attempt','target-run',0,0,'fixture','fixture-model',0,'inflight','{}','2026-11-24T00:00:00Z')", [])?;
         Ok(())
     }).await.unwrap();
 }
