@@ -407,3 +407,95 @@ async fn concurrent_context_commands_fill_a_equal_shares_in_definition_order() {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn context_list_resumes_in_definition_order_only_in_the_same_thread() {
+    use crate::protocol::{
+        Command, ContextListArgs, DEFAULT_LIST_LIMIT, ErrorCode, MAX_LIST_LIMIT, Request,
+        ThreadCreateArgs,
+    };
+    let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+    let thread = accepted.thread_id;
+    let request = |name: &str, command| {
+        Request::new(
+            format!("{}:{name}", owner.operation_epoch.current()),
+            command,
+        )
+    };
+    let other = control
+        .request(request(
+            "other-thread",
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_thread_id: None,
+            }),
+        ))
+        .await;
+    assert!(other.ok, "{:?}", other.error);
+    let other = other.result.unwrap()["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let expected: Vec<_> = (0..=DEFAULT_LIST_LIMIT)
+        .rev()
+        .map(|i| format!("definition-{i:03}"))
+        .collect();
+    for name in &expected {
+        define(&control, &thread, name, "echo definition", 250).await;
+    }
+    let list = |thread_id: &str, limit, cursor| {
+        Command::ContextList(ContextListArgs {
+            thread_id: Some(thread_id.into()),
+            limit,
+            cursor,
+        })
+    };
+    let first = control
+        .request(request(
+            "context-page-first",
+            list(&thread, DEFAULT_LIST_LIMIT, None),
+        ))
+        .await;
+    assert!(first.ok, "{:?}", first.error);
+    let first = first.result.unwrap();
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("a continuation for remaining definitions")
+        .to_owned();
+    assert_eq!(first["thread_id"], thread);
+    let names = |page: &Value| {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&first), expected[..DEFAULT_LIST_LIMIT as usize]);
+    let foreign = control
+        .request(request(
+            "context-page-foreign",
+            list(&other, DEFAULT_LIST_LIMIT, Some(cursor.clone())),
+        ))
+        .await;
+    assert_eq!(foreign.error.unwrap().code, ErrorCode::CursorExpired);
+    let last = control
+        .request(request("context-page-last", list(&thread, 1, Some(cursor))))
+        .await;
+    assert!(last.ok, "{:?}", last.error);
+    let last = last.result.unwrap();
+    assert_eq!(names(&last), expected[DEFAULT_LIST_LIMIT as usize..]);
+    assert!(last.get("next_cursor").is_some_and(Value::is_null));
+    let oversized = control
+        .request(request(
+            "context-page-oversized",
+            list(&thread, MAX_LIST_LIMIT + 1, None),
+        ))
+        .await;
+    assert_eq!(oversized.error.unwrap().code, ErrorCode::InvalidArgument);
+    close(control, owner).await;
+}

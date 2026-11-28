@@ -1030,9 +1030,11 @@ impl Command {
             Self::ContextGet(a) | Self::ContextRemove(a) => {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")
             }
-            Self::ContextList(a) | Self::ScheduleList(a) => {
-                optional_nonempty(a.thread_id.as_deref(), "thread_id")
+            Self::ContextList(a) => {
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                limit(a.limit, MAX_LIST_LIMIT)
             }
+            Self::ScheduleList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
             Self::ThreadTags(a) => a.validate(),
             Self::ThreadCwds(a) => a.validate(),
             Self::ThreadBranches(a) => a.validate(),

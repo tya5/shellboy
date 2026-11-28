@@ -1369,11 +1369,14 @@ Standalone `rag` reports hints on failures and on failed scopes or inputs in a p
 
 `context add --thread THREAD --name NAME --command STRING --timeout-ms N`
 registers one quoted shell command. The timeout is required and must be positive.
-Use `context list --thread THREAD`, `context get --thread THREAD --name NAME`,
+Use `context list --thread THREAD [--limit N] [--cursor TOKEN]`, `context get --thread THREAD --name NAME`,
 `context set --thread THREAD --name NAME [--command STRING] [--timeout-ms N]`,
 or `context remove --thread THREAD --name NAME`. Set changes command or timeout
 without changing execution order. A model shell may omit `--thread` for its own
-Thread. Names are unique within each Thread; resources are not inherited.
+Thread. Names are unique within each Thread; resources are not inherited. The list
+is live, in registration order. Follow `next_cursor` on the same Thread until it
+is null; a page can be shorter than `--limit` to fit the response. Restart without
+a cursor after a definition change to read a fresh list.
 
 Context commands run concurrently in the Thread's effective working directory.
 Each has its own timeout, including launch admission. Results appear in registration

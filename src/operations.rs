@@ -1916,7 +1916,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::Inspect,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Thread],
+        fields: &[FieldId::Thread, FieldId::Limit, FieldId::Cursor],
     },
     OperationSpec {
         id: OperationId::ContextGet,
