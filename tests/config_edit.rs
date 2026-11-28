@@ -1052,7 +1052,7 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
         // Omitting the fence uses the current file, preserving the external edit.
         let unfenced = set(
             &control,
-            &format!("{}:config-unfenced", control.store.instance_id),
+            &format!("{}:config-unfenced", control.store.operation_epoch.current()),
             ConfigSetArgs {
                 expected_hash: None,
                 changes: vec![change("default_model", json!("unfenced"))],

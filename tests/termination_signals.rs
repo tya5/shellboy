@@ -704,22 +704,25 @@ async fn actual_parent_shell_pty_close_kills_term_ignoring_owned_groups_without_
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn repeated_term_keeps_one_owner_drain_until_storage_can_finish() {
+async fn second_signal_forces_without_waiting_for_blocked_database_cleanup() {
     let mut fixture = Fixture::running_with(None, true, true, 2000).await;
+    let native = fixture.owner.native_group.unwrap();
     let hold = rusqlite::Connection::open(fixture.database()).unwrap();
     hold.execute_batch("BEGIN IMMEDIATE").unwrap();
     fixture.owner.signal(libc::SIGTERM);
     fixture.wait_listener_closed().await;
     fixture.owner.signal(libc::SIGTERM);
-    assert!(fixture.owner.child.try_wait().unwrap().is_none());
-    hold.execute_batch("ROLLBACK").unwrap();
     let status = fixture.owner.exited().await;
-    assert!(
-        status.success(),
-        "{status}\n{}",
-        fixture.shutdown_diagnostic()
-    );
-    fixture.assert_graceful();
+    assert_eq!(status.code(), Some(1));
+
+    hold.execute_batch("ROLLBACK").unwrap();
+    crate::test_watchdog::watchdog("tests/termination_signals.rs: second_signal_forces_without_waiting_for_blocked_database_cleanup", async {
+        while unsafe { libc::kill(-native, 0) } == 0 {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("forced exit left its known native process group alive");
     fixture.owner.native_group = None;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
