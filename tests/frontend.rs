@@ -485,7 +485,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     .unwrap();
     let control = Control::new(&owner, root.path().into());
     let observer = control.clone();
-    observer.store.database.call(|db| { db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('wait-thread','/','/AGENTS.md','fixture','fixture-model','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('wait-run','wait-thread','live','now');")?; Ok(()) }).await.unwrap();
+    observer.store.database.call(|db| { db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('wait-thread','/','/AGENTS.md','fixture','fixture-model','2026-01-01T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at)VALUES('wait-run','wait-thread','live','2026-01-01T00:00:00Z');")?; Ok(()) }).await.unwrap();
     let (rpc_send, rpc_receive) = tokio::sync::mpsc::channel(16);
     let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
     tokio::spawn(control.clone().serve(rpc_receive));
