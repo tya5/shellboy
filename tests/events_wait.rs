@@ -1080,6 +1080,27 @@ async fn artifact_scheme_list_pages_live_threads_and_follows_current_version() {
         .await
         .unwrap()
     };
+    let title_ids = [a.clone(), b.clone(), gone.clone()];
+    control
+        .store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE thread SET title='Owner A' WHERE id=?1",
+                [&title_ids[0]],
+            )?;
+            db.execute(
+                "UPDATE thread SET title='Owner B' WHERE id=?1",
+                [&title_ids[1]],
+            )?;
+            db.execute(
+                "UPDATE thread SET title='Deleted owner' WHERE id=?1",
+                [&title_ids[2]],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let first = add(&a).await;
     add(&b).await;
     add(&gone).await;
@@ -1109,6 +1130,7 @@ async fn artifact_scheme_list_pages_live_threads_and_follows_current_version() {
     let page = list("SHELLBOY-APP", None, 1).await;
     assert_eq!(page["filters"], json!({"scheme":"shellboy-app"}));
     assert_eq!(page["items"][0]["thread_id"], b);
+    assert_eq!(page["items"][0]["owner_title"], "Owner B");
     let next = list(
         "shellboy-app",
         Some(page["next_cursor"].as_str().unwrap().into()),
@@ -1116,6 +1138,7 @@ async fn artifact_scheme_list_pages_live_threads_and_follows_current_version() {
     )
     .await;
     assert_eq!(next["items"][0]["thread_id"], a);
+    assert_eq!(next["items"][0]["owner_title"], "Owner A");
     assert!(next["next_cursor"].is_null());
     command(
         &control,

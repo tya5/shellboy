@@ -1638,6 +1638,35 @@ async fn artifact_read_serves_a_published_app_folder_and_refuses_escapes() {
     assert!(std::path::Path::new(folder).is_absolute(), "{uri}");
     let listed = ok(&["artifact", "list", "--thread", thread]).await;
     assert_eq!(listed["items"][0]["latest"]["uri"], uri);
+    assert!(listed["items"][0].get("owner_title").is_none());
+    let owner_id = thread.to_owned();
+    control
+        .store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE thread SET title='App owner' WHERE id=?1",
+                [&owner_id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    for args in [
+        vec!["artifact", "list", "--scheme", "shellboy-app"],
+        vec![
+            "artifact",
+            "list",
+            "--scheme",
+            "shellboy-app",
+            "--thread",
+            thread,
+        ],
+    ] {
+        let page = ok(&args).await;
+        assert_eq!(page["items"][0]["artifact_id"], id);
+        assert_eq!(page["items"][0]["owner_title"], "App owner");
+    }
     let actual_cwd = std::path::Path::new(folder).parent().unwrap();
     let undotted = ok(&[
         "artifact",

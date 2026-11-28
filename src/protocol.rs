@@ -890,7 +890,8 @@ record!(ArtifactSummary {
     thread_id: String,
     created_at: String,
     updated_at: String,
-    latest: ArtifactVersion
+    latest: ArtifactVersion,
+    #[serde(default, skip_serializing_if = "Option::is_none")] owner_title: Option<String>
 });
 record!(ArtifactSelected {
     artifact_id: String,

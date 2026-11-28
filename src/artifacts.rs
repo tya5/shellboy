@@ -70,6 +70,7 @@ fn summary(r: &Row<'_>) -> rusqlite::Result<ArtifactSummary> {
         created_at: r.get(2)?,
         updated_at: r.get(3)?,
         latest: version(r, 4)?,
+        owner_title: None,
     })
 }
 fn selected(item: ArtifactSummary) -> ArtifactSelected {
@@ -304,19 +305,19 @@ fn list_scheme(
             return Ok(());
         }
         let query = format!(
-            "SELECT id,updated_at,thread_id,current_scheme FROM artifact INDEXED BY {index}
-             WHERE {field}=?1 {range} ORDER BY updated_at DESC,id LIMIT ?2"
+            "SELECT {FIELDS},a.current_scheme,t.title,t.archived_at IS NULL AND t.deleted_at IS NULL
+             FROM artifact a INDEXED BY {index} {LATEST_JOIN}
+             JOIN thread t ON t.id=a.thread_id
+             WHERE a.{field}=?1 {range}
+             ORDER BY a.updated_at DESC,a.id LIMIT ?2"
         );
         let mut stmt = tx.prepare(&query).map_err(sql)?;
         let values: [&dyn rusqlite::ToSql; 4] = [&primary, &remaining, &updated, &id];
         for row in stmt
             .query_map(&values[..stmt.parameter_count()], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                ))
+                let mut item = summary(r)?;
+                item.owner_title = Some(r.get(10)?);
+                Ok((item, r.get::<_, Option<String>>(9)?, r.get::<_, bool>(11)?))
             })
             .map_err(sql)?
         {
@@ -325,8 +326,9 @@ fn list_scheme(
         Ok(())
     };
     if let Some((updated, id)) = after {
-        read("AND updated_at=?3 AND id>?4", Some(&updated), Some(&id))?;
-        read("AND updated_at<?3", Some(&updated), None)?;
+        // Mixed sort directions need two index ranges: the remaining tie, then older rows.
+        read("AND a.updated_at=?3 AND a.id>?4", Some(&updated), Some(&id))?;
+        read("AND a.updated_at<?3", Some(&updated), None)?;
     } else {
         read("", None, None)?;
     }
@@ -334,18 +336,11 @@ fn list_scheme(
     let mut items = Vec::new();
     let mut last = None;
     let mut candidates = candidates.into_iter().peekable();
-    let mut live = tx.prepare_cached(
-        "SELECT EXISTS (SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL AND archived_at IS NULL)"
-    ).map_err(sql)?;
-    for (id, updated, owner, current) in candidates.by_ref().take(SCHEME_CANDIDATE_LIMIT) {
-        if current.as_deref() == Some(scheme.as_str())
-            && live
-                .query_row([owner], |r| r.get::<_, bool>(0))
-                .map_err(sql)?
-        {
-            items.push(find(tx, &id, None)?);
+    for (item, current, live) in candidates.by_ref().take(SCHEME_CANDIDATE_LIMIT) {
+        last = Some((item.updated_at.clone(), item.artifact_id.clone()));
+        if live && current.as_deref() == Some(scheme.as_str()) {
+            items.push(item);
         }
-        last = Some((updated, id));
         if items.len() == limit {
             break;
         }
