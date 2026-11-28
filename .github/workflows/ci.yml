@@ -410,7 +410,7 @@ jobs:
         continue-on-error: true
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
-        run: python3 current/scripts/dev/repeat-shutdown-test.py --source baseline --output evidence/before --count 50
+        run: python3 current/scripts/dev/repeat-shutdown-test.py --source baseline --test tui_shutdown::explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes --output evidence/before --count 50
       - name: Repeat current tip 50 times
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target

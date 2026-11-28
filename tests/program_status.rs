@@ -163,6 +163,7 @@ mod native {
                     stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
                 }
             });
+            let _owner = crate::pty_session::ServeFixture::start(std::ffi::OsStr::new(env!("CARGO_BIN_EXE_shellboy")), root.path(), &config, &data).await;
             let mut master=-1;let mut slave=-1;let mut size=libc::winsize{ws_row:36,ws_col:120,ws_xpixel:0,ws_ypixel:0};
             // This fixture owns both returned descriptors; no real terminal is opened.
             assert_eq!(unsafe{libc::openpty(&mut master,&mut slave,std::ptr::null_mut(),std::ptr::null_mut(),std::ptr::addr_of_mut!(size))},0);
@@ -174,7 +175,7 @@ mod native {
             let slave=unsafe{File::from_raw_fd(slave)};
             let mut owner_command=command(&home);
             crate::pty_session::isolate_child(&mut owner_command);
-            let mut owner=owner_command.arg("--config").arg(&config).arg("--data-dir").arg(&data).current_dir(root.path()).stdin(Stdio::from(slave.try_clone().unwrap())).stdout(Stdio::from(slave.try_clone().unwrap())).stderr(Stdio::from(slave)).spawn().unwrap();
+            let mut owner=owner_command.arg("--config").arg(&config).arg("--data-dir").arg(&data).current_dir(root.path()).stdin(Stdio::from(slave.try_clone().unwrap())).stdout(Stdio::from(slave.try_clone().unwrap())).stderr(Stdio::from(slave)).kill_on_drop(true).spawn().unwrap();
             let mut bytes=Vec::new();read_until(&master,&mut bytes,|bytes|{let text=String::from_utf8_lossy(bytes);text.contains("Ready for input")||text.contains("入力できます")}).await;
             let created=cli(&home,&data,&["thread","create"]).await;let id=created["thread_id"].as_str().unwrap();let terminal_id=shellboy::program_status::thread_id(id);
             let sent=cli(&home,&data,&["message","send","--thread",id,"--text","fixture work"]).await;

@@ -316,13 +316,13 @@ fn ps(pid: u32) -> Ps {
         ps_cpu_percent: fields[2].parse().unwrap(),
     }
 }
-#[test]
+#[tokio::test]
 #[ignore = "real macOS TUI x14; ~40 seconds; explicitly run after source freeze"]
-fn performance_real_tui_startup_paste_and_idle() {
+async fn performance_real_tui_startup_paste_and_idle() {
     let binary = std::env::var_os("SHELLBOY_PERF_TUI_BIN")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| env!("CARGO_BIN_EXE_shellboy").into());
-    let metadata: Value = json!({"schema":1,"os":command("/usr/bin/uname", &["-srm"]),"macos":command("/usr/bin/sw_vers", &["-productVersion"]),"os_build":command("/usr/bin/sw_vers", &["-buildVersion"]),"hardware":command("/usr/sbin/sysctl", &["-n","hw.model","hw.ncpu","hw.memsize"]),"rustc":command("rustc", &["--version","--verbose"]),"binary_sha256":binary_hash(&binary),"test_debug_assertions":cfg!(debug_assertions),"binary_override":std::env::var_os("SHELLBOY_PERF_TUI_BIN").is_some(),"git_commit":command("git", &["rev-parse","HEAD"]),"load_average_start":host_load(),"samples_per_mode":SAMPLES,"terminal":{"term":"xterm-256color","columns":120,"rows":32},"settings":{"config":"empty TOML; Config defaults; no connections or embedding; no Send","ui_max_fps":shellboy::config::Config::default().ui.max_fps},"idle_requested_seconds":IDLE.as_secs_f64(),"ps_rss_unit":"KiB (1024 bytes)","ps_cpu_time_display_resolution_seconds":0.01,"ps_percent_cpu":"macOS decaying average; not the 2-second interval percentage","latency_boundary":"before PTY write of complete Japanese bracketed-paste frame to receipt of full marker in ANSI-stripped PTY output; not pixels, hardware keypress, IME or terminal-emulator processing","startup_boundary":"before spawning real shellboy to first input-ready footer with raw ECHO disabled; PTY/config/tempdir creation excluded","fresh_semantics":"new data directory and migrations; OS/binary caches are not flushed; binary hash read warms executable pages"});
+    let metadata: Value = json!({"schema":1,"os":command("/usr/bin/uname", &["-srm"]),"macos":command("/usr/bin/sw_vers", &["-productVersion"]),"os_build":command("/usr/bin/sw_vers", &["-buildVersion"]),"hardware":command("/usr/sbin/sysctl", &["-n","hw.model","hw.ncpu","hw.memsize"]),"rustc":command("rustc", &["--version","--verbose"]),"binary_sha256":binary_hash(&binary),"test_debug_assertions":cfg!(debug_assertions),"binary_override":std::env::var_os("SHELLBOY_PERF_TUI_BIN").is_some(),"git_commit":command("git", &["rev-parse","HEAD"]),"load_average_start":host_load(),"samples_per_mode":SAMPLES,"terminal":{"term":"xterm-256color","columns":120,"rows":32},"settings":{"config":"empty TOML; Config defaults; no connections or embedding; no Send","ui_max_fps":shellboy::config::Config::default().ui.max_fps},"idle_requested_seconds":IDLE.as_secs_f64(),"ps_rss_unit":"KiB (1024 bytes)","ps_cpu_time_display_resolution_seconds":0.01,"ps_percent_cpu":"macOS decaying average; not the 2-second interval percentage","latency_boundary":"before PTY write of complete Japanese bracketed-paste frame to receipt of full marker in ANSI-stripped PTY output; not pixels, hardware keypress, IME or terminal-emulator processing","startup_boundary":"before spawning real shellboy to first input-ready footer with raw ECHO disabled; PTY/config/tempdir creation excluded","fresh_semantics":"first attachment to a new fixture owner; owner preparation is excluded; warm reopen attaches to the same owner"});
     println!("PERF_TUI_ENV {metadata}");
     let mut fresh = Vec::new();
     let mut warm = Vec::new();
@@ -335,6 +335,13 @@ fn performance_real_tui_startup_paste_and_idle() {
         let config = root.path().join("config.toml");
         std::fs::write(&config, "").unwrap();
         let data = root.path().join("data");
+        let _owner = crate::pty_session::ServeFixture::start(
+            binary.as_os_str(),
+            root.path(),
+            &config,
+            &data,
+        )
+        .await;
         for reopen in [false, true] {
             let load = host_load();
             let (mut tui, started) = Tui::start(&binary, &config, &data, root.path());

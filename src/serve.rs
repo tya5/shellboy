@@ -154,11 +154,10 @@ pub async fn attach_or_start(
                 }
                 let exited = child
                     .as_mut()
-                    .map(tokio::process::Child::try_wait)
+                    .map(DetachedChild::exited)
                     .transpose()
                     .map_err(|_| attach_error("Cannot observe owner process"))?
-                    .flatten()
-                    .is_some();
+                    .unwrap_or(false);
                 if exited {
                     child = None;
                     let lock_path = data.clone();
@@ -237,11 +236,37 @@ fn profile_is_unowned(data: &std::path::Path) -> Result<bool, ApiError> {
     }
 }
 
+#[cfg(unix)]
+struct DetachedChild(tokio::process::Child);
+
+#[cfg(windows)]
+struct DetachedChild(std::os::windows::io::OwnedHandle);
+
+impl DetachedChild {
+    fn exited(&mut self) -> std::io::Result<bool> {
+        #[cfg(unix)]
+        return self.0.try_wait().map(|status| status.is_some());
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::{
+                Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT},
+                System::Threading::WaitForSingleObject,
+            };
+            match unsafe { WaitForSingleObject(self.0.as_raw_handle(), 0) } {
+                WAIT_OBJECT_0 => Ok(true),
+                WAIT_TIMEOUT => Ok(false),
+                _ => Err(std::io::Error::last_os_error()),
+            }
+        }
+    }
+}
+
 fn spawn_detached(
     config: Option<&std::path::Path>,
     data: &std::path::Path,
-) -> Result<tokio::process::Child, ApiError> {
-    use std::process::Stdio;
+) -> Result<DetachedChild, ApiError> {
+    use std::ffi::OsStr;
     if !data.is_absolute() || data.to_str().is_none() {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
@@ -250,32 +275,198 @@ fn spawn_detached(
     }
     let executable = std::env::current_exe()
         .map_err(|_| attach_error("Cannot identify the Shellboy executable"))?;
-    let mut command = tokio::process::Command::new(executable);
-    command.arg("--data-dir").arg(data);
+    let mut args = vec![OsStr::new("--data-dir"), data.as_os_str()];
     if let Some(config) = config {
-        command.arg("--config").arg(config);
+        args.extend([OsStr::new("--config"), config.as_os_str()]);
     }
+    args.push(OsStr::new("serve"));
+    spawn_owner(&executable, &args)
+}
+
+#[cfg(unix)]
+fn spawn_owner(
+    executable: &std::path::Path,
+    args: &[&std::ffi::OsStr],
+) -> Result<DetachedChild, ApiError> {
+    use std::process::Stdio;
+    let mut command = tokio::process::Command::new(executable);
     command
-        .arg("serve")
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    #[cfg(unix)]
-    // setsid is async-signal-safe and prevents terminal hangup from following the child.
+    configure_detached_child(command.as_std_mut())?;
+    command
+        .spawn()
+        .map(DetachedChild)
+        .map_err(|_| attach_error("Cannot launch detached Shellboy owner"))
+}
+
+#[cfg(unix)]
+fn configure_detached_child(command: &mut std::process::Command) -> Result<(), ApiError> {
+    use std::os::unix::process::CommandExt;
+    #[cfg(target_os = "macos")]
+    let fd_limit = {
+        let mut limit: libc::c_int = 0;
+        let mut size = std::mem::size_of_val(&limit);
+        // The system's per-process ceiling, not the caller's possibly lowered RLIMIT_NOFILE.
+        if unsafe {
+            libc::sysctlbyname(
+                c"kern.maxfilesperproc".as_ptr(),
+                (&mut limit as *mut libc::c_int).cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        } != 0
+            || limit < 3
+        {
+            return Err(attach_error(
+                "Cannot determine the owner descriptor boundary",
+            ));
+        }
+        limit
+    };
+    // Mark instead of closing: Command's private exec error pipe still needs to
+    // work until exec succeeds. These operations mutate only the forked child.
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             if libc::setsid() == -1 {
                 return Err(std::io::Error::last_os_error());
+            }
+            #[cfg(target_os = "linux")]
+            if libc::syscall(
+                libc::SYS_close_range,
+                3_u32,
+                u32::MAX,
+                libc::CLOSE_RANGE_CLOEXEC,
+            ) == -1
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            #[cfg(target_os = "macos")]
+            for fd in 3..fd_limit {
+                if libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) == -1 {
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() != Some(libc::EBADF) {
+                        return Err(error);
+                    }
+                }
             }
             Ok(())
         });
     }
-    #[cfg(windows)]
-    command.creation_flags(
-        windows_sys::Win32::System::Threading::DETACHED_PROCESS
-            | windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP,
-    );
-    command
-        .spawn()
-        .map_err(|_| attach_error("Cannot launch detached Shellboy owner"))
+    Ok(())
+}
+
+#[cfg(windows)]
+fn spawn_owner(
+    executable: &std::path::Path,
+    args: &[&std::ffi::OsStr],
+) -> Result<DetachedChild, ApiError> {
+    use std::{
+        os::windows::{
+            ffi::OsStrExt,
+            io::{FromRawHandle, OwnedHandle},
+        },
+        ptr::null,
+    };
+    use windows_sys::Win32::System::Threading::{
+        CREATE_NEW_PROCESS_GROUP, CreateProcessW, DETACHED_PROCESS, PROCESS_INFORMATION,
+        STARTUPINFOW,
+    };
+    let mut exe = executable.as_os_str().encode_wide().collect::<Vec<_>>();
+    let args = args
+        .iter()
+        .map(|arg| arg.encode_wide().collect())
+        .collect::<Vec<_>>();
+    let mut line = crate::shell::windows_command::command_line(&exe, &args)?;
+    exe.push(0);
+    let startup = STARTUPINFOW {
+        cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+        ..Default::default()
+    };
+    let mut info = PROCESS_INFORMATION::default();
+    // No inherited handles (including standard streams) and no console.
+    if unsafe {
+        CreateProcessW(
+            exe.as_ptr(),
+            line.as_mut_ptr(),
+            null(),
+            null(),
+            0,
+            DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            null(),
+            null(),
+            &startup,
+            &mut info,
+        )
+    } == 0
+    {
+        return Err(attach_error("Cannot launch detached Shellboy owner"));
+    }
+    unsafe {
+        drop(OwnedHandle::from_raw_handle(info.hThread));
+        Ok(DetachedChild(OwnedHandle::from_raw_handle(info.hProcess)))
+    }
+}
+
+#[cfg(all(test, unix))]
+mod detached_tests {
+    use super::configure_detached_child;
+    use std::{
+        fs::File,
+        os::{fd::AsRawFd, unix::process::CommandExt},
+        process::{Child, Command, Stdio},
+    };
+
+    struct StopAndWait(Child);
+    impl Drop for StopAndWait {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn detached_exec_does_not_retain_a_caller_lock_and_the_guard_reaps_the_child() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("caller.lock");
+        let locked = File::create(&path).unwrap();
+        let witness = File::options().read(true).write(true).open(&path).unwrap();
+        fs2::FileExt::try_lock_exclusive(&locked).unwrap();
+        assert!(fs2::FileExt::try_lock_exclusive(&witness).is_err());
+
+        let mut command = Command::new("/bin/cat");
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let fd = locked.as_raw_fd();
+        // Simulate a caller's inheritable lock without changing another test's fork.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        configure_detached_child(&mut command).unwrap();
+        let mut child = StopAndWait(command.spawn().unwrap());
+        let pid = child.0.id() as libc::pid_t;
+        assert!(child.0.try_wait().unwrap().is_none());
+        drop(locked);
+        fs2::FileExt::try_lock_exclusive(&witness)
+            .expect("live detached child must not retain the lock");
+        drop(child);
+        assert_eq!(
+            unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) },
+            -1
+        );
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ECHILD)
+        );
+    }
 }
