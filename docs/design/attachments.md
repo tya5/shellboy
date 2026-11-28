@@ -155,11 +155,10 @@ attach it again under a new ID. Unchanged live slots keep the existing shape.
 Omitted slots do not resume sending after recovery or reversion. Source payloads,
 spill payloads and the existing input-byte categories are unchanged.
 
-Preparation records bounded hash/size/format observations before selecting
-what fits the aggregate budget. Only live placements count; only admitted
-paths are encoded. A cold admitted path can be read again to encode it, and
-the second read must match its classified observation or preparation fails
-without adoption. Omitted paths keep only observation metadata.
+Preparation classifies a bounded observation before charging send capacity.
+The same read supplies the bytes for encoding; the path is not reopened.
+When capacity is tight, preparation drops the oldest eligible unprotected
+slots and their raw buffers. Omitted paths keep only observation metadata.
 
 Spill keeps its existing saved JSON shape (#470). Its conceptual mapping to the
 shared fact is `reason: spilled`, `ref: original_node_id`, no recorded
