@@ -1521,10 +1521,18 @@ impl Store {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 MutationResult::value(super::schedule::list(tx, &thread, true)?)
             }
-            Command::ContextAdd(args) => {
-                let thread = target(args.thread_id.as_deref(), caller)?;
-                let result = super::context_command::add(tx, &thread, args)?;
-                let mut result = MutationResult::value(result)?;
+            command @ (Command::ContextAdd(_)
+            | Command::ContextSet(_)
+            | Command::ContextRemove(_)) => {
+                use super::context_command as context;
+                let thread = target(command.context_thread(), caller)?;
+                let value = match command {
+                    Command::ContextAdd(args) => context::add(tx, &thread, args),
+                    Command::ContextSet(args) => context::set(tx, &thread, args),
+                    Command::ContextRemove(args) => context::remove(tx, &thread, args),
+                    _ => unreachable!("context mutations only"),
+                }?;
+                let mut result = MutationResult::value(value)?;
                 result.changed_threads.push(thread);
                 Ok(result)
             }
@@ -1539,24 +1547,7 @@ impl Store {
             }
             Command::ContextGet(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
-                let result = super::context_command::get(tx, &thread, args)?;
-                let result = MutationResult::value(result)?;
-
-                Ok(result)
-            }
-            Command::ContextSet(args) => {
-                let thread = target(args.thread_id.as_deref(), caller)?;
-                let result = super::context_command::set(tx, &thread, args)?;
-                let mut result = MutationResult::value(result)?;
-                result.changed_threads.push(thread);
-                Ok(result)
-            }
-            Command::ContextRemove(args) => {
-                let thread = target(args.thread_id.as_deref(), caller)?;
-                let result = super::context_command::remove(tx, &thread, args)?;
-                let mut result = MutationResult::value(result)?;
-                result.changed_threads.push(thread);
-                Ok(result)
+                MutationResult::value(super::context_command::get(tx, &thread, args)?)
             }
             Command::ScheduleAdd(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;

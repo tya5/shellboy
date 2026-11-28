@@ -833,6 +833,16 @@ impl IndexArgs {
     }
 }
 impl Command {
+    pub(crate) fn context_thread(&self) -> Option<&str> {
+        match self {
+            Self::ContextAdd(a) => a.thread_id.as_deref(),
+            Self::ContextSet(a) => a.thread_id.as_deref(),
+            Self::ContextGet(a) | Self::ContextRemove(a) => a.thread_id.as_deref(),
+            Self::ContextList(a) => a.thread_id.as_deref(),
+            _ => None,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ApiError> {
         match self {
             Self::DraftImage(a) => {
@@ -1025,13 +1035,12 @@ impl Command {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
                 ScheduleNotify::saved(&a.notify).map(drop)
             }
-            Self::ContextAdd(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
-            Self::ContextSet(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
-            Self::ContextGet(a) | Self::ContextRemove(a) => {
-                optional_nonempty(a.thread_id.as_deref(), "thread_id")
-            }
+            Self::ContextAdd(_)
+            | Self::ContextSet(_)
+            | Self::ContextGet(_)
+            | Self::ContextRemove(_) => optional_nonempty(self.context_thread(), "thread_id"),
             Self::ContextList(a) => {
-                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                optional_nonempty(self.context_thread(), "thread_id")?;
                 limit(a.limit, MAX_LIST_LIMIT)
             }
             Self::ScheduleList(a) => optional_nonempty(a.thread_id.as_deref(), "thread_id"),
