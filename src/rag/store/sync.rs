@@ -74,22 +74,24 @@ impl FileIndexPolicy {
             .map(|block| crate::index::split_text(&block.text, SPLIT, 0).len())
             .sum::<usize>();
         let provenance = json!({"path":path.to_string_lossy(),"source_hash":source_hash,"content_kind":"extracted"});
-        let (document, revision, _) = prepare(
+        let reference = records::file_ref(source, key);
+        records::admit(
             store,
-            RevisionInput {
-                source,
-                key,
-                source_hash: &source_hash,
-                extracted: &extracted,
-                kind: "extracted",
-                title: key,
-                provenance: &provenance,
+            records::Record {
+                reference: &reference,
+                material: RevisionInput {
+                    source,
+                    key,
+                    source_hash: &source_hash,
+                    extracted: &extracted,
+                    kind: "extracted",
+                    title: key,
+                    provenance: &provenance,
+                },
             },
-        )?;
-        if let Some(profile) = &self.profile {
-            search::embed_revision(store, &revision, profile).await?;
-        }
-        publish(store, &document, &revision)?;
+            self.profile.as_ref(),
+        )
+        .await?;
         counts.processed += 1;
         Ok(())
     }
@@ -116,16 +118,7 @@ pub(super) fn collect_missing(
             if !seen.contains(&key) {
                 removed += 1;
                 if !dry_run {
-                    let tx = store.db.transaction()?;
-                    tx.execute(
-                        "UPDATE documents SET active_revision=NULL,status='missing',error=NULL WHERE id=?1",
-                        [id],
-                    )?;
-                    tx.execute(
-                        "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='generation'",
-                        [],
-                    )?;
-                    tx.commit()?;
+                    records::retire(store, &id)?;
                 }
             }
         }

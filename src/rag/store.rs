@@ -1,5 +1,6 @@
 mod migrate;
 mod observation;
+mod records;
 mod scan;
 mod sync;
 use super::*;
@@ -691,7 +692,7 @@ fn original_file_hash(path: &Path) -> Result<String> {
         .collect())
 }
 
-pub(super) fn ingest(
+pub(super) async fn ingest(
     path: &Path,
     id: &str,
     source_file: &Path,
@@ -750,19 +751,28 @@ pub(super) fn ingest(
         extractor: "external-ingest-v1".into(),
     };
     let mut s = open(path, true)?;
-    let (document, revision, created) = prepare(
+    let reference = records::file_ref("@derived", id);
+    let records::Admission {
+        document,
+        revision,
+        created,
+    } = records::admit(
         &mut s,
-        RevisionInput {
-            source: "@derived",
-            key: id,
-            source_hash: &original_hash,
-            extracted: &extracted,
-            kind,
-            title: id,
-            provenance: &provenance,
+        records::Record {
+            reference: &reference,
+            material: RevisionInput {
+                source: "@derived",
+                key: id,
+                source_hash: &original_hash,
+                extracted: &extracted,
+                kind,
+                title: id,
+                provenance: &provenance,
+            },
         },
-    )?;
-    publish(&mut s, &document, &revision)?;
+        None,
+    )
+    .await?;
     Ok(
         json!({"document_id":document,"revision":revision,"created":created,"source_id":"@derived","kind":kind}),
     )

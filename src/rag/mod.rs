@@ -442,18 +442,21 @@ async fn run(
             text_file,
             text_stdin: _,
             metadata_file,
-        } => store::ingest(
-            &context.database,
-            &id,
-            &absolute(&source_file, cwd),
-            kind,
-            text_file.as_deref().map(|p| absolute(p, cwd)).as_deref(),
-            owned_text,
-            metadata_file
-                .as_deref()
-                .map(|p| absolute(p, cwd))
-                .as_deref(),
-        )?,
+        } => {
+            store::ingest(
+                &context.database,
+                &id,
+                &absolute(&source_file, cwd),
+                kind,
+                text_file.as_deref().map(|p| absolute(p, cwd)).as_deref(),
+                owned_text,
+                metadata_file
+                    .as_deref()
+                    .map(|p| absolute(p, cwd))
+                    .as_deref(),
+            )
+            .await?
+        }
         RagCommand::Status => store::status(&context)?,
         RagCommand::Inspect { id } => store::inspect(&context.database, &id)?,
         RagCommand::Search {
