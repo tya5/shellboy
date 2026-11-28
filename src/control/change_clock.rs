@@ -631,7 +631,7 @@ impl ChangeClock {
             more = true;
         }
         let mut output = Vec::new();
-        if include_output {
+        if include_output && after < cursor {
             for (seq, (thread, execution, output_at)) in
                 inner.output_by_seq.range(after + 1..=cursor)
             {
@@ -918,6 +918,16 @@ mod tests {
         assert!(clock.take_mark(Mark::Retention, &mut seen));
         assert!(!clock.take_mark(Mark::Retention, &mut seen));
         assert!(!clock.take_mark(Mark::Index, &mut seen));
+    }
+
+    #[test]
+    fn polling_for_output_at_the_head_waits_for_new_output() {
+        let clock = ChangeClock::standalone();
+        let (head, _, _) = clock.snapshot(&[], false, false);
+        assert!(matches!(
+            clock.poll(head, &[], false, false, true),
+            Some(Poll::Ready { cursor, output, more: false, .. }) if cursor == head && output.is_empty()
+        ));
     }
 
     #[test]
