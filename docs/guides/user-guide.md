@@ -476,11 +476,14 @@ of those skills are relevant. Keep the full collection available on demand.
   available, a Thread can instead opt in to a command that prints a short
   list for each new conversation request. Use a trusted command and an explicit
   timeout; its output is visible to the provider.
-- **MCP servers:** Call an external MCP bridge CLI from the shell, using a
-  `shellboy-services` recipe as a setup pattern. If the server must stay
-  connected, run it as a [Thread service](agent-guide.md#services-for-long-running-commands).
-  Keep credentials in the bridge, out of commands and output visible to the
-  model. Shellboy does not supply a built-in MCP adapter.
+- **MCP servers:** Configure an external MCP bridge for the server's supported
+  transport (for example, stdio or HTTP). Make the bridge CLI available in the
+  Thread's shell and tell the model how to list and call tools through it. If a
+  process must stay running to keep the connection open, run it as a
+  [Thread service](agent-guide.md#services-for-long-running-commands). Keep
+  credentials in the bridge, out of commands and output visible to the model.
+  A `shellboy-services` recipe is planned; the external bridge works without it.
+  Shellboy does not supply a built-in MCP adapter.
 - **Team knowledge:** Keep the original documents in the team repository. Today
   you can pair them with a project knowledge DB and select it explicitly with
   `shellboy rag --db ./knowledge/rag.db search --scope source:handbook --query 'release checks'`.
