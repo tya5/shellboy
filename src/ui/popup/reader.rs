@@ -47,6 +47,14 @@ impl Default for ReaderCache {
     }
 }
 impl ReaderCache {
+    // A zero retention budget still allows the visible reader to paint. The
+    // viewport allowance is pinned only for the frame that uses it.
+    pub fn viewport_bytes(area: Rect) -> usize {
+        let row = 2 * size_of::<Line<'static>>()
+            + 4 * size_of::<Span<'static>>()
+            + 4 * usize::from(area.width);
+        row * usize::from(area.height.saturating_add(1))
+    }
     pub fn set_budget(&mut self, budget: usize) {
         if self.budget != budget {
             self.budget = budget;

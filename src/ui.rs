@@ -6048,8 +6048,9 @@ cursor: None,
                 .and_then(operations::Operations::reader_mut),
         ]
     }
-    fn set_reader_budgets(&mut self) {
-        let budget = self.config.cache.layout_bytes as usize;
+    fn set_reader_budgets(&mut self, area: Rect) {
+        let budget =
+            (self.config.cache.layout_bytes as usize).max(popup::ReaderCache::viewport_bytes(area));
         for reader in self.reader_caches().into_iter().flatten() {
             reader.set_budget(budget);
         }
@@ -6942,7 +6943,6 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     state.aux_popup_paint.set(None);
     state.viewport = area;
     if area.width < 8 || area.height < 5 {
-        state.trim_layouts(Instant::now());
         frame.render_widget(
             Paragraph::new(text_width::glyphs::select(
                 "Shellboy · enlarge terminal",
@@ -7181,7 +7181,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
             .draw(frame, popup_area, active, notice_visible);
     }
     let popup_frame = Instant::now();
-    state.set_reader_budgets();
+    state.set_reader_budgets(popup_area);
     let overlay_links = state.draw_overlays(frame, popup_area);
     state.trim_layouts(popup_frame);
     state.visible_links = overlay_links;
@@ -8473,7 +8473,7 @@ mod layout_cache_tests {
     fn popup_layout_pressure_preserves_the_current_reader_and_evicts_the_inactive_one() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.config.cache.layout_bytes = 12 * 1024;
-        ui.set_reader_budgets();
+        ui.set_reader_budgets(Rect::default());
         let source = || (0..96).map(|_| Line::from("retained row")).collect();
         ui.help_cache.prepare(1, 60, source);
         let boundary = Instant::now();

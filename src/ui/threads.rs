@@ -835,9 +835,9 @@ impl ThreadBrowser {
         let key = self.presentation_scope();
         self.scope_cache.retain(|entry| entry.key != key);
         let rows = self
-            .visible_indices()
+            .rows()
             .iter()
-            .filter_map(|index| self.items.get(*index))
+            .filter_map(|row| self.items.get(row.index))
             .filter(|row| !row.thread_id.starts_with("draft:"))
             .map(|row| (row.thread_id.clone(), one_line(&row.title)))
             .collect();
@@ -1186,6 +1186,7 @@ impl ThreadBrowser {
         preferred: Option<String>,
     ) -> UiAction {
         self.remember_scope_rows();
+        self.watch.get_mut().close();
         self.visible = true;
         self.mode = mode;
         self.archived = ArchivedFilter::Exclude;

@@ -928,11 +928,29 @@ mod tests {
             "caches": (0..500).map(|i| (format!("cache-{i}"), serde_json::json!(i))).collect::<serde_json::Map<_, _>>(),
             "client_observation": {
                 "completed_at": "2026-11-01T00:00:00Z",
+                "native_caches": {
+                    "body_bytes": {"retained": 512, "pinned": 256, "limit": 1024},
+                    "layout_bytes": {"retained": 128, "pinned": 64, "limit": 256}
+                },
                 "scope": "native memory observation",
                 "refresh": "Repeat status --memory explicitly"
             }
         });
         let result = report(value, MAX_FRAME_BYTES);
+        for (budget, field, expected) in [
+            ("body_bytes", "retained", "512"),
+            ("body_bytes", "pinned", "256"),
+            ("layout_bytes", "retained", "128"),
+            ("layout_bytes", "pinned", "64"),
+        ] {
+            let pointer = format!("/client_observation/native_caches/{budget}/{field}");
+            assert!(
+                result
+                    .fields
+                    .iter()
+                    .any(|item| item.key == pointer && item.value == expected)
+            );
+        }
         assert!(
             result
                 .fields

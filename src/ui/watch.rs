@@ -694,6 +694,8 @@ impl WatchState {
     }
     pub fn close(&mut self) {
         self.open = false;
+        self.entries.clear();
+        self.order = Vec::new();
         self.retained.clear();
         self.tick_origin = None;
         self.tick_second = None;
