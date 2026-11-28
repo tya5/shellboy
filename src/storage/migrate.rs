@@ -410,7 +410,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 78,
-        sql: include_str!("../../migrations/next_context_command.sql"),
+        sql: include_str!("../../migrations/0078_context_command.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
 ];

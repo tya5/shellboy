@@ -7,5 +7,5 @@ CREATE TABLE context_command (
  UNIQUE(thread_id,name)
 );
 CREATE INDEX context_command_order ON context_command(thread_id,id);
-INSERT INTO schema_migration(version,name) VALUES(78,'next_context_command');
+INSERT INTO schema_migration(version,name) VALUES(78,'0078_context_command');
 PRAGMA user_version=78;
