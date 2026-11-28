@@ -157,6 +157,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let value = execute(
             ClientOperation::Docs(crate::docs::DocsCommand::Get {
+                sources: Vec::new(),
                 id: "missing".into(),
                 section: None,
                 limit_bytes: 100,
@@ -301,6 +302,7 @@ mod dispatch_tests {
             context: context(1),
             action: Box::new(UiAction::ClientOperation(Box::new(ClientOperation::Docs(
                 crate::docs::DocsCommand::Get {
+                    sources: Vec::new(),
                     id: "nonexistent-client-guide".into(),
                     section: None,
                     limit_bytes: 1024,
