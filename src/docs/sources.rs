@@ -1072,6 +1072,10 @@ mod tests {
         fs::write(deep.join(&oversized), "cursor-witness").unwrap();
         fs::write(deep.join("a.md"), "cursor-witness").unwrap();
         fs::write(deep.join("b.md"), "cursor-witness").unwrap();
+        let rows = [Registration {
+            name: "local".into(),
+            path,
+        }];
         let search = |cursor| {
             browse(
                 DocsRead::Search {
@@ -1081,10 +1085,7 @@ mod tests {
                     limit: 1,
                     cursor,
                 },
-                &[Registration {
-                    name: "local".into(),
-                    path,
-                }],
+                &rows,
             )
             .unwrap()
         };
