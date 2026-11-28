@@ -17,7 +17,7 @@ Retain existing logical guide IDs and the three categories. The resource-usage g
 
 The Japanese User Guide remains readable from the source and release archives. It is not an additional bundled catalogue entry. Links to `.ja.md` are repository links, not falsely reported as resolvable bundled IDs. No `--lang` flag, per-Thread locale, dual-language search index, schema, worker, or dependency is added. `docs search` performs literal search, not query translation. Unicode matching and UTF-8-safe pagination remain supported for quoted text and user-provided RAG/history content.
 
-Changing guide text changes the existing documentation version/content hash. Old cursors expire normally. Previously indexed bundled docs can require an explicit `rag index --source docs --mode semantic`; search must not silently rebuild or make extra embedding calls. This is the existing version/readiness contract, not a new migration or automatic indexing job.
+Changing guide text changes the existing documentation version/content hash. Old cursors expire normally. Previously indexed bundled docs can require an explicit `docs index --source shellboy`; search must not silently rebuild or make extra embedding calls. This is the existing version/readiness contract, not a new migration or automatic indexing job.
 
 ## UI options
 
