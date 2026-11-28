@@ -1,0 +1,246 @@
+use super::*;
+use crate::control::driver::preparation_tests::{close, fixture, ready};
+use crate::test_watchdog::watchdog;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+};
+
+async fn exchange(listener: &TcpListener, status: u16, reply: Value) -> Vec<u8> {
+    let (mut socket, _) = listener.accept().await.unwrap();
+    let mut request = Vec::new();
+    let mut chunk = [0; 8192];
+    let body = loop {
+        let n = socket.read(&mut chunk).await.unwrap();
+        assert_ne!(n, 0);
+        request.extend_from_slice(&chunk[..n]);
+        if let Some(end) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+            let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+            let length: usize = headers
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            if request.len() >= end + 4 + length {
+                break request[end + 4..end + 4 + length].to_vec();
+            }
+        }
+    };
+    let reply = reply.to_string();
+    socket.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",reply.len()).as_bytes()).await.unwrap();
+    body
+}
+
+fn completed(output: Value) -> Value {
+    json!({"id":"fixture","status":"completed","output":output})
+}
+
+async fn define(control: &Control, thread: &str, name: &str, command: &str, timeout_ms: u32) {
+    let thread = thread.to_owned();
+    let args = crate::protocol::ContextAddArgs {
+        thread_id: None,
+        name: name.into(),
+        command: command.into(),
+        timeout_ms,
+    };
+    control
+        .store
+        .database
+        .call(move |db| {
+            super::super::super::context_command::add(db, &thread, &args)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+fn result_at(item: &Value) -> Option<Value> {
+    let text = item["content"].as_array()?.first()?.get("text")?.as_str()?;
+    let value: Value = serde_json::from_str(text).ok()?;
+    (value["type"] == "context_commands").then_some(value)
+}
+
+#[tokio::test]
+async fn retry_reuses_tail_next_step_replaces_it_and_inspect_does_not_execute() {
+    watchdog("context continuation and retry", async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (root, owner, control, accepted) = fixture(&format!("http://{}/v1",listener.local_addr().unwrap())).await;
+        define(&control,&accepted.thread_id,"probe", "printf x >> context-count; cat context-count", 10_000).await;
+        define(&control,&accepted.thread_id,"failure", "exit 7", 10_000).await;
+        control.kick_quiet(accepted.thread_id.clone()).await;
+        let first = exchange(&listener, 503, json!({"error":{"code":"server_error","message":"fixture retry"}})).await;
+        let retry = exchange(&listener, 200, completed(json!([{"type":"function_call","name":"shell","call_id":"next-step","arguments":"{\"command\":\"printf tool\"}"}]))).await;
+        assert_eq!(retry, first, "the retry must send the identical body");
+        let first: Value = serde_json::from_slice(&first).unwrap();
+        let next = exchange(&listener, 200, completed(json!([]))).await;
+        let next: Value = serde_json::from_slice(&next).unwrap();
+        let first_tail = first["input"].as_array().unwrap().last().unwrap();
+        let first_result = result_at(first_tail).unwrap();
+        assert_eq!(first_result["results"][0]["stdout"], "x");
+        assert_eq!(first_result["results"][1]["outcome"], "failed");
+        let input = next["input"].as_array().unwrap();
+        assert!(input.iter().any(|item| item["type"] == "function_call_output"));
+        let last = input.last().unwrap();
+        assert_eq!(result_at(last).unwrap()["results"][0]["stdout"], "xx");
+        assert_eq!(input.iter().filter(|item| result_at(item).is_some()).count(), 1);
+        let attempt: String = control.store.database.call(|db| Ok(db.query_row("SELECT id FROM model_attempt WHERE json_extract(input_manifest_json,'$.context_tail.item') IS NOT NULL ORDER BY rowid LIMIT 1",[],|r| r.get(0))?)).await.unwrap();
+        let inspected = crate::request_inspect::execute(crate::request_inspect::RequestOptions {thread_id:accepted.thread_id, attempt_id:Some(attempt), compare_attempt_id:None, body:true},Some(root.path().join("config.toml")),Some(root.path().join("data")),root.path()).await;
+        assert_eq!(inspected["ok"], true, "{inspected}");
+        assert_eq!(&inspected["result"]["saved"]["context_tail"]["item"],first_tail);
+        assert_eq!(std::fs::read(root.path().join("context-count")).unwrap(), b"xx");
+        close(control,owner).await;
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn no_definitions_preserve_the_canonical_wire_bytes() {
+    watchdog("context-free request bytes", async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (_root, owner, control, accepted) =
+            fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
+        let snapshot = ready(&control, &accepted).await;
+        let mut prepared = control
+            .attachments
+            .prepare_at_revision(
+                &snapshot.thread,
+                CancellationToken::new(),
+                false,
+                snapshot.selection,
+            )
+            .await
+            .unwrap();
+        let (mut baseline, _) =
+            request::prepare_request(&snapshot, None, &mut prepared, None).unwrap();
+        model::configure_shell_description(
+            &mut baseline,
+            control.store.config.shell.describe_calls,
+        );
+        let client = model_client(&control, &snapshot).unwrap();
+        let body = client
+            .wire_request(baseline, Some(&snapshot.thread))
+            .unwrap()
+            .0;
+        control.kick_quiet(accepted.thread_id).await;
+        let sent = exchange(&listener, 200, completed(json!([]))).await;
+        assert_eq!(sent, serde_json::to_vec(&body).unwrap());
+        close(control, owner).await;
+    })
+    .await
+    .unwrap();
+}
+
+async fn gated_child(interrupt: bool) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (root, owner, control, accepted) =
+        fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
+    let snapshot = ready(&control, &accepted).await;
+    define(&control,&accepted.thread_id,"held", "trap 'printf stopped > context-stopped; exit' TERM; printf '%s' \"$$\" > context-started; while :; do sleep 1; done", 30_000).await;
+    control.kick_quiet(accepted.thread_id.clone()).await;
+    let started = root.path().join("context-started");
+    let pid = loop {
+        if let Ok(value) = std::fs::read_to_string(&started)
+            && let Ok(pid) = value.parse::<i32>()
+        {
+            break pid;
+        }
+        tokio::task::yield_now().await;
+    };
+    if interrupt {
+        assert_eq!(
+            control.interrupt_turn(snapshot.turn.clone()).await.unwrap()["requested"],
+            true
+        );
+    } else {
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::time::resume();
+        let sent: Value =
+            serde_json::from_slice(&exchange(&listener, 200, completed(json!([]))).await).unwrap();
+        let result = result_at(sent["input"].as_array().unwrap().last().unwrap()).unwrap();
+        assert_eq!(result["results"][0]["outcome"], "timed_out");
+    }
+    while control
+        .live
+        .test_drivers()
+        .lock()
+        .await
+        .contains_key(&accepted.thread_id)
+    {
+        tokio::task::yield_now().await;
+    }
+    // The owned driver must join the process before retiring; a signal request is not enough.
+    assert!(
+        !std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let attempts: i64 = control
+        .store
+        .database
+        .call(|db| Ok(db.query_row("SELECT count(*) FROM model_attempt", [], |r| r.get(0))?))
+        .await
+        .unwrap();
+    assert_eq!(attempts, i64::from(!interrupt));
+    close(control, owner).await;
+}
+
+#[tokio::test]
+async fn timed_out_context_is_a_fact_and_the_request_proceeds() {
+    watchdog("context deadline", gated_child(false))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn interrupting_the_turn_reaps_context_before_admission() {
+    watchdog("context interrupt", gated_child(true))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn closed_turn_gate_cannot_create_a_native_context_process() {
+    watchdog("interruption before context launch", async {
+        let (root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+        let snapshot = ready(&control, &accepted).await;
+        define(
+            &control,
+            &accepted.thread_id,
+            "held",
+            "printf launched > launch-marker",
+            30_000,
+        )
+        .await;
+        let gate = Arc::new(Mutex::new(true));
+        // In the interruption path the gate closes before the token is notified.
+        collect(&control, &snapshot, &CancellationToken::new(), gate)
+            .await
+            .unwrap();
+        assert!(!root.path().join("launch-marker").exists());
+        close(control, owner).await;
+    })
+    .await
+    .unwrap();
+}
+
+#[test]
+fn escaped_output_and_metadata_fit_the_final_serialized_budget() {
+    let mut entry = ResultEntry {
+        name: "fixture".into(),
+        outcome: Outcome::TimedOut,
+        stdout: "\u{0}\"é".repeat(64),
+        truncated: false,
+    };
+    let limit = entry.stdout.len();
+    let encoded = fit_entry(&mut entry, limit).unwrap();
+    assert!(encoded.len() <= limit);
+    let value: Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(value["outcome"], "timed_out");
+    assert_eq!(value["truncated"], true);
+    assert!(!value["stdout"].as_str().unwrap().is_empty());
+}

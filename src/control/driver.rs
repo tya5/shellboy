@@ -317,6 +317,7 @@ async fn drive_inner(
             instruction: instructions.body(),
             output_limit: None,
             context_tail: None,
+            context_start_gate: turn_binding.start_gate.clone(),
             boundary: crate::compaction::boundary::Boundary::new(&boundary, boundary_guard),
         };
         let mut partial_attempts = Vec::new();
@@ -518,6 +519,7 @@ struct ConversationCaller<'a, 'b> {
     instruction: Option<&'a Arc<str>>,
     output_limit: Option<crate::protocol::AttemptOutputLimit>,
     context_tail: Option<Option<Value>>,
+    context_start_gate: Arc<Mutex<bool>>,
     boundary: crate::compaction::boundary::Boundary<'b>,
 }
 
@@ -565,7 +567,12 @@ impl RequestCaller for ConversationCaller<'_, '_> {
                 .boundary
                 .pause_owned(
                     cancel,
-                    context_tail::collect(self.control, &self.snapshot, cancel),
+                    context_tail::collect(
+                        self.control,
+                        &self.snapshot,
+                        cancel,
+                        self.context_start_gate.clone(),
+                    ),
                 )
                 .await;
             let Ok(tail) = result else {
