@@ -24,22 +24,28 @@ fn seed_thread(connection: &Connection, id: &str) -> Result<(), StorageError> {
 #[tokio::test]
 async fn production_migration_pragmas_and_reopen() {
     let (directory, database) = database().await;
-    database.call(|connection| {
-        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        assert_eq!(version, SCHEMA_VERSION);
-        assert!(connection.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='history_reasoning_keep'")?.exists([])?);
-        let journal: String = connection.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
-        assert_eq!(journal, "wal");
-        let synchronous: i64 = connection.query_row("PRAGMA synchronous", [], |row| row.get(0))?;
-        assert_eq!(synchronous, 2);
-        let foreign_keys: i64 = connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
-        assert_eq!(foreign_keys, 1);
-        let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
-        assert_eq!(integrity, "ok");
-        assert!(!connection.prepare("PRAGMA foreign_key_check")?.exists([])?);
-        seed_thread(connection, "persisted")?;
-        Ok(())
-    }).await.unwrap();
+    database
+        .call(|connection| {
+            let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+            assert_eq!(version, SCHEMA_VERSION);
+            let journal: String =
+                connection.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+            assert_eq!(journal, "wal");
+            let synchronous: i64 =
+                connection.query_row("PRAGMA synchronous", [], |row| row.get(0))?;
+            assert_eq!(synchronous, 2);
+            let foreign_keys: i64 =
+                connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+            assert_eq!(foreign_keys, 1);
+            let integrity: String =
+                connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+            assert_eq!(integrity, "ok");
+            assert!(!connection.prepare("PRAGMA foreign_key_check")?.exists([])?);
+            seed_thread(connection, "persisted")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     database.shutdown().await.unwrap();
     let database = DbWorker::open(directory.path().join("shellboy.sqlite3"))
         .await

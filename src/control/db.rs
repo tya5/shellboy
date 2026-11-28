@@ -6440,7 +6440,7 @@ mod thread_deletion_notification_tests {
         reopened.shutdown().await.unwrap();
     }
     #[tokio::test]
-    async fn deleting_a_thread_removes_its_automatic_compaction_metadata() {
+    async fn deleting_a_thread_removes_its_compaction_metadata_and_kept_reasoning() {
         let (root, owner) = fixture().await;
         seed(&owner.db).await;
         let keys = |id: &str| {
@@ -6460,6 +6460,10 @@ mod thread_deletion_notification_tests {
                 for key in &saved {
                     db.execute("INSERT INTO app_meta(key,value) VALUES(?1,'x')", [key])?;
                 }
+                db.execute(
+                    "INSERT INTO history_reasoning_keep(thread_id,epoch,node_id) SELECT id,reasoning_epoch,'fixture' FROM thread WHERE id IN ('parent','child')",
+                    [],
+                )?;
                 Ok(())
             })
             .await
@@ -6480,6 +6484,15 @@ mod thread_deletion_notification_tests {
         assert_eq!(
             remaining, expected,
             "only the deleted Thread's metadata, including the witness, is removed"
+        );
+        let remaining: Vec<String> = owner.db.call(|db| {
+            Ok(db.prepare("SELECT thread_id FROM history_reasoning_keep WHERE node_id='fixture' ORDER BY thread_id")?
+                .query_map([], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?)
+        }).await.unwrap();
+        assert_eq!(
+            remaining,
+            ["child"],
+            "only the deleted Thread's kept reasoning is physically removed"
         );
         owner.shutdown().await.unwrap();
     }

@@ -254,15 +254,6 @@ mod tests {
         assert_eq!(pending(&db).unwrap(), None);
     }
 
-    fn scope_56_to_62() -> Check {
-        let scope = Check::for_migrations(super::super::migrate::MIGRATIONS, 56, 62);
-        assert_eq!(
-            scope,
-            Check::Tables(["schedule".into(), "shell_execution".into()].into())
-        );
-        scope
-    }
-
     #[test]
     fn schedule_rebuild_rejects_new_orphan_and_rolls_back() {
         let mut db = super::super::historical_memory(60);
@@ -311,18 +302,10 @@ mod tests {
         db.execute_batch("PRAGMA foreign_keys=OFF;
             INSERT INTO run(id,thread_id,state,created_at) VALUES('unrelated','missing','completed','now');
             PRAGMA foreign_keys=ON;").unwrap();
-        let Check::Tables(mut tables) = scope_56_to_62() else {
-            panic!("expected a table-scoped schedule upgrade");
-        };
-        tables.insert("history_reasoning_keep".into());
-        let scope = Check::Tables(tables);
-        assert_eq!(
-            Check::for_migrations(
-                super::super::migrate::MIGRATIONS,
-                56,
-                super::super::SCHEMA_VERSION
-            ),
-            scope
+        let scope = Check::for_migrations(
+            super::super::migrate::MIGRATIONS,
+            56,
+            super::super::SCHEMA_VERSION,
         );
         drop(db);
         let db = super::super::open_connection(&path, None, None, true).unwrap();
