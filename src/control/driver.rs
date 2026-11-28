@@ -194,10 +194,6 @@ async fn drive_inner(
         };
         if let Some(mut job) = completed_job {
             let joined = job.join().await;
-            control
-                .live
-                .prune_idle_background(&thread, &slot.proactive_job)
-                .await;
             match joined {
                 Ok(Ok(proactive::ProactiveOutcome::Finished { path_changed: true })) => {
                     instructions.clear();
@@ -469,10 +465,6 @@ async fn drive_inner(
                     .await?;
                 }
                 drop(request_boundary);
-                control
-                    .live
-                    .prune_idle_background(&thread, &slot.proactive_job)
-                    .await;
                 continue;
             }
         };

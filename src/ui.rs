@@ -6229,15 +6229,21 @@ cursor: None,
                 .saturating_add(self.autosave.cache_bytes(key));
             if key == &self.active {
                 pinned = pinned.saturating_add(weight.saturating_sub(active_retained));
-            } else if view.thread_id.is_none()
-                || view.selecting_agents.is_some()
+            } else if view.selecting_agents.is_some()
                 || view.pending.values().any(|pending| {
                     matches!(
                         pending.status,
                         ReceiptStatus::Accepting | ReceiptStatus::Unknown
                     )
                 })
-                || !self.autosave.reconstructible(key, view)
+                || if view.thread_id.is_none() {
+                    !view.draft.text.is_empty()
+                        || !view.draft.attachments.is_empty()
+                        || view.draft.edit.is_some()
+                        || !view.pending.is_empty()
+                } else {
+                    !self.autosave.reconstructible(key, view)
+                }
             {
                 pinned = pinned.saturating_add(weight);
             } else {
@@ -8484,125 +8490,169 @@ mod layout_cache_tests {
             .db
             .call(|db| {
                 let tx = db.transaction()?;
-                crate::history::append_node(
-                    &tx,
-                    "thread",
-                    "n",
-                    None,
-                    "user",
-                    &serde_json::json!({"role":"user","content":"saved reading node"}),
-                    "2026-01-01T00:00:00Z",
-                )?;
+                for (thread, node) in [("thread", "older-node"), ("independent", "recent-node")] {
+                    crate::history::append_node(
+                        &tx,
+                        thread,
+                        node,
+                        None,
+                        "user",
+                        &serde_json::json!({"role":"user","content":"saved reading node"}),
+                        "2026-01-01T00:00:00Z",
+                    )?;
+                }
                 tx.commit()?;
                 Ok(())
             })
             .await
             .unwrap();
-        let request = |command| crate::ipc::call(&owner.loaded.data_dir, command, None, None);
+
+        async fn load(
+            ui: &mut UiState,
+            data_dir: &std::path::Path,
+            thread: &str,
+            actions: &[UiAction],
+        ) {
+            let Some(UiAction::SelectThread {
+                generation,
+                view_revision,
+                known_view: None,
+                ..
+            }) = actions.last()
+            else {
+                panic!("{thread}: expected owner restore");
+            };
+            let read = |command| crate::ipc::call(data_dir, command, None, None);
+            let state: DraftState = serde_json::from_value(
+                read(Command::DraftGet(DraftGetArgs {
+                    thread_id: Some(thread.into()),
+                    operation_id: None,
+                }))
+                .await
+                .unwrap()
+                .result
+                .unwrap(),
+            )
+            .unwrap();
+            let details = serde_json::from_value(
+                read(Command::ThreadGet(ThreadGetArgs {
+                    thread_id: Some(thread.into()),
+                    display: false,
+                }))
+                .await
+                .unwrap()
+                .result
+                .unwrap(),
+            )
+            .unwrap();
+            ui.apply(UiUpdate::Thread {
+                generation: *generation,
+                details,
+                draft: state.draft,
+            });
+            if let Some(view) = state.view {
+                ui.apply(UiUpdate::ViewState {
+                    thread_id: thread.into(),
+                    generation: *generation,
+                    view_revision: *view_revision,
+                    anchor: view.anchor,
+                    follow: view.follow_tail,
+                });
+            }
+        }
+
+        let data_dir = &owner.loaded.data_dir;
         let mut ui = UiState::new(&Config::default(), root.path().into());
-        ui.select_thread("thread".into());
-        history(&mut ui, "thread", &"a".repeat(512 * 1024));
-        ui.insert("exact saved composer", false);
-        let draft = ui.view().draft.clone();
-        let anchor = ViewAnchor {
-            node_id: Some("n".into()),
+        let older_text = "older ".repeat(29 * 1024);
+        let recent_text = "newer ".repeat(29 * 1024);
+        let older = ViewAnchor {
+            node_id: Some("older-node".into()),
             char_offset: 4,
         };
-        ui.view_mut().navigation.select_reading();
-        ui.view_mut().navigation.anchor = anchor.clone();
-        let saved = request(Command::DraftSave(DraftSaveArgs {
-            thread_id: "thread".into(),
-            draft: Box::new(draft.clone()),
-            expected_source_message: None,
-            expected_thread_revision: None,
-            anchor: anchor.clone(),
-            follow_tail: false,
-        }))
-        .await
-        .unwrap();
-        assert!(saved.ok, "{:?}", saved.error);
-        ui.apply(UiUpdate::DraftViewSaved {
-            thread_id: "thread".into(),
-            draft_id: draft.draft_id.clone(),
-            revision: draft.revision,
-            cursor: draft.cursor,
-            anchor: anchor.clone(),
-            follow: false,
-            anchor_refusal: None,
-        });
-        ui.select_thread("independent".into());
-        ui.select_thread("thread".into());
-        assert_eq!(ui.view().navigation.anchor, anchor);
-        assert_eq!(ui.view().draft.text, draft.text);
-        ui.select_thread("recent".into());
-        history(&mut ui, "recent", "recent retained history");
-        ui.select_thread("active".into());
+        let recent = ViewAnchor {
+            node_id: Some("recent-node".into()),
+            char_offset: 5,
+        };
+        for (thread, text, anchor) in [
+            ("thread", &older_text, &older),
+            ("independent", &recent_text, &recent),
+        ] {
+            let actions = ui.select_thread(thread.into());
+            load(&mut ui, data_dir, thread, &actions).await;
+            ui.insert(text, false);
+            ui.view_mut().navigation.select_reading();
+            ui.view_mut().navigation.anchor = anchor.clone();
+            let draft = ui.view().draft.clone();
+            let saved = crate::ipc::call(
+                data_dir,
+                Command::DraftSave(DraftSaveArgs {
+                    thread_id: thread.into(),
+                    draft: Box::new(draft.clone()),
+                    expected_source_message: None,
+                    expected_thread_revision: None,
+                    anchor: anchor.clone(),
+                    follow_tail: false,
+                }),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                saved.result,
+                Some(serde_json::json!({"accepted":true})),
+                "{:?}",
+                saved.error
+            );
+            ui.apply(UiUpdate::DraftViewSaved {
+                thread_id: thread.into(),
+                draft_id: draft.draft_id,
+                revision: draft.revision,
+                cursor: draft.cursor,
+                anchor: anchor.clone(),
+                follow: false,
+                anchor_refusal: None,
+            });
+        }
+        let hit = |actions: &[UiAction], anchor: &ViewAnchor| {
+            assert!(matches!(actions.last(), Some(UiAction::SelectThread {
+                known_view: Some((saved, false)), ..
+            }) if saved == anchor));
+        };
+        hit(&ui.select_thread("thread".into()), &older);
+        assert_eq!(ui.view().draft.text, older_text);
+        hit(&ui.select_thread("independent".into()), &recent);
+        assert_eq!(ui.view().draft.text, recent_text);
+        ui.new_chat();
         ui.config.cache.body_bytes = 256 * 1024;
         ui.trim_bodies();
-        assert!(
-            !ui.views
-                .values()
-                .any(|v| v.thread_id.as_deref() == Some("thread"))
-        );
-        assert!(
-            ui.views
-                .values()
-                .any(|v| v.thread_id.as_deref() == Some("recent"))
-        );
+
+        hit(&ui.select_thread("independent".into()), &recent);
+        assert_eq!(ui.view().draft.text, recent_text);
+        assert_eq!(ui.view().navigation.anchor, recent);
         let actions = ui.select_thread("thread".into());
-        let Some(UiAction::SelectThread {
-            generation,
-            view_revision,
-            known_view: None,
-            ..
-        }) = actions.last()
-        else {
-            panic!("evicted view must request owner state");
-        };
         assert!(ui.view().draft.text.is_empty());
-        let state: DraftState = serde_json::from_value(
-            request(Command::DraftGet(DraftGetArgs {
-                thread_id: Some("thread".into()),
-                operation_id: None,
-            }))
-            .await
-            .unwrap()
-            .result
-            .unwrap(),
-        )
-        .unwrap();
-        let details = serde_json::from_value(
-            request(Command::ThreadGet(ThreadGetArgs {
-                thread_id: Some("thread".into()),
-                display: false,
-            }))
-            .await
-            .unwrap()
-            .result
-            .unwrap(),
-        )
-        .unwrap();
-        let view = state.view.unwrap();
-        ui.apply(UiUpdate::Thread {
-            generation: *generation,
-            details,
-            draft: state.draft,
-        });
-        ui.apply(UiUpdate::ViewState {
-            thread_id: "thread".into(),
-            generation: *generation,
-            view_revision: *view_revision,
-            anchor: view.anchor,
-            follow: view.follow_tail,
-        });
-        assert_eq!(ui.view().draft.text, draft.text);
-        assert_eq!(ui.view().navigation.anchor, anchor);
+        load(&mut ui, data_dir, "thread", &actions).await;
+        assert_eq!(ui.view().draft.text, older_text);
+        assert_eq!(ui.view().navigation.anchor, older);
         assert!(!ui.view().navigation.follow());
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }
 
+    #[test]
+    fn empty_new_chats_age_out_without_losing_a_threadless_draft() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.insert("unsaved local input", false);
+        let pending = ui.active.clone();
+        ui.new_chat();
+        let empty = ui.active.clone();
+        ui.config.cache.body_bytes = 0;
+        ui.new_chat();
+        assert!(!ui.views.contains_key(&empty));
+        assert_eq!(ui.views[&pending].draft.text, "unsaved local input");
+    }
     #[test]
     fn pinned_input_consumes_body_budget_without_becoming_an_eviction_candidate() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());

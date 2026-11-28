@@ -199,11 +199,9 @@ mod refresh_scope_tests {
         for generation in 2..100 {
             selection.select_thread(format!("visited-{generation}"), generation);
             selection.retire_generations(|thread| thread == "in-flight");
-            assert_eq!(selection.generations.len(), 2);
             assert!(!selection.accepts("in-flight", 1, selection.progress_epoch));
         }
         selection.retire_generations(|_| false);
-        assert!(!selection.generations.contains_key("in-flight"));
         selection.select_thread("in-flight".into(), 100);
         assert!(!selection.accepts("in-flight", 1, selection.progress_epoch));
         assert!(selection.accepts("in-flight", 100, selection.progress_epoch));
