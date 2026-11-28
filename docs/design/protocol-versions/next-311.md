@@ -208,11 +208,6 @@ embedding profile (otherwise `invalid_argument`). Windows are separate reads,
 not one snapshot, and are never summed. CLI: `index status --coverage
 [--coverage-cursor CURSOR]`. Without `coverage` the result is unchanged.
 
-- `attachment.list` accepts an optional `attachment_id` for a single saved
-  selection in the requested Thread. It cannot be combined with a cursor,
-  does not probe the file, and returns no continuation. This lets F8 follow
-  a saved attachment reference without searching unrelated pages.
-
 ## Stop the current Run of a Thread
 
 `run.stop` accepts exactly one selector: `run_id` or `thread_id`. For a Thread
