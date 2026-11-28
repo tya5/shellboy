@@ -408,6 +408,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0077_ordered_thread_replacement.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 78,
+        sql: include_str!("../../migrations/next_context_command.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(

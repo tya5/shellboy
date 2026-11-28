@@ -131,6 +131,52 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::ContextAdd,
+        &["context", "add"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("name", FieldId::ContextName),
+            ("command", FieldId::ScheduleCommand),
+            ("timeout_ms", FieldId::ContextTimeout),
+        ],
+        None,
+    ),
+    (
+        OperationId::ContextList,
+        &["context", "list"],
+        &[("thread_id", FieldId::Thread)],
+        None,
+    ),
+    (
+        OperationId::ContextGet,
+        &["context", "get"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("name", FieldId::ContextName),
+        ],
+        None,
+    ),
+    (
+        OperationId::ContextSet,
+        &["context", "set"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("name", FieldId::ContextName),
+            ("command", FieldId::ScheduleCommand),
+            ("timeout_ms", FieldId::ContextTimeout),
+        ],
+        None,
+    ),
+    (
+        OperationId::ContextRemove,
+        &["context", "remove"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("name", FieldId::ContextName),
+        ],
+        None,
+    ),
+    (
         OperationId::ScheduleAdd,
         &["schedule", "add"],
         &[

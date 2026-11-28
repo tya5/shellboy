@@ -1521,6 +1521,41 @@ impl Store {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 MutationResult::value(super::schedule::list(tx, &thread, true)?)
             }
+            Command::ContextAdd(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                let result = super::context_command::add(tx, &thread, args)?;
+                let mut result = MutationResult::value(result)?;
+                result.changed_threads.push(thread);
+                Ok(result)
+            }
+            Command::ContextList(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                let result = super::context_command::list(tx, &thread)?;
+                let result = MutationResult::value(result)?;
+
+                Ok(result)
+            }
+            Command::ContextGet(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                let result = super::context_command::get(tx, &thread, args)?;
+                let result = MutationResult::value(result)?;
+
+                Ok(result)
+            }
+            Command::ContextSet(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                let result = super::context_command::set(tx, &thread, args)?;
+                let mut result = MutationResult::value(result)?;
+                result.changed_threads.push(thread);
+                Ok(result)
+            }
+            Command::ContextRemove(args) => {
+                let thread = target(args.thread_id.as_deref(), caller)?;
+                let result = super::context_command::remove(tx, &thread, args)?;
+                let mut result = MutationResult::value(result)?;
+                result.changed_threads.push(thread);
+                Ok(result)
+            }
             Command::ScheduleAdd(args) => {
                 let thread = target(args.thread_id.as_deref(), caller)?;
                 let mut result = MutationResult::value(super::schedule::add(tx, &thread, args)?)?;

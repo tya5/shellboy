@@ -61,6 +61,7 @@ named_jobs! {
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     ArtifactAdd => artifact_add, ArtifactUpdate => artifact_update, ArtifactList => artifact_list, ArtifactGet => artifact_get, ArtifactRemove => artifact_remove, ArtifactRead => artifact_read,
     ServiceAdd => service_add, ServiceList => service_list, ServiceGet => service_get, ServiceSet => service_set, ServiceEndpoint => service_endpoint, ServiceStart => service_start, ServiceStop => service_stop, ServiceRemove => service_remove,
+    ContextAdd => context_add, ContextList => context_list, ContextGet => context_get, ContextSet => context_set, ContextRemove => context_remove,
     ScheduleAdd => schedule_add, ScheduleSet => schedule_set, ScheduleEnable => schedule_enable, ScheduleDisable => schedule_disable, ScheduleRemove => schedule_remove,  ScheduleList => schedule_list,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadImport => thread_import, ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete, ThreadDeleteSet => thread_delete_set,
@@ -116,6 +117,8 @@ impl Kind {
             | Kind::ThreadList
             | Kind::ArtifactList
             | Kind::ArtifactGet
+            | Kind::ContextList
+            | Kind::ContextGet
             | Kind::ScheduleList
             | Kind::ServiceGet
             | Kind::ServiceList
@@ -153,6 +156,9 @@ impl Kind {
             | Kind::ServiceSet
             | Kind::ServiceAdd
             | Kind::ServiceStart
+            | Kind::ContextAdd
+            | Kind::ContextSet
+            | Kind::ContextRemove
             | Kind::ScheduleAdd
             | Kind::ScheduleSet
             | Kind::ScheduleEnable
