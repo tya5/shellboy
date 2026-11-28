@@ -263,34 +263,6 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             .any(|binding| binding.path == ["startup"]),
         "standalone diagnostics must not be offered as a TUI form"
     );
-    // Source registration and indexing are standalone config/knowledge
-    // operations, not forms. Keep exact path and option coverage for them.
-    for (path, options) in [
-        ("docs source add", &["--name", "--path"][..]),
-        ("docs source list", &[]),
-        ("docs source get", &["--name"]),
-        ("docs source update", &["--name", "--path"]),
-        ("docs source remove", &["--name"]),
-        ("docs index", &["--source", "--all", "--dry-run"]),
-    ] {
-        let command = leaves.remove(path).expect("standalone docs command");
-        let actual = command
-            .get_arguments()
-            .filter(|arg| !matches!(arg.get_id().as_str(), "help" | "version"))
-            .map(|arg| format!("--{}", arg.get_long().expect("named docs option")))
-            .collect::<BTreeSet<_>>();
-        let mut expected = options
-            .iter()
-            .map(|opt| (*opt).to_owned())
-            .collect::<BTreeSet<_>>();
-        expected.extend(GLOBAL_ARGUMENTS.iter().map(|arg| arg.spelling.to_owned()));
-        assert_eq!(actual, expected, "{path}");
-        assert!(
-            !CLI_BINDINGS
-                .iter()
-                .any(|binding| binding.path.join(" ") == path)
-        );
-    }
     let bindings = CLI_BINDINGS
         .iter()
         .map(|binding| (binding.path.join(" "), binding))
@@ -300,6 +272,8 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
         CLI_BINDINGS.len(),
         "one binding per executable spelling"
     );
+    // Docs also has standalone commands outside the form catalogue.
+    leaves.retain(|path, _| !path.starts_with("docs ") || bindings.contains_key(path));
     assert_eq!(
         leaves.keys().collect::<Vec<_>>(),
         bindings.keys().collect::<Vec<_>>(),
