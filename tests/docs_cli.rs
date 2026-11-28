@@ -362,3 +362,77 @@ fn startup_stage_status_keeps_unavailable_exit_and_prints_last_stage() {
     std::fs::write(root.path().join("startup-stage.json"), b"\"unknown\"").unwrap();
     assert!(status().is_null());
 }
+
+#[test]
+fn bundled_recovery_does_not_parse_broken_config() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("missing.toml"), "[broken\n").unwrap();
+    for args in [
+        vec!["docs", "list", "--source", "shellboy"],
+        vec![
+            "docs",
+            "search",
+            "--source",
+            "shellboy",
+            "--query",
+            "configuration",
+        ],
+        vec!["docs", "get", "--id", "shellboy/configuration"],
+    ] {
+        let (success, value) = call(root.path(), &args);
+        assert!(success, "{value}");
+    }
+    let (success, value) = call(root.path(), &["docs", "list"]);
+    assert!(!success);
+    assert_eq!(value["error"]["code"], "config_invalid");
+}
+
+#[test]
+fn configured_search_resumes_an_empty_work_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let folder = root.join("guides");
+    std::fs::create_dir(&folder).unwrap();
+    for n in 0..125 {
+        std::fs::write(folder.join(format!("{n:03}.md")), "# Ordinary guide\n").unwrap();
+    }
+    std::fs::write(
+        folder.join("last.md"),
+        "# Last guide\nneedle-past-scan-boundary\n",
+    )
+    .unwrap();
+    let (ok, registered) = call(
+        root,
+        &[
+            "docs", "source", "add", "--name", "local", "--path", "guides",
+        ],
+    );
+    assert!(ok, "{registered}");
+    let args = [
+        "docs",
+        "search",
+        "--parent",
+        "local",
+        "--query",
+        "needle-past-scan-boundary",
+    ];
+    let (ok, first) = call(root, &args);
+    assert!(ok, "{first}");
+    assert!(first["result"]["items"].as_array().unwrap().is_empty());
+    let mut page = first;
+    let mut found = false;
+    while let Some(cursor) = page["result"]["next_cursor"].as_str() {
+        let mut args = args.to_vec();
+        args.extend(["--cursor", cursor]);
+        let (ok, next) = call(root, &args);
+        assert!(ok, "{next}");
+        assert_ne!(next["result"]["next_cursor"], page["result"]["next_cursor"]);
+        found |= next["result"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["id"] == "local/last.md");
+        page = next;
+    }
+    assert!(found);
+}

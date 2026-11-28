@@ -1,4 +1,4 @@
-use super::{BUNDLED, Registration, category, hash};
+use super::{Registration, hash};
 use crate::{
     config::{PathEnvironment, resolve_cli_data_dir, resolve_config_path},
     config_edit,
@@ -79,19 +79,32 @@ fn export(data: &Path) -> Result<(PathBuf, File), ApiError> {
     }
     for entry in fs::read_dir(&root)
         .map_err(|_| error(ErrorCode::IoFailed, "Cannot inspect bundled guide export"))?
-        .take(201)
     {
         let entry =
             entry.map_err(|_| error(ErrorCode::IoFailed, "Cannot inspect an export entry"))?;
         let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if name
+        let kind = entry
+            .file_type()
+            .map_err(|_| error(ErrorCode::IoFailed, "Cannot inspect export entry type"))?;
+        let Some(name) = name.to_str() else {
+            return Err(error(
+                ErrorCode::IoFailed,
+                "Unexpected entry in managed export",
+            ));
+        };
+        let managed = name
             .strip_prefix("guide-")
             .and_then(|s| s.strip_suffix(".md"))
-            .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-            && !wanted.contains_key(name)
-            && entry.file_type().is_ok_and(|kind| kind.is_file())
-        {
+            .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+        // The root is passed to generic RAG. Unexpected material must not be
+        // indexed, and is not ours to delete.
+        if !managed || !kind.is_file() {
+            return Err(error(
+                ErrorCode::IoFailed,
+                "Unexpected entry in managed export",
+            ));
+        }
+        if !wanted.contains_key(name) {
             fs::remove_file(entry.path())
                 .map_err(|_| error(ErrorCode::IoFailed, "Cannot retire old exported guide"))?;
         }
@@ -100,52 +113,13 @@ fn export(data: &Path) -> Result<(PathBuf, File), ApiError> {
 }
 
 fn preview(row: Option<&Registration>) -> Value {
-    let Some(row) = row else {
-        let docs = BUNDLED.docs.iter().filter(|d| !category(&d.id));
-        return json!({"source":"shellboy","files":docs.clone().count(),"bytes":docs.map(|d|d.text.len()).sum::<usize>(),"complete":true});
-    };
-    let mut pending = vec![(row.path.clone(), 0)];
-    let mut examined = 0;
-    let mut files = 0;
-    let mut bytes = 0u64;
-    let mut complete = true;
-    'walk: while let Some((path, depth)) = pending.pop() {
-        if depth > 32 || fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
-            complete = false;
-            continue;
-        }
-        let Ok(dir) = fs::read_dir(path) else {
-            complete = false;
-            continue;
-        };
-        for entry in dir {
-            if examined >= 200 {
-                complete = false;
-                break 'walk;
-            }
-            examined += 1;
-            let Ok(entry) = entry else {
-                complete = false;
-                continue;
-            };
-            let Ok(kind) = entry.file_type() else {
-                complete = false;
-                continue;
-            };
-            if kind.is_dir() {
-                pending.push((entry.path(), depth + 1));
-            } else if kind.is_file() && entry.path().extension().is_some_and(|s| s == "md") {
-                match entry.metadata() {
-                    Ok(meta) => {
-                        files += 1;
-                        bytes = bytes.saturating_add(meta.len());
-                    }
-                    Err(_) => complete = false,
-                }
-            }
+    match row {
+        Some(row) => super::sources::preview(row),
+        None => {
+            let docs = super::documents();
+            json!({"source":"shellboy","files":docs.len(),"bytes":docs.iter().map(|d|d.text.len()).sum::<usize>(),"complete":true})
         }
     }
-    json!({"source":row.name,"files":files,"bytes":bytes,"complete":complete})
 }
 
 pub async fn execute(
@@ -157,6 +131,9 @@ pub async fn execute(
     cwd: &Path,
 ) -> Value {
     match index(names, all, dry_run, config, data, cwd).await {
+        Ok(result) if result["partial_failure"] == true => {
+            json!({"protocol_version":PROTOCOL_VERSION,"ok":false,"result":result,"error":{"code":"partial_failure","message":"Docs indexing failed for one or more steps; inspect the step results"}})
+        }
         Ok(result) => json!({"protocol_version":PROTOCOL_VERSION,"ok":true,"result":result}),
         Err(error) => json!({"protocol_version":PROTOCOL_VERSION,"ok":false,"error":error}),
     }
