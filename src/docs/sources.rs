@@ -316,17 +316,11 @@ fn metadata(text: &str, fallback: &str) -> (String, String) {
             break;
         }
     }
-    fn bounded(mut text: String) -> String {
-        text.truncate(text.floor_char_boundary(1024));
-        text
-    }
     (
-        bounded(
-            title
-                .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| fallback.into()),
-        ),
-        bounded(summary.unwrap_or_default()),
+        title
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| fallback.into()),
+        summary.unwrap_or_default(),
     )
 }
 
