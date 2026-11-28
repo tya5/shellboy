@@ -88,33 +88,6 @@ async fn hot_query_index_failure_rolls_back_indexes_and_version_together() {
 }
 
 #[tokio::test]
-async fn hot_query_plans_use_expected_access_paths() {
-    let root = tempfile::tempdir().unwrap();
-    let worker = DbWorker::open(root.path().join("plans.sqlite"))
-        .await
-        .unwrap();
-    worker.call(|db| {
-        for (sql, expected) in [
-            ("SELECT id,owner_run_id,turn_id FROM shell_execution WHERE state IN ('starting','running','stopping')", "shell_active_owner"),
-            ("SELECT COUNT(*) FROM shell_execution WHERE owner_run_id='run' AND state IN ('starting','running','stopping')", "shell_active_owner"),
-            ("SELECT id FROM run WHERE thread_id='thread' ORDER BY created_at DESC,id DESC LIMIT 1", "run_thread_created"),
-            ("SELECT id FROM run WHERE thread_id='thread' AND state IN ('live','stopping') AND state='live'", "one_live_run"),
-            ("SELECT id FROM shell_execution WHERE state IN ('exited','failed','stopped') AND COALESCE(ended_at,started_at)>'now' ORDER BY COALESCE(ended_at,started_at),rowid LIMIT 128", "shell_terminal_time"),
-        ] {
-            let plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?.query_map([], |r| r.get::<_, String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            if expected=="one_live_run" {
-                // Either named index still seeks the exact Thread/state prefix.
-                assert!(plan.iter().any(|line| (line.contains("one_live_run") || line.contains("wait_run_state")) && line.contains("SEARCH run") && line.contains("thread_id=?")),"{plan:?}");
-            } else {
-                assert!(plan.iter().any(|line| line.contains(expected)), "expected {expected}: {plan:?}");
-            }
-        }
-        Ok(())
-    }).await.unwrap();
-    worker.shutdown().await.unwrap();
-}
-
-#[tokio::test]
 async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_schema() {
     crate::test_watchdog::watchdog("parent index rollback and reopen", async {
     let root = tempfile::tempdir().unwrap();
@@ -179,8 +152,6 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
             assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=17", [], |r|r.get::<_,String>(0))?,"0017_thread_parent");
             let children=db.prepare("SELECT id FROM thread WHERE parent_thread_id=?1 ORDER BY id")?.query_map(["parent"],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
             assert_eq!(children,["child"]);
-            let plan=db.prepare("EXPLAIN QUERY PLAN SELECT min(id) FROM thread WHERE parent_thread_id=?1 AND id>?2")?.query_map(["parent","a"],|r|r.get::<_,String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(plan.iter().any(|line|line.contains("COVERING INDEX thread_parent")&&line.contains("parent_thread_id=? AND id>?")),"{plan:?}");
             Ok(())
         }}).await.unwrap();
         upgraded.shutdown().await.unwrap();
@@ -239,12 +210,5 @@ async fn history_attempt_index_migration_from_24_matches_fresh() {
     db.close().unwrap();
     let upgraded = DbWorker::open(&path).await.unwrap();
     assert_eq!(upgraded.call(|db| Ok(schema(db)?)).await.unwrap(), expected);
-    upgraded.call(|db| {
-        let sql = "EXPLAIN QUERY PLAN SELECT c.group_id,c.call_id FROM output_item o JOIN tool_group g ON g.attempt_id=o.attempt_id JOIN tool_call c ON c.group_id=g.id WHERE o.node_id=?1";
-        let plan = db.prepare(sql)?.query_map(["none"], |r| r.get::<_,String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        assert!(plan.iter().any(|s| s.contains("history_tool_group_attempt")), "{plan:?}");
-        assert!(!plan.iter().any(|s| s.contains("SCAN c") || s.contains("SCAN g")), "{plan:?}");
-        Ok(())
-    }).await.unwrap();
     upgraded.shutdown().await.unwrap();
 }

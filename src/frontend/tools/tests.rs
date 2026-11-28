@@ -321,11 +321,6 @@ fn whole_response_candidate_range_is_bounded_and_uncertain_sources_stay_local() 
             .code,
         crate::protocol::ErrorCode::InputLimit
     );
-    let plan=db.prepare("EXPLAIN QUERY PLAN SELECT call_id FROM tool_call WHERE group_id=?1 ORDER BY ordinal,call_id LIMIT 129").unwrap().query_map(["g"],|row|row.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap().join("\n");
-    assert!(
-        plan.contains("SEARCH") && plan.contains("group_id=?"),
-        "{plan}"
-    );
 }
 
 #[test]

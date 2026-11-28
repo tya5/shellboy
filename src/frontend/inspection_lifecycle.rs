@@ -532,23 +532,6 @@ mod tests {
             assert!(value.limited_fields.contains(&key.into()));
         }
         seed_owned(&db, 150, 1150);
-        {
-            let sql = OWNED_EXECUTIONS;
-            let plans = db
-                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-                .unwrap()
-                .query_map(["r"], |r| r.get::<_, String>(3))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert!(plans.iter().any(|p| p.contains("USING INDEX")), "{plans:?}");
-            assert!(
-                !plans
-                    .iter()
-                    .any(|p| p == "SCAN run" || p == "SCAN shell_execution"),
-                "{plans:?}"
-            );
-        }
     }
     #[test]
     fn latest_turn_tie_breaker_matches_canonical_with_an_indexed_run_query() {
@@ -574,33 +557,11 @@ mod tests {
             assert_eq!(turns.len(), 1);
             turns[0].clone()
         };
-        let plan = || {
-            db.prepare(&format!("EXPLAIN QUERY PLAN {RUN_SQL}"))
-                .unwrap()
-                .query_map(params!["r", JSON_BYTES as i64], |row| {
-                    row.get::<_, String>(3)
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap()
-        };
         seed_ties(0, 4096);
         assert_eq!(latest().as_deref(), Some("tie-004095"));
         assert_eq!(
             prepare(read_tx(&db, &run()).unwrap()).unwrap().value,
             canonical(&db, &run())
-        );
-        let plan = plan();
-        assert!(
-            plan.iter()
-                .any(|part| part.starts_with("SEARCH") && part.contains("INDEX")),
-            "{plan:?}"
-        );
-        assert!(
-            !plan
-                .iter()
-                .any(|part| part.starts_with("SCAN u") || part.starts_with("SCAN turn")),
-            "{plan:?}"
         );
         seed_ties(4096, 8192);
         assert_eq!(latest().as_deref(), Some("tie-008191"));

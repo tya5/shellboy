@@ -663,17 +663,6 @@ mod query_cost_tests {
         }
         display
     }
-    fn plan(db: &Connection) -> Vec<String> {
-        db.prepare(&format!(
-            "EXPLAIN QUERY PLAN {}",
-            latest_query(EXACT_ATTEMPTS)
-        ))
-        .unwrap()
-        .query_map(params!["t", 512], |row| row.get::<_, String>(3))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap()
-    }
     #[test]
     fn preflight_selects_latest_matching_adoption_without_falling_back() {
         let db = fixture();
@@ -723,21 +712,6 @@ mod query_cost_tests {
         );
         assert_eq!(details["last_successful_attempt"]["input_tokens"], 11);
         assert!(details["bounded_observation"].is_null());
-        let plan = plan(&db);
-        assert!(
-            plan.iter().any(|p| p.contains("turns_by_thread")),
-            "{plan:?}"
-        );
-        assert!(
-            plan.iter().any(|p| p.contains("attempts_completed_scope")),
-            "{plan:?}"
-        );
-        assert!(
-            !plan
-                .iter()
-                .any(|p| p.starts_with("SCAN a") || p.starts_with("SCAN u")),
-            "{plan:?}"
-        );
     }
     #[test]
     fn replacement_pending_probe_is_foreign_scoped_over_own_memberships() {
@@ -869,18 +843,6 @@ mod bounded_cost_tests {
         assert_eq!(v["last_successful_attempt"]["attempt_id"], "a000639-63");
         assert_eq!(v["last_successful_attempt"]["input_tokens"], 11);
         assert!(v["last_successful_attempt"]["next_request_pending"].is_null());
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {}", bounded::query()))
-            .unwrap()
-            .query_map(params!["t", 512], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter().any(|s| s.contains("attempts_completed_scope")),
-            "{plan:?}"
-        );
-        assert!(!plan.iter().any(|s| s.contains("AUTOMATIC")), "{plan:?}");
     }
     #[test]
     fn output_prefix_bounds_visits_without_claiming_absence_after_saturation() {

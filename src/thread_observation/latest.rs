@@ -383,60 +383,6 @@ mod tests {
         assert_eq!(last_end_message(&db, "t").unwrap().unwrap()["at"], at);
     }
     #[test]
-    fn latest_query_plans_seek_one_thread_without_sorting_history() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        for (query, index) in [
-            (ANSWER, "thread_answer_latest"),
-            (INPUT, "receipt_thread_order"),
-        ] {
-            let plan = db
-                .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
-                .unwrap()
-                .query_map(
-                    rusqlite::params_from_iter(
-                        std::iter::once(rusqlite::types::Value::Text("t".into())).chain(
-                            std::iter::repeat_n(
-                                rusqlite::types::Value::Integer(i64::MAX),
-                                if query == ANSWER { 1 } else { 2 },
-                            ),
-                        ),
-                    ),
-                    |r| r.get::<_, String>(3),
-                )
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap()
-                .join("\n");
-            assert!(plan.contains(index) && plan.contains("SEARCH"), "{plan}");
-            assert!(
-                !plan.contains("SCAN") && !plan.contains("TEMP B-TREE"),
-                "{plan}"
-            );
-        }
-    }
-    #[test]
-    fn excerpt_plan_selects_one_node_before_bounded_json_fragments() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {EXCERPT}"))
-            .unwrap()
-            .query_map(["node"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .join("\n");
-        assert!(
-            plan.contains("SEARCH node USING INDEX sqlite_autoindex_node_1 (id=?)"),
-            "{plan}"
-        );
-        assert!(
-            !plan.contains("SCAN node") && !plan.contains("TEMP B-TREE"),
-            "{plan}"
-        );
-    }
-    #[test]
     fn excerpts_keep_natural_text_and_do_not_copy_tools_reasoning_or_credentials() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();

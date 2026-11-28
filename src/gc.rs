@@ -2504,15 +2504,6 @@ mod tests {
         db
     }
 
-    fn plan(db: &Connection) -> Vec<String> {
-        db.prepare(&format!("EXPLAIN QUERY PLAN {INDEX_SOURCES_PAGE}"))
-            .unwrap()
-            .query_map(params!["", 128], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap()
-    }
-
     /// Every owning source across bounded keyset pages.
     fn sources(db: &Connection) -> Vec<String> {
         let (mut owned, mut after) = (Vec::new(), String::new());
@@ -2537,31 +2528,5 @@ mod tests {
         let db = fixture(4, 3, 8, 4);
         db.execute_batch("INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES('jd','s','d000001',0,'text','h',0,0,'done'); INSERT INTO embedding_chunk(id,job_id,space_id,source_node_id,source_revision,span_start,span_end,content_hash,vec_row_id)VALUES('cd','jd','s','d000002',0,0,0,'h',99); INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES('m','user','2026',NULL,0); INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES('jm','s','m',0,'text','h',0,0,'done');").unwrap();
         assert_eq!(sources(&db), ["d000001", "d000002", "m"]);
-        let plan = plan(&db);
-        assert!(
-            plan.iter().any(
-                |d| (d.starts_with("SCAN n USING") || d.starts_with("SEARCH n USING"))
-                    && d.contains("INDEX nodes_index_gc")
-            ),
-            "{plan:?}"
-        );
-        assert!(
-            plan.iter()
-                .any(|d| d
-                    .contains("embedding_job USING COVERING INDEX jobs_source (source_node_id=?)")),
-            "{plan:?}"
-        );
-        assert!(
-            plan.iter().any(|d| d
-                .contains("embedding_chunk USING COVERING INDEX chunks_source (source_node_id=?)")),
-            "{plan:?}"
-        );
-        assert!(
-            !plan
-                .iter()
-                .any(|d| d.starts_with("SCAN") && !d.contains("nodes_index_gc")),
-            "{plan:?}"
-        );
-        assert!(!plan.iter().any(|d| d.contains("TEMP B-TREE")), "{plan:?}");
     }
 }

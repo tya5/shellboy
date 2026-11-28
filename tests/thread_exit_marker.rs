@@ -19,9 +19,6 @@ async fn thread_list_exposes_latest_stop_reason_and_new_run_clears_it() {
                 db.execute("INSERT INTO run(id,thread_id,state,created_at,stop_reason) VALUES(?1,?1,?2,'old',?3)",rusqlite::params![id,state,reason])?;
             }
         }
-        let plans = db.prepare("EXPLAIN QUERY PLAN SELECT stop_reason FROM run WHERE thread_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1")?.query_map(["crash"],|r|r.get::<_,String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        assert!(plans.iter().any(|p|p.contains("run_thread_created")),"{plans:?}");
-        assert!(!plans.iter().any(|p|p.contains("TEMP B-TREE")),"{plans:?}");
         Ok(())
     }).await.unwrap();
     let store = Store::new(

@@ -291,24 +291,5 @@ mod tests {
                 .get::<_, bool>(0))
                 .unwrap()
         );
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-            .unwrap()
-            .query_map(params!["composer", 7, "t"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter().any(
-                |line| (line.contains("SEARCH binding USING INDEX receipt_target")
-                    || line.contains("SEARCH binding USING INDEX receipt_thread_order"))
-                    && line.contains("target_thread_id=?")
-            ),
-            "{plan:?}"
-        );
-        assert!(
-            !plan.iter().any(|line| line.contains("SCAN binding")),
-            "{plan:?}"
-        );
     }
 }

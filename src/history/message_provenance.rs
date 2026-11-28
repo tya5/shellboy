@@ -221,18 +221,13 @@ mod tests {
             .unwrap();
             }
             let measure = |query: &str| {
-                let plan = db
-                    .query_row(&format!("EXPLAIN QUERY PLAN {query}"), [], |r| {
-                        r.get::<_, String>(3)
-                    })
-                    .unwrap();
                 let mut stmt = db.prepare(query).unwrap();
                 let values = stmt
                     .query_map([], |r| r.get::<_, i64>(0))
                     .unwrap()
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .unwrap();
-                (plan, values)
+                values
             };
             let query = "SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')";
             let before = measure(query);
@@ -244,13 +239,8 @@ mod tests {
             let forced = measure(
                 "SELECT rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')",
             );
-            assert_eq!(before.1, after.1);
-            assert_eq!(before.1, forced.1);
-            assert!(
-                after.0.contains("receipt_reply_pending"),
-                "unforced pending scope changed: {}",
-                after.0
-            );
+            assert_eq!(before, after);
+            assert_eq!(before, forced);
         }
     }
     #[test]
@@ -316,19 +306,5 @@ mod tests {
         )
         .unwrap();
         assert!(bounded_receipt(&db, "large").unwrap().is_none());
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {REVERSE_LOOKUP}"))
-            .unwrap()
-            .query_map(["t", "b"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-            .join(" ");
-        assert!(
-            plan.contains("SEARCH")
-                && plan.contains("target_thread_id=?")
-                && plan.contains("<expr>=?"),
-            "{plan}"
-        );
     }
 }

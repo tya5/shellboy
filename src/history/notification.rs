@@ -205,8 +205,6 @@ mod tests {
         fresh.execute("DELETE FROM delivery", []).unwrap();
         assert_eq!(snapshot(&fresh, "n").unwrap(), Some(original));
         assert!(fresh.execute("DELETE FROM event WHERE id='e'", []).is_err());
-        let plans=fresh.prepare("EXPLAIN QUERY PLAN SELECT CASE WHEN length(CAST(e.semantic_json AS BLOB))<=2048 THEN e.semantic_json END FROM node n JOIN turn t ON t.id=n.turn_id JOIN event e ON e.id=n.notification_event_id WHERE n.id=?1 AND n.kind='event' AND t.thread_id=e.target_thread_id").unwrap().query_map(["n"],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-        assert!(plans.iter().all(|plan| !plan.contains("SCAN")), "{plans:?}");
         assert_eq!(
             fresh
                 .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r

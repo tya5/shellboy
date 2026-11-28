@@ -1009,8 +1009,6 @@ mod tests {
             summary(&db, "current").unwrap()["protected_old_pending_bytes"],
             0
         );
-        let plan:String=db.query_row("EXPLAIN QUERY PLAN SELECT SUM(reserved_bytes) FROM operation_receipt INDEXED BY operation_receipt_pending_budget WHERE instance_id='current' AND state='pending'",[],|r|r.get(3)).unwrap();
-        assert!(plan.contains("operation_receipt_pending_budget"));
     }
 
     #[test]

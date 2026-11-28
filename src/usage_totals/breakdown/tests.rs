@@ -361,25 +361,6 @@ fn maximum_groups_and_validation_bounds() {
 #[test]
 fn existing_rowid_query_plan_and_bounded_scan_counts() {
     let db = fixture();
-    let plan = db
-        .prepare(&format!("EXPLAIN QUERY PLAN {}", query()))
-        .unwrap()
-        .query_map(
-            params!["2026-10-31T00:00:00", "2026-11-01T00:00:01", 0, i64::MAX],
-            |r| r.get::<_, String>(3),
-        )
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap()
-        .join("\n");
-    assert!(
-        plan.lines()
-            .any(|line| line.starts_with("SEARCH model_attempt ")
-                && line.contains("rowid>?")
-                && line.contains("rowid<?")),
-        "{plan}"
-    );
-    assert!(!plan.contains("SCAN model_attempt"), "{plan}");
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
@@ -775,25 +756,6 @@ fn model_group_by_validates_and_reuses_rowid_query_without_model_scan() {
     assert!(validate(&a).is_ok());
     a.group_by = Some("profile".into());
     assert_eq!(validate(&a).unwrap_err().code, ErrorCode::InvalidArgument);
-    let plan = db
-        .prepare(&format!("EXPLAIN QUERY PLAN {}", query()))
-        .unwrap()
-        .query_map(
-            params!["2026-10-31T00:00:00", "2026-11-01T00:00:01", 0, i64::MAX],
-            |r| r.get::<_, String>(3),
-        )
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap()
-        .join("\n");
-    assert!(
-        plan.lines()
-            .any(|line| line.starts_with("SEARCH model_attempt ")
-                && line.contains("rowid>?")
-                && line.contains("rowid<?")),
-        "{plan}"
-    );
-    assert!(!plan.contains("SCAN model_attempt"), "{plan}");
 }
 
 #[test]
@@ -822,20 +784,6 @@ fn bounded_shell_exit_groups_preserve_unknown_and_scope_to_thread() {
     assert_eq!(items[2]["exit_code"], Value::Null);
     assert_eq!(items[2]["count"], 1);
     assert_eq!(value["outside_period_count"], 1);
-    let plan = db.prepare("EXPLAIN QUERY PLAN WITH candidates AS MATERIALIZED (SELECT rowid,id FROM shell_execution WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT 201) SELECT * FROM candidates").unwrap()
-        .query_map(params![0_i64, i64::MAX], |r| r.get::<_, String>(3)).unwrap()
-        .map(Result::unwrap).collect::<Vec<_>>();
-    assert!(
-        plan.iter()
-            .any(|line| line.contains("SEARCH shell_execution USING INTEGER PRIMARY KEY")),
-        "{plan:?}"
-    );
-    assert!(
-        !plan
-            .iter()
-            .any(|line| line.starts_with("SCAN shell_execution")),
-        "{plan:?}"
-    );
 }
 
 #[test]

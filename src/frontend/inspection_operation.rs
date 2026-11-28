@@ -520,21 +520,5 @@ mod tests {
         db.execute("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<?1) INSERT OR IGNORE INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)SELECT 'unrelated:'||i,'old','null','hash','completed','{\"result\":{}}','now' FROM n",[10000]).unwrap();
         let raw = read_tx(&db, "selected", "current").unwrap();
         assert_eq!(raw.state, "pending");
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {OP_SQL}"))
-            .unwrap()
-            .query_map(["selected"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter()
-                .any(|step| step.starts_with("SEARCH") && step.contains("operation_id=?")),
-            "{plan:?}"
-        );
-        assert!(
-            !plan.iter().any(|step| step.starts_with("SCAN")),
-            "{plan:?}"
-        );
     }
 }

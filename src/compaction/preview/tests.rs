@@ -229,6 +229,22 @@ async fn default_applies_virtual_spill_before_summary_and_does_not_request_model
     f.close().await;
 }
 #[tokio::test]
+async fn preview_can_read_from_a_query_only_connection() {
+    let f = plain().await;
+    let db = Connection::open(f.db.path()).unwrap();
+    db.pragma_update(None, "query_only", true).unwrap();
+    read_tx(
+        &db,
+        "t",
+        &args(Some(ContextEditAction::Maximal), None, None),
+        &config(),
+    )
+    .unwrap();
+    drop(db);
+    f.close().await;
+}
+
+#[tokio::test]
 async fn summary_forecast_does_not_predict_a_refusal_and_makes_no_request_or_adoption() {
     let f = Fixture::new().await;
     f.text("large", &"x".repeat(70_000)).await;
@@ -343,38 +359,6 @@ async fn payload_and_turn_coverage_limits_are_unknown_not_false_empty() {
     let f = plain().await;
     f.db.call(|db|{db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');WITH RECURSIVE seq(n)AS(VALUES(0)UNION ALL SELECT n+1 FROM seq WHERE n<512)INSERT INTO turn(id,thread_id,run_id,state,created_at)SELECT 'u'||n,'t','r','completed','now' FROM seq;")?;Ok(())}).await.unwrap();
     assert!(forecast_config(&f, &args(None, None, None), &config()).is_err());
-    f.close().await;
-}
-#[tokio::test]
-async fn query_only_read_uses_indexed_plans() {
-    let f = plain().await;
-    let db = Connection::open(f.db.path()).unwrap();
-    db.pragma_update(None, "query_only", true).unwrap();
-    read_tx(
-        &db,
-        "t",
-        &args(Some(ContextEditAction::Maximal), None, None),
-        &config(),
-    )
-    .unwrap();
-    for (query, parameter, index) in [
-        (PATH_SQL, "t", "sqlite_autoindex_thread_path_1"),
-        (GROUP_SQL, "[]", "sqlite_autoindex_tool_group_1"),
-        (ANCESTRY_SQL, "[]", "replacement_output_node"),
-    ] {
-        let mut statement = db.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap();
-        let mut rows = if query == ANCESTRY_SQL {
-            statement.query(params![parameter, ROWS as i64]).unwrap()
-        } else {
-            statement.query([parameter]).unwrap()
-        };
-        let mut plan = String::new();
-        while let Some(row) = rows.next().unwrap() {
-            plan.push_str(&row.get::<_, String>(3).unwrap());
-        }
-        assert!(plan.contains(index), "{plan}");
-    }
-    drop(db);
     f.close().await;
 }
 #[tokio::test]

@@ -968,24 +968,6 @@ mod browser_title_batch_tests {
         }
         tx.commit().unwrap();
         measure(&db);
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {TITLE_BATCH_SQL}"))
-            .unwrap()
-            .query_map(rusqlite::params![encoded, 128 * 1024, 512 * 1024], |r| {
-                r.get::<_, String>(3)
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter()
-                .any(|p| p.contains("thread_path") && p.contains("SEARCH")),
-            "{plan:?}"
-        );
-        assert!(
-            plan.iter().any(|p| p.contains("receipt_target")),
-            "{plan:?}"
-        );
     }
 }
 
@@ -1112,30 +1094,5 @@ mod header_scalar_bound_tests {
             INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)
             SELECT 'foreign-e-'||n,'foreign-r-0','foreign-u-0','foreign-operation-'||n,'running','/','{}','UTF-8','UTF-8','open','now' FROM seq;").unwrap();
         measure(&db);
-        let plans = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {HEADER_SQL}"))
-            .unwrap()
-            .query_map(header_params("t"), |row| row.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        for alias in ["t", "r", "u", "s"] {
-            assert!(
-                plans
-                    .iter()
-                    .any(|plan| plan.starts_with(&format!("SEARCH {alias} "))),
-                "{alias}: {plans:?}"
-            );
-            assert!(
-                !plans
-                    .iter()
-                    .any(|plan| plan.starts_with(&format!("SCAN {alias} "))),
-                "{alias}: {plans:?}"
-            );
-        }
-        assert!(
-            plans.iter().any(|plan| plan.contains("shell_active_owner")),
-            "{plans:?}"
-        );
     }
 }

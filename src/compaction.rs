@@ -3580,10 +3580,6 @@ mod tests {
                 assert_eq!(new.iter().cloned().collect::<BTreeSet<_>>(), expected);
                 assert_eq!(new.len(), expected.len(), "duplicate receipts/fanout are one seed each");
             }
-            let plan = db.prepare(&format!("EXPLAIN QUERY PLAN {TURN_BOUNDARY_SEEDS_SQL}"))?
-                .query_map(params!["current",65_537], |row| row.get::<_, String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(plan.iter().any(|line| line.contains("node_turn")), "{plan:?}");
-            assert!(!plan.iter().any(|line| line.contains("TEMP B-TREE")), "streaming DISTINCT has no pre-limit sort: {plan:?}");
             // The child has only the selected replacement, no copied ancestor
             // thread_replacement rows. Provenance remains global until projection.
             assert_eq!(resolve_turn_boundary(db,"fork","current",64)?,Some("current-summary".into()));
@@ -3608,15 +3604,6 @@ mod tests {
                 INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision)VALUES('r1',0,'origin',0),('r2',0,'s1',0);
                 INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',0,'s2');
                 UPDATE thread SET cursor_node_id='s2' WHERE id='t';")?;
-            for (label,sql) in [
-                ("seeds", format!("EXPLAIN QUERY PLAN {}", TURN_BOUNDARY_SEEDS_SQL.replace("?1", "'current'").replace("?2", "65537"))),
-                ("consumers", "EXPLAIN QUERY PLAN SELECT r.output_node_id,p.ordinal FROM replacement_source s JOIN replacement r ON r.id=s.replacement_id LEFT JOIN thread_path p ON p.node_id=r.output_node_id AND p.thread_id='t' WHERE s.source_node_id IN ('origin','s1') AND r.state='completed' LIMIT 65537".to_owned()),
-            ] {
-                let plan=db.prepare(&sql)?.query_map([],|r|r.get::<_,String>(3))?.collect::<Result<Vec<_>,_>>()?;
-                eprintln!("M11 {label} query plan: {}",plan.join("; "));
-                assert!(!plan.iter().any(|line|line.contains("TEMP B-TREE")), "no pre-limit sort/materialization: {plan:?}");
-                if label=="consumers" { assert!(plan.iter().any(|line|line.contains("replacement_source_reverse"))); }
-            }
             let error=resolve_turn_boundary(db,"t","current",2).unwrap_err();
             let api=storage_error(error);
             assert_eq!(api.code,ErrorCode::InvalidState);

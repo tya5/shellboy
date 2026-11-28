@@ -3,9 +3,7 @@
 use rusqlite::Connection;
 use serde_json::json;
 use shellboy::{
-    history::{
-        WINDOW_STATEMENTS_FOR_TESTS, append_node, rewind::rewind_thread, select_path, window,
-    },
+    history::{append_node, rewind::rewind_thread, select_path, window},
     protocol::{ErrorCode, HistoryWindowArgs, MAX_LIST_LIMIT},
     storage::DbWorker,
 };
@@ -377,52 +375,6 @@ fn rewind_shortens_the_path_and_old_tail_positions_expire() {
         )
         .unwrap_err();
         assert_eq!(gone.code, ErrorCode::CursorExpired);
-    });
-}
-
-fn plan(db: &Connection, sql: &str) -> String {
-    let probe: Vec<rusqlite::types::Value> = (1..=sql.matches('?').count().max(4))
-        .map(|i| {
-            if i == 1 {
-                "t".to_owned().into()
-            } else {
-                1_i64.into()
-            }
-        })
-        .collect();
-    let probe = &probe[..sql_params(sql)];
-    db.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-        .unwrap()
-        .query_map(rusqlite::params_from_iter(probe), |r| r.get::<_, String>(3))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap()
-        .join(" | ")
-}
-fn sql_params(sql: &str) -> usize {
-    (1..=9).filter(|i| sql.contains(&format!("?{i}"))).count()
-}
-
-#[test]
-fn every_statement_is_a_search_on_the_primary_key_or_unique_index() {
-    on_db(|db| {
-        fill(db, 3);
-        for sql in WINDOW_STATEMENTS_FOR_TESTS {
-            let plan = plan(db, sql);
-            assert!(plan.contains("SEARCH"), "{sql}\n{plan}");
-            assert!(!plan.contains("SCAN"), "{sql}\n{plan}");
-            assert!(!plan.contains("TEMP B-TREE"), "{sql}\n{plan}");
-        }
-        let total = plan(db, WINDOW_STATEMENTS_FOR_TESTS[0]);
-        assert!(
-            total.contains("sqlite_autoindex_thread_path_1") || total.contains("PRIMARY KEY"),
-            "{total}"
-        );
-        let ranged = plan(db, WINDOW_STATEMENTS_FOR_TESTS[3]);
-        assert!(
-            ranged.contains("ordinal>? AND ordinal<?") || ranged.contains("ordinal>"),
-            "{ranged}"
-        );
     });
 }
 

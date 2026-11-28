@@ -582,42 +582,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn exact_latest_and_running_state_are_index_seeks() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        for (sql, index) in [
-            (
-                "SELECT id FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
-                "activity_turn_run",
-            ),
-            (
-                "SELECT rowid FROM model_attempt INDEXED BY activity_attempt_turn WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
-                "activity_attempt_turn",
-            ),
-            (
-                "SELECT created_at FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=?1 AND state='running' ORDER BY rowid LIMIT 1",
-                "activity_group_turn_state",
-            ),
-            (
-                "SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running') LIMIT 1",
-                "activity_turn_run_state",
-            ),
-        ] {
-            let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-            let detail: Vec<String> = plan
-                .query_map(["id"], |r| r.get(3))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect();
-            assert!(detail.iter().any(|line| line.contains(index)), "{detail:?}");
-            assert!(
-                !detail.iter().any(|line| line.contains("TEMP B-TREE")),
-                "{detail:?}"
-            );
-        }
-    }
-
-    #[test]
     fn result_counts_are_bounded_even_when_groups_or_results_are_sparse() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();

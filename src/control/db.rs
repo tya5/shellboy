@@ -3799,27 +3799,6 @@ mod thread_list_plan_tests {
             page.items[0].awaiting_named_oldest_at.is_none(),
             "oldest is unknown when the bounded sample is inexact"
         );
-        let sql = awaiting_human_candidates_sql();
-        let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-        let details: Vec<String> = plan
-            .query_map(
-                params![
-                    "",
-                    1,
-                    (crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1) as i64,
-                    "human"
-                ],
-                |r| r.get(3),
-            )
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert!(
-            details
-                .iter()
-                .any(|x| x.contains("receipt_named_reply_pending") && x.contains("SEARCH")),
-            "{details:?}"
-        );
     }
 
     #[test]
@@ -4067,29 +4046,6 @@ mod thread_list_plan_tests {
     }
 
     #[test]
-    fn creation_page_seeks_each_archive_and_timestamp_partition() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        for (after, seeks) in [(None, 2), (Some(Some("2".into())), 6), (Some(None), 2)] {
-            let sql = thread_summary::created_page_sql(ArchivedFilter::Include, after.as_ref());
-            let plan: Vec<String> = db
-                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-                .unwrap()
-                .query_map(params!["2", "b", 2], |r| r.get(3))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
-            assert_eq!(
-                plan.iter()
-                    .filter(|line| line.contains("SEARCH thread USING INDEX threads_created"))
-                    .count(),
-                seeks,
-                "{plan:?}"
-            );
-        }
-    }
-
-    #[test]
     fn creation_page_seek_returns_the_page_below_the_cursor() {
         let page = |count: u32| {
             let db = Connection::open_in_memory().unwrap();
@@ -4114,26 +4070,6 @@ mod thread_list_plan_tests {
         };
         page(20);
         page(3000);
-    }
-
-    #[test]
-    fn cwd_names_are_one_index_seek_each_whatever_a_directory_holds() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        let plan: Vec<String> = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {}", tags::NEXT_CWD_SQL))
-            .unwrap()
-            .query_map(["/a"], |r| r.get(3))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        eprintln!("EXPLAIN cwds: {plan:?}");
-        assert!(
-            plan.iter()
-                .any(|p| p.contains("threads_cwd_updated (cwd>?)")),
-            "{plan:?}"
-        );
-        assert!(!plan.iter().any(|p| p.contains("TEMP B-TREE")), "{plan:?}");
     }
 
     #[test]

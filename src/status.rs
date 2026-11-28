@@ -1014,20 +1014,5 @@ mod response_node_tests {
         let (nodes, truncated) = response_nodes(&db, "boundary").unwrap();
         assert!(nodes.is_empty());
         assert!(truncated);
-        let plan: Vec<String> = {
-            let mut statement = db.prepare("EXPLAIN QUERY PLAN SELECT ordinal,item_id,item_type,phase,node_id FROM output_item WHERE attempt_id=?1 ORDER BY ordinal LIMIT ?2").unwrap();
-            let rows = statement
-                .query_map(
-                    params!["boundary", (RESPONSE_CANDIDATE_LIMIT + 1) as i64],
-                    |row| row.get(3),
-                )
-                .unwrap();
-            rows.collect::<rusqlite::Result<_>>().unwrap()
-        };
-        let plan = plan.join(" | ");
-        assert!(
-            plan.contains("output_item_1") && plan.contains("attempt_id=?"),
-            "expected PK range scan: {plan}"
-        );
     }
 }

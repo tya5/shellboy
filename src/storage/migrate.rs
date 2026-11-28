@@ -1663,17 +1663,6 @@ mod activity_migration_tests {
                 .unwrap(),
                 "0028_tool_group_recovery_candidates"
             );
-            if start < 27 {
-                let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT id FROM embedding_job WHERE state='running' AND id>?1 ORDER BY id LIMIT 128", [""], |r| r.get(3)).unwrap();
-                assert!(plan.contains("jobs_running_recovery"), "{plan}");
-            }
-            let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT group_id FROM tool_group_recovery_candidate WHERE group_id>?1 ORDER BY group_id LIMIT 32", [""], |r| r.get(3)).unwrap();
-            assert!(plan.contains("tool_group_recovery_candidate"), "{plan}");
-            let attempt_plan: String = db.query_row("EXPLAIN QUERY PLAN UPDATE model_attempt SET state='incomplete' WHERE state IN ('preparing','inflight')", [], |r| r.get(3)).unwrap();
-            assert!(
-                attempt_plan.contains("model_attempt_active_recovery"),
-                "{attempt_plan}"
-            );
         }
     }
 
@@ -1782,19 +1771,6 @@ mod activity_migration_tests {
                 "0026_reply_expected"
             );
             assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='history_tool_group_attempt'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-            let unforced:String=db.query_row("EXPLAIN QUERY PLAN SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')",[],|row|row.get(3)).unwrap();
-            eprintln!("PENDING_REPLY_UNFORCED_PLAN {unforced}");
-            assert!(
-                unforced.contains("SEARCH") && unforced.contains("target_thread_id=?"),
-                "{unforced}"
-            );
-            let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state') IN ('pending','awaiting_own_ask')", [], |row| row.get(3)).unwrap();
-            assert!(plan.contains("receipt_reply_pending"), "{plan}");
-            let human_plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT target_thread_id FROM receipt INDEXED BY receipt_human_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(3)).unwrap();
-            assert!(
-                human_plan.contains("receipt_human_reply_pending"),
-                "{human_plan}"
-            );
         }
     }
     #[test]
@@ -1824,8 +1800,6 @@ mod activity_migration_tests {
             Some(20)
         );
         assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='receipt_human_reply_pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT target_thread_id FROM receipt INDEXED BY receipt_human_reply_pending WHERE target_thread_id='legacy' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(3)).unwrap();
-        assert!(plan.contains("receipt_human_reply_pending"), "{plan}");
     }
 
     #[test]

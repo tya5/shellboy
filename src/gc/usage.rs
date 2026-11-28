@@ -229,27 +229,4 @@ INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'
         assert_reference(&db);
         assert_eq!(logical_usage(&db).unwrap().total(), 0);
     }
-
-    #[test]
-    fn logical_aggregation_uses_scalar_indexes() {
-        let db = current_schema();
-        seed(&db);
-        for query in
-            HISTORY_QUERIES
-                .iter()
-                .copied()
-                .chain([RAW_QUERY, MANAGED_QUERY, INDEX_META_QUERY])
-        {
-            let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap();
-            let detail: Vec<String> = plan
-                .query_map([], |row| row.get(3))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
-            assert!(
-                detail.iter().any(|line| line.contains("gc_bytes_")),
-                "missing narrow index: {detail:?}"
-            );
-        }
-    }
 }

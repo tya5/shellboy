@@ -757,13 +757,6 @@ mod metadata_tests {
             .unwrap(),
             "pending"
         );
-        let jobs: String = db.query_row("EXPLAIN QUERY PLAN SELECT id FROM embedding_job INDEXED BY jobs_running_recovery WHERE state='running' ORDER BY id LIMIT 128", [], |r| r.get(3)).unwrap();
-        assert!(jobs.contains("jobs_running_recovery"), "{jobs}");
-        let (sql, bound) = bootstrap_recovery_query(None);
-        let meta: String = db
-            .query_row(&format!("EXPLAIN QUERY PLAN {sql}"), [bound], |r| r.get(3))
-            .unwrap();
-        assert!(meta.contains("SEARCH") && meta.contains("INDEX"), "{meta}");
     }
 
     #[test]

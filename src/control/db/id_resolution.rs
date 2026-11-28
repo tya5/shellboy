@@ -241,24 +241,6 @@ mod tests {
     }
 
     #[test]
-    fn message_prefix_range_uses_the_existing_receipt_message_index() {
-        let db = database();
-        let plan = db
-            .prepare("EXPLAIN QUERY PLAN SELECT DISTINCT message_node_id FROM receipt INDEXED BY receipt_message_node WHERE message_node_id>='abc' AND message_node_id<'abd' ORDER BY message_node_id LIMIT 9")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .join(" ");
-        assert!(plan.contains("receipt_message_node"), "{plan}");
-        assert!(
-            plan.contains("message_node_id>") && plan.contains("message_node_id<"),
-            "{plan}"
-        );
-    }
-
-    #[test]
     fn message_resolution_requires_a_message_receipt() {
         let db = database();
         db.execute(

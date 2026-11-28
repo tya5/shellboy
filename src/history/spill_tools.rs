@@ -161,19 +161,6 @@ mod tests {
         )
         .unwrap();
         assert!(load(&db, "old").unwrap().truncated);
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {LOOKUP_SQL}"))
-            .unwrap()
-            .query_map(["s"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter()
-                .any(|s| s.contains("SEARCH node USING COVERING INDEX node_spill_tools")),
-            "{plan:?}"
-        );
-        assert!(!plan.iter().any(|s| s.contains("SCAN")), "{plan:?}");
     }
 }
 

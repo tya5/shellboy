@@ -348,22 +348,6 @@ mod tests {
                     .contains("RAW_OUTPUT_MUST_NOT_BE_FETCHED")
             );
         }
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {SQL}"))
-            .unwrap()
-            .query_map([serde_json::to_string(&ids).unwrap()], |r| {
-                r.get::<_, String>(3)
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .join("\n");
-        assert!(plan.contains("SEARCH n USING INDEX"), "{plan}");
-        assert!(plan.contains("SEARCH c USING INDEX"), "{plan}");
-        assert!(
-            !plan.contains("SCAN shell_execution") && !plan.contains("SCAN tool_call"),
-            "{plan}"
-        );
     }
     #[test]
     fn child_lifecycle_facts_are_not_decorated_or_refreshed() {

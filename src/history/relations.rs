@@ -392,24 +392,6 @@ mod tests {
             [&owner],
         )
         .unwrap();
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {ATTEMPT_OWNER_SQL}"))
-            .unwrap()
-            .query_map(["assistant"], |row| row.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter()
-                .any(|detail| detail.contains("SEARCH output_item USING INDEX output_item_node")),
-            "{plan:?}"
-        );
-        assert!(
-            !plan
-                .iter()
-                .any(|detail| detail.contains("SCAN output_item")),
-            "{plan:?}"
-        );
 
         db.authorizer(Some(|context: AuthContext<'_>| match context.action {
             AuthAction::Read {

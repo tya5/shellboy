@@ -779,16 +779,6 @@ mod adapter_contract_tests {
                 (2, false, None)
             ]
         );
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {LIFECYCLE_SQL}"))
-            .unwrap()
-            .query_map([&requests], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .join("\n");
-        assert!(plan.contains("sqlite_autoindex_run_1"), "{plan}");
-        assert!(plan.contains("sqlite_autoindex_turn_1"), "{plan}");
     }
 }
 

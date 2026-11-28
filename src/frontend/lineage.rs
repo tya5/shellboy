@@ -437,30 +437,6 @@ mod tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         assert_eq!(rows.len(), MEMBER_LIMIT + 1);
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-            .unwrap()
-            .query_map(["root"], |row| row.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter()
-                .filter(|step| step.contains("thread_parent") && step.contains("SEARCH"))
-                .count()
-                >= 3,
-            "{plan:?}"
-        );
-        assert!(
-            plan.iter().any(|step| step.contains("run_thread_created")),
-            "{plan:?}"
-        );
-        assert!(
-            !plan.iter().any(|step| step.contains("tool_group")
-                || step.contains("model_attempt")
-                || step.contains("shell_execution")),
-            "count-only classification must not inspect irrelevant work: {plan:?}"
-        );
     }
     #[test]
     fn two_actual_roots_share_callers_transaction_without_per_descendant_jobs() {

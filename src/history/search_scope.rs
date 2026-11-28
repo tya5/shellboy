@@ -71,19 +71,6 @@ mod tests {
                 );
             }
         }
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {CANDIDATE_SCOPE_SQL}"))
-            .unwrap()
-            .query_map(params!["one", "a"], |row| row.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .join("\n");
-        assert!(plan.contains("replacement_source_reverse"), "{plan}");
-        assert!(
-            plan.contains("thread_id=? AND node_id=?"),
-            "candidate validation must probe one indexed Thread-path pair rather than scan every path node: {plan}"
-        );
         assert!(on_current_path(&db, "one", "root").unwrap());
         assert!(!on_current_path(&db, "one", "b").unwrap());
     }

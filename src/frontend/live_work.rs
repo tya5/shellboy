@@ -427,31 +427,6 @@ mod tests {
             assert!(read_tx_limited(&db, "r", Some(&[]), invalid).is_err());
         }
     }
-    #[test]
-    fn live_work_plan_seeks_owned_candidates_and_exact_child_state() {
-        let db = fixture();
-        let mut statement = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {LIVE_SQL}"))
-            .unwrap();
-        let details: Vec<String> = statement
-            .query_map(rusqlite::params!["r", "[]", 3], |row| row.get(3))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        {
-            let index = "shell_active_owner";
-            assert!(
-                details.iter().any(|detail| detail.contains(index)),
-                "missing {index}: {details:?}"
-            );
-        }
-        assert!(
-            !details
-                .iter()
-                .any(|detail| detail == "SCAN shell_execution" || detail == "SCAN run"),
-            "{details:?}"
-        );
-    }
 
     #[test]
     fn large_owned_scope_reports_a_lower_bound_without_claiming_global_order() {

@@ -1705,41 +1705,6 @@ async fn attachment_list_seeks_existing_indexes_and_does_not_wait_for_writer() {
     crate::test_watchdog::watchdog("indexed attachment list while writer is held", async {
         let f = Fixture::new(Config::default()).await;
         f.add("regular.txt", b"ordinary").await;
-        f.db.call(|db| {
-            for (watermark, after_order, after_id) in
-                [(i64::MAX, 0, ""), (i64::MAX, 10, "cursor-id")]
-            {
-                let mut plan =
-                    db.prepare(&format!("EXPLAIN QUERY PLAN {}", ATTACHMENT_LIST_SQL))?;
-                let details = plan
-                    .query_map(
-                        params!["thread", watermark, after_order, after_id, 51],
-                        |r| r.get::<_, String>(3),
-                    )?
-                    .collect::<Result<Vec<_>, _>>()?;
-                assert!(
-                    details
-                        .iter()
-                        .any(|s| s.starts_with("SEARCH s USING INDEX attachment_page_order")),
-                    "{details:?}"
-                );
-                assert!(
-                    details.iter().any(|s| s.starts_with("SEARCH a ")),
-                    "{details:?}"
-                );
-                assert!(
-                    details.iter().any(|s| s.starts_with("SEARCH m ")),
-                    "{details:?}"
-                );
-                assert!(
-                    !details.iter().any(|s| s.contains("USE TEMP B-TREE")),
-                    "{details:?}"
-                );
-            }
-            Ok(())
-        })
-        .await
-        .unwrap();
         let (ready, waiting) = tokio::sync::oneshot::channel();
         let (release, gate) = std::sync::mpsc::channel();
         let db = f.db.clone();

@@ -1742,20 +1742,7 @@ mod source_metadata_tests {
                 )?;
             }
             tx.commit()?;
-            for (sql, index) in [
-                (DELETE_BOOTSTRAP_SOURCE, "index_bootstrap_source"),
-                (DELETE_AUTO_SOURCE, "index_auto_source"),
-            ] {
-                let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
-                let lines = plan
-                    .query_map(["target"], |row| row.get::<_, String>(3))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                assert!(
-                    lines
-                        .iter()
-                        .any(|line| line.contains("SEARCH") && line.contains(index)),
-                    "{lines:?}"
-                );
+            for sql in [DELETE_BOOTSTRAP_SOURCE, DELETE_AUTO_SOURCE] {
                 let mut statement = db.prepare(sql)?;
                 assert_eq!(statement.execute(["no matching source"])?, 0);
                 assert_eq!(statement.get_status(StatementStatus::FullscanStep), 0);

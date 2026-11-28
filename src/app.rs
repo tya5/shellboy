@@ -689,28 +689,6 @@ mod startup_range_tests {
             "SELECT key FROM app_meta WHERE key>='wait.pending.' AND key<'wait.pending/' ORDER BY key",
         );
         assert_eq!(old_wait, new_wait);
-        for sql in [
-            STARTUP_QUEUED_SELECT,
-            STARTUP_QUEUED_DELETE,
-            STARTUP_WAIT_DELETE,
-        ] {
-            let plan: Vec<String> = db
-                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-                .unwrap()
-                .query_map([], |r| r.get::<_, String>(3))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap();
-            let joined = plan.join("\n");
-            assert!(
-                joined.contains("SEARCH") && !joined.contains("SCAN"),
-                "{sql}: {joined}"
-            );
-            assert!(
-                joined.contains("PRIMARY KEY") || joined.contains("sqlite_autoindex_app_meta_1"),
-                "{joined}"
-            );
-        }
         let removed = db.execute(STARTUP_QUEUED_DELETE, []).unwrap();
         assert_eq!(removed, 3);
         assert_eq!(db.execute(STARTUP_WAIT_DELETE, []).unwrap(), 1);

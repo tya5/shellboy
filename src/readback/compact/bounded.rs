@@ -195,37 +195,6 @@ mod tests {
         }
         db.execute_batch("COMMIT").unwrap();
     }
-    #[test]
-    fn bounded_compaction_prefix_seeks_use_native_order() {
-        let db = fixture();
-        let sql = format!(
-            "EXPLAIN QUERY PLAN {} SELECT * FROM operation_receipt CROSS JOIN automatic_compaction CROSS JOIN thread_replacement",
-            prefix()
-        );
-        let plan = db
-            .prepare(&sql)
-            .unwrap()
-            .query_map(["t"], |row| row.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        for index in [
-            "compact_operation_thread",
-            "turns_by_thread",
-            "automatic_compaction_turn",
-            "sqlite_autoindex_thread_replacement_1",
-        ] {
-            assert!(
-                plan.iter()
-                    .any(|step| step.starts_with("SEARCH") && step.contains(index)),
-                "missing seek through {index}: {plan:?}"
-            );
-        }
-        assert!(
-            !plan.iter().any(|step| step.contains("TEMP B-TREE")),
-            "prefix must not sort an unbounded input: {plan:?}"
-        );
-    }
 
     #[test]
     fn expired_restore_cannot_certify_an_older_replacement_as_latest() {

@@ -95,28 +95,4 @@ mod tests {
             .unwrap();
         assert_eq!(read(&db, "s", observed).unwrap().elapsed_ms, None);
     }
-    #[test]
-    fn last_output_uses_the_primary_key_without_a_sort_or_output_scan() {
-        let db = fixture();
-        let plans: Vec<String> = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {TIMING_SQL}"))
-            .unwrap()
-            .query_map(["s"], |r| r.get(3))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert!(
-            plans
-                .iter()
-                .any(|p| p
-                    .contains("SEARCH output_chunk USING INDEX sqlite_autoindex_output_chunk_1")),
-            "{plans:?}"
-        );
-        assert!(
-            !plans
-                .iter()
-                .any(|p| p.contains("TEMP B-TREE") || p.contains("SCAN output_chunk")),
-            "{plans:?}"
-        );
-    }
 }

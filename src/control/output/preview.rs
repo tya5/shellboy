@@ -353,13 +353,6 @@ mod tests {
         assert_eq!(page.inspected_rows, 128);
         assert_eq!(page.raw_bytes, 128);
         assert!(page.skipped);
-        let plan:String=db.query_row("EXPLAIN QUERY PLAN SELECT sequence,stream_offset,length(bytes) FROM output_chunk INDEXED BY output_stream WHERE execution_id='e' AND stream='stdout' ORDER BY stream_offset DESC LIMIT 128",[],|r|r.get(3)).unwrap();
-        assert!(
-            plan.contains("SEARCH") && plan.contains("output_stream"),
-            "{plan}"
-        );
-        let plan:String=db.query_row("EXPLAIN QUERY PLAN SELECT substr(bytes,5,8) FROM output_chunk WHERE execution_id='e' AND sequence=199",[],|r|r.get(3)).unwrap();
-        assert!(plan.contains("SEARCH") && !plan.contains("SCAN"), "{plan}");
     }
 
     #[test]

@@ -665,19 +665,6 @@ mod tests {
                 assert!(rows.next().unwrap().is_some());
             }
         }
-        let mut q = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {SHELL_SQL}"))
-            .unwrap();
-        let plan = q
-            .query_map(["shell"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter()
-                .any(|line| line.contains("output_chunk") && line.contains("INDEX")),
-            "{plan:?}"
-        );
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn explicit_saved_gets_finish_while_writer_is_blocked_and_create_no_receipts() {

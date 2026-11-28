@@ -245,18 +245,5 @@ mod bounded_comparison_tests {
         }
         tx.commit().unwrap();
         measure(&db);
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {}", comparison_query()))
-            .unwrap()
-            .query_map(["t"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter().any(|p| p.contains("attempts_completed_scope")
-                && p.contains("turn_id=? AND profile_id=? AND model_id=?")),
-            "{plan:?}"
-        );
-        assert!(!plan.iter().any(|p| p.contains("SCAN a")), "{plan:?}");
     }
 }

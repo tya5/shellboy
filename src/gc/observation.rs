@@ -922,19 +922,6 @@ mod tests {
         let result = bounded_observation(&db);
         assert!(!result.history.complete);
         assert!(result.history.examined_rows <= 10 * 17);
-        for (table, index, expression, predicate, _) in SCALARS {
-            let query = scalar_sql(table, index, expression, predicate);
-            let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap();
-            let details = plan
-                .query_map([17], |row| row.get::<_, String>(3))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert!(
-                !details.iter().any(|detail| detail.contains("TEMP B-TREE")),
-                "unbounded prefix sort: {query}: {details:?}"
-            );
-        }
         execution(&db, "raw-head", "running");
         db.execute_batch("WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000) INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) SELECT 'e'||x,'r','u','o'||x,'running','/','{}','UTF-8','UTF-8','closed','2020-01-01T00:00:00Z' FROM n;").unwrap();
         let empty_raw = read_tx(

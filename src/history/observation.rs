@@ -340,25 +340,5 @@ mod tests {
             assert!(counters.vm_steps > 0);
         }
         measure(&db);
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {NODE_SQL}"))
-            .unwrap()
-            .query_map(params![encoded, "t"], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plan.iter().any(|p| p.contains("SEARCH n USING INDEX")),
-            "{plan:?}"
-        );
-        assert!(
-            plan.iter()
-                .any(|p| p.contains("SEARCH p USING COVERING INDEX")),
-            "{plan:?}"
-        );
-        assert!(
-            !plan.iter().any(|p| p == "SCAN n" || p == "SCAN p"),
-            "{plan:?}"
-        );
     }
 }

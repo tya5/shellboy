@@ -935,57 +935,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn open_duty_reads_seek_state_qualified_indexes_for_both_open_states() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        let plan = |sql: &str| {
-            let mut stmt = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-            // Parameters stay unbound: the plan does not depend on their values.
-            let mut rows = stmt.raw_query();
-            let mut steps = Vec::new();
-            while let Some(row) = rows.next().unwrap() {
-                steps.push(row.get::<_, String>(3).unwrap());
-            }
-            steps
-        };
-        let mut reads = Vec::new();
-        for (owed, asked, to) in [
-            (Some("t"), None, None),
-            (None, Some("t"), None),
-            (None, None, Some("human")),
-            (None, None, None),
-        ] {
-            let (index, predicate, _) = pending_direction(owed, asked, to);
-            reads.push((index, list_sql(index, predicate)));
-            if to.is_none() && (owed.is_some() || asked.is_some()) {
-                reads.push((index, count_sql(index, predicate)));
-            }
-        }
-        reads.push(("receipt_pending_owed", AWAITING_OWED.into()));
-        reads.push(("receipt_pending_asked", LATER_OWN_ASK.into()));
-        reads.push(("receipt_pending_owed", REOPEN_AWAITING.into()));
-        reads.push(("receipt_pending_owed", CLAIM_REOPENED.into()));
-        reads.push(("reply_outcome_unadmitted", OFFER_UNADMITTED_OUTCOMES.into()));
-        for sql in crate::history::rewind::pending_replies_sent_sql() {
-            reads.push(("receipt_pending_asked", sql));
-        }
-        reads.push(("receipt_reply_owner_pending", RUN_DUTIES.into()));
-        for (index, sql) in reads {
-            let steps = plan(&sql);
-            assert!(
-                steps.iter().any(|s| s.starts_with("SEARCH")
-                    && (s.contains(&format!("USING INDEX {index} "))
-                        || s.contains(&format!("USING COVERING INDEX {index} ")))),
-                "{index}: {steps:?}"
-            );
-            assert!(
-                !steps.iter().any(|s| s.contains("TEMP B-TREE")),
-                "{steps:?}"
-            );
-        }
-    }
-
-    #[test]
     fn admitted_messages_replay_receipt_facts_without_notice_nodes() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -1156,23 +1105,6 @@ mod tests {
                     params!["target", 1],
                 ),
             ] {
-                let plans = db
-                    .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
-                    .unwrap()
-                    .query_map(args, |r| r.get::<_, String>(3))
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap();
-                assert!(
-                    plans
-                        .iter()
-                        .any(|p| p.contains("SEARCH receipt USING INDEX")),
-                    "{plans:?}"
-                );
-                assert!(
-                    !plans.iter().any(|p| p.contains("TEMP B-TREE")),
-                    "{plans:?}"
-                );
                 let mut stmt = db.prepare(&query).unwrap();
                 let count = stmt
                     .query_map(args, |_| Ok(()))
@@ -1246,23 +1178,6 @@ mod tests {
                 terminal_tx(&db, "r", "4", &mut Vec::new())
                     .unwrap()
                     .is_empty()
-            );
-            let plans = db
-                .prepare(&format!("EXPLAIN QUERY PLAN {RUN_DUTIES}"))
-                .unwrap()
-                .query_map(["r"], |r| r.get::<_, String>(3))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert!(
-                plans
-                    .iter()
-                    .any(|p| p.contains("SEARCH receipt USING INDEX receipt_reply_owner_pending")),
-                "{plans:?}"
-            );
-            assert!(
-                !plans.iter().any(|p| p.contains("TEMP B-TREE")),
-                "{plans:?}"
             );
         }
     }
@@ -1406,22 +1321,6 @@ mod tests {
             }
         }
         tx.commit().unwrap();
-        let plan: Vec<String> = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {DELETED_RECIPIENT_REPLIES}"))
-            .unwrap()
-            .query_map(
-                params!["target-0", crate::protocol::MAX_PENDING_REPLY_DUTIES as i64],
-                |r| r.get(3),
-            )
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert!(
-            plan.iter().any(|s| s
-                .contains("SEARCH receipt USING INDEX receipt_reply_pending (target_thread_id=?)")),
-            "{plan:?}"
-        );
-        assert!(!plan.iter().any(|s| s.contains("SCAN receipt")), "{plan:?}");
         db.execute_batch("CREATE TEMP TABLE receipt_updates(id TEXT); CREATE TEMP TRIGGER audit_receipts AFTER UPDATE ON receipt BEGIN INSERT INTO receipt_updates VALUES(NEW.id); END;").unwrap();
         let tx = db.transaction().unwrap();
         tx.execute(

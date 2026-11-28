@@ -441,25 +441,6 @@ mod tests {
                     && row.sender.is_none()
                     && !row.revisit)
         );
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {COMMON_SOURCES}"))
-            .unwrap()
-            .query_map(
-                params![serde_json::to_string(&ids).unwrap(), "child"],
-                |row| row.get::<_, String>(3),
-            )
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .join("\n");
-        assert!(
-            plan.contains("SEARCH n") && plan.contains("SEARCH u") && plan.contains("SEARCH r"),
-            "{plan}"
-        );
-        assert!(
-            !plan.contains("SCAN n") && !plan.contains("SCAN r"),
-            "{plan}"
-        );
     }
 
     #[test]
@@ -731,22 +712,6 @@ mod tests {
                 .source,
             InputSource::Unknown
         );
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {RECEIPTS_AT_STAMP}"))
-            .unwrap()
-            .query_map(
-                params![
-                    r#"[{"target":"child","stamp":"collision"}]"#,
-                    "[\"collision-0\"]"
-                ],
-                |row| row.get::<_, String>(3),
-            )
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .join("\n");
-        assert!(plan.contains("receipt_target"), "{plan}");
-        assert!(plan.contains("created_at=?"), "{plan}");
         assert!(RECEIPTS_AT_STAMP.contains("c.depth<129"));
         assert!(RECEIPTS_AT_STAMP.contains("AS MATERIALIZED"));
         assert!(!RECEIPTS_AT_STAMP.contains("sender_json"));

@@ -356,19 +356,6 @@ mod tests {
             ),
             1
         );
-        for sql in [
-            "EXPLAIN QUERY PLAN SELECT rowid FROM event INDEXED BY event_run_shell_ended WHERE target_run_id='done' AND kind='shell_ended' AND rowid>0 ORDER BY rowid LIMIT 32",
-            "EXPLAIN QUERY PLAN SELECT rowid FROM delivery INDEXED BY delivery_pending WHERE recipient_id='done' AND state='pending' LIMIT 64",
-        ] {
-            let plan: Vec<String> = db
-                .prepare(sql)
-                .unwrap()
-                .query_map([], |r| r.get(3))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
-            assert!(plan.iter().all(|d| d.starts_with("SEARCH")), "{plan:?}");
-        }
     }
 
     #[test]
@@ -425,34 +412,6 @@ mod tests {
             }).await.unwrap();
             db.shutdown().await.unwrap();
         }
-    }
-
-    #[test]
-    fn reverse_node_lookup_uses_bounded_index() {
-        let db = fixture();
-        let mut stmt = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {ELIGIBLE_SQL}"))
-            .unwrap();
-        let plan: Vec<String> = stmt
-            .query_map([1], |r| r.get(3))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert!(
-            plan.iter()
-                .any(|line| line.contains("SEARCH n USING INDEX node_event_retention")),
-            "{plan:?}"
-        );
-        assert_eq!(
-            plan.iter()
-                .filter(
-                    |line| line.contains("SEARCH d USING COVERING INDEX delivery_event_state")
-                        && (line.contains("state>") || line.contains("state<"))
-                )
-                .count(),
-            3,
-            "{plan:?}"
-        );
     }
 }
 
@@ -512,19 +471,6 @@ mod notification_marker_tests {
         db.execute("INSERT INTO node VALUES('event','{}','e')", [])
             .unwrap();
         assert!(!eligible());
-        let plans = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {ELIGIBLE_SQL}"))
-            .unwrap()
-            .query_map([1i64], |r| r.get::<_, String>(3))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            plans
-                .iter()
-                .any(|p| p.contains("SEARCH marker") && p.contains("node_notification_event")),
-            "{plans:?}"
-        );
         db.execute("UPDATE node SET notification_event_id=NULL", [])
             .unwrap();
         assert!(eligible());

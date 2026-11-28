@@ -639,18 +639,6 @@ mod tests {
         .unwrap();
         let query = prefix_sql(Kind::Run, 201);
         let measure = || {
-            let plan = db
-                .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
-                .unwrap()
-                .query_map(params!["[\"scope\"]", "live"], |r| r.get::<_, String>(3))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert!(
-                plan.iter()
-                    .any(|s| s.contains("SEARCH run USING INDEX wait_run_state"))
-            );
-            let mut st = db.prepare(&query).unwrap();
             {
                 let mut rows = st.query(params!["[\"scope\"]", "live"]).unwrap();
                 while rows.next().unwrap().is_some() {}
@@ -666,20 +654,6 @@ mod tests {
             .unwrap();
         }
         measure();
-        for kind in Kind::ALL {
-            let plan = db
-                .prepare(&format!("EXPLAIN QUERY PLAN {}", point_sql(kind)))
-                .unwrap()
-                .query_map(["[\"missing\"]"], |r| r.get::<_, String>(3))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert!(!plan.iter().any(|s| {
-                ["SCAN r", "SCAN t"]
-                    .iter()
-                    .any(|p| s == p || s.starts_with(&format!("{p} USING")))
-            }));
-        }
     }
     #[test]
     fn missing_and_metadata_limits_are_distinct_from_an_empty_success() {

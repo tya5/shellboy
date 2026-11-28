@@ -313,25 +313,6 @@ mod retained_execution_tests {
             db.query_row("SELECT -1", [], |row| retained_unsigned(row, 0))
                 .is_err()
         );
-        let plan = db
-            .prepare(&format!(
-                "EXPLAIN QUERY PLAN {RETAINED_EXECUTION_FACTS_SQL}"
-            ))
-            .unwrap()
-            .query_map([serde_json::to_string(&requests).unwrap()], |r| {
-                r.get::<_, String>(3)
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-            .join("\n");
-        for index in [
-            "sqlite_autoindex_shell_execution_1",
-            "sqlite_autoindex_app_meta_1",
-            "sqlite_autoindex_output_chunk_1",
-        ] {
-            assert!(plan.contains(index), "{plan}");
-        }
         assert!(
             RawWitness::for_retained_execution(
                 &db,

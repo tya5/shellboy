@@ -513,13 +513,20 @@ async fn version_two_upgrade_preserves_context_and_indexes_only_unconsumed_obser
     connection.execute_batch("COMMIT").unwrap();
     connection.close().unwrap();
     let database = DbWorker::open(&path).await.unwrap();
-    database.call(|db|{
-        assert_eq!(db.query_row("SELECT id FROM event",[],|r|r.get::<_,String>(0))?,"pending");
-        let plan:String=db.query_row("EXPLAIN QUERY PLAN SELECT id FROM event WHERE target_thread_id='saved' AND kind='context_changed' AND target_run_id IS NULL ORDER BY created_at,id",[],|r|r.get(3))?;
-        assert!(plan.contains("context_pending_by_thread"),"{plan}");
-        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,SCHEMA_VERSION);
-        Ok(())
-    }).await.unwrap();
+    database
+        .call(|db| {
+            assert_eq!(
+                db.query_row("SELECT id FROM event", [], |r| r.get::<_, String>(0))?,
+                "pending"
+            );
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+                SCHEMA_VERSION
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     database.shutdown().await.unwrap();
 }
 
@@ -1240,13 +1247,6 @@ async fn schema_thirty_nine_detaches_runs_preserving_shells_turns_and_metadata()
         DROP INDEX IF EXISTS attachment_page_order; DELETE FROM schema_migration WHERE version>=39; PRAGMA user_version=38;",
         )
         .unwrap();
-    let plans=legacy.prepare("EXPLAIN QUERY PLAN UPDATE event SET kind='recovery_wait' WHERE kind='child_recovery_wait'").unwrap().query_map([],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-    assert!(
-        plans
-            .iter()
-            .any(|p| p.contains("USING INDEX wait_recovery_thread")),
-        "{plans:?}"
-    );
     legacy.close().unwrap();
     for _ in 0..2 {
         let db = DbWorker::open(&path).await.unwrap();

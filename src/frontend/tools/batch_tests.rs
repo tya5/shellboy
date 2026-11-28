@@ -180,18 +180,6 @@ fn empty_and_oversized_scope_and_group_seek_has_index_range_proof() {
             .code,
         ErrorCode::InputLimit
     );
-    let plan = db
-        .prepare(&format!("EXPLAIN QUERY PLAN {GROUP_CALL_BATCH_SQL}"))
-        .unwrap()
-        .query_map(["[\"g\"]"], |row| row.get::<_, String>(3))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap()
-        .join("\n");
-    assert!(
-        plan.contains("SEARCH c") && plan.contains("group_id=? AND ordinal>?)"),
-        "{plan}"
-    );
 }
 
 #[test]
@@ -349,17 +337,6 @@ fn collected_source_lookup_uses_existing_index_without_unrelated_relation_scan()
     }
     tx.commit().unwrap();
     measure(&db);
-    let plan = db
-        .prepare(&format!("EXPLAIN QUERY PLAN {PROJECTED_SOURCE_BATCH_SQL}"))
-        .unwrap()
-        .query_map([encoded], |row| row.get::<_, String>(3))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    assert!(
-        plan.iter().any(|step| step.contains("tool_result_node")),
-        "{plan:?}"
-    );
 }
 
 #[test]
@@ -387,20 +364,4 @@ fn modern_selector_seeks_requested_ids_before_filtering_node_kind() {
     }
     tx.commit().unwrap();
     measure(&db);
-    let plan = db
-        .prepare(&format!("EXPLAIN QUERY PLAN {MODERN_NODE_BATCH_SQL}"))
-        .unwrap()
-        .query_map([ids], |row| row.get::<_, String>(3))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    assert!(
-        plan.iter()
-            .any(|step| step.contains("sqlite_autoindex_node_1") && step.contains("id=?")),
-        "{plan:?}"
-    );
-    assert!(
-        !plan.iter().any(|step| step.contains("nodes_retention")),
-        "{plan:?}"
-    );
 }

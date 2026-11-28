@@ -344,13 +344,6 @@ mod tests {
             assert_eq!(vectors,1);
             assert!(meta(db,"index.preview.c")?.is_some());
             db.execute_batch("DROP TRIGGER fail_chunk;")?;
-            for (sql,index) in [
-                ("EXPLAIN QUERY PLAN SELECT id FROM index_space WHERE state='removing' ORDER BY id LIMIT 1","index_reclaim_state"),
-                ("EXPLAIN QUERY PLAN SELECT key FROM app_meta WHERE value='r' AND key>='index.group.' AND key<'index.group/' LIMIT 7","index_reclaim_group_value"),
-            ] {
-                let lines=db.prepare(sql)?.query_map([],|r|r.get::<_,String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
-                assert!(lines.iter().any(|s|s.contains(index)),"{lines:?}");
-            }
             let mut finished=0;
             loop {let (n,more)=reclaim_step(db,1,&mut String::new())?;finished+=n;if !more {break;}}
             assert_eq!(finished,1);

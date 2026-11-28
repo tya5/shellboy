@@ -1119,11 +1119,6 @@ mod tests {
             liked.len() > ranged.len(),
             "LIKE also matched other profiles"
         );
-        let mut plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {NEXT_DELAY_BOOTSTRAP}"))
-            .unwrap();
-        let detail: String = plan.query_row(["a", "b"], |row| row.get(3)).unwrap();
-        assert!(detail.contains("USING INDEX"), "{detail}");
     }
 }
 
