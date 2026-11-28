@@ -1,5 +1,6 @@
 //! Per-Thread model/tool loop. A long wait keeps its IPC slot for the whole wait.
 mod adoption;
+mod context_tail;
 mod notification_admission;
 mod overflow;
 pub(super) mod proactive;
@@ -315,6 +316,7 @@ async fn drive_inner(
             snapshot: *snapshot,
             instruction: instructions.body(),
             output_limit: None,
+            context_tail: None,
             boundary: crate::compaction::boundary::Boundary::new(&boundary, boundary_guard),
         };
         let mut partial_attempts = Vec::new();
@@ -515,6 +517,7 @@ struct ConversationCaller<'a, 'b> {
     snapshot: Snapshot,
     instruction: Option<&'a Arc<str>>,
     output_limit: Option<crate::protocol::AttemptOutputLimit>,
+    context_tail: Option<Option<Value>>,
     boundary: crate::compaction::boundary::Boundary<'b>,
 }
 
@@ -556,12 +559,27 @@ impl RequestCaller for ConversationCaller<'_, '_> {
             }
             self.snapshot = *refreshed;
         }
+        if self.context_tail.is_none() {
+            let cancel = &self.slot.stop;
+            let result = self
+                .boundary
+                .pause_owned(
+                    cancel,
+                    context_tail::collect(self.control, &self.snapshot, cancel),
+                )
+                .await;
+            let Ok(tail) = result else {
+                return Ok(None);
+            };
+            self.context_tail = Some(tail?);
+        }
         prepare_attempt(
             self.control,
             &mut self.snapshot,
             self.slot,
             self.instruction,
             self.client,
+            self.context_tail.as_ref().and_then(Option::as_ref),
         )
         .await
     }

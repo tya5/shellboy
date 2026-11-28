@@ -1,0 +1,137 @@
+//! Request-local context commands, owned until native cleanup completes.
+use super::*;
+use crate::shell::{OutputStream, ShellEvent};
+use serde::Serialize;
+use std::time::Duration;
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Outcome {
+    Ok,
+    Failed,
+    TimedOut,
+    Cancelled,
+}
+
+#[derive(Serialize)]
+struct ResultEntry {
+    name: String,
+    outcome: Outcome,
+    stdout: String,
+    truncated: bool,
+}
+
+pub(super) async fn collect(
+    control: &Arc<Control>,
+    snapshot: &Snapshot,
+    cancel: &CancellationToken,
+) -> Result<Option<Value>, ApiError> {
+    let thread = snapshot.thread.clone();
+    let definitions = control
+        .store
+        .database
+        .call(move |db| {
+            super::super::context_command::definitions(db, &thread).map_err(StorageError::from)
+        })
+        .await
+        .map_err(storage_error)?;
+    if definitions.is_empty() || cancel.is_cancelled() {
+        return Ok(None);
+    }
+    let mut remaining = usize::try_from(control.store.config.limits.tool_excerpt_bytes)
+        .unwrap_or(usize::MAX)
+        .min(crate::protocol::MAX_BODY_BYTES as usize);
+    let mut entries = Vec::with_capacity(definitions.len());
+    for definition in definitions {
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
+        let mut env = shell_output::cli_environment(control, &snapshot.thread);
+        env.insert("SHELLBOY_RUN_ID".into(), snapshot.run.clone());
+        env.insert("SHELLBOY_TURN_ID".into(), snapshot.turn.clone());
+        let args = crate::protocol::ShellToolArgs {
+            command: definition.command,
+            description: None,
+            background: false,
+            stdin_open: false,
+            initial_stdin: None,
+            input_encoding: "utf-8".into(),
+            output_encoding: "utf-8".into(),
+        };
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_millis(definition.timeout_ms.into());
+        let execution = control
+            .shell
+            .spawn_thread_owned(
+                uuid::Uuid::new_v4().to_string(),
+                snapshot.cwd.clone(),
+                args,
+                env,
+            )
+            .await;
+        let mut bytes = Vec::new();
+        let mut truncated = false;
+        let outcome = match execution {
+            Ok(mut child) => {
+                let stopped = loop {
+                    tokio::select! { biased;
+                        _ = cancel.cancelled() => break Some(Outcome::Cancelled),
+                        _ = tokio::time::sleep_until(deadline) => break Some(Outcome::TimedOut),
+                        event = child.events.recv() => match event {
+                            Some(ShellEvent::Output(chunk)) if chunk.stream == OutputStream::Stdout => {
+                                let keep = chunk.bytes.len().min(remaining - bytes.len());
+                                bytes.extend_from_slice(&chunk.bytes[..keep]);
+                                truncated |= keep != chunk.bytes.len();
+                            }
+                            Some(_) => {},
+                            None => break None,
+                        }
+                    }
+                };
+                if stopped.is_some() {
+                    child.handle.stop();
+                }
+                // Release buffered output permits even when a command is stopping.
+                drop(child.events);
+                let completion = child
+                    .completion
+                    .wait_for(|done| done.is_some())
+                    .await
+                    .ok()
+                    .and_then(|done| done.clone());
+                stopped.unwrap_or_else(|| match completion {
+                    Some(done)
+                        if done.exit_code == Some(0)
+                            && done.output_complete
+                            && done.group_cleanup_confirmed =>
+                    {
+                        Outcome::Ok
+                    }
+                    _ => Outcome::Failed,
+                })
+            }
+            Err(_) if cancel.is_cancelled() => Outcome::Cancelled,
+            Err(_) => Outcome::Failed,
+        };
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
+        let mut stdout = String::from_utf8_lossy(&bytes).into_owned();
+        if stdout.len() > remaining {
+            stdout.truncate(stdout.floor_char_boundary(remaining));
+            truncated = true;
+        }
+        remaining -= stdout.len();
+        entries.push(ResultEntry {
+            name: definition.name,
+            outcome,
+            stdout,
+            truncated,
+        });
+    }
+    let text = serde_json::to_string(&json!({"type":"context_commands","results":entries}))
+        .expect("bounded context results serialize");
+    Ok(Some(
+        json!({"type":"message","role":"developer","content":[{"type":"input_text","text":text}]}),
+    ))
+}
