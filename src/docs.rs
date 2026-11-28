@@ -277,21 +277,23 @@ struct Cursor<T> {
     scope: String,
     offset: T,
 }
+pub(crate) const DOCS_READ_MAX_BYTES: usize = 65536;
+pub(crate) use sources::{DOCS_LIST_MAX, DOCS_SEARCH_MAX};
+
 const CURSOR_BYTES: usize = 8192;
 
 fn read_cursor(cursor: Option<&str>, version: &str, scope: &str) -> Result<usize, String> {
-    decode_cursor(cursor, version, scope, CURSOR_BYTES)
+    decode_cursor(cursor, version, scope)
 }
 fn decode_cursor<T: Default + serde::de::DeserializeOwned>(
     cursor: Option<&str>,
     version: &str,
     scope: &str,
-    max: usize,
 ) -> Result<T, String> {
     let Some(cursor) = cursor else {
         return Ok(T::default());
     };
-    if cursor.len() > max {
+    if cursor.len() > CURSOR_BYTES {
         return Err("cursor_expired: Cursor is too large".into());
     }
     let c: Cursor<T> = URL_SAFE_NO_PAD
@@ -483,7 +485,7 @@ fn bundled_get(
     let bundled = &*BUNDLED;
     let docs = &bundled.docs;
     let version = bundled.version.as_str();
-    limit(limit_bytes, 65536)?;
+    limit(limit_bytes, DOCS_READ_MAX_BYTES)?;
     let d = find(docs, &id)?;
     let index = docs
         .iter()
@@ -639,6 +641,19 @@ mod tests {
         let mut page = search(None);
         let mut scores = Vec::new();
         loop {
+            let hit = &page["items"][0];
+            let guide = execute(DocsRead::Get {
+                id: hit["id"].as_str().unwrap().into(),
+                sources: Vec::new(),
+                section: None,
+                limit_bytes: 256,
+                cursor: None,
+            })
+            .unwrap();
+            assert_eq!(
+                hit["content_hash"].as_str(),
+                Some(guide["content_hash"].as_str().unwrap())
+            );
             scores.push(page["items"][0]["score"].as_u64().unwrap());
             let Some(cursor) = page["next_cursor"].as_str() else {
                 break;
