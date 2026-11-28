@@ -2917,8 +2917,8 @@ mod tests {
             let tx = db.transaction()?;
             tx.execute("UPDATE thread SET reasoning_epoch=1 WHERE id='t'", [])?;
             tx.execute(
-                "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                params![history::reasoning_keep_key("t"), json!({"epoch":1,"nodes":["last-answer"]}).to_string()],
+                "INSERT INTO history_reasoning_keep(thread_id,epoch,node_id) VALUES('t',1,'last-answer')",
+                [],
             )?;
             tx.commit()?;
             Ok(())

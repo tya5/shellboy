@@ -398,6 +398,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/next_replay_path_revision.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 76,
+        sql: include_str!("../../migrations/next_history_reasoning_keep.sql"),
+        foreign_keys: Some(Impact::Tables(&["history_reasoning_keep"])),
+    },
 ];
 
 pub(super) fn run(

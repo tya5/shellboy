@@ -563,10 +563,7 @@ pub(super) fn adopt_current_rs_tx(
                 "current reasoning epoch changed inside the final adoption transaction".into(),
             ));
         }
-        tx.execute(
-            "DELETE FROM app_meta WHERE key=?1",
-            [history::reasoning_keep_key(thread)],
-        )?;
+        history::clear_reasoning_keep(tx, thread)?;
     }
     if cancel.is_cancelled() {
         return Err(rejection(

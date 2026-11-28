@@ -3383,18 +3383,17 @@ pub(super) fn delete_targets_effects(
         )
         .map_err(sql_error)?;
         tx.execute(
-            "DELETE FROM app_meta WHERE key IN (?1,?2,?3,?4,?5)",
+            "DELETE FROM app_meta WHERE key IN (?1,?2,?3,?4)",
             params![
                 crate::compaction::CompactionKeys::new(id).automatic_target(),
                 // #226: a stopped Thread's stale automatic-active witness.
                 crate::compaction::CompactionKeys::new(id).automatic_active(),
                 crate::compaction::CompactionKeys::new(id).automatic_guard(),
                 crate::compaction::CompactionKeys::new(id).automatic_status(),
-                // #182: the kept-reasoning set ends with its Thread.
-                history::reasoning_keep_key(id)
             ],
         )
         .map_err(sql_error)?;
+        history::clear_reasoning_keep(tx, id).map_err(sql_error)?;
         tx.execute("DELETE FROM artifact WHERE thread_id=?1", [id])
             .map_err(sql_error)?;
         // Tags end with their Thread (#222): a deleted Thread leaves no tag name behind.

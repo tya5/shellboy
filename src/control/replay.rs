@@ -616,14 +616,6 @@ impl ReplayCache {
             state.rebuilds += 1;
         }
         if !stamps.is_empty() {
-            let keep =
-                crate::history::reasoning_keep_checked(db, thread, context.epoch, |bytes| {
-                    work.check(bytes)
-                })?;
-            work.charge(
-                keep.capacity() * (size_of::<String>() + size_of::<usize>())
-                    + keep.iter().map(String::capacity).sum::<usize>(),
-            )?;
             // Don't read an oversized SQLite value into the result row at all.
             let mut statement = db.prepare(
                 "SELECT n.id, octet_length(n.payload_json),
@@ -650,12 +642,14 @@ impl ReplayCache {
                     Some(row_text(row, 2)?)
                 };
                 state.parsed_nodes += u64::from(!stamp.tombstone);
+                let kept = body.is_some()
+                    && crate::history::keeps_reasoning(db, thread, context.epoch, id)?;
                 let frame = decode_frame(
                     offset,
                     stamp.clone(),
                     body,
                     context.epoch,
-                    &keep,
+                    kept,
                     &self.ledger,
                 )?;
                 work.charge(frame.bytes)?;
@@ -836,17 +830,17 @@ fn decode_frame(
     stamp: Stamp,
     body: Option<&str>,
     epoch: i64,
-    keep: &std::collections::HashSet<String>,
+    kept: bool,
     ledger: &Arc<Ledger>,
 ) -> Result<Frame, StorageError> {
-    decode_frame_checked(ordinal, stamp, body, epoch, keep, ledger).map_err(StorageError::from)
+    decode_frame_checked(ordinal, stamp, body, epoch, kept, ledger).map_err(StorageError::from)
 }
 fn decode_frame_checked(
     ordinal: usize,
     stamp: Stamp,
     body: Option<&str>,
     epoch: i64,
-    keep: &std::collections::HashSet<String>,
+    kept: bool,
     ledger: &Arc<Ledger>,
 ) -> Result<Frame, FrameError> {
     #[cfg(test)]
@@ -878,7 +872,7 @@ fn decode_frame_checked(
                     (safe, result)
                 }
             }
-            let items = convert_source(value, epoch, keep.contains(&stamp.id), stamp.imported);
+            let items = convert_source(value, epoch, kept, stamp.imported);
             (
                 group,
                 if spill {
@@ -976,7 +970,6 @@ fn load_uncached_mode(
 ) -> Result<ReplayLease, StorageError> {
     let limit = nodes.map_or(-1, |n| i64::try_from(n).unwrap_or(i64::MAX));
     let ledger = Arc::new(Ledger::default());
-    let keep = crate::history::reasoning_keep(db, thread, epoch)?;
     let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.payload_json,n.kind,n.import_origin_json IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT ?2")?;
     let mut rows = statement.query(rusqlite::params![thread, limit])?;
     let mut frames = Vec::new();
@@ -996,7 +989,8 @@ fn load_uncached_mode(
         } else {
             Some(row_text(row, 3)?)
         };
-        match decode_frame_checked(frames.len(), stamp, body, epoch, &keep, &ledger) {
+        let kept = body.is_some() && crate::history::keeps_reasoning(db, thread, epoch, &stamp.id)?;
+        match decode_frame_checked(frames.len(), stamp, body, epoch, kept, &ledger) {
             Ok(frame) => frames.push(Arc::new(frame)),
             Err(FrameError::Tool(_)) if inspect => decode_fault = true,
             Err(error) => return Err(error.into()),
@@ -1286,7 +1280,7 @@ mod tests {
                                 },
                                 Some(&payload.to_string()),
                                 0,
-                                &Default::default(),
+                                false,
                                 &ledger,
                             )
                             .unwrap(),
@@ -1336,7 +1330,7 @@ mod tests {
                         },
                         Some(&payload.to_string()),
                         0,
-                        &Default::default(),
+                        false,
                         &ledger,
                     )
                     .unwrap(),

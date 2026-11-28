@@ -322,46 +322,34 @@ fn edit_invalidates_kept_reasoning(
 /// Per-Thread set of output nodes whose reasoning stays sendable although it
 /// was saved under an older epoch (#182). Valid only for the epoch it names;
 /// a model change or binding retry advances the epoch and voids it.
-pub(crate) fn reasoning_keep_key(thread_id: &str) -> String {
-    format!("reasoning.keep.{thread_id}")
-}
 pub(crate) fn reasoning_keep(
     db: &Connection,
     thread_id: &str,
     epoch: i64,
 ) -> Result<HashSet<String>, StorageError> {
-    reasoning_keep_checked(db, thread_id, epoch, |_| Ok(()))
+    let mut query =
+        db.prepare("SELECT node_id FROM history_reasoning_keep WHERE thread_id=?1 AND epoch=?2")?;
+    Ok(query
+        .query_map(params![thread_id, epoch], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
-pub(crate) fn reasoning_keep_checked(
+pub(crate) fn keeps_reasoning(
     db: &Connection,
     thread_id: &str,
     epoch: i64,
-    check: impl FnOnce(usize) -> Result<(), StorageError>,
-) -> Result<HashSet<String>, StorageError> {
-    let mut statement = db.prepare("SELECT value FROM app_meta WHERE key=?1")?;
-    let mut rows = statement.query([reasoning_keep_key(thread_id)])?;
-    let Some(row) = rows.next()? else {
-        return Ok(HashSet::new());
-    };
-    let raw = row.get_ref(0)?;
-    let bytes = raw.as_str().map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(0, raw.data_type(), Box::new(error))
-    })?;
-    check(bytes.len())?;
-    let Ok(value) = serde_json::from_str::<Value>(bytes) else {
-        return Ok(HashSet::new());
-    };
-    if value["epoch"].as_i64() != Some(epoch) {
-        return Ok(HashSet::new());
-    }
-    Ok(value["nodes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect())
+    node_id: &str,
+) -> rusqlite::Result<bool> {
+    db.prepare_cached("SELECT EXISTS(SELECT 1 FROM history_reasoning_keep WHERE thread_id=?1 AND epoch=?2 AND node_id=?3)")?
+        .query_row(params![thread_id,epoch,node_id], |row| row.get(0))
+}
+
+pub(crate) fn clear_reasoning_keep(tx: &Transaction<'_>, thread_id: &str) -> rusqlite::Result<()> {
+    tx.execute(
+        "DELETE FROM history_reasoning_keep WHERE thread_id=?1",
+        [thread_id],
+    )?;
+    Ok(())
 }
 
 /// Current replay projection after selecting `path`, without writing it. The
@@ -433,13 +421,12 @@ fn restart_reasoning_after(
         "UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",
         [thread_id],
     )?;
-    tx.execute(
-        "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        params![
-            reasoning_keep_key(thread_id),
-            serde_json::json!({"epoch": epoch + 1, "nodes": kept}).to_string()
-        ],
-    )?;
+    clear_reasoning_keep(tx, thread_id)?;
+    let mut insert =
+        tx.prepare("INSERT INTO history_reasoning_keep(thread_id,epoch,node_id) VALUES(?1,?2,?3)")?;
+    for node_id in kept {
+        insert.execute(params![thread_id, epoch + 1, node_id])?;
+    }
     Ok(())
 }
 
@@ -589,11 +576,8 @@ pub fn fork_thread_kind(
     ).map_err(sql_error)?;
     // #182: the fork shares the parent's epoch, so it shares its kept set.
     tx.execute(
-        "INSERT INTO app_meta(key,value) SELECT ?1,value FROM app_meta WHERE key=?2",
-        params![
-            reasoning_keep_key(new_thread_id),
-            reasoning_keep_key(&args.thread_id)
-        ],
+        "INSERT INTO history_reasoning_keep(thread_id,epoch,node_id) SELECT ?1,k.epoch,k.node_id FROM history_reasoning_keep k JOIN thread_path p ON p.thread_id=?1 AND p.node_id=k.node_id WHERE k.thread_id=?2 AND k.epoch=?3",
+        params![new_thread_id,args.thread_id,source.5],
     )
     .map_err(sql_error)?;
     tx.execute(
