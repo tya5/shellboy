@@ -124,6 +124,10 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
         ),
         (&["message", "get", "--message", "m"], "message.get"),
         (&["operation", "get", "--operation", "op"], "operation.get"),
+        (
+            &["operation", "cancel", "--operation", "op"],
+            "operation.cancel",
+        ),
         (&["run", "get", "--run", "r"], "run.get"),
         (&["run", "retry", "--run", "r"], "run.retry"),
         (&["run", "stop", "--run", "r"], "run.stop"),

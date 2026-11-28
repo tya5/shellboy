@@ -785,6 +785,8 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     announce: Option<&mut (dyn FnMut(&str) + Send)>,
 ) -> Result<Response<Value>, ApiError> {
     let welcome = exchange_hello(&mut stream, &endpoint).await?;
+    let required_capability = required_capability
+        .or_else(|| matches!(command, Command::OperationCancel(_)).then_some("operation.cancel"));
     if let Some(capability) = required_capability
         && !welcome
             .capabilities
@@ -793,9 +795,17 @@ async fn call_stream_requiring_capability<S: AsyncRead + AsyncWrite + Unpin>(
     {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
-            "This owner cannot resolve short IDs",
+            if capability == "id.resolve" {
+                "This owner cannot resolve short IDs"
+            } else {
+                "This owner cannot cancel observations by operation ID"
+            },
         )
-        .hint("Pass the full ID or update the owner to a release advertising this capability")
+        .hint(if capability == "id.resolve" {
+            "Pass the full ID or update the owner to a release advertising this capability"
+        } else {
+            "Use an owner advertising operation.cancel"
+        })
         .details(serde_json::json!({
             "reason":"missing_capability",
             "required_capability":capability,

@@ -464,6 +464,12 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::OperationCancel,
+        &["operation", "cancel"],
+        &[("lookup_operation_id", FieldId::Operation)],
+        None,
+    ),
+    (
         OperationId::RunGet,
         &["run", "get"],
         &[("run_id", FieldId::Run)],

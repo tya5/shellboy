@@ -207,12 +207,24 @@ struct Observation {
     cursor: Option<String>,
 }
 
+#[cfg(test)]
 pub(super) async fn observe(
     control: Arc<Control>,
     operation_id: String,
     args: WaitArgs,
     caller: Option<Origin>,
     disconnected: CancellationToken,
+) -> Result<Value> {
+    observe_cancellable(control, operation_id, args, caller, disconnected, None).await
+}
+
+pub(super) async fn observe_cancellable(
+    control: Arc<Control>,
+    operation_id: String,
+    args: WaitArgs,
+    caller: Option<Origin>,
+    disconnected: CancellationToken,
+    explicit_cancel: Option<CancellationToken>,
 ) -> Result<Value> {
     let foreground = if let Some(origin) = &caller {
         control
@@ -229,7 +241,7 @@ pub(super) async fn observe(
         args,
         caller.clone(),
         foreground.clone(),
-        disconnected,
+        (disconnected, explicit_cancel),
     )
     .await;
     let cleanup_caller = caller.clone();
@@ -263,8 +275,9 @@ async fn observe_inner(
     args: WaitArgs,
     caller: Option<Origin>,
     foreground: Option<Arc<ForegroundSlot>>,
-    disconnected: CancellationToken,
+    cancellation: (CancellationToken, Option<CancellationToken>),
 ) -> Result<Value> {
+    let (disconnected, explicit_cancel) = cancellation;
     if args.conditions.is_empty() {
         return Err(invalid("wait requires at least one condition"));
     }
@@ -433,6 +446,13 @@ async fn observe_inner(
             control.changed(&origin.thread_id);
         }
         initial = false;
+        if explicit_cancel
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return outcome(&args, &observation, Some(WaitStatus::Cancelled))?
+                .ok_or_else(|| invalid("wait cancellation did not produce a result"));
+        }
         if disconnected.is_cancelled() {
             return outcome(&args, &observation, Some(WaitStatus::Interrupted))?
                 .ok_or_else(|| invalid("wait cancellation did not produce a result"));
@@ -469,6 +489,7 @@ async fn observe_inner(
         control.waits.parked.notify_one();
         tokio::select! {
             _=keyed=>{},
+            _=async { match &explicit_cancel { Some(cancel) => cancel.cancelled().await, None => std::future::pending().await } }=>{},
             _=disconnected.cancelled()=>{},
             _=tokio::time::sleep(duration.saturating_sub(started.elapsed()).min(Duration::from_secs(86_400)))=>{},
             _=control.stop.cancelled()=>return outcome(&args,&observation,Some(WaitStatus::Interrupted))?.ok_or_else(||invalid("shutdown wait result missing")),
@@ -505,6 +526,7 @@ fn outcome(
     });
     let reason = match status {
         WaitStatus::Timeout => Some(crate::protocol::wait_timeout_reason(args.timeout_ms)),
+        WaitStatus::Cancelled => Some("observation cancelled; targets continue".into()),
         WaitStatus::Interrupted => Some("observation interrupted; targets continue".into()),
         WaitStatus::RecoveryWait => Some("target requires an explicit recovery decision".into()),
         WaitStatus::Unavailable => Some("a wait target became unavailable".into()),

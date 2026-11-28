@@ -663,6 +663,11 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "Message · Cancel unadopted input"
         ),
         OperationId::OperationGet => local!(language, "操作 · 受付結果", "Operation · Receipt"),
+        OperationId::OperationCancel => local!(
+            language,
+            "操作 · 観測取消",
+            "Operation · Cancel observation"
+        ),
         OperationId::RunGet => local!(language, "作業 · 詳細", "Run · Details"),
         OperationId::RunRetry => local!(language, "作業 · 復旧を再試行", "Run · Retry recovery"),
         OperationId::RunStop => local!(language, "作業 · 停止", "Run · Stop"),
@@ -981,6 +986,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定operation_idの保存済み受付結果と後続処理を確認し、不確実な再送を判断できます。",
             "Inspect the saved receipt and subsequent work for an operation_id to assess an uncertain resend."
+        ),
+        OperationId::OperationCancel => local!(
+            language,
+            "指定operation_idの観測だけを取り消します。対象の作業は停止しません。",
+            "Cancel only the observation with the exact operation ID. The observed work is not stopped."
         ),
         OperationId::RunGet => local!(
             language,

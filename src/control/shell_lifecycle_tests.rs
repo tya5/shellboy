@@ -589,6 +589,7 @@ async fn failed_grace_owner_does_not_swallow_another_saved_stop() {
         "failed-grace-owner".into(),
         RuntimeOperation {
             fingerprint: Value::Null,
+            observation_cancel: super::runtime::ObservationCancel::Unsupported,
             deferred_shell_stop: Some(execution.clone()),
             receive,
         },
@@ -677,6 +678,7 @@ async fn failed_self_stop_owner_does_not_preempt_another_saved_reply_grace() {
             id.into(),
             RuntimeOperation {
                 fingerprint: Value::Null,
+                observation_cancel: super::runtime::ObservationCancel::Unsupported,
                 deferred_shell_stop: Some(execution.clone()),
                 receive,
             },

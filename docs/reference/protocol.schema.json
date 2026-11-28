@@ -3,7 +3,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity",
-    "id.resolve"
+    "id.resolve",
+    "operation.cancel"
   ],
   "definitions": {
     "Accepted": {
@@ -1737,6 +1738,22 @@
             },
             "command": {
               "const": "operation.get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/OperationTarget"
+            },
+            "command": {
+              "const": "OperationCancel",
               "type": "string"
             }
           },
@@ -10950,6 +10967,35 @@
           "additionalProperties": false,
           "properties": {
             "args": {
+              "$ref": "#/definitions/OperationTarget"
+            },
+            "command": {
+              "const": "OperationCancel",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
               "$ref": "#/definitions/RunTarget"
             },
             "command": {
@@ -16754,6 +16800,7 @@
     "WaitStatus": {
       "enum": [
         "satisfied",
+        "cancelled",
         "timeout",
         "interrupted",
         "recovery_wait",
@@ -18723,6 +18770,23 @@
         "unavailable_features"
       ],
       "title": "ModelListResult",
+      "type": "object"
+    },
+    "operation.cancel": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "cancel_requested": {
+          "type": "boolean"
+        },
+        "operation_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "cancel_requested"
+      ],
+      "title": "OperationCancelResult",
       "type": "object"
     },
     "operation.get": {

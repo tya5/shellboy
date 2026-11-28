@@ -206,12 +206,28 @@ async fn management_request(
 ) -> Result<Value, ApiError> {
     let is_read_projection = !command.requires_receipt();
     let request = owner.operation(command);
+    let is_wait = matches!(request.command, Command::Wait(_));
+    let operation = request.operation_id.clone();
+    let mut dispatch = std::pin::pin!(owner.dispatch(request));
+    let mut cancel_error = None;
     let response = tokio::select! { biased;
         _ = cancel.cancelled(), if is_read_projection => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
-        response = owner.dispatch(request) => match response {
-            Ok(response) => response,
-            Err(error) => return Ok(management::native_failure(error)),
+        response = &mut dispatch => response,
+        _ = cancel.cancelled(), if is_wait => {
+            let signal = owner.call::<Value>(Command::OperationCancel(crate::protocol::OperationTarget { operation_id: operation }));
+            tokio::pin!(signal);
+            tokio::select! { biased;
+                response = &mut dispatch => response,
+                result = &mut signal => {
+                    cancel_error = result.err();
+                    dispatch.await
+                },
+            }
         },
+    };
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => return Ok(management::native_failure(error)),
     };
     let operation_id = response.operation_id;
     let mut result = if response.ok {
@@ -231,6 +247,9 @@ async fn management_request(
     }
     if !is_read_projection && let Value::Object(object) = &mut result {
         object.insert("request_operation_id".into(), Value::String(operation_id));
+        if let Some(error) = cancel_error {
+            object.insert("cancellation_error".into(), serde_json::json!(error));
+        }
     }
     Ok(result)
 }
@@ -2697,7 +2716,7 @@ async fn run_client(
                         status(
                             &updates,
                             None,
-                            i18n::local!(language, "待機の観測を取消しました。対象処理は継続します", "Wait observation cancelled. The target process continues"),
+                            i18n::local!(language, "待機の観測の取消を要求しました。対象処理は継続します", "Wait observation cancellation requested. The target process continues"),
                         )
                         .await;
                     }
