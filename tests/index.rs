@@ -3682,11 +3682,14 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
             let on = f.service.status(args().into()).await.unwrap();
             assert_eq!((on.pending, on.held_auto_history), (3, 0));
             let selected_space = off
-                .status(IndexArgs {
-                    kinds: Vec::new(),
-                    space_id: mixed.space_id,
-                    ..args()
-                }.into())
+                .status(
+                    IndexArgs {
+                        kinds: Vec::new(),
+                        space_id: mixed.space_id,
+                        ..args()
+                    }
+                    .into(),
+                )
                 .await
                 .unwrap();
             assert_eq!(

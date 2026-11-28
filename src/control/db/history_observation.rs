@@ -427,7 +427,10 @@ mod queue_tests {
             before.items[1].sender.thread_id.as_deref(),
             Some("sender-thread")
         );
-        assert!(before.items[1].delivery_status == DeliveryStatus::Held && before.items[1].admission_uncertain);
+        assert!(
+            before.items[1].delivery_status == DeliveryStatus::Held
+                && before.items[1].admission_uncertain
+        );
         let tx = db.unchecked_transaction().unwrap();
         tx.execute("INSERT INTO thread_path VALUES('thread','z-first')", [])
             .unwrap();
