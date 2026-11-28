@@ -92,13 +92,10 @@ ownerのoperation receiptへ登録せず、`--operation-id`併用は拒否する
 
 ## 同梱ガイドの明示semantic索引（G14）
 
-既定scopeはdocs＋全登録資料、historyは明示opt-in、keyword既定という採用仕様を維持する。一方、検索から同梱ガイドの資料embeddingを暗黙に行う実装は採らない。`rag init`の後、`rag index --source docs --dry-run --mode semantic`で同梱ガイドの件数・UTF-8 byte数・分割件数と資料embeddingに外部費用が発生し得る旨を確認し、`rag index --source docs --mode semantic`で明示的に準備する。予約済みdocs（内部ID @docs）はindex入口だけの特別対象で、既定のindexは従来の登録資料/派生資料を処理しdocsを追加しない。docsには外部extractor/adapterを使わない。
+`docs index --source shellboy --dry-run` previews counts and potential cost without writing to the store or calling a provider. `docs index --source shellboy` explicitly exports bundled Markdown into the managed root and indexes it as an ordinary semantic RAG source. Use `rag search --scope source:shellboy` after indexing. There is no built-in docs scope; the standalone store upgrade retires its registration and references but retains embeddings for identical chunks. Default RAG search covers registered materials, with history opt-in.
 
-semantic/hybrid検索は既存RAG DBをread-onlyで開き、現在の同梱ガイド版と選択embedding profileの準備が不足する場合は、init/indexの次操作を示す。検索からDB作成、writer lock、guide本文準備、資料embedding、publishを行わない。明示semantic queryのquery embeddingだけは外部API費用が発生し得る。未初期化DBでもdocs keywordとdocs getは従来どおりowner/embedding/DBなしで動く。hybridでは不足scopeのエラーと既に得たkeyword結果を併せて返す。未索引を空結果や暗黙fallback成功とは扱わない。
+Search never exports or embeds documents. Query embeddings can incur cost. The offline `docs` catalogue needs neither an owner nor RAG; bundled-only requests also bypass configuration. See the [docs guide](../guides/docs.md) and [RAG guide](../guides/rag.md).
 
-明示docs indexは従来のrevision/hash/embedding cacheを再利用し、途中失敗では成功済みcacheと旧公開版を保持する。同じindexの明示再実行で不足分だけ再開する。旧実装が検索時に作った互換cacheも使用可能で、不要な再課金をしない。binary更新後のguide版不一致/追加/除外は検索前に検知し、明示indexまで資料embeddingをしない。schema/worker/設定は増やさず、会話DBとは独立した既存RAG storeを使う。
-
-既定scopeの登録資料には、明示登録されたfile sourceと、公開済みingest本文のあるderived sourceを含める。初期化だけで作る空の内部derived容器は未登録資料と同じく既定scopeへ展開しない。これによりdocs準備済み/外部資料未登録のsemantic検索を、空容器の未索引エラーで失敗させない。空文字の明示scopeは引き続きscope_invalidであり、scope省略とは区別する。
 
 ## Thread-scoped keyword history (Issue #34)
 

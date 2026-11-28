@@ -392,7 +392,7 @@ fn configured_search_resumes_an_empty_work_page() {
     let root = dir.path();
     let folder = root.join("guides");
     std::fs::create_dir(&folder).unwrap();
-    for n in 0..125 {
+    for n in 0..225 {
         std::fs::write(folder.join(format!("{n:03}.md")), "# Ordinary guide\n").unwrap();
     }
     std::fs::write(
@@ -434,4 +434,41 @@ fn configured_search_resumes_an_empty_work_page() {
         page = next;
     }
     assert!(found);
+}
+
+#[test]
+fn configured_list_resumes_after_examining_non_guides_in_a_wide_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let folder = root.join("guides");
+    std::fs::create_dir(&folder).unwrap();
+    for n in (0..205).rev() {
+        std::fs::write(folder.join(format!("{n:03}.txt")), "not a guide").unwrap();
+    }
+    std::fs::write(folder.join("last.md"), "# Last guide\n").unwrap();
+    let (ok, registered) = call(
+        root,
+        &[
+            "docs", "source", "add", "--name", "local", "--path", "guides",
+        ],
+    );
+    assert!(ok, "{registered}");
+    let (ok, first) = call(root, &["docs", "list", "--parent", "local"]);
+    assert!(ok, "{first}");
+    assert!(first["result"]["items"].as_array().unwrap().is_empty());
+    let cursor = first["result"]["next_cursor"].as_str().unwrap();
+    let (ok, second) = call(
+        root,
+        &["docs", "list", "--parent", "local", "--cursor", cursor],
+    );
+    assert!(ok, "{second}");
+    assert_eq!(second["result"]["items"][0]["id"], "local/last.md");
+    assert!(second["result"].get("next_cursor").is_none());
+    std::fs::write(folder.join("new.md"), "# New guide\n").unwrap();
+    let (ok, stale) = call(
+        root,
+        &["docs", "list", "--parent", "local", "--cursor", cursor],
+    );
+    assert!(!ok, "{stale}");
+    assert_eq!(stale["error"]["code"], "cursor_expired");
 }
