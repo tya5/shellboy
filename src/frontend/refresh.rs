@@ -148,7 +148,7 @@ pub(super) async fn run(
     tokio::select! {biased;_=stop.cancelled()=>{},_=async {
         let receipts = native_page::receipts(&owner, &ids).await;
         if !visible || generation.is_none() {
-            let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:None,epoch,generation}).await;
+            let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,settled_submissions:Vec::new(),receipts,progress:None,epoch,generation}).await;
             return;
         }
         let generation=generation.expect("visible generation checked above");
@@ -158,11 +158,12 @@ pub(super) async fn run(
             if let Some(revision)=tool_revision {
                 update(&updates,UiUpdate::ToolFacts {thread_id:thread.clone(),generation,revision,result:Err(error.to_string())}).await;
             }
-            let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(Err(error)),epoch,generation:Some(generation)}).await;
+            let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,settled_submissions:Vec::new(),receipts,progress:Some(Err(error)),epoch,generation:Some(generation)}).await;
             return;
         };
         let current = read_current(&ui, &owner, &thread, render_width, &known, tool_scope, stop.clone()).await;
         drop(_progress_permit);
+        let mut settled_submissions = Vec::new();
         let result: Result<activity::Projection, ApiError>=async {
             let Current {details, page, before_cursor, received, activity, context_usage, mut tool_scope} = current?;
             let Page {mut nodes, info, ..} = page;
@@ -175,6 +176,7 @@ pub(super) async fn run(
                 thread_id:thread.clone(),generation,selection_revision:received.selection_revision,
                 view_revision:None,root_revision:received.root_revision,nodes:received.nodes,
             }));
+            settled_submissions.extend(info.pending.submitted.iter().map(|entry|entry.operation_id.clone()));
             update(&updates,UiUpdate::CurrentView {
                 generation,details,context_usage,
                 history:Box::new(UiUpdate::History {
@@ -192,7 +194,7 @@ pub(super) async fn run(
             }
             load_failed(&updates,thread.clone(),generation,error.clone()).await;
         }
-        let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,receipts,progress:Some(result),epoch,generation:Some(generation)}).await;
+        let _=sender.send(BackgroundResult::Refreshed {thread_id:thread,settled_submissions,receipts,progress:Some(result),epoch,generation:Some(generation)}).await;
     }=>{}}
 }
 
@@ -216,6 +218,7 @@ mod tests {
     }
 
     struct Observed {
+        settled_submissions: Vec<String>,
         receipts: Result<Vec<(String, ReceiptStatus)>, ApiError>,
         progress: Option<Result<activity::Projection, ApiError>>,
         view: Option<(
@@ -233,6 +236,16 @@ mod tests {
         ids: Vec<String>,
         tool_scope: Option<ToolObservation>,
     ) -> Observed {
+        refresh_with_submissions(control, data_dir, ids, tool_scope, Vec::new()).await
+    }
+
+    async fn refresh_with_submissions(
+        control: &Arc<Control>,
+        data_dir: &std::path::Path,
+        ids: Vec<String>,
+        tool_scope: Option<ToolObservation>,
+        known: Vec<KnownSubmission>,
+    ) -> Observed {
         let (updates, received) = std::sync::mpsc::sync_channel(64);
         let (sender, mut results) = mpsc::channel(8);
         let permit = Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap();
@@ -249,7 +262,7 @@ mod tests {
                     epoch: 0,
                     render_width: 80,
                     tool_scope,
-                    known: Vec::new(),
+                    known,
                 },
                 control.store.config.ui.clone(),
                 updates,
@@ -264,14 +277,19 @@ mod tests {
         let mut observed = Observed {
             receipts: Ok(Vec::new()),
             progress: None,
+            settled_submissions: Vec::new(),
             view: None,
         };
         while let Ok(result) = results.try_recv() {
             if let BackgroundResult::Refreshed {
-                receipts, progress, ..
+                receipts,
+                progress,
+                settled_submissions,
+                ..
             } = result
             {
                 observed.receipts = receipts;
+                observed.settled_submissions = settled_submissions;
                 observed.progress = progress;
             }
         }
@@ -300,6 +318,57 @@ mod tests {
         tokio::spawn(control.clone().serve(dispatcher));
         control.start().await.unwrap();
         (owner, control, server)
+    }
+
+    #[tokio::test]
+    async fn saved_refresh_retires_only_the_observed_submission() {
+        let root = tempfile::tempdir().unwrap();
+        let (owner, control, server) = served(&root).await;
+        owner.db.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','2026-01-01T00:00:00Z')", [])?;
+            Ok(())
+        }).await.unwrap();
+        let submission = |id: &str, revision| KnownSubmission {
+            operation_id: id.into(),
+            draft_id: "fixture-draft".into(),
+            revision,
+        };
+        let mut known = HashMap::from([(
+            "t".to_owned(),
+            vec![submission("first-op", 1), submission("second-op", 2)],
+        )]);
+        for (operation, message, revision) in [
+            ("first-op", "first-message", 1),
+            ("second-op", "second-message", 2),
+        ] {
+            let instance = control.store.instance_id.clone();
+            owner.db.call(move |db| {
+                db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes)VALUES(?1,?2,'null','hash','completed',?3,?4,0)",
+                    rusqlite::params![operation, instance, chrono::Utc::now().to_rfc3339(), json!({"result":{"message_id":message,"thread_id":"t"}}).to_string()])?;
+                Ok(())
+            }).await.unwrap();
+            let observed = refresh_with_submissions(
+                &control,
+                &owner.loaded.data_dir,
+                vec![],
+                None,
+                known.get("t").cloned().unwrap_or_default(),
+            )
+            .await;
+            let (_, _, history, _) = observed.view.expect("saved current view");
+            let UiUpdate::History { pending, .. } = *history else {
+                panic!("expected selected page");
+            };
+            let [submitted] = pending.submitted.as_slice() else {
+                panic!("only the newly settled submission belongs in this refresh");
+            };
+            assert_eq!(submitted.operation_id, operation);
+            assert_eq!(submitted.message_id, message);
+            assert_eq!(submitted.revision, revision);
+            native_page::retire_submissions(&mut known, &observed.settled_submissions);
+        }
+        server.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test]

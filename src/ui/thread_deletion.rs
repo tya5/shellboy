@@ -35,6 +35,26 @@ pub(super) struct DeletionDialog {
     phase: Phase,
 }
 impl DeletionDialog {
+    pub(super) fn reader_body_bytes(&self) -> usize {
+        self.title.capacity()
+            + self.args.thread_id.capacity()
+            + self
+                .args
+                .preview_marker
+                .as_ref()
+                .map_or(0, |marker| marker.ids_hash.capacity())
+            + match &self.phase {
+                Phase::Ready(value) => crate::memory::json_retained_bytes(value),
+                Phase::Failed(error) => {
+                    error.message.capacity()
+                        + error
+                            .details
+                            .as_ref()
+                            .map_or(0, crate::memory::json_retained_bytes)
+                }
+                _ => 0,
+            }
+    }
     pub(super) fn footer(&self) -> String {
         crate::ui::text_width::glyphs::decorate(if self.can_execute() {
             crate::ui::text_width::glyphs::localized!(

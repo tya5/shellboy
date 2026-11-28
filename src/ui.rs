@@ -1522,22 +1522,25 @@ impl HistoryLayoutKey {
     }
 }
 impl HistoryLayoutCache {
-    fn oldest(&self) -> Option<Instant> {
+    fn oldest(&self, frame: Instant) -> Option<Instant> {
         self.entries
             .values()
             .chain(self.units.values())
+            .filter(|entry| entry.touched < frame)
             .map(|entry| entry.touched)
             .min()
     }
-    fn evict_oldest(&mut self) -> bool {
+    fn evict_oldest(&mut self, frame: Instant) -> bool {
         let whole = self
             .entries
             .iter()
+            .filter(|(_, entry)| entry.touched < frame)
             .min_by_key(|(_, entry)| entry.touched)
             .map(|(key, entry)| (key.clone(), entry.touched));
         let unit = self
             .units
             .iter()
+            .filter(|(_, entry)| entry.touched < frame)
             .min_by_key(|(_, entry)| entry.touched)
             .map(|(key, entry)| (key.clone(), entry.touched));
         let removed = match (whole, unit) {
@@ -1553,8 +1556,20 @@ impl HistoryLayoutCache {
             false
         }
     }
+    fn accounting(&self, frame: Option<Instant>) -> (usize, usize) {
+        let pinned = self
+            .entries
+            .values()
+            .chain(self.units.values())
+            .filter(|entry| frame.is_some_and(|frame| entry.touched >= frame))
+            .map(|entry| entry.bytes)
+            .sum::<usize>();
+        (self.bytes - pinned, pinned)
+    }
+    #[cfg(test)]
     fn evict(&mut self, budget: usize) {
-        while self.bytes > budget && self.evict_oldest() {}
+        let boundary = Instant::now();
+        while self.bytes > budget && self.evict_oldest(boundary) {}
     }
     fn unit(&mut self, key: &RenderUnitKey) -> Option<Arc<HistoryLayout>> {
         #[cfg(test)]
@@ -1589,7 +1604,6 @@ impl HistoryLayoutCache {
         if let Some(old) = self.units.remove(&key) {
             self.bytes -= old.bytes;
         }
-        self.evict(budget - bytes);
         self.bytes += bytes;
         self.units.insert(
             key,
@@ -1641,7 +1655,6 @@ impl HistoryLayoutCache {
         if let Some(old) = self.entries.remove(&key) {
             self.bytes -= old.bytes;
         }
-        self.evict(budget - bytes);
         self.bytes += bytes;
         self.entries.insert(
             key,
@@ -1662,6 +1675,24 @@ pub enum ManagementFollow {
     Refresh,
 }
 impl Confirmation {
+    fn reader_body_bytes(&self) -> usize {
+        match self {
+            Self::Operation { detail, .. } | Self::Index { detail, .. } => detail.capacity(),
+            Self::ThreadDeletion(dialog) => dialog.reader_body_bytes(),
+            Self::Watch(target) => {
+                target.thread_id.capacity()
+                    + target.run_id.capacity()
+                    + target.turn_id.as_ref().map_or(0, String::capacity)
+                    + target.execution_id.as_ref().map_or(0, String::capacity)
+            }
+            Self::Rewind { args, .. } => {
+                args.node_id.capacity()
+                    + args.thread_id.as_ref().map_or(0, String::capacity)
+                    + args.recovery_run_id.as_ref().map_or(0, String::capacity)
+            }
+            Self::ForceQuit => 0,
+        }
+    }
     fn sized_area(&self, area: Rect, language: crate::config::UiLanguage) -> Rect {
         if matches!(self, Self::ForceQuit) {
             popup::text_viewport(
@@ -1898,16 +1929,8 @@ impl UiState {
             popup_epoch: 0,
             popup_paint: None,
             aux_popup_paint: Default::default(),
-            help_cache: {
-                let mut cache = popup::ReaderCache::default();
-                cache.set_language(config.ui.language);
-                cache
-            },
-            confirmation_cache: {
-                let mut cache = popup::ReaderCache::default();
-                cache.set_language(config.ui.language);
-                cache
-            },
+            help_cache: popup::ReaderCache::default(),
+            confirmation_cache: popup::ReaderCache::default(),
             palette,
             diagnostics: None,
             bell: bell::Bell::default(),
@@ -6030,7 +6053,7 @@ cursor: None,
             help::footer(self.config.ui.language),
             &self.aux_popup_paint,
         );
-        self.help_cache.set_language(self.config.ui.language);
+
         self.help_scroll = self
             .help_cache
             .render(frame, body, 0, self.help_scroll, || {
@@ -6048,9 +6071,8 @@ cursor: None,
                 .and_then(operations::Operations::reader_mut),
         ]
     }
-    fn set_reader_budgets(&mut self, area: Rect) {
-        let budget =
-            (self.config.cache.layout_bytes as usize).max(popup::ReaderCache::viewport_bytes(area));
+    fn set_reader_budgets(&mut self) {
+        let budget = self.config.cache.layout_bytes as usize;
         for reader in self.reader_caches().into_iter().flatten() {
             reader.set_budget(budget);
         }
@@ -6073,8 +6095,7 @@ cursor: None,
         let working = self.retained_working_node_ids();
         let (retained, pinned) = self.body_cache_bytes(&working, |_, _, _| {});
         let frame_start = self.popup_layout_frame;
-        let mut layout_retained = self.layout_cache.bytes;
-        let mut layout_pinned = 0;
+        let (mut layout_retained, mut layout_pinned) = self.layout_cache.accounting(frame_start);
         for reader in self.reader_caches().into_iter().flatten() {
             if reader
                 .touched
@@ -6100,6 +6121,11 @@ cursor: None,
             .map_or(0, details::Details::reader_body_bytes)
             .saturating_add(self.management.reader_body_bytes())
             .saturating_add(self.help_page.reader_body_bytes())
+            .saturating_add(
+                self.confirmation
+                    .as_ref()
+                    .map_or(0, Confirmation::reader_body_bytes),
+            )
     }
     fn view_is_evictable(&self, key: &str, view: &ThreadView) -> bool {
         key != self.active
@@ -6178,12 +6204,12 @@ cursor: None,
             if let Some(reader) = oldest
                 && self
                     .layout_cache
-                    .oldest()
+                    .oldest(frame_start)
                     .is_none_or(|t| reader.touched < Some(t))
             {
                 popup_bytes -= reader.retained_bytes();
                 reader.clear();
-            } else if !self.layout_cache.evict_oldest() {
+            } else if !self.layout_cache.evict_oldest(frame_start) {
                 break;
             }
         }
@@ -6252,10 +6278,9 @@ cursor: None,
             let footer = confirmation.footer(language);
             let title = confirmation.title(language);
             let width = popup::reader_width(popup::body_area(area, &context, &footer, None)).max(1);
-            self.confirmation_cache.set_language(language);
-            let rows = self
-                .confirmation_cache
-                .prepare(0, width, || confirmation.lines(language));
+
+            let lines = confirmation.lines(language);
+            let rows = self.confirmation_cache.row_count(0, width, &lines);
             let overhead = 5 + footer.lines().count().clamp(1, 2);
             let height = rows.saturating_add(overhead).clamp(8, u16::MAX as usize) as u16;
             let body = popup::compact_recorded(
@@ -6269,9 +6294,7 @@ cursor: None,
             );
             self.confirmation_scroll =
                 self.confirmation_cache
-                    .render(frame, body, 0, self.confirmation_scroll, || {
-                        confirmation.lines(language)
-                    });
+                    .render(frame, body, 0, self.confirmation_scroll, || lines);
         }
         if matches!(
             self.top_overlay(),
@@ -6937,6 +6960,7 @@ fn visible_render_nodes(
 }
 
 pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
+    let layout_frame = Instant::now();
     state.refresh_connection_defaults();
     let area = frame.area();
     state.popup_paint = None;
@@ -7180,10 +7204,9 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
             .thread_browser
             .draw(frame, popup_area, active, notice_visible);
     }
-    let popup_frame = Instant::now();
-    state.set_reader_budgets(popup_area);
+    state.set_reader_budgets();
     let overlay_links = state.draw_overlays(frame, popup_area);
-    state.trim_layouts(popup_frame);
+    state.trim_layouts(layout_frame);
     state.visible_links = overlay_links;
     if state.history_links_active() {
         state.visible_links.extend(
@@ -8470,26 +8493,52 @@ mod layout_cache_tests {
         assert!(Arc::ptr_eq(&anchored, &ui.history_layout(20, 8)));
     }
     #[test]
-    fn popup_layout_pressure_preserves_the_current_reader_and_evicts_the_inactive_one() {
+    fn popup_layout_pressure_evicts_older_popup_before_history() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
-        ui.config.cache.layout_bytes = 12 * 1024;
-        ui.set_reader_budgets(Rect::default());
-        let source = || (0..96).map(|_| Line::from("retained row")).collect();
-        ui.help_cache.prepare(1, 60, source);
-        let boundary = Instant::now();
-        ui.confirmation_cache.prepare(1, 60, source);
-        assert!(
-            ui.help_cache.retained_bytes() + ui.confirmation_cache.retained_bytes() > 12 * 1024
-        );
-        ui.trim_layouts(boundary);
-        ui.confirmation_cache
-            .prepare(1, 60, || panic!("the displayed reader is pinned"));
-        let mut builds = 0;
-        ui.help_cache.prepare(1, 60, || {
-            builds += 1;
-            source()
-        });
-        assert_eq!(builds, 1);
+        let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+        let source = || {
+            (0..1000)
+                .map(|_| Line::from("popup source".to_owned()))
+                .collect()
+        };
+        let mut popup = |ui: &mut UiState, expected_rebuild: bool| {
+            let mut rebuilt = false;
+            terminal
+                .draw(|frame| {
+                    ui.help_cache.render(frame, frame.area(), 1, 0, || {
+                        rebuilt = true;
+                        source()
+                    });
+                })
+                .unwrap();
+            assert_eq!(rebuilt, expected_rebuild);
+            assert!(
+                terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .contains("popup source")
+            );
+        };
+        ui.config.cache.layout_bytes = 256 * 1024;
+        ui.set_reader_budgets();
+        popup(&mut ui, true);
+        popup(&mut ui, false);
+        ui.select_thread("a".into());
+        history(&mut ui, "a", "history a");
+        let a = ui.history_layout(60, 12);
+        ui.select_thread("b".into());
+        history(&mut ui, "b", "history b");
+        ui.config.cache.layout_bytes = 64 * 1024;
+        let frame = Instant::now();
+        let _b = ui.history_layout(60, 12);
+        ui.trim_layouts(frame);
+        ui.select_thread("a".into());
+        assert!(Arc::ptr_eq(&a, &ui.history_layout(60, 12)));
+        popup(&mut ui, true);
     }
 
     #[test]
@@ -8512,6 +8561,7 @@ mod layout_cache_tests {
         let owned = cache.get(&key("a")).unwrap();
         let weak = Arc::downgrade(&owned);
         cache.insert(key("c"), value(), 2 * one);
+        cache.evict(2 * one);
         assert!(cache.get(&key("b")).is_none());
         assert!(cache.get(&key("a")).is_some());
         assert_eq!(cache.entries.len(), 2);

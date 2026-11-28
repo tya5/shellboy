@@ -1,17 +1,7 @@
 //! A single popup's finite, styled Ratatui-wrap result. Raw sources stay with owners.
 use super::*;
-use crate::config::UiLanguage;
 use std::mem::size_of;
-fn limit_notice(language: UiLanguage) -> Line<'static> {
-    Line::from(crate::ui::text_width::glyphs::localized!(
-        language,
-        "上限: 表示キャッシュ上限 · 原文のコピー・取得元から全文を確認",
-        "上限: 表示キャッシュ上限 | 原文のコピー・取得元から全文を確認",
-        "Limit: Copy the original or inspect the source for full text",
-        "Limit: Copy the original or inspect the source for full text"
-    ))
-    .style(Style::default().fg(theme::WARNING))
-}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::ui) struct ReaderBounds {
     pub total: usize,
@@ -21,62 +11,28 @@ pub(in crate::ui) struct ReaderBounds {
 pub(in crate::ui) struct ReaderCache {
     budget: usize,
     pub touched: Option<std::time::Instant>,
-    language: Option<UiLanguage>,
     key: Option<(u64, u16, Option<u8>)>,
     rows: Vec<Line<'static>>,
     bytes: usize,
     bounds: ReaderBounds,
-    limited: bool,
-    #[cfg(test)]
-    builds: usize,
 }
 impl Default for ReaderCache {
     fn default() -> Self {
         Self {
             budget: crate::config::Cache::default().layout_bytes as usize,
             touched: None,
-            language: None,
             key: None,
             rows: Vec::new(),
             bytes: 0,
             bounds: ReaderBounds::default(),
-            limited: false,
-            #[cfg(test)]
-            builds: 0,
         }
     }
 }
 impl ReaderCache {
-    // A zero retention budget still allows the visible reader to paint. The
-    // viewport allowance is pinned only for the frame that uses it.
-    pub fn viewport_bytes(area: Rect) -> usize {
-        let row = 2 * size_of::<Line<'static>>()
-            + 4 * size_of::<Span<'static>>()
-            + 4 * usize::from(area.width);
-        row * usize::from(area.height.saturating_add(1))
-    }
     pub fn set_budget(&mut self, budget: usize) {
         if self.budget != budget {
             self.budget = budget;
             self.clear();
-        }
-    }
-    pub fn set_language(&mut self, language: UiLanguage) {
-        if self.language.unwrap_or(UiLanguage::Ja) == language {
-            self.language = Some(language);
-            return;
-        }
-        self.language = Some(language);
-        if self.limited
-            && let Some(last) = self.rows.last_mut()
-        {
-            let previous = row_bytes(last);
-            *last = limit_notice(language);
-            let replacement = row_bytes(last);
-            self.bytes = self
-                .bytes
-                .saturating_sub(previous)
-                .saturating_add(replacement);
         }
     }
     pub fn clear(&mut self) {
@@ -85,21 +41,12 @@ impl ReaderCache {
         self.rows = Vec::new();
         self.bytes = 0;
         self.bounds = ReaderBounds::default();
-        self.limited = false;
     }
     pub fn retained_bytes(&self) -> usize {
         self.bytes
     }
-    #[cfg(test)]
-    pub(in crate::ui) fn build_count(&self) -> usize {
-        self.builds
-    }
     pub fn bounds(&self) -> ReaderBounds {
         self.bounds
-    }
-    #[cfg(test)]
-    pub fn limited(&self) -> bool {
-        self.limited
     }
     /// `revision` belongs to this popup's content/page. Preparing is lazy on a hit.
     pub fn render(
@@ -115,131 +62,95 @@ impl ReaderCache {
             self.bounds = ReaderBounds::default();
             return 0;
         }
-        self.prepare(revision, width, prepare);
-        self.paint(frame, area, requested)
-    }
-    /// Prepare once for source revision/width; geometry can use this row count
-    /// without rewrapping the source on every keyboard or wheel operation.
-    pub fn prepare(
-        &mut self,
-        revision: u64,
-        width: u16,
-        make_lines: impl FnOnce() -> Vec<Line<'static>>,
-    ) -> usize {
-        self.touched = Some(std::time::Instant::now());
-        let width = width.max(1);
-        if self.key
-            != Some((
-                revision,
-                width,
-                crate::ui::text_width::terminal_width_observation(),
-            ))
-        {
-            self.rebuild(revision, width, &make_lines());
+        if self.touch(revision, width) {
+            return self.paint(frame, area, requested);
         }
-        self.rows.len()
+        self.paint_source(frame, area, revision, requested, &prepare())
     }
-    fn rebuild(&mut self, revision: u64, width: u16, lines: &[Line<'static>]) {
-        self.rows = Vec::new();
-        self.bytes = 0;
-        self.limited = false;
-        self.key = Some((
+
+    fn touch(&mut self, revision: u64, width: u16) -> bool {
+        self.touched = Some(std::time::Instant::now());
+        self.key == Some(Self::key(revision, width))
+    }
+
+    fn key(revision: u64, width: u16) -> (u64, u16, Option<u8>) {
+        (
             revision,
             width,
             crate::ui::text_width::terminal_width_observation(),
-        ));
-        #[cfg(test)]
-        {
-            self.builds += 1;
+        )
+    }
+
+    pub fn row_count(&self, revision: u64, width: u16, lines: &[Line<'static>]) -> usize {
+        if self.key == Some(Self::key(revision, width)) {
+            return self.rows.len();
         }
-        let notice = limit_notice(self.language.unwrap_or(UiLanguage::Ja));
-        let notice_bytes = row_bytes(&notice);
-        let available = self.budget.saturating_sub(
-            notice_bytes
-                .max(row_bytes(&limit_notice(UiLanguage::En)))
-                .max(row_bytes(&limit_notice(UiLanguage::Ja))),
+        prepared(lines).line_count(width)
+    }
+
+    fn paint_source(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        revision: u64,
+        requested: u16,
+        lines: &[Line<'static>],
+    ) -> u16 {
+        let width = reader_width(area).max(1);
+        self.key = None;
+        self.rows = Vec::new();
+        self.bytes = 0;
+        // Admission only controls retained rows. On a miss that cannot fit,
+        // Ratatui wraps the original and paints only the requested viewport.
+        let paragraph = prepared(lines);
+        let total = paragraph.line_count(width);
+        let row_floor = 2 * size_of::<Line<'static>>();
+        if self.budget != 0 && total <= u16::MAX.into() && total <= self.budget / row_floor {
+            let mut bytes = 0usize;
+            let mut rows = Vec::new();
+            for line in lines {
+                let wrapped = super::super::presentation::hanging_wrap(vec![line.clone()], width);
+                bytes = bytes.saturating_add(wrapped.iter().map(row_bytes).sum::<usize>());
+                if bytes > self.budget {
+                    break;
+                }
+                rows.extend(wrapped);
+            }
+            if bytes <= self.budget {
+                self.key = Some(Self::key(revision, width));
+                self.rows = rows;
+                self.bytes = bytes;
+                return self.paint(frame, area, requested);
+            }
+        }
+        let scroll = self.set_bounds(total, area.height, requested);
+        frame.render_widget(
+            paragraph.scroll((scroll, 0)).style(normal_style()),
+            Rect {
+                width: reader_width(area),
+                ..area
+            },
         );
-        for source in lines {
-            let mut line = Line::default().style(source.style);
-            line.alignment = source.alignment;
-            let row_floor = 2 * size_of::<Line<'static>>() + size_of::<Span<'static>>() + 4;
-            let affordable_rows = available.saturating_sub(self.bytes) / row_floor;
-            if affordable_rows == 0 {
-                self.limited = true;
-                break;
-            }
-            let remaining = available
-                .saturating_sub(self.bytes)
-                .min(affordable_rows.saturating_mul(usize::from(width)));
-            let mut copied = 0usize;
-            for span in &source.spans {
-                if copied >= remaining
-                    || (line.spans.len() + 1).saturating_mul(size_of::<Span<'static>>())
-                        >= available.saturating_sub(self.bytes)
-                {
-                    self.limited = true;
-                    break;
-                }
-                let mut end = (remaining - copied).min(span.content.len());
-                while !span.content.is_char_boundary(end) {
-                    end -= 1;
-                }
-                line.spans
-                    .push(Span::styled(span.content[..end].to_owned(), span.style));
-                copied += end;
-                if end < span.content.len() {
-                    self.limited = true;
-                    break;
-                }
-            }
-            crate::presentation::expand_tabs(&mut line);
-            // A tab may expand an otherwise small source. Bound it before wrapping.
-            let expanded = line
-                .spans
-                .iter()
-                .map(|span| span.content.len())
-                .sum::<usize>();
-            if expanded > remaining {
-                let mut available = remaining;
-                for span in &mut line.spans {
-                    let mut end = available.min(span.content.len());
-                    while !span.content.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    span.content = span.content[..end].to_owned().into();
-                    available -= end;
-                }
-                self.limited = true;
-            }
-            for row in super::super::presentation::hanging_wrap(vec![line], width) {
-                let charge = row_bytes(&row);
-                if self.bytes.saturating_add(charge) > available {
-                    self.limited = true;
-                    break;
-                }
-                self.bytes += charge;
-                self.rows.push(row);
-            }
-            if self.limited {
-                break;
-            }
+        if total > usize::from(area.height) {
+            scrollbar(frame, area, total, usize::from(scroll));
         }
-        if self.limited && notice_bytes <= self.budget {
-            self.bytes += notice_bytes;
-            self.rows.push(notice);
-        }
+        scroll
+    }
+
+    fn set_bounds(&mut self, total: usize, visible: u16, requested: u16) -> u16 {
+        let maximum = total
+            .saturating_sub(usize::from(visible))
+            .min(u16::MAX.into()) as u16;
+        self.bounds = ReaderBounds {
+            total,
+            visible,
+            maximum,
+        };
+        requested.min(maximum)
     }
     fn paint(&mut self, frame: &mut Frame<'_>, area: Rect, requested: u16) -> u16 {
         let total = self.rows.len();
-        let maximum = total
-            .saturating_sub(usize::from(area.height))
-            .min(u16::MAX as usize) as u16;
-        self.bounds = ReaderBounds {
-            total,
-            visible: area.height,
-            maximum,
-        };
-        let scroll = requested.min(maximum);
+        let scroll = self.set_bounds(total, area.height, requested);
         let start = usize::from(scroll);
         let end = (start + usize::from(area.height)).min(total);
         let display = super::super::presentation::borrowed(&self.rows[start..end]);
@@ -255,6 +166,13 @@ impl ReaderCache {
         }
         scroll
     }
+}
+fn prepared<'a>(lines: &'a [Line<'static>]) -> Paragraph<'a> {
+    let mut display = super::super::presentation::borrowed(lines);
+    for line in &mut display {
+        crate::presentation::expand_tabs(line);
+    }
+    Paragraph::new(display).wrap(Wrap { trim: false })
 }
 fn row_bytes(row: &Line<'_>) -> usize {
     // Vec growth is geometric; charge twice the inline row size as well as the
@@ -283,16 +201,11 @@ pub(in crate::ui) fn reader_cached(
         cache.bounds = ReaderBounds::default();
         return 0;
     }
-    if cache.key
-        != Some((
-            revision,
-            width,
-            crate::ui::text_width::terminal_width_observation(),
-        ))
-    {
-        cache.rebuild(revision, width, lines);
+    if cache.touch(revision, width) {
+        cache.paint(frame, area, requested)
+    } else {
+        cache.paint_source(frame, area, revision, requested, lines)
     }
-    cache.paint(frame, area, requested)
 }
 
 #[cfg(test)]
@@ -350,173 +263,18 @@ mod tests {
         }
     }
     #[test]
-    fn sixty_kib_original_wraps_once_across_sixty_wheels_and_only_page_or_width_rebuilds() {
-        let original = "line of saved original text 0123456789\n".repeat(1700);
-        assert!(original.len() >= 64 * 1024);
-        let lines = original
-            .lines()
-            .map(|line| Line::from(line.to_owned()))
-            .collect::<Vec<_>>();
-        let mut cache = ReaderCache::default();
-        for event in 0..60 {
-            paint(&mut cache, &lines, 80, 24, 11, event * 3);
-        }
-        assert_eq!(cache.builds, 1);
-        assert!(!cache.limited());
-        assert!(cache.retained_bytes() <= cache.budget);
-        assert!(cache.bounds().maximum > 1000);
-        paint(&mut cache, &lines, 140, 24, 11, 0);
-        assert_eq!(cache.builds, 2);
-        paint(&mut cache, &[Line::from("different page")], 140, 24, 12, 0);
-        assert_eq!(cache.builds, 3);
-        assert_eq!(cache.bounds().total, 1);
-        cache.clear();
-        assert_eq!(cache.retained_bytes(), 0);
-        assert_eq!(cache.bounds(), ReaderBounds::default());
-    }
-    #[test]
-    fn limited_notice_relocalizes_without_rebuilding_or_modifying_original() {
-        use crate::ui::text_width::UnicodeWidthStr;
-        let original = "RAW ORIGINAL ".repeat(25_000);
-        let lines = vec![Line::from(original.clone())];
-        for policy in [Some(1), Some(2), None] {
-            crate::ui::text_width::set_terminal_width(policy);
-            for width in [80, 120] {
-                let mut cache = ReaderCache::default();
-                cache.set_budget(64 * 1024);
-                let (_, scroll) = paint(&mut cache, &lines, width, 12, 91, u16::MAX);
-                assert!(cache.limited());
-                let builds = cache.build_count();
-                let bounds = cache.bounds();
-                let first = cache.rows.first().unwrap().to_string();
-                for (language, expected) in [
-                    (UiLanguage::En, "Limit: Copy the original"),
-                    (UiLanguage::Ja, "上限: 表示キャッシュ上限"),
-                ] {
-                    cache.set_language(language);
-                    let (buffer, actual_scroll) =
-                        paint(&mut cache, &lines, width, 12, 91, u16::MAX);
-                    let mut screen = String::new();
-                    for y in 0..buffer.area.height {
-                        let mut x = 0;
-                        while x < buffer.area.width {
-                            let symbol = buffer[(x, y)].symbol();
-                            screen.push_str(symbol);
-                            x += symbol.width().max(1) as u16;
-                        }
-                        screen.push('\n');
-                    }
-                    assert!(screen.contains(expected), "{language:?} {width}: {screen}");
-                    assert_eq!(actual_scroll, scroll);
-                    assert_eq!(cache.build_count(), builds);
-                    assert_eq!(cache.bounds(), bounds);
-                    assert_eq!(cache.rows.first().unwrap().to_string(), first);
-                    assert!(cache.retained_bytes() <= cache.budget);
-                }
-                assert_eq!(lines[0].to_string(), original);
-            }
-        }
-        crate::ui::text_width::clear_terminal_width();
-    }
-
-    #[test]
-    fn limited_help_screen_uses_configured_language_at_standard_widths() {
-        fn configure(ui: &mut crate::ui::UiState) {
-            ui.show_help(crate::ui::help::Page::info(
-                "Synthetic reader",
-                "Fixture",
-                "x".repeat(300_000),
-            ));
-            ui.config.cache.layout_bytes = 64 * 1024;
-            ui.help_scroll = u16::MAX;
-        }
-        fn expected(language: UiLanguage) -> &'static [&'static str] {
-            match language {
-                UiLanguage::En => &["Limit: Copy the original"],
-                UiLanguage::Ja => &["上限: 表示キャッシュ上限"],
-            }
-        }
-        crate::ui::i18n::verify_screen(configure, expected);
-    }
-
-    #[test]
-    fn limited_confirmation_screen_uses_configured_language_at_standard_widths() {
-        fn configure(ui: &mut crate::ui::UiState) {
-            ui.config.cache.layout_bytes = 64 * 1024;
-            ui.confirmation = Some(crate::ui::Confirmation::Operation {
-                command: crate::protocol::Command::Status(crate::protocol::StatusArgs::default()),
-                detail: "x".repeat(300_000),
-            });
-            ui.confirmation_scroll = u16::MAX;
-        }
-        fn expected(language: UiLanguage) -> &'static [&'static str] {
-            match language {
-                UiLanguage::En => &["Limit: Copy the original"],
-                UiLanguage::Ja => &["上限: 表示キャッシュ上限"],
-            }
-        }
-        crate::ui::i18n::verify_screen(configure, expected);
-    }
-
-    #[test]
-    fn narrow_limited_reader_keeps_outcome_and_source_unchanged() {
-        use crate::ui::text_width::UnicodeWidthStr;
-        let original = "x".repeat(300_000);
-        let lines = vec![Line::from(original.clone())];
-        for (language, expected) in [(UiLanguage::En, "Limit:"), (UiLanguage::Ja, "上限:")] {
+    fn small_and_zero_budgets_still_scroll_to_original_tail() {
+        let mut lines = vec![Line::from("x".repeat(120_000))];
+        lines.push(Line::from("original tail"));
+        for budget in [0, 1024] {
             let mut cache = ReaderCache::default();
-            cache.set_language(language);
-            cache.set_budget(64 * 1024);
-            let (buffer, _) = paint(&mut cache, &lines, 8, 5, 12, u16::MAX);
-            assert!(cache.limited());
-            let mut final_row = String::new();
-            let mut x = 0;
-            while x < buffer.area.width {
-                let symbol = buffer[(x, buffer.area.height - 1)].symbol();
-                final_row.push_str(symbol);
-                x += symbol.width().max(1) as u16;
-            }
-            assert!(final_row.contains(expected), "{language:?}: {final_row}");
-            assert_eq!(lines[0].to_string(), original);
+            cache.set_budget(budget);
+            let (_, first) = paint(&mut cache, &lines, 80, 12, 9, 0);
+            let (last, end) = paint(&mut cache, &lines, 80, 12, 9, u16::MAX);
+            assert_eq!(first, 0);
+            assert!(end > first);
+            let text: String = last.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(text.contains("original tail"));
         }
-    }
-
-    #[test]
-    fn lazy_prepare_is_not_called_on_scroll_hit_and_narrow_limit_is_explicit() {
-        let mut cache = ReaderCache::default();
-        let mut terminal = Terminal::new(TestBackend::new(80, 8)).unwrap();
-        let mut prepares = 0;
-        for scroll in 0..60 {
-            terminal
-                .draw(|frame| {
-                    cache.render(frame, frame.area(), 9, scroll, || {
-                        prepares += 1;
-                        vec![Line::from("saved ".repeat(10_000))]
-                    });
-                })
-                .unwrap();
-        }
-        assert_eq!(prepares, 1);
-        let mut lines = vec![Line::from("x".repeat(300_000))];
-        let original_bytes = lines[0].spans[0].content.len();
-        cache.set_budget(64 * 1024);
-        paint(&mut cache, &lines, 2, 8, 10, u16::MAX);
-        assert!(cache.limited());
-        assert!(cache.retained_bytes() <= cache.budget);
-        assert!(
-            cache
-                .rows
-                .last()
-                .unwrap()
-                .spans
-                .iter()
-                .any(|span| span.content.contains("表示キャッシュ上限"))
-        );
-        assert_eq!(
-            lines[0].spans[0].content.len(),
-            original_bytes,
-            "copy source is independent of display cache"
-        );
-        lines.clear();
     }
 }

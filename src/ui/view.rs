@@ -433,7 +433,6 @@ impl ThreadView {
                 .map(|node| node.node_id.clone());
             self.navigation.scroll.focus = focus;
         }
-        cache.evict(budget);
         let key = HistoryLayoutKey::new(view_key, self, width, height);
         cache.discard_old_revision(&key);
         if let Some(value) = cache.get(&key) {

@@ -902,6 +902,18 @@ impl ThreadBrowser {
                             .sum::<usize>()
                 })
                 .sum::<usize>();
+        let active = active
+            + self
+                .watch_summaries
+                .iter()
+                .map(|(key, summary)| {
+                    key.capacity()
+                        + size_of::<(String, WatchSummary)>()
+                        + 64
+                        + summary.retained_text_bytes()
+                })
+                .sum::<usize>()
+            + self.watch.borrow().summary_bytes();
         (
             active
                 + self.scope_cache.capacity() * size_of::<CachedScope>()
@@ -2635,24 +2647,6 @@ impl ThreadBrowser {
         active_thread: Option<&str>,
         notice_visible: bool,
     ) {
-        if let Some(cached) = self.preview_rows() {
-            let label = BrowserText::ReconfirmRows.render(self.language);
-            let body = popup::panel_recorded(frame, area, label, &self.filter, "", &self.paint);
-            let lines: Vec<_> = cached
-                .rows
-                .iter()
-                .take(body.height.into())
-                .map(|(id, title)| {
-                    Line::from(if title.is_empty() {
-                        id.as_str()
-                    } else {
-                        title.as_str()
-                    })
-                })
-                .collect();
-            frame.render_widget(Paragraph::new(lines), body);
-            return;
-        }
         if self.mode == BrowserMode::Watch {
             self.draw_watch(frame, area, active_thread);
             return;
@@ -2701,7 +2695,7 @@ impl ThreadBrowser {
             .is_some_and(|id| !id.starts_with("draft:"))
         {
             context.push_str(BrowserText::ReconfirmSelection.render(self.language));
-        } else if self.reconfirming_row.is_some() {
+        } else if self.reconfirming_row.is_some() || self.preview_rows().is_some() {
             context.push_str(BrowserText::ReconfirmRows.render(self.language));
         }
         let inner = popup::panel_recorded(frame, area, &title, &context, &footer_text, &self.paint);
@@ -2715,6 +2709,9 @@ impl ThreadBrowser {
             self.notice_seen.set(true);
         }
         if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+        if self.draw_preview(frame, inner) {
             return;
         }
         let detail_height = if inner.height >= 10 {
@@ -2912,6 +2909,26 @@ impl ThreadBrowser {
         fit(&label, width)
     }
 
+    fn draw_preview(&self, frame: &mut Frame<'_>, body: Rect) -> bool {
+        let Some(cached) = self.preview_rows() else {
+            return false;
+        };
+        let lines = cached
+            .rows
+            .iter()
+            .take(body.height.into())
+            .map(|(id, title)| {
+                Line::from(if title.is_empty() {
+                    id.as_str()
+                } else {
+                    title.as_str()
+                })
+            })
+            .collect::<Vec<_>>();
+        frame.render_widget(Paragraph::new(lines), body);
+        true
+    }
+
     fn draw_watch(&self, frame: &mut Frame<'_>, area: Rect, active_thread: Option<&str>) {
         let count = self.rows().len();
         let title = BrowserMessage::WatchTitle {
@@ -2939,9 +2956,16 @@ impl ThreadBrowser {
             context.push_str(crate::ui::text_width::glyphs::separator());
             context.push_str(&label);
         }
+        if self.preview_rows().is_some() {
+            context.push_str(BrowserText::ReconfirmRows.render(self.language));
+        }
         let footer = BrowserText::WatchKeys.render(self.language);
         let inner = popup::panel_recorded(frame, area, &title, &context, footer, &self.paint);
         if inner.height == 0 || inner.width == 0 {
+            self.watch_visible_ids.borrow_mut().clear();
+            return;
+        }
+        if self.draw_preview(frame, inner) {
             self.watch_visible_ids.borrow_mut().clear();
             return;
         }
@@ -5764,6 +5788,12 @@ mod archive_tests {
             vec![],
             None
         ));
+        browser.failed(browser.generation, "synthetic refresh refusal".into());
+        let failed = paint(&browser, 100, 20);
+        assert!(failed.contains("title a"));
+        assert!(failed.contains("synthetic refresh refusal"));
+        assert!(failed.contains("Ctrl+R"));
+        assert!(matches!(browser.key(ctrl('r')), ThreadOutcome::Load(_)));
         assert!(browser.apply(
             browser.generation,
             12,
@@ -5774,6 +5804,9 @@ mod archive_tests {
             vec![],
             None
         ));
+        let fresh = paint(&browser, 100, 20);
+        assert!(fresh.contains("title fresh"));
+        assert!(!fresh.contains("synthetic refresh refusal"));
         assert!(
             matches!(browser.key(ctrl('a')), ThreadOutcome::Archive(id, true) if id == "fresh")
         );

@@ -537,6 +537,14 @@ pub struct WatchSummary {
     pub interrupted: bool,
 }
 impl WatchSummary {
+    pub(super) fn retained_text_bytes(&self) -> usize {
+        [&self.thread_id, &self.title, &self.updated_at]
+            .into_iter()
+            .chain(self.latest_run_id.iter())
+            .chain(self.answer_id.iter())
+            .map(String::capacity)
+            .sum()
+    }
     /// Worker-only bounded text preparation. updated_at is cache freshness, not unread identity.
     pub fn prepare(summary: &ThreadSummary) -> Self {
         Self {
@@ -651,6 +659,18 @@ fn ordinary_category(phase: ActivityPhase) -> WatchCategory {
     }
 }
 impl WatchState {
+    pub(super) fn summary_bytes(&self) -> usize {
+        self.entries
+            .iter()
+            .map(|(key, entry)| {
+                key.capacity()
+                    + std::mem::size_of::<(String, Entry)>()
+                    + 64
+                    + entry.summary.retained_text_bytes()
+            })
+            .sum()
+    }
+
     pub(super) fn set_language(&mut self, language: UiLanguage) {
         if self.language == language {
             return;

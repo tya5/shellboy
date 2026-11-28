@@ -113,12 +113,12 @@ Rebuildable data shares its existing byte budget. Charge allocation and metadata
 
 `cache.body_bytes` also charges pinned popup source bodies and inactive browser scope presentations. Scope keys include mode, archive filter, descendant root (for Watch), and query. A hit paints retained presentation rows while the ordinary owner freshness read proceeds. Cached rows never supply action targets, cursors, patch evidence, or a revision. The returned current-generation page replaces the presentation preview. Only currently used previews are pinned; closed scopes and inactive Thread views share eviction order.
 
-`cache.layout_bytes` also charges the popup reader's wrapped rows, including styles and owned text. The visible readers are protected during layout eviction. Rebuild a missing layout from the popup's source, never from truncated display rows. Copy continues to use the original source. Native `status --memory` displays client cache accounting alongside, but separately from, the owner observation; it is not an atomic snapshot or a total process memory measurement.
+`cache.layout_bytes` also charges the popup reader's wrapped rows, including styles and owned text. The visible readers are protected during layout eviction. An oversized layout is not retained; the reader renders the requested viewport from the original source without shortening scroll bounds. Copy continues to use the original source. Native `status --memory` displays client cache accounting alongside, but separately from, the owner observation; it is not an atomic snapshot or a total process memory measurement.
 
 
 entryは表示対象historyの変換済みStringと、描画と同じRatatui Paragraph/Wrap(trim:false)が計算したwrapped行数。描画中はArcで借り、cache hitで本文Stringを複製しない。予算には変換Stringのcapacity、key中のID/開閉集合、entryと管理metadataを含める。0又は単独entryが予算を超える場合はそのframeの作業領域だけとし保持しない。LRUからの回収はanchor/ordinal/本文windowを変更しない。本文revisionが変わった同じviewの旧entryは破棄し、元本文回収後に古い変換結果を表示しない。幅や高さ、開閉、anchorが異なる結果は別keyで、同一Threadの再選択も元の本文revisionが同じなら再利用できる。
 
-UI本文LRUは最初にactive anchor周辺の最大3nodeを作業領域として固定し、それ以外の本文/metadata/未使用Vec capacityを同じbody_bytes counterへ計上する。inactive Threadは選択generationの古い順（同値はview ID順）に本文、そのpage metadataを回収し、activeはworking外の遠方から回収する。inactive page破棄はVec::newへの置換でstruct bufferも解放する。active pageの縮小後は余分なstruct capacityも解放する。予算内のinactive本文を、除外対象のactive本文サイズだけを理由に消さない。先頭node削除だけfirst_ordinalを増やし、選択revisionと元anchorを保持して原文の前後pageを再取得する。
+UI本文LRUは最初にactive anchor周辺の最大3nodeを作業領域として固定し、それ以外の本文/metadata/未使用Vec capacityを同じbody_bytes counterへ計上する。inactive Threadとbrowser scopeは最終使用時刻の古い順に本文、そのpage metadataを回収し、activeはworking外の遠方から回収する。inactive page破棄はVec::newへの置換でstruct bufferも解放する。active pageの縮小後は余分なstruct capacityも解放する。予算内のinactive本文を、除外対象のactive本文サイズだけを理由に消さない。先頭node削除だけfirst_ordinalを増やし、選択revisionと元anchorを保持して原文の前後pageを再取得する。
 
 frontendのstream tailは巨大deltaをtrimした後の余剰String capacityと不要reasoning_ranges capacityも解放し、小さいtailだけを保持しているのに元deltaの大きなbufferが残ることを避ける。
 

@@ -366,6 +366,7 @@ enum BackgroundResult {
     },
     Refreshed {
         thread_id: String,
+        settled_submissions: Vec<String>,
         receipts: Result<Vec<(String, ReceiptStatus)>, ApiError>,
         progress: Option<Result<activity::Projection, ApiError>>,
         epoch: u64,
@@ -3144,12 +3145,14 @@ async fn run_client(
                 }
                 Some(BackgroundResult::Refreshed {
                     thread_id,
+                    settled_submissions,
                     receipts,
                     progress,
                     epoch,
                     generation,
                 }) => {
                     refreshing.remove(&thread_id);
+                    native_page::retire_submissions(&mut known_submissions, &settled_submissions);
                     if let (Some(result), Some(generation)) = (progress, generation) {
                         selection
                             .publish_activity(&updates, thread_id.clone(), generation, epoch, result)
