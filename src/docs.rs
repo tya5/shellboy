@@ -460,7 +460,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
     let docs: &[Document] = &bundled.docs;
     let version = bundled.version.as_str();
     match command {
-        DocsCommand::Source { .. } => {
+        DocsCommand::Source { .. } | DocsCommand::Index { .. } => {
             Err("invalid_argument: Source operations need a configuration context".into())
         }
         DocsCommand::List {
