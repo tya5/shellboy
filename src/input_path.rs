@@ -2,6 +2,7 @@
 use std::path::{Path, PathBuf};
 
 /// Maximum entries observed by a registered-folder walk.
+pub(crate) const FOLDER_WALK_MAX_DEPTH: usize = 64;
 pub(crate) const FOLDER_WALK_MAX_ENTRIES: usize = 100_000;
 
 pub(crate) fn relative_to(path: &Path, cwd: &Path) -> PathBuf {

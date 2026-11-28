@@ -1,11 +1,12 @@
 use super::*;
+use crate::input_path::{FOLDER_WALK_MAX_DEPTH, FOLDER_WALK_MAX_ENTRIES};
 use crate::{
     config::{PathEnvironment, resolve_config_path},
     config_edit,
     protocol::{ApiError, ConfigChange, ErrorCode, PROTOCOL_VERSION},
 };
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs::{self, File},
     io::{Read, Seek, SeekFrom},
     path::{Component, Path, PathBuf},
@@ -179,7 +180,7 @@ pub fn configured_response(command: DocsCommand, explicit: Option<&Path>, cwd: &
             | DocsCommand::Search {
                 parent, sources, ..
             } => {
-                (parent.as_ref().as_deref().is_some_and(is_bundled) || !sources.is_empty())
+                (parent.as_deref().is_some_and(is_bundled) || !sources.is_empty())
                     && sources.iter().all(|s| s == "shellboy")
             }
             _ => false,
@@ -418,31 +419,23 @@ pub(super) fn preview(row: &Registration) -> Value {
     let mut bytes = 0u64;
     let observed = (|| {
         let root = canonical_root(&row.path)?;
-        let mut pending = vec![(String::new(), 0usize)];
-        let mut work = LIST_WORK;
-        while let Some((rel, depth)) = pending.pop() {
-            if work == 0 {
-                return Err("work_limit".into());
-            }
-            let path = under(&root, &rel)?;
-            for name in sorted_names(&path)? {
-                work = work.checked_sub(1).ok_or("work_limit")?;
-                let Some((rel, path, directory)) = child(&root, &rel, &name)? else {
-                    continue;
-                };
-                if directory {
-                    if depth >= 31 {
-                        return Err("depth_limit".into());
-                    }
-                    pending.push((rel, depth + 1));
-                } else {
+        let mut walk = FolderWalk::default();
+        walk.enter(String::new(), &root);
+        let mut directories = BTreeMap::new();
+        for _ in 0..=FOLDER_WALK_MAX_ENTRIES {
+            match walk.step(&root, &mut directories)? {
+                WalkStep::Done => return Ok(()),
+                WalkStep::Directory(rel, path) => walk.enter(rel, &path),
+                WalkStep::File(_, path) => {
                     prefix(&path, 0, TEXT_WORK)?;
                     count += 1;
                     bytes = bytes.saturating_add(fs::metadata(path).map_err(io_error)?.len());
                 }
+                WalkStep::Unavailable(_, reason) => return Err(reason),
+                WalkStep::Advanced => {}
             }
         }
-        Ok::<(), String>(())
+        Err("work_limit".into())
     })();
     let mut result =
         json!({"source":row.name,"files":count,"bytes":bytes,"complete":observed.is_ok()});
@@ -644,110 +637,97 @@ fn bundled_list(parent: Option<&str>) -> Result<Vec<Value>, String> {
         .collect())
 }
 
-#[derive(Default)]
-struct SearchPosition {
-    bundled: usize,
-    source: usize,
-    frames: Vec<Frame>,
-    file: Option<(String, usize, String)>,
+#[derive(Default, Serialize, Deserialize)]
+struct FolderWalk {
+    path: String,
+    levels: Vec<(String, usize)>,
 }
-struct Frame {
-    name: String,
-    after: Vec<u8>,
-    revision: String,
+
+enum WalkStep {
+    Directory(String, PathBuf),
+    File(String, PathBuf),
+    Unavailable(String, String),
+    Advanced,
+    Done,
+}
+
+impl FolderWalk {
+    fn enter(&mut self, path: String, folder: &Path) {
+        self.path = path;
+        self.levels.push((revision(folder), 0));
+    }
+
+    fn leave(&mut self) {
+        self.levels.pop();
+        self.path.truncate(if self.levels.is_empty() {
+            0
+        } else {
+            self.path.rfind('/').unwrap_or(0)
+        });
+    }
+
+    fn step(
+        &mut self,
+        root: &Path,
+        dirs: &mut BTreeMap<String, Vec<std::ffi::OsString>>,
+    ) -> Result<WalkStep, String> {
+        use std::collections::btree_map::Entry;
+        let Some((saved, next)) = self.levels.last_mut() else {
+            return Ok(WalkStep::Done);
+        };
+        let names = match dirs.entry(self.path.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let names = under(root, &self.path).and_then(|path| {
+                    if revision(&path) != *saved {
+                        return Err("cursor_expired: Docs folder changed".into());
+                    }
+                    sorted_names(&path)
+                });
+                match names {
+                    Ok(names) => entry.insert(names),
+                    Err(reason) if reason.starts_with("cursor_expired:") => return Err(reason),
+                    Err(reason) => {
+                        let path = self.path.clone();
+                        self.leave();
+                        return Ok(WalkStep::Unavailable(path, reason));
+                    }
+                }
+            }
+        };
+        if *next > names.len() {
+            return Err("cursor_expired: Invalid folder position".into());
+        }
+        let Some(name) = names.get(*next) else {
+            dirs.remove(&self.path);
+            self.leave();
+            return Ok(if self.levels.is_empty() {
+                WalkStep::Done
+            } else {
+                WalkStep::Advanced
+            });
+        };
+        *next += 1;
+        Ok(match child(root, &self.path, name) {
+            Ok(Some((rel, path, false))) => WalkStep::File(rel, path),
+            Ok(Some((rel, path, true))) if self.levels.len() <= FOLDER_WALK_MAX_DEPTH => {
+                WalkStep::Directory(rel, path)
+            }
+            Ok(Some((rel, _, true))) => WalkStep::Unavailable(rel, "depth_limit".into()),
+            Ok(None) => WalkStep::Advanced,
+            Err(reason) => {
+                WalkStep::Unavailable(child_path(&self.path, &name.to_string_lossy()), reason)
+            }
+        })
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
 struct SearchMark {
     bundled: usize,
     source: usize,
-    path: String,
-    revisions: Vec<String>,
-    file: Option<(usize, String)>,
-}
-
-impl SearchMark {
-    fn from_position(pos: &SearchPosition) -> Self {
-        let mut path = frame_path(&pos.frames).into_bytes();
-        if let Some(frame) = pos.frames.last() {
-            if !path.is_empty() {
-                path.push(b'/');
-            }
-            path.extend(&frame.after);
-        } else if let Some((name, _, _)) = &pos.file {
-            path.extend(name.as_bytes());
-        }
-        Self {
-            bundled: pos.bundled,
-            source: pos.source,
-            path: URL_SAFE_NO_PAD.encode(path),
-            revisions: pos
-                .frames
-                .iter()
-                .map(|frame| frame.revision.clone())
-                .collect(),
-            file: pos
-                .file
-                .as_ref()
-                .map(|(_, offset, rev)| (*offset, rev.clone())),
-        }
-    }
-
-    fn resume(self, root: &str) -> Result<SearchPosition, String> {
-        let invalid = "cursor_expired: Invalid search position";
-        let path = URL_SAFE_NO_PAD.decode(self.path).map_err(|_| invalid)?;
-        let mut pos = SearchPosition {
-            bundled: self.bundled,
-            source: self.source,
-            ..Default::default()
-        };
-        if self.revisions.len() > 32 {
-            return Err(invalid.into());
-        }
-        let last = if self.revisions.is_empty() {
-            path.as_slice()
-        } else {
-            let tail = if root.is_empty() {
-                path.as_slice()
-            } else {
-                path.strip_prefix(root.as_bytes())
-                    .and_then(|tail| tail.strip_prefix(b"/"))
-                    .ok_or(invalid)?
-            };
-            let parts: Vec<_> = tail.split(|&b| b == b'/').collect();
-            if parts.len() != self.revisions.len() {
-                return Err(invalid.into());
-            }
-            let mut name = root;
-            for (part, revision) in parts.iter().zip(self.revisions) {
-                pos.frames.push(Frame {
-                    name: name.into(),
-                    after: part.to_vec(),
-                    revision,
-                });
-                // The final key may be an unprojectable native filename.
-                name = std::str::from_utf8(part).unwrap_or("");
-            }
-            parts.last().copied().ok_or(invalid)?
-        };
-        if let Some((offset, rev)) = self.file {
-            pos.file = Some((
-                std::str::from_utf8(last).map_err(|_| invalid)?.into(),
-                offset,
-                rev,
-            ));
-        }
-        Ok(pos)
-    }
-}
-
-fn frame_path(frames: &[Frame]) -> String {
-    frames
-        .iter()
-        .map(|frame| frame.name.as_str())
-        .filter(|name| !name.is_empty())
-        .collect::<Vec<_>>()
-        .join("/")
+    walk: FolderWalk,
+    file: Option<(String, usize, String)>,
 }
 
 fn hit(
@@ -798,8 +778,35 @@ fn search(
         .as_deref()
         .and_then(|p| p.split_once('/'))
         .map_or("", |p| p.1);
-    let mark: SearchMark = decode_cursor(cursor.as_deref(), version, &scope, CURSOR_BYTES)?;
-    let mut pos = mark.resume(root_rel)?;
+    let mut pos: SearchMark = decode_cursor(cursor.as_deref(), version, &scope, CURSOR_BYTES)?;
+    let depth = if pos.walk.path == root_rel {
+        Some(0)
+    } else {
+        let tail = if root_rel.is_empty() {
+            Some(pos.walk.path.as_str())
+        } else {
+            pos.walk
+                .path
+                .strip_prefix(root_rel)
+                .and_then(|tail| tail.strip_prefix('/'))
+        };
+        tail.map(|tail| tail.split('/').count())
+    };
+    if (!pos.walk.levels.is_empty()
+        && (depth.is_none_or(|n| n > FOLDER_WALK_MAX_DEPTH || n + 1 != pos.walk.levels.len())
+            || pos
+                .file
+                .as_ref()
+                .is_some_and(|(name, _, _)| name.contains('/'))))
+        || (pos.walk.levels.is_empty()
+            && (!pos.walk.path.is_empty()
+                || pos
+                    .file
+                    .as_ref()
+                    .is_some_and(|(name, _, _)| name != root_rel)))
+    {
+        return Err("cursor_expired: Invalid search position".into());
+    }
     let needle = query.to_lowercase();
     let mut hits = Vec::new();
     let mut unavailable = Vec::new();
@@ -828,8 +835,8 @@ fn search(
     let bundled_count = bundled_hits.len();
     hits.extend(bundled_hits.into_iter().skip(pos.bundled).take(count));
     pos.bundled += hits.len();
-    let mut page_dirs = std::collections::BTreeMap::new();
-    let mut page_roots = std::collections::BTreeMap::new();
+    let mut dirs = BTreeMap::new();
+    let mut current_root = None;
     while pos.source < rows.len() && hits.len() < count && work < SEARCH_WORK {
         let row = &rows[pos.source];
         if !included(&sources, &row.name)
@@ -841,23 +848,27 @@ fn search(
             work += 1;
             continue;
         }
-        let root = match page_roots
-            .entry(pos.source)
-            .or_insert_with(|| canonical_root(&row.path))
+        if current_root
+            .as_ref()
+            .is_none_or(|(source, _)| *source != pos.source)
         {
-            Ok(path) => path,
-            Err(_) => {
-                unavailable.push(branch(&row.name, false, version));
-                pos.frames.clear();
-                pos.file = None;
-                pos.source += 1;
-                work += 1;
-                continue;
+            dirs.clear();
+            match canonical_root(&row.path) {
+                Ok(root) => current_root = Some((pos.source, root)),
+                Err(_) => {
+                    unavailable.push(branch(&row.name, false, version));
+                    pos.walk = FolderWalk::default();
+                    pos.file = None;
+                    pos.source += 1;
+                    work += 1;
+                    continue;
+                }
             }
-        };
+        }
+        let (_, root) = current_root.as_ref().expect("opened source root");
         if let Some((name, offset, rev)) = pos.file.take() {
             work += 1;
-            let rel = child_path(&frame_path(&pos.frames), &name);
+            let rel = child_path(&pos.walk.path, &name);
             let observation = under(root, &rel).and_then(|path| {
                 let meta = fs::metadata(&path).map_err(io_error)?;
                 Ok((path, meta))
@@ -866,7 +877,7 @@ fn search(
                 Ok(value) => value,
                 Err(reason) => {
                     unavailable.push(json!({"source":row.name,"path":rel,"reason":reason}));
-                    if pos.frames.is_empty() {
+                    if pos.walk.levels.is_empty() {
                         pos.source += 1;
                     }
                     continue;
@@ -883,7 +894,7 @@ fn search(
                 Ok(value) => value,
                 Err(reason) => {
                     unavailable.push(json!({"source":row.name,"path":rel,"reason":reason}));
-                    if pos.frames.is_empty() {
+                    if pos.walk.levels.is_empty() {
                         pos.source += 1;
                     }
                     continue;
@@ -903,22 +914,32 @@ fn search(
                 // Repeat only enough UTF-8 text to catch a match across chunks.
                 let overlap = text.ceil_char_boundary(text.len().saturating_sub(query.len() * 4));
                 pos.file = Some((name, offset + overlap, rev));
-            } else if pos.frames.is_empty() {
+                if next_cursor(version, &scope, &pos).len() > CURSOR_BYTES {
+                    pos.file = None;
+                    unavailable
+                        .push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
+                    if pos.walk.levels.is_empty() {
+                        pos.source += 1;
+                    }
+                }
+            } else if pos.walk.levels.is_empty() {
                 pos.source += 1;
             }
             continue;
         }
-        if pos.frames.is_empty() {
-            work += 1;
-            let rel = root_rel;
-            match under(root, rel) {
-                Ok(path) if path.is_dir() => pos.frames.push(Frame {
-                    name: rel.into(),
-                    after: Vec::new(),
-                    revision: revision(&path),
-                }),
-                Ok(path) if path.is_file() && rel.ends_with(".md") => {
-                    pos.file = Some((rel.into(), 0, revision(&path)));
+        work += 1;
+        if pos.walk.levels.is_empty() {
+            match under(root, root_rel) {
+                Ok(path) if path.is_dir() => pos.walk.enter(root_rel.into(), &path),
+                Ok(path) if path.is_file() && root_rel.ends_with(".md") => {
+                    pos.file = Some((root_rel.into(), 0, revision(&path)));
+                    if next_cursor(version, &scope, &pos).len() > CURSOR_BYTES {
+                        pos.file = None;
+                        unavailable.push(
+                            json!({"source":row.name,"path":root_rel,"reason":"path_too_long"}),
+                        );
+                        pos.source += 1;
+                    }
                     continue;
                 }
                 _ => {
@@ -927,123 +948,59 @@ fn search(
                     continue;
                 }
             }
-        }
-        // A frame is reopened only once per page (then kept in this page's cache).
-        while !pos.frames.is_empty() {
-            if work >= SEARCH_WORK || pos.frames.len() > 32 {
-                break;
-            }
-            let parent = frame_path(&pos.frames);
-            let frame = pos.frames.last_mut().expect("frame");
-            let key = (pos.source, parent.clone());
-            if let std::collections::btree_map::Entry::Vacant(slot) = page_dirs.entry(key.clone()) {
-                let names = under(root, &parent).and_then(|path| {
-                    if revision(&path) != frame.revision {
-                        return Err("cursor_expired: Docs folder changed".into());
-                    }
-                    sorted_names(&path)
-                });
-                match names {
-                    Ok(names) => {
-                        slot.insert(names);
-                    }
-                    Err(reason) if reason.starts_with("cursor_expired:") => return Err(reason),
-                    Err(reason) => {
-                        unavailable.push(json!({"source":row.name,"path":parent,"reason":reason}));
-                        pos.frames.pop();
-                        work += 1;
-                        continue;
-                    }
-                }
-            }
-            let names = &page_dirs[&key];
-            work += 1;
-            let next =
-                names.partition_point(|name| name.as_encoded_bytes() <= frame.after.as_slice());
-            let Some(name) = names.get(next) else {
-                page_dirs.remove(&key);
-                pos.frames.pop();
+            if !folder_cursor_fits(&mut pos, version, &scope) {
+                unavailable
+                    .push(json!({"source":row.name,"path":root_rel,"reason":"path_too_long"}));
+                pos.walk.leave();
+                pos.source += 1;
                 continue;
-            };
-            frame.after = name.as_encoded_bytes().to_vec();
-            let (rel, path, directory) = match child(root, &parent, name) {
-                Ok(Some(entry)) => entry,
-                Ok(None) => continue,
-                Err(reason) => {
-                    unavailable.push(json!({"source":row.name,"path":child_path(&parent, &name.to_string_lossy()),"reason":reason}));
-                    continue;
-                }
-            };
-            let name = name.to_string_lossy().into_owned();
-            let rev = revision(&path);
-            if directory {
-                if pos.frames.len() >= 32 {
-                    unavailable.push(json!({"source":row.name,"path":rel,"reason":"depth_limit"}));
-                } else {
-                    pos.frames.push(Frame {
-                        name,
-                        after: Vec::new(),
-                        revision: rev,
-                    });
-                }
-            } else {
-                pos.file = Some((name, 0, rev));
-                break;
             }
         }
-        if pos.frames.is_empty() && pos.file.is_none() {
-            pos.source += 1;
+        match pos.walk.step(root, &mut dirs)? {
+            WalkStep::Directory(rel, path) => {
+                pos.walk.enter(rel.clone(), &path);
+                if !folder_cursor_fits(&mut pos, version, &scope) {
+                    pos.walk.leave();
+                    unavailable
+                        .push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
+                }
+            }
+            WalkStep::File(rel, path) => {
+                pos.file = Some((
+                    rel.rsplit('/').next().expect("guide filename").into(),
+                    0,
+                    revision(&path),
+                ));
+                if next_cursor(version, &scope, &pos).len() > CURSOR_BYTES {
+                    pos.file = None;
+                    unavailable
+                        .push(json!({"source":row.name,"path":rel,"reason":"path_too_long"}));
+                }
+            }
+            WalkStep::Unavailable(path, reason) => {
+                unavailable.push(json!({"source":row.name,"path":path,"reason":reason}));
+                if pos.walk.levels.is_empty() {
+                    pos.source += 1;
+                }
+            }
+            WalkStep::Done => pos.source += 1,
+            WalkStep::Advanced => {}
         }
     }
-    let next = search_continuation(
-        &mut pos,
-        version,
-        &scope,
-        rows,
-        bundled_count,
-        &mut unavailable,
-    );
+    let next = (pos.source < rows.len() || pos.bundled < bundled_count)
+        .then(|| next_cursor(version, &scope, &pos));
     Ok(paginated(
         json!({"version":version,"mode":"keyword","items":hits,"unavailable":unavailable}),
         next,
     ))
 }
 
-fn search_continuation(
-    pos: &mut SearchPosition,
-    version: &str,
-    scope: &str,
-    rows: &[Registration],
-    bundled_len: usize,
-    unavailable: &mut Vec<Value>,
-) -> Option<String> {
-    while pos.source < rows.len() || pos.bundled < bundled_len {
-        let mark = SearchMark::from_position(pos);
-        let cursor = next_cursor(version, scope, &mark);
-        if cursor.len() <= CURSOR_BYTES {
-            return Some(cursor);
-        }
-        let had_file = pos.file.is_some();
-        let path = if let Some((name, _, _)) = pos.file.take() {
-            child_path(&frame_path(&pos.frames), &name)
-        } else {
-            frame_path(&pos.frames)
-        };
-        unavailable
-            .push(json!({"source":rows[pos.source].name,"path":path,"reason":"path_too_long"}));
-        // If just the file chunk cannot fit, try continuing after that file.
-        if had_file && !pos.frames.is_empty() {
-            let after_file = next_cursor(version, scope, SearchMark::from_position(pos));
-            if after_file.len() <= CURSOR_BYTES {
-                return Some(after_file);
-            }
-        }
-        // Continue after the closest ancestor whose actual marker fits.
-        if pos.frames.pop().is_none() || pos.frames.is_empty() {
-            pos.source += 1;
-        }
-    }
-    None
+fn folder_cursor_fits(pos: &mut SearchMark, version: &str, scope: &str) -> bool {
+    // A directory accepted now must remain resumable after its last entry.
+    pos.walk.levels.last_mut().expect("entered folder").1 = FOLDER_WALK_MAX_ENTRIES;
+    let fits = next_cursor(version, scope, &*pos).len() <= CURSOR_BYTES;
+    pos.walk.levels.last_mut().expect("entered folder").1 = 0;
+    fits
 }
 
 #[cfg(test)]
@@ -1082,44 +1039,6 @@ mod tests {
         let cursor = first["next_cursor"].as_str().unwrap();
         let second = search(Some(cursor.into()));
         assert_eq!(second["items"][0]["id"], format!("local/{relative}/b.md"));
-    }
-
-    #[test]
-    fn real_cursor_envelope_skips_only_the_branch_that_does_not_fit() {
-        // Model a directory beyond this host's full-path syscall limit. Use
-        // ordinary native components, genuine revision widths and the live codec.
-        let component = "\"".repeat(250);
-        let mut pos = SearchPosition {
-            frames: (0..17)
-                .map(|i| Frame {
-                    name: if i == 0 {
-                        String::new()
-                    } else {
-                        component.clone()
-                    },
-                    after: component.as_bytes().to_vec(),
-                    revision: "0123456789abcdef".into(),
-                })
-                .collect(),
-            ..Default::default()
-        };
-        let rows = [Registration {
-            name: "local".into(),
-            path: PathBuf::new(),
-        }];
-        let (version, scope) = ("catalogue", hash("filters"));
-        let branch = frame_path(&pos.frames);
-        let mut unavailable = Vec::new();
-        let cursor =
-            search_continuation(&mut pos, version, &scope, &rows, 0, &mut unavailable).unwrap();
-        assert_eq!(
-            unavailable,
-            [json!({"source":"local","path":branch,"reason":"path_too_long"})]
-        );
-        let mark: SearchMark = decode_cursor(Some(&cursor), version, &scope, CURSOR_BYTES).unwrap();
-        let resumed = mark.resume("").unwrap();
-        assert_eq!(resumed.frames.len(), 16);
-        assert_eq!(resumed.frames.last().unwrap().after, component.as_bytes());
     }
 
     #[test]
