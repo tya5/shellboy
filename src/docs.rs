@@ -271,8 +271,10 @@ struct Cursor<T> {
     scope: String,
     offset: T,
 }
+const CURSOR_BYTES: usize = 8192;
+
 fn read_cursor(cursor: Option<&str>, version: &str, scope: &str) -> Result<usize, String> {
-    decode_cursor(cursor, version, scope, 8192)
+    decode_cursor(cursor, version, scope, CURSOR_BYTES)
 }
 fn decode_cursor<T: Default + serde::de::DeserializeOwned>(
     cursor: Option<&str>,
