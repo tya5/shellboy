@@ -1956,18 +1956,21 @@ mod preparation_tests {
                 .await
         });
         let mut started = started;
-        tokio::time::timeout(Duration::from_secs(10), started.recv())
+        crate::test_watchdog::watchdog("later attachment observation started", started.recv())
             .await
             .unwrap()
             .unwrap();
         tokio::time::pause();
         tokio::time::advance(Duration::from_secs(31)).await;
         tokio::time::resume();
-        let prepared = tokio::time::timeout(Duration::from_secs(10), task)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let prepared = crate::test_watchdog::watchdog(
+            "attachment preparation returned while later read is stalled",
+            task,
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
         assert_eq!(*reads.lock().unwrap(), [early, later]);
         assert!(has_snapshot(&prepared, 0));
         assert_eq!(
@@ -1997,12 +2000,12 @@ mod preparation_tests {
                 })
                 .await
         });
-        tokio::time::timeout(Duration::from_secs(10), started)
+        crate::test_watchdog::watchdog("control file worker entered", started)
             .await
             .unwrap()
             .unwrap();
-        let prepared = tokio::time::timeout(
-            Duration::from_secs(10),
+        let prepared = crate::test_watchdog::watchdog(
+            "attachment prepared without the control file worker",
             service.prepare_snapshot(
                 "thread",
                 CancellationToken::new(),
