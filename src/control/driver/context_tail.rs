@@ -17,6 +17,8 @@ enum Outcome {
 struct ResultEntry {
     name: String,
     outcome: Outcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started: Option<bool>,
     stdout: String,
     truncated: bool,
 }
@@ -41,50 +43,55 @@ pub(super) async fn collect(
     }
     let limit =
         usize::try_from(control.store.config.limits.tool_excerpt_bytes).unwrap_or(usize::MAX);
-    use futures_util::{StreamExt, stream::FuturesOrdered};
-    let mut commands: FuturesOrdered<_> = definitions
-        .into_iter()
+    let base = serde_json::to_vec(&item(ENVELOPE.to_owned() + SUFFIX))
+        .expect("context item serializes")
+        .len();
+    let metadata: Vec<_> = definitions
+        .iter()
         .map(|definition| {
-            run(
-                control,
-                snapshot,
-                cancel,
-                start_gate.clone(),
-                definition,
-                limit,
+            escaped_size(
+                &serde_json::to_string(&ResultEntry {
+                    name: definition.name.clone(),
+                    outcome: Outcome::Cancelled,
+                    started: Some(false),
+                    stdout: String::new(),
+                    truncated: false,
+                })
+                .expect("context metadata serializes"),
             )
         })
         .collect();
-    let envelope = item(ENVELOPE.to_owned() + SUFFIX);
-    let base = serde_json::to_vec(&envelope)
-        .expect("context item serializes")
-        .len();
-    let mut remaining = limit.saturating_sub(base);
-    let mut entries = Vec::new();
-    let mut omitted = false;
-    let mut shortened = false;
-    while let Some(mut entry) = commands.next().await {
-        if cancel.is_cancelled() || omitted {
-            continue;
-        }
-        let comma = usize::from(!entries.is_empty());
-        match fit_entry(&mut entry, remaining.saturating_sub(comma)) {
-            Some(encoded) => {
-                shortened |= entry.truncated;
-                remaining -= escaped_size(&encoded) + comma;
-                entries.push(encoded);
-            }
-            None => omitted = true,
-        }
-    }
-    if cancel.is_cancelled() || base > limit {
+    let reserved = metadata
+        .iter()
+        .fold(base.saturating_add(definitions.len() - 1), |sum, size| {
+            sum.saturating_add(*size)
+        });
+    let Some(available) = limit.checked_sub(reserved) else {
+        return Ok(Some(item(SKIPPED.to_owned())));
+    };
+    let share = available / definitions.len();
+    let results = futures_util::future::join_all(definitions.into_iter().map(|definition| {
+        run(
+            control,
+            snapshot,
+            cancel,
+            start_gate.clone(),
+            definition,
+            share,
+        )
+    }))
+    .await;
+    if cancel.is_cancelled() {
         return Ok(None);
     }
-    let fact = if omitted || shortened {
-        "truncated"
-    } else {
-        "complete"
-    };
+    let mut entries = Vec::new();
+    let mut shortened = false;
+    for (mut entry, metadata) in results.into_iter().zip(metadata) {
+        let encoded = fit_entry(&mut entry, metadata + share).expect("metadata was reserved");
+        shortened |= entry.truncated;
+        entries.push(encoded);
+    }
+    let fact = if shortened { "truncated" } else { "complete" };
     Ok(Some(item(format!(
         "{ENVELOPE}{}],\"outcome\":\"{fact}\"}}",
         entries.join(",")
@@ -101,7 +108,7 @@ async fn run(
     cancel: &CancellationToken,
     start_gate: Arc<Mutex<bool>>,
     definition: super::super::context_command::Definition,
-    limit: usize,
+    share: usize,
 ) -> ResultEntry {
     let mut env = shell_output::cli_environment(control, &snapshot.thread);
     env.insert("SHELLBOY_RUN_ID".into(), snapshot.run.clone());
@@ -125,8 +132,10 @@ async fn run(
             args,
             env,
             start_gate,
+            Some(deadline),
         )
         .await;
+    let started = execution.is_ok();
     let mut bytes = Vec::new();
     let mut truncated = false;
     let outcome = match execution {
@@ -137,7 +146,7 @@ async fn run(
                     _ = tokio::time::sleep_until(deadline) => break Some(Outcome::TimedOut),
                     event = child.events.recv() => match event {
                         Some(ShellEvent::Output(chunk)) if chunk.stream == OutputStream::Stdout => {
-                            let keep = chunk.bytes.len().min(limit - bytes.len());
+                            let keep = chunk.bytes.len().min(share - bytes.len());
                             bytes.extend_from_slice(&chunk.bytes[..keep]);
                             truncated |= keep != chunk.bytes.len();
                         }
@@ -169,15 +178,27 @@ async fn run(
             })
         }
         Err(_) if cancel.is_cancelled() => Outcome::Cancelled,
+        Err(error)
+            if error
+                .details
+                .as_ref()
+                .and_then(|value| value["reason"].as_str())
+                == Some("deadline_before_spawn") =>
+        {
+            Outcome::TimedOut
+        }
         Err(_) => Outcome::Failed,
     };
     ResultEntry {
         name: definition.name,
+        started: (started || matches!(outcome, Outcome::TimedOut)).then_some(started),
         outcome,
         stdout: String::from_utf8_lossy(&bytes).into_owned(),
         truncated,
     }
 }
+
+const SKIPPED: &str = r#"{"context":"skipped","reason":"budget_too_small"}"#;
 
 // Reserve the larger outcome spelling, so truncation never grows the envelope.
 const ENVELOPE: &str = "{\"type\":\"context_commands\",\"results\":[";

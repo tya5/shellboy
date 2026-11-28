@@ -311,6 +311,27 @@ pub struct ShellSupervisor {
     #[cfg(all(unix, test))]
     descriptor_fixture: Arc<StdMutex<Option<descriptor_budget::DescriptorUse>>>,
 }
+fn start_deadline_error() -> ApiError {
+    ApiError::new(
+        ErrorCode::InvalidState,
+        "Shell deadline expired before process creation",
+    )
+    .details(serde_json::json!({"reason":"deadline_before_spawn"}))
+}
+
+#[cfg(any(unix, windows))]
+async fn lock_start_gate(
+    gate: &tokio::sync::Mutex<bool>,
+    deadline: Option<tokio::time::Instant>,
+) -> Result<tokio::sync::MutexGuard<'_, bool>, ApiError> {
+    match deadline {
+        Some(deadline) => tokio::time::timeout_at(deadline, gate.lock())
+            .await
+            .map_err(|_| start_deadline_error()),
+        None => Ok(gate.lock().await),
+    }
+}
+
 impl ShellSupervisor {
     pub fn new(config: &Config) -> Self {
         #[cfg(unix)]
@@ -372,7 +393,7 @@ impl ShellSupervisor {
     pub(crate) fn starts_closed(&self) -> bool {
         self.starts_closed.load(std::sync::atomic::Ordering::SeqCst)
     }
-    fn admit_start(&self) -> Result<(), ApiError> {
+    fn admit_start(&self, deadline: Option<tokio::time::Instant>) -> Result<(), ApiError> {
         // This load is the start-admission linearization point relative to the
         // Quit store. No await may occur between admission and native creation.
         if self.starts_closed() {
@@ -386,6 +407,9 @@ impl ShellSupervisor {
             // are serialized against each other and this live count (#450).
             #[cfg(unix)]
             descriptor_budget::admit(self.observe_descriptors())?;
+            if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+                return Err(start_deadline_error());
+            }
             Ok(())
         }
     }
@@ -404,6 +428,7 @@ impl ShellSupervisor {
             args,
             env,
             None,
+            None,
             SpawnOwner::Run(self.config.limits.shell_raw_bytes),
         )
         .await
@@ -415,7 +440,7 @@ impl ShellSupervisor {
         args: ShellToolArgs,
         env: BTreeMap<String, String>,
     ) -> Result<ShellExecution, ApiError> {
-        self.spawn_inner(execution_id, cwd, args, env, None, SpawnOwner::Thread)
+        self.spawn_inner(execution_id, cwd, args, env, None, None, SpawnOwner::Thread)
             .await
     }
     pub(crate) async fn spawn_guarded(
@@ -425,6 +450,7 @@ impl ShellSupervisor {
         args: ShellToolArgs,
         env: BTreeMap<String, String>,
         gate: Arc<tokio::sync::Mutex<bool>>,
+        deadline: Option<tokio::time::Instant>,
     ) -> Result<ShellExecution, ApiError> {
         self.spawn_inner(
             execution_id,
@@ -432,10 +458,12 @@ impl ShellSupervisor {
             args,
             env,
             Some(gate),
+            deadline,
             SpawnOwner::Run(self.config.limits.shell_raw_bytes),
         )
         .await
     }
+    #[allow(clippy::too_many_arguments)]
     async fn spawn_inner(
         &self,
         execution_id: String,
@@ -443,6 +471,7 @@ impl ShellSupervisor {
         args: ShellToolArgs,
         env: BTreeMap<String, String>,
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
+        deadline: Option<tokio::time::Instant>,
         owner: SpawnOwner,
     ) -> Result<ShellExecution, ApiError> {
         args.validate().map_err(|error| {
@@ -490,13 +519,14 @@ impl ShellSupervisor {
                 initial,
                 budget_size,
                 gate,
+                deadline,
                 owner,
             )
             .await
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = (cwd, env, initial, budget_size, gate, owner);
+            let _ = (cwd, env, initial, budget_size, gate, deadline, owner);
             Err(ApiError::new(
                 ErrorCode::InvalidState,
                 "shell executions are unsupported on this platform",
@@ -512,6 +542,7 @@ impl ShellSupervisor {
                 initial,
                 budget_size,
                 gate,
+                deadline,
                 owner,
             )
             .await
@@ -529,6 +560,7 @@ impl ShellSupervisor {
         initial: Option<Vec<u8>>,
         budget_size: usize,
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
+        deadline: Option<tokio::time::Instant>,
         owner: SpawnOwner,
     ) -> Result<ShellExecution, ApiError> {
         use std::process::Stdio;
@@ -552,7 +584,7 @@ impl ShellSupervisor {
             command.env("PATH", path);
         }
         let turn_gate = match &gate {
-            Some(gate) => Some(gate.lock().await),
+            Some(gate) => Some(lock_start_gate(gate, deadline).await?),
             None => None,
         };
         if turn_gate.as_ref().is_some_and(|guard| **guard) {
@@ -569,7 +601,7 @@ impl ShellSupervisor {
         // Serialize native publication with emergency force cleanup. No await
         // or DB/file work occurs while this short native ownership lock is held.
         let mut groups = self.native_groups.lock().unwrap_or_else(|e| e.into_inner());
-        self.admit_start()?;
+        self.admit_start(deadline)?;
         let child = command.spawn();
         // Release the parent's copies of guardian/exec-error endpoints before
         // observing EOF on the private launch acknowledgment.

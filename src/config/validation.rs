@@ -411,6 +411,13 @@ fn contains_toml_datetime(value: &serde_json::Value) -> bool {
 }
 impl Limits {
     fn validate_relations(&self) -> Result<(), ConfigError> {
+        // The fixed skipped context fact must fit even when no outcomes do.
+        if self.tool_excerpt_bytes < 138 {
+            return Err(invalid(
+                "limits.tool_excerpt_bytes",
+                "must be at least 138 bytes",
+            ));
+        }
         if self.attachment_file_bytes > self.attachment_request_bytes {
             return Err(invalid(
                 "limits.attachment_file_bytes",

@@ -528,6 +528,7 @@ impl ShellSupervisor {
         initial: Option<Vec<u8>>,
         budget_size: usize,
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
+        deadline: Option<tokio::time::Instant>,
         owner: SpawnOwner,
     ) -> Result<ShellExecution, ApiError> {
         let native_cwd = LaunchPath::Cwd.prepare(&cwd)?;
@@ -550,7 +551,7 @@ impl ShellSupervisor {
             .map_err(|error| error.hint(super::LAUNCH_INSPECT))?;
         let job = create_job().map_err(|error| error.hint(super::LAUNCH_INSPECT))?;
         let turn_gate = match &gate {
-            Some(gate) => Some(gate.lock().await),
+            Some(gate) => Some(lock_start_gate(gate, deadline).await?),
             None => None,
         };
         if turn_gate.as_ref().is_some_and(|guard| **guard) {
@@ -580,7 +581,7 @@ impl ShellSupervisor {
         // Attributes and their backing handle slices stay alive through this call.
         // Job assignment is part of creation, before the first instruction runs.
         let spawned_at = Instant::now();
-        self.admit_start()?;
+        self.admit_start(deadline)?;
         if unsafe {
             CreateProcessW(
                 exe.as_ptr(),
