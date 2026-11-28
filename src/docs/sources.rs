@@ -555,7 +555,7 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
             if let Some(id) = &parent {
                 if id == "shellboy" || id.starts_with("shellboy/") {
                     if included(&sources, "shellboy") {
-                        items = bundled_list(Some(id.clone()))?;
+                        items = bundled_list(Some(id))?;
                     }
                 } else {
                     let source = source_for(id, rows)?;
@@ -602,7 +602,16 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
             limit: count,
             cursor,
         } => search(query, parent, sources, count, cursor, rows, version),
-        other => super::execute(other),
+        DocsCommand::Get {
+            id,
+            sources,
+            section,
+            limit_bytes,
+            cursor,
+        } => bundled_get(id, sources, section, limit_bytes, cursor),
+        DocsCommand::Source { .. } | DocsCommand::Index { .. } => {
+            Err("invalid_argument: Source operations need a configuration context".into())
+        }
     }
 }
 fn included(filters: &[String], name: &str) -> bool {
@@ -618,16 +627,17 @@ fn selected(rows: &[Registration], filters: &[String]) -> Result<(), String> {
     }
     Ok(())
 }
-fn bundled_list(parent: Option<String>) -> Result<Vec<Value>, String> {
-    Ok(super::execute(DocsCommand::List {
-        parent,
-        sources: Vec::new(),
-        limit: LIST_WORK,
-        cursor: None,
-    })?["items"]
-        .as_array()
-        .expect("list items")
-        .clone())
+fn bundled_list(parent: Option<&str>) -> Result<Vec<Value>, String> {
+    let bundled = &*BUNDLED;
+    if let Some(id) = parent {
+        find(&bundled.docs, id)?;
+    }
+    Ok(bundled
+        .docs
+        .iter()
+        .filter(|doc| doc.parent_id == parent.unwrap_or_default())
+        .map(|doc| summary(doc, &bundled.version))
+        .collect())
 }
 
 #[derive(Default)]
@@ -786,28 +796,34 @@ fn search(
         .map_or("", |p| p.1);
     let mark: SearchMark = decode_cursor(cursor.as_deref(), version, &scope, CURSOR_BYTES)?;
     let mut pos = mark.resume(root_rel)?;
-    if pos.bundled > BUNDLED.docs.len() || pos.source > rows.len() {
-        return Err("cursor_expired: Invalid search position".into());
-    }
     let needle = query.to_lowercase();
     let mut hits = Vec::new();
     let mut unavailable = Vec::new();
     let mut work = 0;
     let bundled = &BUNDLED.docs;
-    while pos.bundled < bundled.len() && hits.len() < count && work < SEARCH_WORK {
-        let d = &bundled[pos.bundled];
-        pos.bundled += 1;
-        work += 1;
-        if included(&sources, "shellboy")
-            && !category(&d.id)
-            && parent
-                .as_ref()
-                .is_none_or(|p| d.id == *p || descendant(d, p, bundled))
-            && let Some(h) = hit(&d.id, &d.title, &d.parent_id, &d.text, &needle, 0, version)
-        {
-            hits.push(h);
-        }
+    let mut bundled_hits: Vec<_> = bundled
+        .iter()
+        .filter(|d| {
+            included(&sources, "shellboy")
+                && !category(&d.id)
+                && parent
+                    .as_ref()
+                    .is_none_or(|p| d.id == *p || descendant(d, p, bundled))
+        })
+        .filter_map(|d| hit(&d.id, &d.title, &d.parent_id, &d.text, &needle, 0, version))
+        .collect();
+    bundled_hits.sort_by(|a, b| {
+        b["score"]
+            .as_u64()
+            .cmp(&a["score"].as_u64())
+            .then_with(|| a["id"].as_str().cmp(&b["id"].as_str()))
+    });
+    if pos.bundled > bundled_hits.len() || pos.source > rows.len() {
+        return Err("cursor_expired: Invalid search position".into());
     }
+    let bundled_count = bundled_hits.len();
+    hits.extend(bundled_hits.into_iter().skip(pos.bundled).take(count));
+    pos.bundled += hits.len();
     let mut page_dirs = std::collections::BTreeMap::new();
     let mut page_roots = std::collections::BTreeMap::new();
     while pos.source < rows.len() && hits.len() < count && work < SEARCH_WORK {
@@ -980,7 +996,7 @@ fn search(
         version,
         &scope,
         rows,
-        bundled.len(),
+        bundled_count,
         &mut unavailable,
     );
     Ok(paginated(
