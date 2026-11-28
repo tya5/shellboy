@@ -18,10 +18,6 @@ pub(crate) struct Owner<'a> {
 }
 
 impl Owner<'_> {
-    pub(super) async fn mint_operation(&self) -> Result<String, ApiError> {
-        crate::ipc::mint_selected_operation(self.data_dir, self.instance).await
-    }
-
     pub(crate) async fn call<T: serde::de::DeserializeOwned>(
         &self,
         command: Command,
@@ -400,7 +396,7 @@ fn source_changed() -> ApiError {
     ApiError::new(ErrorCode::CursorExpired, "Selected history source changed")
 }
 
-fn invalid_response() -> ApiError {
+pub(super) fn invalid_response() -> ApiError {
     ApiError::new(
         ErrorCode::ProtocolMismatch,
         "Invalid selected history response",

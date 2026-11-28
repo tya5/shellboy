@@ -114,6 +114,7 @@ impl Management {
     }
     /// F8 closed: no refresh is read for it any more.
     pub(super) fn close(&mut self) {
+        self.cancel_wait();
         self.shown = None;
         self.pending_shown = None;
         self.refresh_pending = false;

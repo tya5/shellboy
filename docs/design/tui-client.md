@@ -338,3 +338,8 @@ reason, bounded answer and current shell evidence. The client uses the typed
 answer truncation fact and each row's `title_truncated` flag; it never infers
 truncation from length or opens SQLite. Detail, row refresh, and descendant
 reads retain their own owner read sequences.
+
+Detached-owner startup uses a 30-second client readiness deadline. While the
+single spawned owner initializes, a 50 ms probe interval bounds local socket
+traffic without making the client wait a full retry interval after readiness.
+A successful exact-profile Welcome ends probing; a refusal is not a restart.

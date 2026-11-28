@@ -551,6 +551,10 @@ impl Control {
             self.change_clock.record(&format!("fixture-gap-{i}"));
         }
     }
+    #[cfg(test)]
+    pub(crate) fn receipt_ready_for_test(&self) -> &Notify {
+        &self.changed
+    }
     fn publish_event(&self, event: EngineEvent) {
         let _ = self.events.send(event);
     }

@@ -108,7 +108,7 @@ fn launch_client(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_relaunched_native_client_restores_the_owner_saved_draft() {
-    use shellboy::protocol::{Command, DraftGetArgs, ThreadCreateArgs};
+    use shellboy::protocol::{Command, DraftGetArgs, StatusArgs, ThreadCreateArgs};
 
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
@@ -118,8 +118,82 @@ async fn a_relaunched_native_client_restores_the_owner_saved_draft() {
         "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n",
     ).unwrap();
     let binary = test_binary();
-    let _owner =
-        crate::pty_session::ServeFixture::start(&binary, root.path(), &config, &data).await;
+    let owner = shellboy::app::DataOwner::start(
+        Some(config.clone()),
+        Some(data.clone()),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = shellboy::control::Control::new(&owner, root.path().into());
+    control.start().await.unwrap();
+    let (send, receive) = tokio::sync::mpsc::channel(8);
+    let server = shellboy::ipc::LocalServer::bind(&owner, send)
+        .await
+        .unwrap();
+    let serving = tokio::spawn(control.serve(receive));
+    let (mut child, mut terminal) = launch_client(&binary, root.path(), &config, &data);
+    terminal.until_screen(&["F1"]).await;
+    // A real client is attached with no Thread to autosave while pressure rolls the epoch.
+    let status = shellboy::ipc::call(&data, Command::Status(StatusArgs::default()), None, None)
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    let epoch = status["operation_epoch"].as_str().unwrap();
+    let instance = status["instance_id"].as_str().unwrap();
+    let seed_epoch = epoch.to_owned();
+    let seed_instance = instance.to_owned();
+    owner.db.call(move |db| {
+        let tx = db.transaction()?;
+        for n in 0..31 {
+            tx.execute(r#"INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes,result_ref_json) VALUES (?1,?2,'"'||hex(zeroblob(4194304))||'"','hash','completed',?3,0,'0')"#,
+                rusqlite::params![format!("{seed_epoch}:pty-pressure-{n}"), seed_instance, chrono::Utc::now().to_rfc3339()])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let pressure = shellboy::ipc::call(
+        &data,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_thread_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let pressure = pressure
+        .error
+        .expect("receipt pressure must refuse admission");
+    assert_eq!(
+        pressure.details.as_ref().unwrap()["reason"],
+        "operation_epoch_rolled",
+        "{pressure:?}"
+    );
+    owner
+        .db
+        .call(|db| {
+            db.execute(
+                "DELETE FROM operation_receipt WHERE operation_id LIKE '%:pty-pressure-%'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let status = shellboy::ipc::call(&data, Command::Status(StatusArgs::default()), None, None)
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert_ne!(status["operation_epoch"], epoch);
+    assert_eq!(status["instance_id"], instance);
     let response = shellboy::ipc::call(
         &data,
         Command::ThreadCreate(ThreadCreateArgs {
@@ -148,8 +222,6 @@ async fn a_relaunched_native_client_restores_the_owner_saved_draft() {
 
     let select = format!("/switch {thread}\r");
     let draft = "draft survives client relaunch";
-    let (mut child, mut terminal) = launch_client(&binary, root.path(), &config, &data);
-    terminal.until_screen(&["F1"]).await;
     terminal.send(select.as_bytes());
     terminal.until_screen(&[title]).await;
     terminal.send(draft.as_bytes());
@@ -178,4 +250,7 @@ async fn a_relaunched_native_client_restores_the_owner_saved_draft() {
     terminal.until_screen(&[draft]).await;
     terminal.send(&[0x11]);
     assert!(terminal.until_exit(&mut child).await.success());
+    server.shutdown().await.unwrap();
+    serving.abort();
+    owner.shutdown().await.unwrap();
 }

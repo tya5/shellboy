@@ -52,19 +52,31 @@ impl Owner {
         );
     }
     async fn wait_for_display(&mut self, marker: &str) {
+        let master = self.terminal.as_ref().unwrap().try_clone().unwrap();
+        // SAFETY: this fixture owns the duplicated descriptor until deregistration.
+        let terminal = unsafe { tokio::io::unix::AsyncFd::register(master) }.unwrap();
         loop {
-            self.drain();
-            let display = String::from_utf8_lossy(&self.terminal_tail);
-            assert!(
-                self.child.try_wait().unwrap().is_none(),
-                "TUI exited before {marker}: {display}"
-            );
-            if display.contains(marker) {
+            if String::from_utf8_lossy(&self.terminal_tail).contains(marker) {
                 return;
             }
-            sleep(Duration::from_millis(5)).await;
+            let mut readable = terminal.readable().await.unwrap();
+            let mut bytes = [0; 8192];
+            match readable.try_io(|fd| fd.get_ref().read(&mut bytes)) {
+                Ok(Ok(n)) if n > 0 => {
+                    self.terminal_tail.extend_from_slice(&bytes[..n]);
+                    if self.terminal_tail.len() > 8192 {
+                        self.terminal_tail.drain(..self.terminal_tail.len() - 8192);
+                    }
+                }
+                Err(_) => continue,
+                result => panic!(
+                    "TUI closed before {marker}: {result:?}; {}",
+                    String::from_utf8_lossy(&self.terminal_tail)
+                ),
+            }
         }
     }
+
     async fn exited(&mut self) -> ExitStatus {
         crate::test_watchdog::watchdog("tests/termination_signals.rs: exited", async {
             loop {

@@ -371,11 +371,21 @@ pub(crate) async fn call_selected_operation(
     command: Command,
     operation_id: Option<String>,
 ) -> Result<Response<Value>, ApiError> {
+    call_selected(data_dir, instance, command, operation_id, None).await
+}
+
+pub(crate) async fn call_selected(
+    data_dir: &Path,
+    instance: &str,
+    command: Command,
+    operation_id: Option<String>,
+    announce: Option<&mut (dyn FnMut(&str) + Send)>,
+) -> Result<Response<Value>, ApiError> {
     let endpoint = read_endpoint(data_dir).await?;
     if endpoint.instance_id != instance {
         return Err(endpoint_mismatch());
     }
-    connect(endpoint, command, operation_id, None).await
+    connect_with_capability(endpoint, command, operation_id, None, None, announce).await
 }
 
 /// The CLI retries only a definite wait admission refusal, on the same owner.
@@ -612,21 +622,6 @@ async fn connect_with_capability(
         announce,
     )
     .await
-}
-
-pub(crate) async fn mint_selected_operation(
-    data_dir: &Path,
-    instance: &str,
-) -> Result<String, ApiError> {
-    let endpoint = read_endpoint(data_dir).await?;
-    if endpoint.instance_id != instance {
-        return Err(endpoint_mismatch());
-    }
-    let mut stream = open_transport(&endpoint, true)
-        .await?
-        .ok_or_else(|| io_error(std::io::ErrorKind::NotFound.into()))?;
-    let welcome = exchange_hello(&mut stream, &endpoint).await?;
-    Ok(crate::control::mint_operation_id(&welcome.operation_epoch))
 }
 
 pub(crate) async fn probe_selected(data_dir: &Path) -> Result<Option<Welcome>, ApiError> {

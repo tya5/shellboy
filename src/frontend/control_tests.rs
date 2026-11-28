@@ -770,25 +770,21 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
             })))
             .unwrap();
     }
-    crate::test_watchdog::watchdog("ordinary wait admission fills", async {
+    let wait_ids = crate::test_watchdog::watchdog("ordinary wait admission fills", async {
         loop {
+            let changed = control.receipt_ready_for_test().notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
             drain(&incoming);
-            let count: i64 = control
-                .store
-                .database
-                .call(|db| {
-                    Ok(db.query_row(
-                        "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
-                        [],
-                        |row| row.get(0),
-                    )?)
-                })
-                .await
-                .unwrap();
-            if count == 2 && slots.available_permits() == 0 {
-                break;
+            let pending = control.store.database.call(|db| {
+                let mut statement = db.prepare("SELECT operation_id FROM operation_receipt WHERE lane='wait' AND state='pending'")?;
+                let ids = statement.query_map([], |row| row.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(ids)
+            }).await.unwrap();
+            if pending.len() == 2 && slots.available_permits() == 0 {
+                break pending;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            changed.await;
         }
     })
     .await
@@ -855,6 +851,9 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
         .unwrap();
     crate::test_watchdog::watchdog("priority Thread stop settles", async {
         loop {
+            let changed = control.receipt_ready_for_test().notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
             drain(&incoming);
             let state: String = control
                 .store
@@ -871,7 +870,7 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
             if state == "stopped" {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            changed.await;
         }
     })
     .await
@@ -907,6 +906,41 @@ async fn thread_stop_remains_available_at_full_receipt_budget_and_saves_outcomes
         })
         .await
         .unwrap();
+    sender.try_send(UiAction::ManagementClosed).unwrap();
+    for operation_id in wait_ids {
+        crate::test_watchdog::watchdog("F8 close settles admitted Wait", async {
+            loop {
+                let changed = control.receipt_ready_for_test().notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let receipt = super::request(
+                    &control,
+                    Command::OperationGet(crate::protocol::OperationTarget {
+                        operation_id: operation_id.clone(),
+                    }),
+                )
+                .await
+                .unwrap();
+                if receipt["state"] != "pending" {
+                    assert_eq!(receipt["state"], "completed");
+                    assert_eq!(receipt["outcome"]["result"]["status"], "interrupted");
+                    break;
+                }
+                changed.await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    let independent = super::request(
+        &control,
+        Command::RunGet(crate::protocol::RunTarget {
+            run_id: "independent-run".into(),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(independent["state"], "live");
     sender.try_send(UiAction::Quit).unwrap();
     finish_bridge(bridge, &incoming).await;
 }

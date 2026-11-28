@@ -205,39 +205,10 @@ async fn management_request(
     cancel: CancellationToken,
 ) -> Result<Value, ApiError> {
     let is_read_projection = !command.requires_receipt();
-    let is_wait = matches!(command, Command::Wait(_));
-    let operation = if is_wait {
-        tokio::select! { biased;
-            _ = cancel.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
-            id = owner.mint_operation() => match id {
-                Ok(id) => Some(id),
-                Err(error) => return Ok(management::native_failure(error)),
-            },
-        }
-    } else {
-        None
-    };
-    let mut dispatch = std::pin::pin!(crate::ipc::call_selected_operation(
-        owner.data_dir,
-        owner.instance,
-        command,
-        operation.clone()
-    ));
-    let mut cancel_error = None;
+    let closes_connection = is_read_projection || matches!(command, Command::Wait(_));
     let response = tokio::select! { biased;
-        _ = cancel.cancelled(), if is_read_projection => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
-        response = &mut dispatch => response,
-        _ = cancel.cancelled(), if is_wait => {
-            let signal = owner.call::<Value>(Command::OperationCancel(crate::protocol::OperationTarget { operation_id: operation.expect("Wait has a selected operation ID") }));
-            tokio::pin!(signal);
-            tokio::select! { biased;
-                response = &mut dispatch => response,
-                result = &mut signal => {
-                    cancel_error = result.err();
-                    dispatch.await
-                },
-            }
-        },
+        _ = cancel.cancelled(), if closes_connection => return Err(ApiError::new(ErrorCode::InvalidState, "Observation closed")),
+        response = crate::ipc::call_selected_operation(owner.data_dir, owner.instance, command, None) => response,
     };
     let response = match response {
         Ok(response) => response,
@@ -261,9 +232,6 @@ async fn management_request(
     }
     if !is_read_projection && let Value::Object(object) = &mut result {
         object.insert("request_operation_id".into(), Value::String(operation_id));
-        if let Some(error) = cancel_error {
-            object.insert("cancellation_error".into(), serde_json::json!(error));
-        }
     }
     Ok(result)
 }
@@ -406,6 +374,10 @@ enum BackgroundResult {
         generation: u64,
         pause_notification_epoch: u64,
         result: Result<activity::Projection, ApiError>,
+    },
+    SendStarted {
+        thread: Option<String>,
+        submission: native_page::KnownSubmission,
     },
     Sent {
         generation: u64,
@@ -1430,43 +1402,10 @@ async fn run_client(
                         model,
                         effort,
                     } => {
-                        let operation_id = match selected.mint_operation().await {
-                            Ok(id) => id,
-                            Err(error) => {
-                                update(&updates, UiUpdate::Receipt { draft_id, revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(error.to_string()) }).await;
-                                continue;
-                            }
-                        };
                         let diagnostics = diagnostics.clone();
-                        let trace = MessageSendTrace {
-                            stage: MessageSendStage::Queued,
-                            draft_id: draft_id.clone(),
-                            revision,
-                            operation_id,
-                            message_id: None,
-                        };
-                        trace_send(&diagnostics, &trace, MessageSendStage::Queued, thread_id.as_deref(), None);
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = thread_id.clone();
-                        let accepting=UiUpdate::SendOperation {draft_id:draft_id.clone(),revision,operation_id:trace.operation_id.clone()};
-                        if let Some(thread) = &thread_id {
-                            native_page::remember(
-                                known_submissions.entry(thread.clone()).or_default(),
-                                native_page::KnownSubmission {
-                                    operation_id: trace.operation_id.clone(),
-                                    draft_id: draft_id.clone(),
-                                    revision,
-                                },
-                            );
-                        }
-                        let known = thread_id
-                            .as_ref()
-                            .and_then(|thread| known_submissions.get(thread))
-                            .cloned()
-                            .unwrap_or_default();
-                        if !actions.is_closing() {
-                            update(&updates, accepting).await;
-                        }
+                        let mut known = thread_id.as_ref().and_then(|thread| known_submissions.get(thread)).cloned().unwrap_or_default();
                         let projection_stop = cancel.clone();
                         images.begin_send(&draft_id, &attachments);
                         let data_dir = event_directory.clone();
@@ -1474,7 +1413,6 @@ async fn run_client(
                         let draft_bytes = config.limits.draft_bytes;
                         let sender = background_tx.clone();
                         send_workers.spawn(async move {
-                            trace_send(&diagnostics, &trace, MessageSendStage::Processing, thread_id.as_deref(), None);
                             let trace_thread = thread_id.as_deref().map(str::to_owned);
                             let ids = attachments
                                 .iter()
@@ -1488,7 +1426,7 @@ async fn run_client(
                                     )
                                 })?;
                                 let snapshot=message_queue::submission_snapshot(snapshot,&draft_id,revision,&text,&attachments,None,draft_bytes)?;
-                                compose_call(&native_history::Owner { data_dir: &data_dir, instance: &instance },
+                                let command =
                                     Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                         expected_thread_revision: thread_id.as_ref().map(|_| selection_revision),
                                         expected_source_message: None,
@@ -1497,17 +1435,9 @@ async fn run_client(
                                         create: ThreadCreateArgs { agents: None, connection, cwd: Some(cwd), model, effort, parent_thread_id: None },
                                         draft: Box::new(snapshot),
                                         deliver: crate::protocol::Deliver::Next,
-                                    })), Some(trace.operation_id.clone()),
-                                ).await
-                            }
-                            .await;
-                            trace_send(
-                                &diagnostics,
-                                &trace,
-                                if result.is_ok() { MessageSendStage::Saved } else { MessageSendStage::Failed },
-                                trace_thread.as_deref(),
-                                result.as_ref().ok(),
-                            );
+                                     }));
+                                submit_announced(&data_dir, &instance, command, &sender, &diagnostics, trace_thread.as_deref(), &draft_id, revision, &mut known).await
+                            }.await;
                             let projection=match &result {
                                 Ok(value)=>post_commit_projection(&projection_stop,
                                     HistoryReader::saved(&native_history::Owner { data_dir: &data_dir, instance: &instance },language,render_width,known,(draft_id.clone(),revision),generation,value)).await,
@@ -2025,28 +1955,10 @@ async fn run_client(
                         model,
                         effort,
                     } => {
-                        let operation_id = match selected.mint_operation().await {
-                            Ok(id) => id,
-                            Err(error) => {
-                                update(&updates, UiUpdate::Receipt { draft_id, revision, thread_id: None, status: ReceiptStatus::Failed, message: Some(error.to_string()) }).await;
-                                continue;
-                            }
-                        };
                         let diagnostics = diagnostics.clone();
-                        let trace = MessageSendTrace {
-                            stage: MessageSendStage::Queued,
-                            draft_id: draft_id.clone(),
-                            revision,
-                            operation_id,
-                            message_id: None,
-                        };
-                        trace_send(&diagnostics, &trace, MessageSendStage::Queued, Some(source_thread_id.as_str()), None);
                         selection.active_draft = Some(draft_id.clone());
                         selection.active_thread = None;
-                        let accepting=UiUpdate::SendOperation {draft_id:draft_id.clone(),revision,operation_id:trace.operation_id.clone()};
-                        if !actions.is_closing() {
-                            update(&updates, accepting).await;
-                        }
+                        let mut known = Vec::new();
                         let projection_stop = cancel.clone();
                         images.begin_send(&draft_id, &attachments);
                         let data_dir = event_directory.clone();
@@ -2054,7 +1966,6 @@ async fn run_client(
                         let draft_bytes = config.limits.draft_bytes;
                         let sender = background_tx.clone();
                         send_workers.spawn(async move {
-                            trace_send(&diagnostics, &trace, MessageSendStage::Processing, Some(source_thread_id.as_str()), None);
                             let trace_thread = Some(source_thread_id.clone());
                             let ids = attachments.iter().map(|a| a.id.clone()).collect();
                             let result = async {
@@ -2067,26 +1978,19 @@ async fn run_client(
                                         return Err(ApiError::new(ErrorCode::InvalidArgument, "Thread cwd must be valid Unicode"));
                                     }
                                 };
-                                compose_call(&native_history::Owner { data_dir: &data_dir, instance: &instance }, Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
+                                let command = Command::DraftSubmit(Box::new(crate::protocol::DraftSubmitArgs {
                                     thread_id: Some(source_thread_id),
                                     expected_thread_revision: Some(selection_revision),
                                     expected_source_message: snapshot.edit.as_ref().map(|edit| edit.node_id.clone()),
                                     create: ThreadCreateArgs { agents: None, cwd: Some(cwd), connection, model, effort, parent_thread_id: None },
                                     draft: Box::new(snapshot),
                                     deliver: crate::protocol::Deliver::Next,
-                                })), Some(trace.operation_id.clone())).await
-                            }
-                            .await;
-                            trace_send(
-                                &diagnostics,
-                                &trace,
-                                if result.is_ok() { MessageSendStage::Saved } else { MessageSendStage::Failed },
-                                trace_thread.as_deref(),
-                                result.as_ref().ok(),
-                            );
+                                 }));
+                                submit_announced(&data_dir, &instance, command, &sender, &diagnostics, trace_thread.as_deref(), &draft_id, revision, &mut known).await
+                            }.await;
                             let projection=match &result {
                                 Ok(value)=>post_commit_projection(&projection_stop,
-                                    HistoryReader::saved(&native_history::Owner { data_dir: &data_dir, instance: &instance },language,render_width,Vec::new(),(draft_id.clone(),revision),generation,value)).await,
+                                    HistoryReader::saved(&native_history::Owner { data_dir: &data_dir, instance: &instance },language,render_width,known,(draft_id.clone(),revision),generation,value)).await,
                                 Err(_)=>None,
                             };
                             let _ = sender
@@ -3202,6 +3106,14 @@ async fn run_client(
                 }) => {
                     selection.handle_initial_activity(&updates, &mut dirty_threads, (thread_id, generation, epoch, pause_notification_epoch), result).await;
                 }
+                Some(BackgroundResult::SendStarted { thread, submission }) => {
+                    if !actions.is_closing() {
+                        update(&updates, UiUpdate::SendOperation { draft_id: submission.draft_id.clone(), revision: submission.revision, operation_id: submission.operation_id.clone() }).await;
+                    }
+                    if let Some(thread) = thread {
+                        native_page::remember(known_submissions.entry(thread).or_default(), submission);
+                    }
+                },
                 Some(BackgroundResult::Sent {
                     generation, projection,
                     draft_id,
@@ -4005,6 +3917,90 @@ fn reconcile_compose<'a>(
         }
         Ok(())
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn submit_announced(
+    data: &Path,
+    instance: &str,
+    command: Command,
+    sender: &mpsc::Sender<BackgroundResult>,
+    diagnostics: &Diagnostics,
+    thread: Option<&str>,
+    draft_id: &str,
+    revision: u64,
+    known: &mut Vec<native_page::KnownSubmission>,
+) -> Result<Value, ApiError> {
+    let (announce, mut announced) = tokio::sync::oneshot::channel();
+    let mut announce = Some(announce);
+    let mut report_id = |id: &str| {
+        if let Some(announce) = announce.take() {
+            let _ = announce.send(id.to_owned());
+        }
+    };
+    let dispatch = crate::ipc::call_selected(data, instance, command, None, Some(&mut report_id));
+    tokio::pin!(dispatch);
+    let mut complete = None;
+    let id = tokio::select! { biased;
+        id = &mut announced => id.ok(),
+        reply = &mut dispatch => { complete = Some(reply); announced.try_recv().ok() },
+    };
+    let trace = if let Some(operation_id) = id {
+        let trace = MessageSendTrace {
+            stage: MessageSendStage::Queued,
+            draft_id: draft_id.into(),
+            revision,
+            operation_id: operation_id.clone(),
+            message_id: None,
+        };
+        trace_send(diagnostics, &trace, MessageSendStage::Queued, thread, None);
+        let submission = native_page::KnownSubmission {
+            operation_id,
+            draft_id: draft_id.into(),
+            revision,
+        };
+        native_page::remember(known, submission.clone());
+        let _ = sender
+            .send(BackgroundResult::SendStarted {
+                thread: thread.map(str::to_owned),
+                submission,
+            })
+            .await;
+        trace_send(
+            diagnostics,
+            &trace,
+            MessageSendStage::Processing,
+            thread,
+            None,
+        );
+        Some(trace)
+    } else {
+        None
+    };
+    let response = match complete {
+        Some(result) => result,
+        None => dispatch.await,
+    };
+    let result = response.and_then(|reply| {
+        if let Some(error) = reply.error {
+            return Err(error);
+        }
+        reply.result.ok_or_else(native_history::invalid_response)
+    });
+    if let Some(trace) = trace {
+        trace_send(
+            diagnostics,
+            &trace,
+            if result.is_ok() {
+                MessageSendStage::Saved
+            } else {
+                MessageSendStage::Failed
+            },
+            thread,
+            result.as_ref().ok(),
+        );
+    }
+    result
 }
 
 async fn compose_call<T: serde::de::DeserializeOwned>(

@@ -1849,8 +1849,22 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     }).await.unwrap();
     let control = Control::new(&owner, root.path().into());
     let observer = control.clone();
-    let (rpc_send, rpc_receive) = tokio::sync::mpsc::channel(8);
+    let (rpc_send, mut from_client) = tokio::sync::mpsc::channel::<shellboy::ipc::Invocation>(8);
     let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
+    let (to_owner, rpc_receive) = tokio::sync::mpsc::channel(8);
+    let (held_wait, mut wait_request) = tokio::sync::mpsc::channel(1);
+    tokio::spawn(async move {
+        while let Some(invocation) = from_client.recv().await {
+            let destination = if matches!(invocation.request.command, Command::Wait(_)) {
+                &held_wait
+            } else {
+                &to_owner
+            };
+            if destination.send(invocation).await.is_err() {
+                break;
+            }
+        }
+    });
     tokio::spawn(control.clone().serve(rpc_receive));
     let (send, receive) = tokio::sync::mpsc::channel(16);
     let (updates, mut incoming) = std::sync::mpsc::sync_channel(256);
@@ -2363,6 +2377,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         })
         .await
         .unwrap();
+    let data = root.path().join("data");
     send.send(UiAction::Manage(Command::Wait(WaitArgs {
         after: None,
         conditions: vec![WaitCondition::RunEnded {
@@ -2372,75 +2387,60 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })))
     .await
     .unwrap();
-    let operation_id = crate::test_watchdog::watchdog("Wait is registered before cancel", async {
-        loop {
-            let pending = observer
-                .store
-                .database
-                .call(|db| {
-                    use rusqlite::OptionalExtension;
-                    Ok(db.query_row(
-                        "SELECT substr(key,length('wait.pending.')+1) FROM app_meta WHERE key LIKE 'wait.pending.%'",
-                        [],
-                        |row| row.get::<_, String>(0),
-                    ).optional()?)
-                })
-                .await
-                .unwrap();
-            if let Some(operation_id) = pending {
-                break operation_id;
-            }
-        }
-    })
+    let invocation =
+        crate::test_watchdog::watchdog("native Wait reaches IPC dispatch", wait_request.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    let operation_id = invocation.request.operation_id.clone();
+    send.send(UiAction::ManagementClosed).await.unwrap();
+    crate::test_watchdog::watchdog(
+        "F8 close disconnects the held Wait",
+        invocation.disconnected.cancelled(),
+    )
     .await
     .unwrap();
-    send.send(UiAction::CancelWait).await.unwrap();
-    let outcome = next_state_update(&mut incoming, |update| match update {
-        UiUpdate::StructuredManagement { title, fields, .. } if title == "待機 | 条件を観測" => {
-            Some(fields)
-        }
-        _ => None,
-    })
-    .await;
-    assert_eq!(field(&outcome, "/status"), "cancelled");
-    assert_eq!(field(&outcome, "/request_operation_id"), operation_id);
-    let data = root.path().join("data");
+    let finished = crate::test_watchdog::watchdog(
+        "owner settles disconnected Wait",
+        observer.request_cancellable(invocation.request, invocation.disconnected),
+    )
+    .await
+    .unwrap();
+    assert!(finished.ok, "{:?}", finished.error);
     let receipt = shellboy::ipc::call(
         &data,
-        Command::OperationGet(OperationTarget {
-            operation_id: operation_id.clone(),
-        }),
+        Command::OperationGet(OperationTarget { operation_id }),
         None,
         None,
     )
     .await
     .unwrap();
     assert!(receipt.ok, "{:?}", receipt.error);
-    let receipt = receipt.result.unwrap();
-    assert_eq!(receipt["state"], "completed");
     assert_eq!(
-        receipt.pointer("/outcome/result/status").unwrap(),
-        "cancelled"
+        receipt
+            .result
+            .unwrap()
+            .pointer("/outcome/result/status")
+            .unwrap(),
+        "interrupted"
     );
-    for (id, reason) in [
-        (operation_id, "already_settled"),
-        ("unknown-wait".into(), "unknown_operation"),
-    ] {
-        let response = shellboy::ipc::call(
-            &data,
-            Command::OperationCancel(OperationTarget {
-                operation_id: id.clone(),
-            }),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(!response.ok);
-        let details = response.error.unwrap().details.unwrap();
-        assert_eq!(details["reason"], reason);
-        assert_eq!(details["target_operation_id"], id);
-    }
+    // A subsequent operation invalidates the previous History detail identity.
+    send.send(UiAction::Manage(Command::RunGet(RunTarget {
+        run_id: "observed-run".into(),
+    })))
+    .await
+    .unwrap();
+    next_state_update(&mut incoming, |update| match update {
+        UiUpdate::StructuredManagement { fields, .. }
+            if fields
+                .iter()
+                .any(|field| field.key == "/run_id" && field.value == "observed-run") =>
+        {
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
     send.send(UiAction::LoadManagementDetail {
         detail_request_id: 1,
         request_id: report_id,
@@ -2467,28 +2467,18 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         _ => None,
     })
     .await;
-    observer
-        .store
-        .database
-        .call(|db| {
-            assert_eq!(
-                db.query_row(
-                    "SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%'",
-                    [],
-                    |r| r.get::<_, i64>(0)
-                )?,
-                0
-            );
-            assert_eq!(
-                db.query_row("SELECT state FROM run WHERE id='observed-run'", [], |r| {
-                    r.get::<_, String>(0)
-                })?,
-                "live"
-            );
-            Ok(())
-        })
-        .await
-        .unwrap();
+    let run = shellboy::ipc::call(
+        &data,
+        Command::RunGet(RunTarget {
+            run_id: "observed-run".into(),
+        }),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(run.ok, "{:?}", run.error);
+    assert_eq!(run.result.unwrap()["state"], "live");
     send.send(UiAction::Quit).await.unwrap();
     crate::test_watchdog::drain_to_completion(bridge, &incoming, crate::test_watchdog::WATCHDOG)
         .await
@@ -2590,11 +2580,11 @@ async fn stale_history_navigation_recovers_after_path_change(remove_anchor: bool
         UiUpdate::HistoryInvalidated {
             thread_id,
             generation,
-            view_revision,
+            view_revision: Some(view_revision),
         } => {
             assert_eq!(thread_id, "navigation");
             assert_eq!(generation, 19);
-            assert_eq!(view_revision, Some(7));
+            assert_eq!(view_revision, 7);
             Some(())
         }
         UiUpdate::LoadFailed { message, .. } => {

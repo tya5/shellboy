@@ -31,8 +31,10 @@ impl ServeFixture {
         config: &std::path::Path,
         data: &std::path::Path,
     ) -> Self {
-        use shellboy::protocol::{Command, ThreadListArgs};
-        use std::process::{Command as Process, Stdio};
+        use std::{
+            io::{BufRead, BufReader},
+            process::{Command as Process, Stdio},
+        };
         let mut owner = Self(
             Process::new(binary)
                 .arg("--config")
@@ -42,33 +44,25 @@ impl ServeFixture {
                 .arg("serve")
                 .current_dir(cwd)
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
                 .expect("start disposable owner"),
         );
-        crate::test_watchdog::watchdog("disposable PTY owner readiness", async {
-            loop {
-                assert!(
-                    owner.0.try_wait().unwrap().is_none(),
-                    "disposable owner exited before readiness"
-                );
-                if shellboy::ipc::call(
-                    data,
-                    Command::ThreadList(ThreadListArgs::default()),
-                    None,
-                    None,
-                )
-                .await
-                .is_ok_and(|response| response.ok)
-                {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
+        let mut lines = BufReader::new(owner.0.stdout.take().unwrap()).lines();
+        let ready = crate::test_watchdog::watchdog(
+            "disposable PTY owner readiness",
+            tokio::task::spawn_blocking(move || lines.next()),
+        )
         .await
+        .unwrap()
+        .unwrap()
+        .expect("owner exited before readiness")
         .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&ready).unwrap()["event"],
+            "ready"
+        );
         owner
     }
 }
