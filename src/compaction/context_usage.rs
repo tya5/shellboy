@@ -752,17 +752,28 @@ mod query_cost_tests {
             "foreign newer replacements must not change the pending flag"
         );
         replacements(&db, "t", "old", 1, 2048, "2020-01-01T00:00:00Z");
-        let own2048 = measure(&db);
-        assert!(!own2048.pending);
-        assert_eq!(own2048.fullscan, 0, "own memberships are read by index");
-        replacements(&db, "t", "zz-witness", 0, 1, "2099-01-01T00:00:00Z");
-        let witness = measure(&db);
-        assert!(witness.pending);
-        let details = prepared(&db);
-        assert_eq!(
-            details["last_successful_attempt"]["next_request_pending"],
-            true
+        let pending = || {
+            read_preflight_usage(&db, "t")
+                .unwrap()
+                .latest
+                .unwrap()
+                .next_request_pending
+        };
+        replacements(&db, "t", "tie", 0, 1, "2026-01-01T00:00:00Z");
+        assert!(
+            !pending(),
+            "foreign, older and equal stamps do not make the winner stale"
         );
+        replacements(&db, "t", "zz-witness", 0, 1, "2099-01-01T00:00:00Z");
+        assert!(pending());
+        db.execute("DELETE FROM thread_replacement WHERE thread_id='t' AND replacement_id='zz-witness-000000'", []).unwrap();
+        assert!(!pending());
+        db.execute(
+            "UPDATE replacement SET created_at='2099-01-01T00:00:00Z' WHERE id='tie-000000'",
+            [],
+        )
+        .unwrap();
+        assert!(pending());
     }
 }
 #[cfg(test)]

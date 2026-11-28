@@ -576,7 +576,7 @@ pub fn fork_thread_kind(
     ).map_err(sql_error)?;
     // #182: the fork shares the parent's epoch, so it shares its kept set.
     tx.execute(
-        "INSERT INTO history_reasoning_keep(thread_id,epoch,node_id) SELECT ?1,k.epoch,k.node_id FROM history_reasoning_keep k JOIN thread_path p ON p.thread_id=?1 AND p.node_id=k.node_id WHERE k.thread_id=?2 AND k.epoch=?3",
+        "INSERT INTO history_reasoning_keep(thread_id,epoch,node_id) SELECT ?1,k.epoch,k.node_id FROM history_reasoning_keep k WHERE k.thread_id=?2 AND k.epoch=?3",
         params![new_thread_id,args.thread_id,source.5],
     )
     .map_err(sql_error)?;
