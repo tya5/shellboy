@@ -161,7 +161,9 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
     }).await.unwrap();
     let path = control.store.database.path().to_path_buf();
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
-    let (sender, receiver) = actions::channel(64);
+    // Match the production terminal action queue; a smaller fixture bound can
+    // reject a legitimate burst of actions while owner updates are being pumped.
+    let (sender, receiver) = actions::channel(128);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
     let bridge = tokio::spawn(super::run_with_clipboard(
         control.clone(),
