@@ -174,6 +174,8 @@ struct Plan {
     /// Some(nodes) when the replayed path is known; None reads the whole path.
     history: History,
     attachments_known_empty: bool,
+    context_tail: Option<Value>,
+    context_pending: bool,
     saved: Option<Value>,
 }
 enum History {
@@ -283,7 +285,10 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
         attachments_known_empty: manifest["attachments"]
             .as_array()
             .is_some_and(Vec::is_empty),
+        context_tail: manifest.get("context_tail").cloned(),
+        context_pending: false,
         saved: Some(json!({
+            "context_tail": manifest.get("context_tail"),
             "input_characters": manifest["input_characters"],
             "request_body_bytes": manifest["http_observation"]["request_body_bytes"],
             "prompt_cache_diagnostics": crate::model::cache_diagnostics::bounded(&manifest["prompt_cache_diagnostics"]),
@@ -360,6 +365,12 @@ fn next_plan(tx: &Connection, thread: &str, config: &Config) -> Result<Plan> {
         instructions,
         history: History::Current,
         attachments_known_empty: !attachments,
+        context_tail: None,
+        context_pending: tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM context_command WHERE thread_id=?1)",
+            [thread],
+            |r| r.get(0),
+        )?,
         saved: None,
     })
 }
@@ -434,6 +445,9 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             "attachment notices: depend on attachment state at send time".into(),
         );
     }
+    if let Some(item) = plan.context_tail.as_ref().and_then(|tail| tail.get("item")) {
+        parts.push(Part::Known(item.clone()));
+    }
     // The context line is saved history (#183). The next request appends a new
     // one only when the latest saved line is not the current context.
     if let Some(cwd) = &plan.cwd {
@@ -475,6 +489,12 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             None
         }
     };
+    if plan.context_pending {
+        note(
+            &mut parts,
+            "context tail: commands run only during request preparation".into(),
+        );
+    }
     let wire = if unknown.is_empty() {
         let input = parts
             .iter()
