@@ -28,7 +28,6 @@ pub struct Registration {
 }
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
-        && name.len() <= 128
         && name != "shellboy"
         && name
             .bytes()
@@ -37,16 +36,14 @@ fn valid_name(name: &str) -> bool {
 impl DocsConfig {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         let mut names = HashSet::new();
-        if self.sources.len() > LIST_WORK
-            || self.sources.iter().any(|row| {
-                !valid_name(&row.name)
-                    || !row.path.is_absolute()
-                    || row.path.to_str().is_none_or(|p| p.len() > 4096)
-                    || !names.insert(&row.name)
-            })
-        {
+        if self.sources.iter().any(|row| {
+            !valid_name(&row.name)
+                || !row.path.is_absolute()
+                || row.path.to_str().is_none_or(|p| p.len() > 4096)
+                || !names.insert(&row.name)
+        }) {
             return Err(
-                "Expected up to 200 unique, non-reserved names and absolute UTF-8 paths (up to 4096 bytes)",
+                "Expected unique, non-reserved names and absolute UTF-8 paths (up to 4096 bytes)",
             );
         }
         Ok(())
@@ -174,8 +171,7 @@ pub fn configured_response(command: DocsCommand, explicit: Option<&Path>, cwd: &
         // recovery route when the combined catalogue cannot read its sources.
         let bundled_only = match &command {
             DocsCommand::Get { id, sources, .. } => {
-                (id == "shellboy" || id.starts_with("shellboy/"))
-                    && sources.iter().all(|s| s == "shellboy")
+                is_bundled(id) && sources.iter().all(|s| s == "shellboy")
             }
             DocsCommand::List {
                 parent, sources, ..
@@ -183,10 +179,7 @@ pub fn configured_response(command: DocsCommand, explicit: Option<&Path>, cwd: &
             | DocsCommand::Search {
                 parent, sources, ..
             } => {
-                (parent
-                    .as_ref()
-                    .is_some_and(|id| id == "shellboy" || id.starts_with("shellboy/"))
-                    || !sources.is_empty())
+                (parent.as_ref().as_deref().is_some_and(is_bundled) || !sources.is_empty())
                     && sources.iter().all(|s| s == "shellboy")
             }
             _ => false,
@@ -194,13 +187,7 @@ pub fn configured_response(command: DocsCommand, explicit: Option<&Path>, cwd: &
         if bundled_only {
             return browse(command, &[]).map_err(browse_error);
         }
-        let path = resolve_config_path(explicit, cwd, &PathEnvironment::current())
-            .map_err(|e| refusal(ErrorCode::ConfigInvalid, e.to_string()))?;
-        let state = config_edit::read_state(&path)?;
-        let settings = config_edit::parse_file(&state.bytes, &path)
-            .map_err(|_| refusal(ErrorCode::ConfigInvalid,
-                "Cannot load docs sources. For bundled recovery guides use docs list --source shellboy or docs get --id shellboy/configuration"))?
-            .docs;
+        let (path, state, settings) = load_sources(explicit, cwd)?;
         match command {
             DocsCommand::Source { command } => {
                 registration_command(command, settings, &path, cwd, &state.hash)
@@ -212,6 +199,24 @@ pub fn configured_response(command: DocsCommand, explicit: Option<&Path>, cwd: &
         Ok(result) => json!({"protocol_version":PROTOCOL_VERSION,"ok":true,"result":result}),
         Err(error) => json!({"protocol_version":PROTOCOL_VERSION,"ok":false,"error":error}),
     }
+}
+
+pub(super) fn load_sources(
+    explicit: Option<&Path>,
+    cwd: &Path,
+) -> Result<(PathBuf, config_edit::FileState, DocsConfig), ApiError> {
+    let path = resolve_config_path(explicit, cwd, &PathEnvironment::current())
+        .map_err(|e| refusal(ErrorCode::ConfigInvalid, e.to_string()))?;
+    let state = config_edit::read_state(&path)?;
+    let settings = config_edit::parse_file(&state.bytes, &path)
+            .map_err(|_| refusal(ErrorCode::ConfigInvalid,
+                "Cannot load docs sources. For bundled recovery guides use docs list --source shellboy or docs get --id shellboy/configuration"))?
+            .docs;
+    Ok((path, state, settings))
+}
+
+fn is_bundled(id: &str) -> bool {
+    id.split('/').next() == Some("shellboy")
 }
 
 fn canonical_root(path: &Path) -> Result<PathBuf, String> {
@@ -488,7 +493,7 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
             section,
             limit_bytes,
             cursor,
-        } if id != "shellboy" && !id.starts_with("shellboy/") => {
+        } if !is_bundled(&id) => {
             limit(limit_bytes, TEXT_WORK)?;
             let source = source_for(&id, rows)?;
             let root = canonical_root(&source.path)?;
@@ -553,7 +558,7 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
             let scope = hash(serde_json::to_vec(&json!(["list", parent, sources])).expect("scope"));
             let mut items = Vec::new();
             if let Some(id) = &parent {
-                if id == "shellboy" || id.starts_with("shellboy/") {
+                if is_bundled(id) {
                     if included(&sources, "shellboy") {
                         items = bundled_list(Some(id))?;
                     }
@@ -617,11 +622,10 @@ fn browse(command: DocsCommand, rows: &[Registration]) -> Result<Value, String> 
 fn included(filters: &[String], name: &str) -> bool {
     filters.is_empty() || filters.iter().any(|s| s == name)
 }
-fn selected(rows: &[Registration], filters: &[String]) -> Result<(), String> {
-    if filters.len() > LIST_WORK
-        || filters
-            .iter()
-            .any(|name| name != "shellboy" && !rows.iter().any(|row| &row.name == name))
+pub(super) fn selected(rows: &[Registration], filters: &[String]) -> Result<(), String> {
+    if filters
+        .iter()
+        .any(|name| name != "shellboy" && !rows.iter().any(|row| &row.name == name))
     {
         return Err("target_unavailable: Unknown docs source filter".into());
     }
@@ -782,7 +786,7 @@ fn search(
         if id.len() > 4096 {
             return Err("invalid_argument: Docs parent ID exceeds 4096 bytes".into());
         }
-        if id == "shellboy" || id.starts_with("shellboy/") {
+        if is_bundled(id) {
             find(&BUNDLED.docs, id)?;
         } else {
             source_for(id, rows)?;

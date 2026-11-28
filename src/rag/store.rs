@@ -700,10 +700,11 @@ pub(super) fn ingest(
     owned_text: Option<String>,
     metadata_file: Option<&Path>,
 ) -> Result<Value> {
-    if id.is_empty() || id.len() > 512 {
+    const MAX_ID_BYTES: usize = 512;
+    if id.is_empty() || id.len() > MAX_ID_BYTES {
         return Err(err(
             "invalid_argument",
-            "Ingest id must contain 1..=612 bytes",
+            format!("Ingest id must contain 1..={MAX_ID_BYTES} bytes"),
         ));
     }
     let text = if let Some(text) = owned_text {
