@@ -543,12 +543,6 @@ fn validate_config_hash(hash: &str) -> Result<(), ApiError> {
         ))
     }
 }
-fn validate_docs_source_mutation(name: &str, hash: &str) -> Result<(), ApiError> {
-    if name.len() > 4096 {
-        return Err(invalid("Docs source name exceeds 4096 bytes"));
-    }
-    validate_config_hash(hash)
-}
 impl ConfigSetArgs {
     fn validate(&self) -> Result<(), ApiError> {
         validate_config_hash(&self.expected_hash)?;
@@ -1222,15 +1216,13 @@ impl Command {
             Self::StorageStatus(_) | Self::StorageCollect(_) | Self::ConfigGet(_) => Ok(()),
             Self::DocsSourceList(_) => Ok(()),
             Self::DocsSourceAdd(a) => {
-                validate_docs_source_mutation(&a.name, &a.expected_hash)?;
-                if a.path.len() > 4096 || !std::path::Path::new(&a.path).is_absolute() {
-                    return Err(invalid(
-                        "Docs source path must be absolute and at most 4096 bytes",
-                    ));
+                validate_config_hash(&a.expected_hash)?;
+                if !std::path::Path::new(&a.path).is_absolute() {
+                    return Err(invalid("Docs source path must be absolute"));
                 }
                 Ok(())
             }
-            Self::DocsSourceRemove(a) => validate_docs_source_mutation(&a.name, &a.expected_hash),
+            Self::DocsSourceRemove(a) => validate_config_hash(&a.expected_hash),
             Self::ConfigSet(a) => a.validate(),
             Self::CredentialsSet(a) => a.validate(),
             Self::CredentialsClear(a) => {

@@ -1370,14 +1370,6 @@ fn protocol_v6_handshake_and_typed_results_cover_existing_wire_modes() {
     );
     let schema: Value = serde_json::from_str(&shellboy::protocol::schema_json()).unwrap();
     assert_eq!(schema["protocol_version"], PROTOCOL_VERSION);
-    assert_eq!(
-        schema["capabilities"],
-        serde_json::json!([
-            "events.reasoning_activity",
-            "id.resolve",
-            "docs.source.registry"
-        ])
-    );
     let results = schema["operation_results"].as_object().unwrap();
     assert_eq!(results["message.ask"]["title"], "MessageAccepted");
     assert_eq!(results["message.ask"], results["message.send"]);

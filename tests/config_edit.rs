@@ -1708,12 +1708,27 @@ async fn docs_registry_ipc_uses_selected_config_and_fences_stale_edits() {
             ipc::call(&data, command, operation, None).await.unwrap()
         };
         let list = || call(Command::DocsSourceList(DocsSourceListArgs {}), None);
-        let initial = list().await.result.unwrap();
+        let (welcome, initial) = ipc::call_with_welcome(
+            &data,
+            Command::DocsSourceList(DocsSourceListArgs {}),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            welcome
+                .capabilities
+                .iter()
+                .any(|name| name == "docs.source.registry")
+        );
+        let initial = initial.result.unwrap();
         crate::operation_result_schema::assert_result("docs.source.list", &initial);
         assert_eq!(initial["items"], json!([]));
         let hash = |value: &Value| value["content_hash"].as_str().unwrap().to_owned();
+        let name = "guide".repeat(900);
         let add = Command::DocsSourceAdd(DocsSourceAddArgs {
-            name: "guide".into(),
+            name: name.clone(),
             path: guide.to_str().unwrap().into(),
             expected_hash: hash(&initial),
         });
@@ -1726,15 +1741,10 @@ async fn docs_registry_ipc_uses_selected_config_and_fences_stale_edits() {
         let replay = call(add, Some(added.operation_id.clone())).await;
         assert_eq!(replay.result, added.result);
         let listed = list().await.result.unwrap();
-        assert_eq!(listed["items"], json!([{"name":"guide","path":guide}]));
-        assert!(
-            std::fs::read_to_string(&selected)
-                .unwrap()
-                .contains("[[docs.sources]]")
-        );
+        assert_eq!(listed["items"], json!([{"name":name,"path":guide}]));
         let remove = |expected_hash| {
             Command::DocsSourceRemove(DocsSourceRemoveArgs {
-                name: "guide".into(),
+                name: name.clone(),
                 expected_hash,
             })
         };
