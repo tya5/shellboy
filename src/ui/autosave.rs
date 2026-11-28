@@ -25,7 +25,7 @@ pub(super) struct Autosave {
     dirty: VecDeque<String>,
     queued: HashSet<String>,
     admitted: BTreeMap<String, Signature>,
-    committed: BTreeMap<String, Signature>,
+    committed: BTreeMap<String, (Signature, bool)>,
 }
 pub(super) struct Request {
     key: String,
@@ -39,24 +39,38 @@ impl Autosave {
         self.admitted.retain(|key, _| !keys.contains(key));
         self.committed.retain(|key, _| !keys.contains(key));
     }
-    pub(super) fn committed(&mut self, key: String, stamp: Signature) {
-        self.committed.insert(key, stamp);
+    pub(super) fn committed(&mut self, key: String, stamp: Signature, anchor_refused: bool) {
+        self.committed.insert(key, (stamp, anchor_refused));
     }
     pub(super) fn reconstructible(&self, key: &str, view: &ThreadView) -> bool {
-        !saveable(view) || self.committed.get(key) == Some(&Signature::of(view))
+        !saveable(view)
+            || self
+                .committed
+                .get(key)
+                .is_some_and(|(stamp, anchor_refused)| {
+                    stamp.draft_id == view.draft.draft_id
+                        && stamp.revision == view.draft.revision
+                        && stamp.cursor == view.draft.cursor
+                        && (*anchor_refused
+                            || (stamp.anchor == view.navigation.anchor
+                                && stamp.follow == view.navigation.follow()))
+                })
     }
     pub(super) fn cache_bytes(&self, key: &str) -> usize {
-        [&self.admitted, &self.committed]
-            .iter()
-            .filter_map(|map| map.get(key))
-            .map(|stamp| {
-                std::mem::size_of::<(String, Signature)>()
-                    + 4 * std::mem::size_of::<usize>()
-                    + key.len()
-                    + stamp.draft_id.capacity()
-                    + stamp.anchor.node_id.as_ref().map_or(0, String::capacity)
-            })
-            .sum()
+        [
+            self.admitted.get(key),
+            self.committed.get(key).map(|(stamp, _)| stamp),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|stamp| {
+            std::mem::size_of::<(String, Signature)>()
+                + 4 * std::mem::size_of::<usize>()
+                + key.len()
+                + stamp.draft_id.capacity()
+                + stamp.anchor.node_id.as_ref().map_or(0, String::capacity)
+        })
+        .sum()
     }
     pub(super) fn pending(&self) -> bool {
         !self.dirty.is_empty()

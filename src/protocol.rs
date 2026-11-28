@@ -49,7 +49,7 @@ fn operation_result_schemas(
     }
     result!("draft.image", DraftImageResult);
     result!("owner.shutdown", Accepted);
-    result!("draft.save", Accepted);
+    result!("draft.save", DraftSaveResult);
     result!("draft.get", DraftState);
     result!("draft.list", DraftListPage);
     result!("draft.restore", crate::draft::DraftSnapshot);
@@ -2064,6 +2064,16 @@ record!(DraftState {
 record!(DraftView {
     anchor: crate::draft::ViewAnchor,
     follow_tail: bool
+});
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DraftAnchorRefusal {
+    CursorExpired,
+}
+record!(DraftSaveResult {
+    accepted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    anchor_refusal: Option<DraftAnchorRefusal>,
 });
 args!(DraftSaveArgs {
     thread_id: String,

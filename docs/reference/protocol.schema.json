@@ -2976,6 +2976,12 @@
       ],
       "type": "object"
     },
+    "DraftAnchorRefusal": {
+      "enum": [
+        "cursor_expired"
+      ],
+      "type": "string"
+    },
     "DraftGetArgs": {
       "additionalProperties": false,
       "properties": {
@@ -17916,12 +17922,22 @@
       "properties": {
         "accepted": {
           "type": "boolean"
+        },
+        "anchor_refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DraftAnchorRefusal"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "accepted"
       ],
-      "title": "Accepted",
+      "title": "DraftSaveResult",
       "type": "object"
     },
     "draft.submit": {

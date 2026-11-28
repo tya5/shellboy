@@ -32,7 +32,6 @@ impl DraftSaver {
                 instance: &instance,
             };
             let mut failure = None;
-            let mut refused_anchors = HashMap::new();
             while let Some((thread, draft, anchor, follow)) = receiver.recv().await {
                 let stamp = (draft.draft_id.clone(), draft.revision, draft.cursor);
                 let restored = draft
@@ -48,10 +47,7 @@ impl DraftSaver {
                     save_draft(&owner, thread.clone(), draft, anchor.clone(), follow).await
                 };
                 match &result {
-                    Ok(()) => {
-                        // A later save for this Thread supersedes a refused view.
-                        refused_anchors.remove(&thread);
-                    }
+                    Ok(_) => {}
                     // A committed send already consumed this snapshot. Do not
                     // resurrect it, report a save failure, or clear anchor refusals.
                     Err(error)
@@ -63,9 +59,6 @@ impl DraftSaver {
                                 == Some("draft_revision_submitted") =>
                     {
                         continue;
-                    }
-                    Err(error) if error.code == ErrorCode::CursorExpired => {
-                        refused_anchors.insert(thread.clone(), error.clone());
                     }
                     // A non-live Thread cannot own a saved draft. Its typed
                     // refusal still reaches the interactive client.
@@ -88,9 +81,7 @@ impl DraftSaver {
                     })
                     .await;
             }
-            failure
-                .or_else(|| refused_anchors.into_values().next())
-                .map_or(Ok(()), Err)
+            failure.map_or(Ok(()), Err)
         });
         Self {
             backlog: HashMap::new(),
@@ -605,7 +596,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            matches!(refused, Some(BackgroundResult::DraftSaved { result: Err(error), .. }) if error.code == ErrorCode::CursorExpired)
+            matches!(refused, Some(BackgroundResult::DraftSaved { result: Ok(saved), .. }) if saved.accepted && saved.anchor_refusal == Some(crate::protocol::DraftAnchorRefusal::CursorExpired))
         );
         draft.revision += 1;
         assert!(saver.enqueue("thread".into(), draft, ViewAnchor::default(), true, true));
@@ -618,7 +609,7 @@ mod tests {
         joined.unwrap().unwrap();
         assert!(matches!(
             incoming.try_recv(),
-            Ok(BackgroundResult::DraftSaved { result: Ok(()), .. })
+            Ok(BackgroundResult::DraftSaved { result: Ok(saved), .. }) if saved.accepted && saved.anchor_refusal.is_none()
         ));
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();

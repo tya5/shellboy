@@ -1253,8 +1253,11 @@ impl Store {
             Command::DraftGet(args) => MutationResult::value(compose::get(tx, args)?),
             Command::DraftList(args) => MutationResult::value(compose::list(tx, args)?),
             Command::DraftSave(args) => {
-                compose::save(tx, args, self.config.limits.draft_bytes, now)?;
-                MutationResult::value(crate::protocol::Accepted { accepted: true })
+                let anchor_refusal = compose::save(tx, args, self.config.limits.draft_bytes, now)?;
+                MutationResult::value(crate::protocol::DraftSaveResult {
+                    accepted: true,
+                    anchor_refusal,
+                })
             }
             Command::OwnerShutdown(args) => {
                 if args.instance_id != self.instance_id {
@@ -4459,15 +4462,14 @@ mod receipt_wait_tests {
         let mut displaced = args.clone();
         displaced.anchor.node_id = Some("not-selected".into());
         displaced.draft.revision = 3;
-        displaced.draft.text = "must not persist".into();
-        let refused = store
-            .execute(
-                Request::new("current:displaced", Command::DraftSave(displaced)),
-                None,
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(refused.code, ErrorCode::CursorExpired);
+        displaced.draft.text = "new durable input".into();
+        let request = Request::new("current:displaced", Command::DraftSave(displaced));
+        let saved = store.execute(request.clone(), None).await.unwrap().result;
+        assert_eq!(
+            saved,
+            json!({"accepted":true,"anchor_refusal":"cursor_expired"})
+        );
+        assert_eq!(store.execute(request, None).await.unwrap().result, saved);
         args.draft.revision = 1;
         args.draft.text = "stale".into();
         args.follow_tail = true;
@@ -4483,7 +4485,7 @@ mod receipt_wait_tests {
             "SELECT json_extract(d.body_json, '$.text'), v.follow_tail, v.anchor_node_id FROM draft d JOIN view_state v USING(thread_id)",
             [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?)),
         )?)).await.unwrap();
-        assert_eq!(saved, ("current".into(), false, "reading".into()));
+        assert_eq!(saved, ("new durable input".into(), false, "reading".into()));
         db.shutdown().await.unwrap();
     }
 

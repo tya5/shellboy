@@ -412,10 +412,16 @@ async fn tui_startup_can_terminate_while_credential_inspection_is_blocked() {
         .spawn()
         .unwrap();
     let mut output = Vec::new();
-    read_until_text(
+    collect_matching(
         &mut terminal,
         &mut output,
-        "Checking configuration and storage",
+        "startup paints while inspection is blocked",
+        |bytes| {
+            bytes
+                .windows(b"\x1b[?1049h".len())
+                .any(|part| part == b"\x1b[?1049h")
+                && !emitted_text(bytes).trim().is_empty()
+        },
     )
     .await;
     let pid = i32::try_from(child.id().unwrap()).unwrap();

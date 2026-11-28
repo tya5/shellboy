@@ -453,7 +453,6 @@ async fn drive_inner(
                     &failure.error,
                 );
                 {
-                    let mut job = request_slot.proactive_job.lock().await;
                     retry::retry_or_recover(
                         &control,
                         &snapshot,
@@ -464,7 +463,6 @@ async fn drive_inner(
                         decision.expect("non-cancelled failure has an executor decision"),
                         &mut retry_budget,
                         &mut overflow,
-                        &mut job,
                         &mut request_boundary,
                         partial_attempts,
                     )

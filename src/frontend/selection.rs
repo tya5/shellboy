@@ -120,6 +120,10 @@ impl Selection {
         }
         self.generations.entry(thread.to_owned()).or_insert(0);
     }
+    pub(super) fn retire_generations(&mut self, in_use: impl Fn(&str) -> bool) {
+        self.generations
+            .retain(|thread, _| self.active_thread.as_deref() == Some(thread) || in_use(thread));
+    }
     pub(super) fn changed(&mut self, thread: &str) {
         if self.active_thread.as_deref() == Some(thread) {
             self.refresh();
@@ -188,6 +192,23 @@ mod refresh_scope_tests {
         presentation::{BlockKind, PresentationBlock, ToolPresentation},
         ui::UiNode,
     };
+    #[test]
+    fn finished_observation_retires_generation_without_admitting_stale_results() {
+        let mut selection = Selection::default();
+        selection.select_thread("in-flight".into(), 1);
+        for generation in 2..100 {
+            selection.select_thread(format!("visited-{generation}"), generation);
+            selection.retire_generations(|thread| thread == "in-flight");
+            assert_eq!(selection.generations.len(), 2);
+            assert!(!selection.accepts("in-flight", 1, selection.progress_epoch));
+        }
+        selection.retire_generations(|_| false);
+        assert!(!selection.generations.contains_key("in-flight"));
+        selection.select_thread("in-flight".into(), 100);
+        assert!(!selection.accepts("in-flight", 1, selection.progress_epoch));
+        assert!(selection.accepts("in-flight", 100, selection.progress_epoch));
+    }
+
     fn scope(revision: u64, view_revision: u64) -> ToolObservation {
         ToolObservation {
             revision,

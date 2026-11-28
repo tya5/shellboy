@@ -1017,11 +1017,6 @@ pub enum UiUpdate {
         thread_id: String,
         message: String,
     },
-    DraftAnchorExpired {
-        thread_id: String,
-        anchor: ViewAnchor,
-        message: String,
-    },
     DraftViewSaved {
         thread_id: String,
         draft_id: String,
@@ -1029,6 +1024,7 @@ pub enum UiUpdate {
         cursor: usize,
         anchor: ViewAnchor,
         follow: bool,
+        anchor_refusal: Option<crate::protocol::DraftAnchorRefusal>,
     },
     DraftSaveFailed {
         thread_id: String,
@@ -3447,31 +3443,6 @@ impl UiState {
                     view.status = message;
                 }
             }
-            UiUpdate::DraftAnchorExpired {
-                thread_id,
-                anchor,
-                message,
-            } => {
-                if let Some(view) = self.views.values_mut().find(|view| {
-                    view.thread_id.as_deref() == Some(&thread_id)
-                        && !view.navigation.follow()
-                        && view.navigation.anchor == anchor
-                }) {
-                    view.status = message;
-                    view.save_retry = false;
-                    view.navigation
-                        .on_event(NavEvent::Read(ReadEvent::RebaseRequested {
-                            ticket: (view.navigation.view_revision, None),
-                            pending: None,
-                        }));
-                    self.deferred_actions.push(UiAction::RebaseHistory {
-                        thread_id,
-                        generation: view.generation,
-                        view_revision: view.navigation.view_revision,
-                        anchor,
-                    });
-                }
-            }
             UiUpdate::DraftViewSaved {
                 thread_id,
                 draft_id,
@@ -3479,10 +3450,31 @@ impl UiState {
                 cursor,
                 anchor,
                 follow,
+                anchor_refusal,
             } => {
-                if let Some((key, _)) = self.views.iter().find(|(_, view)| {
+                if let Some((key, view)) = self.views.iter_mut().find(|(_, view)| {
                     view.thread_id.as_deref() == Some(&thread_id) && view.draft.draft_id == draft_id
                 }) {
+                    if let Some(crate::protocol::DraftAnchorRefusal::CursorExpired) = anchor_refusal
+                        && !view.navigation.follow()
+                        && view.navigation.anchor == anchor
+                    {
+                        view.status = "Saved view anchor is no longer selected".into();
+                        view.save_retry = false;
+                        if key == &self.active {
+                            view.navigation
+                                .on_event(NavEvent::Read(ReadEvent::RebaseRequested {
+                                    ticket: (view.navigation.view_revision, None),
+                                    pending: None,
+                                }));
+                            self.deferred_actions.push(UiAction::RebaseHistory {
+                                thread_id,
+                                generation: view.generation,
+                                view_revision: view.navigation.view_revision,
+                                anchor: anchor.clone(),
+                            });
+                        }
+                    }
                     self.autosave.committed(
                         key.clone(),
                         autosave::Signature {
@@ -3492,6 +3484,7 @@ impl UiState {
                             anchor,
                             follow,
                         },
+                        anchor_refusal.is_some(),
                     );
                 }
             }
@@ -8478,52 +8471,131 @@ mod layout_cache_tests {
         );
         assert!(!ui.history_layout(80, 20).text.contains("本文未キャッシュ"));
     }
-    #[test]
-    fn body_budget_excludes_working_nodes_and_evicts_oldest_inactive_first() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
-        ui.select_thread("old".into());
-        history(&mut ui, "old", &"a".repeat(512));
-        let old = ui.active.clone();
-        ui.view_mut().navigation.select_reading();
-        let anchor = ViewAnchor {
-            node_id: Some("old".into()),
-            char_offset: 17,
-        };
-        ui.view_mut().navigation.anchor = anchor.clone();
-        ui.select_thread("recent".into());
-        history(&mut ui, "recent", &"b".repeat(512));
-        let recent = ui.active.clone();
-        assert!(
-            matches!(ui.select_thread("old".into()).last(), Some(UiAction::SelectThread { known_view: Some((saved, false)), .. }) if saved == &anchor)
-        );
-        ui.select_thread("active".into());
-        *ui.view_mut().nodes_mut_for_test() = vec![
-            node("x", &"x".repeat(8192)),
-            node("y", &"y".repeat(8192)),
-            node("z", &"z".repeat(8192)),
-        ];
-        let fits = ui.views[&old].retained_view_bytes()
-            + old.capacity()
-            + ui.views[&recent].retained_view_bytes()
-            + recent.capacity();
-        ui.config.cache.body_bytes = fits as u64;
-        ui.trim_bodies();
-        assert!(ui.views.contains_key(&old) && ui.views.contains_key(&recent));
-        ui.config.cache.body_bytes = (fits - 1) as u64;
-        ui.trim_bodies();
-        assert!(
-            !ui.views.contains_key(&recent),
-            "revisiting old made recent the least recently used"
-        );
-        assert_eq!(ui.views[&old].navigation.anchor, anchor);
-        assert!(ui.view().nodes().iter().all(|n| n.text.len() == 8192));
-        assert!(matches!(
-            ui.select_thread("recent".into()).last(),
-            Some(UiAction::SelectThread {
-                known_view: None,
-                ..
+    #[tokio::test]
+    async fn inactive_view_lru_retains_scroll_until_evicted_then_restores_owner_state() {
+        use crate::protocol::{DraftGetArgs, DraftSaveArgs, DraftState, ThreadGetArgs};
+        let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        owner
+            .db
+            .call(|db| {
+                let tx = db.transaction()?;
+                crate::history::append_node(
+                    &tx,
+                    "thread",
+                    "n",
+                    None,
+                    "user",
+                    &serde_json::json!({"role":"user","content":"saved reading node"}),
+                    "2026-01-01T00:00:00Z",
+                )?;
+                tx.commit()?;
+                Ok(())
             })
-        ));
+            .await
+            .unwrap();
+        let request = |command| crate::ipc::call(&owner.loaded.data_dir, command, None, None);
+        let mut ui = UiState::new(&Config::default(), root.path().into());
+        ui.select_thread("thread".into());
+        history(&mut ui, "thread", &"a".repeat(512 * 1024));
+        ui.insert("exact saved composer", false);
+        let draft = ui.view().draft.clone();
+        let anchor = ViewAnchor {
+            node_id: Some("n".into()),
+            char_offset: 4,
+        };
+        ui.view_mut().navigation.select_reading();
+        ui.view_mut().navigation.anchor = anchor.clone();
+        let saved = request(Command::DraftSave(DraftSaveArgs {
+            thread_id: "thread".into(),
+            draft: Box::new(draft.clone()),
+            expected_source_message: None,
+            expected_thread_revision: None,
+            anchor: anchor.clone(),
+            follow_tail: false,
+        }))
+        .await
+        .unwrap();
+        assert!(saved.ok, "{:?}", saved.error);
+        ui.apply(UiUpdate::DraftViewSaved {
+            thread_id: "thread".into(),
+            draft_id: draft.draft_id.clone(),
+            revision: draft.revision,
+            cursor: draft.cursor,
+            anchor: anchor.clone(),
+            follow: false,
+            anchor_refusal: None,
+        });
+        ui.select_thread("independent".into());
+        ui.select_thread("thread".into());
+        assert_eq!(ui.view().navigation.anchor, anchor);
+        assert_eq!(ui.view().draft.text, draft.text);
+        ui.select_thread("recent".into());
+        history(&mut ui, "recent", "recent retained history");
+        ui.select_thread("active".into());
+        ui.config.cache.body_bytes = 256 * 1024;
+        ui.trim_bodies();
+        assert!(
+            !ui.views
+                .values()
+                .any(|v| v.thread_id.as_deref() == Some("thread"))
+        );
+        assert!(
+            ui.views
+                .values()
+                .any(|v| v.thread_id.as_deref() == Some("recent"))
+        );
+        let actions = ui.select_thread("thread".into());
+        let Some(UiAction::SelectThread {
+            generation,
+            view_revision,
+            known_view: None,
+            ..
+        }) = actions.last()
+        else {
+            panic!("evicted view must request owner state");
+        };
+        assert!(ui.view().draft.text.is_empty());
+        let state: DraftState = serde_json::from_value(
+            request(Command::DraftGet(DraftGetArgs {
+                thread_id: Some("thread".into()),
+                operation_id: None,
+            }))
+            .await
+            .unwrap()
+            .result
+            .unwrap(),
+        )
+        .unwrap();
+        let details = serde_json::from_value(
+            request(Command::ThreadGet(ThreadGetArgs {
+                thread_id: Some("thread".into()),
+                display: false,
+            }))
+            .await
+            .unwrap()
+            .result
+            .unwrap(),
+        )
+        .unwrap();
+        let view = state.view.unwrap();
+        ui.apply(UiUpdate::Thread {
+            generation: *generation,
+            details,
+            draft: state.draft,
+        });
+        ui.apply(UiUpdate::ViewState {
+            thread_id: "thread".into(),
+            generation: *generation,
+            view_revision: *view_revision,
+            anchor: view.anchor,
+            follow: view.follow_tail,
+        });
+        assert_eq!(ui.view().draft.text, draft.text);
+        assert_eq!(ui.view().navigation.anchor, anchor);
+        assert!(!ui.view().navigation.follow());
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     #[test]
@@ -8558,6 +8630,7 @@ mod layout_cache_tests {
             cursor: draft.cursor,
             anchor,
             follow,
+            anchor_refusal: Some(crate::protocol::DraftAnchorRefusal::CursorExpired),
         });
         assert!(
             ui.views.contains_key(&old),

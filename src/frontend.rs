@@ -362,7 +362,7 @@ enum BackgroundResult {
         stamp: (String, u64, usize),
         anchor: ViewAnchor,
         follow: bool,
-        result: Result<(), ApiError>,
+        result: Result<crate::protocol::DraftSaveResult, ApiError>,
     },
     Refreshed {
         thread_id: String,
@@ -1015,6 +1015,8 @@ async fn run_client(
                 draft_pause_running = true;
             }
         }
+        // Submission work carries its own generation in the send/receipt record.
+        selection.retire_generations(|thread| refreshing.contains(thread));
         live_output.retain(selection.active_thread.as_deref(), &selection.generations);
         if let Some(value) = initialize.take() {
             initialize = updates.defer(value);
@@ -3096,7 +3098,7 @@ async fn run_client(
                         Err(error) => status(&updates, Some(ticket.thread), error).await,
                     }
                 }
-                Some(BackgroundResult::DraftSaved { thread_id, anchor, result: Err(error), .. }) => {
+                Some(BackgroundResult::DraftSaved { thread_id, result: Err(error), .. }) => {
                     if compose_transport_error(&error) {
                         compose_disconnected.store(true, Ordering::Release);
                         if let Some(operation) = unknown_compose_operation(&error) {
@@ -3105,17 +3107,15 @@ async fn run_client(
                         update(&updates, UiUpdate::StorageFailed { thread_id, message: compose_disconnected_message(&error) }).await;
                     } else if error.is_storage_failure() {
                         update(&updates,UiUpdate::StorageFailed{thread_id,message:ui_diagnostics::save_failed(language, error)}).await;
-                    } else if error.code == ErrorCode::CursorExpired {
-                        update(&updates, UiUpdate::DraftAnchorExpired { thread_id, anchor, message: error.to_string() }).await;
                     } else {
                         update(&updates, UiUpdate::StorageFailed { thread_id, message: crate::config_setup::tui_error(&error) }).await;
                     }
                 }
-                Some(BackgroundResult::DraftSaved { thread_id, restored, stamp: (draft_id, revision, cursor), anchor, follow, result: Ok(()) }) => {
+                Some(BackgroundResult::DraftSaved { thread_id, restored, stamp: (draft_id, revision, cursor), anchor, follow, result: Ok(saved) }) => {
                     if let Some((draft_id, source)) = restored {
                         update(&updates, UiUpdate::DraftSourceSaved { draft_id, source }).await;
                     }
-                    update(&updates, UiUpdate::DraftViewSaved { thread_id, draft_id, revision, cursor, anchor, follow }).await;
+                    update(&updates, UiUpdate::DraftViewSaved { thread_id, draft_id, revision, cursor, anchor, follow, anchor_refusal: saved.anchor_refusal }).await;
                 }
                 Some(BackgroundResult::Refreshed {
                     thread_id,
@@ -4004,10 +4004,10 @@ async fn save_draft(
     mut draft: DraftSnapshot,
     anchor: ViewAnchor,
     follow_tail: bool,
-) -> Result<(), ApiError> {
+) -> Result<crate::protocol::DraftSaveResult, ApiError> {
     let expected_source = draft.restored_source.take();
     let operation = format!("{}:{}", owner.instance, uuid::Uuid::new_v4());
-    compose_call::<crate::protocol::Accepted>(
+    compose_call::<crate::protocol::DraftSaveResult>(
         owner,
         Command::DraftSave(crate::protocol::DraftSaveArgs {
             expected_thread_revision: expected_source
@@ -4022,7 +4022,6 @@ async fn save_draft(
         Some(operation),
     )
     .await
-    .map(|_| ())
 }
 
 async fn native_header(

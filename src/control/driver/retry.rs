@@ -126,7 +126,6 @@ pub(super) async fn retry_or_recover(
     decision: model::request_path::FailureDecision,
     budget: &mut RetryBudget,
     overflow: &mut OverflowBudget,
-    proactive_job: &mut super::proactive::ThreadJob,
     boundary_guard: &mut crate::compaction::boundary::Boundary<'_>,
     partial_attempts: Vec<String>,
 ) -> Result<(), ApiError> {
@@ -160,16 +159,32 @@ pub(super) async fn retry_or_recover(
     let mut trim_not_applied = None;
     let mut proactive_adopted = false;
     // Join already-admitted compaction even when there is no slot to rebuild.
-    if failure.error.is_context_limit()
-        && let super::proactive::ThreadJob::Retained(job) = proactive_job
-    {
-        let waited = boundary_guard.pause(&slot.stop, job.join()).await;
-        let joined = match waited {
-            Ok(joined) => joined,
-            Err(_) if slot.stop.is_cancelled() => return Ok(()),
-            Err(_) => return Err(invalid("proactive summary boundary wait cancelled")),
-        };
-        *proactive_job = super::proactive::ThreadJob::Idle;
+    let claimed = if failure.error.is_context_limit() {
+        slot.proactive_job.lock().await.claim_join()
+    } else {
+        None
+    };
+    if let Some(mut job) = claimed {
+        // The producer must publish completion before its handle resolves.
+        // Keep the join claim, not the mutex, while the boundary is paused.
+        let mut joined = None;
+        let waited = boundary_guard
+            .pause(&slot.stop, async {
+                joined = Some(job.join().await);
+            })
+            .await;
+        if joined.is_none() {
+            job.cancel();
+            joined = Some(job.join().await);
+        }
+        control
+            .live
+            .finish_proactive_join(&snapshot.thread, slot)
+            .await;
+        if waited.is_err() {
+            return Ok(());
+        }
+        let joined = joined.expect("claimed job was joined");
         match joined {
             Ok(Ok(super::proactive::ProactiveOutcome::Finished { path_changed: true })) => {
                 proactive_adopted = true;

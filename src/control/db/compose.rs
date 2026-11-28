@@ -5,8 +5,8 @@ use crate::{
     control::submission_retention,
     history::{self, ThreadScope},
     protocol::{
-        DraftGetArgs, DraftListArgs, DraftListFilters, DraftListKind, DraftListPage, DraftRecord,
-        DraftSaveArgs, ErrorCode, PageCursor, RecordPage,
+        DraftAnchorRefusal, DraftGetArgs, DraftListArgs, DraftListFilters, DraftListKind,
+        DraftListPage, DraftRecord, DraftSaveArgs, ErrorCode, PageCursor, RecordPage,
     },
 };
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -18,7 +18,7 @@ pub(super) fn save(
     args: &DraftSaveArgs,
     draft_bytes: u64,
     now: &str,
-) -> super::Result<()> {
+) -> super::Result<Option<DraftAnchorRefusal>> {
     let DraftSaveArgs {
         thread_id: thread,
         expected_source_message,
@@ -60,9 +60,8 @@ pub(super) fn save(
             ));
         }
     }
-    if !follow_tail
-        && let Some(node) = anchor.node_id.as_deref()
-        && tx
+    let anchor_expired = match (follow_tail, anchor.node_id.as_deref()) {
+        (false, Some(node)) => tx
             .query_row(
                 history::SELECTED_NODE_ORDINAL_SQL,
                 params![thread, node],
@@ -70,13 +69,9 @@ pub(super) fn save(
             )
             .optional()
             .map_err(sql_error)?
-            .is_none()
-    {
-        return Err(error(
-            ErrorCode::CursorExpired,
-            "Saved view anchor is no longer selected",
-        ));
-    }
+            .is_none(),
+        _ => false,
+    };
     crate::draft::validate_positions(draft, draft_bytes)?;
     let revision = i64::try_from(draft.revision)
         .map_err(|_| error(ErrorCode::InvalidArgument, "Draft revision is out of range"))?;
@@ -125,6 +120,9 @@ pub(super) fn save(
         )
         .details(serde_json::json!({"reason":"draft_revision_submitted"})));
     }
+    if anchor_expired {
+        return Ok(Some(DraftAnchorRefusal::CursorExpired));
+    }
     tx.execute(
         "INSERT INTO view_state(thread_id,anchor_node_id,anchor_offset,follow_tail)
          VALUES(?1,?2,?3,?4) ON CONFLICT(thread_id) DO UPDATE SET
@@ -133,7 +131,7 @@ pub(super) fn save(
         params![thread, anchor.node_id, offset, follow_tail],
     )
     .map_err(sql_error)?;
-    Ok(())
+    Ok(None)
 }
 
 pub(super) fn get(

@@ -474,7 +474,6 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
         },
         &mut retry::RetryBudget::default(),
         &mut OverflowBudget::default(),
-        &mut Default::default(),
         &mut crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await),
         Vec::new(),
     )

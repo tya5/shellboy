@@ -33,12 +33,10 @@ async fn return_joined_slot(slot: &DriverSlot) {
     slot.proactive_join_done.notify_waiters();
 }
 
-fn can_retire_background(job: &ThreadJob) -> bool {
-    match job {
-        ThreadJob::Idle => true,
-        ThreadJob::Retained(job) => job.completed_work(),
-        ThreadJob::Joining => false,
-    }
+enum SlotTransition<'a> {
+    Departed(&'a str),
+    Completed(&'a Arc<Mutex<ThreadJob>>),
+    Idle(&'a Arc<Mutex<ThreadJob>>),
 }
 
 #[derive(Default)]
@@ -175,21 +173,14 @@ impl LiveRegistry {
     }
 
     pub(super) async fn remove_driver_if_current(&self, thread: &str, slot: &str) -> bool {
-        let mut drivers = self.drivers.lock().await;
-        if let Some(entry) = drivers
-            .get(thread)
-            .filter(|entry| entry.id == slot)
-            .cloned()
-        {
-            entry.driver_active.store(false, Ordering::Release);
-            if !can_retire_background(&*entry.proactive_job.lock().await) {
-                return false;
-            }
-            drivers.remove(thread);
-            true
-        } else {
-            false
-        }
+        self.settle_slot(thread, SlotTransition::Departed(slot))
+            .await
+    }
+
+    pub(super) async fn finish_proactive_join(&self, thread: &str, slot: &DriverSlot) {
+        return_joined_slot(slot).await;
+        self.prune_idle_background(thread, &slot.proactive_job)
+            .await;
     }
 
     /// Cancel and join the Thread-owned job on Stop/error or owner shutdown.
@@ -206,10 +197,8 @@ impl LiveRegistry {
         } else if let Some(mut job) = claimed {
             job.cancel();
             let _ = job.join().await;
-            return_joined_slot(slot).await;
+            self.finish_proactive_join(thread, slot).await;
         }
-        self.prune_idle_background(thread, &slot.proactive_job)
-            .await;
     }
 
     /// A stopped inactive Run can retain a Thread job that still needs the
@@ -246,9 +235,7 @@ impl LiveRegistry {
             drop(jobs);
             drop(drivers);
             let _ = job.join().await;
-            return_joined_slot(&slot).await;
-            self.prune_idle_background(thread, &slot.proactive_job)
-                .await;
+            self.finish_proactive_join(thread, &slot).await;
             return true;
         }
     }
@@ -308,43 +295,39 @@ impl LiveRegistry {
         }
     }
 
-    pub(super) async fn prune_completed_background(
-        &self,
-        thread: &str,
-        job: &Arc<Mutex<ThreadJob>>,
-    ) {
-        self.prune_background(thread, job, can_retire_background)
+    pub(super) async fn complete_background(&self, thread: &str, job: &Arc<Mutex<ThreadJob>>) {
+        self.settle_slot(thread, SlotTransition::Completed(job))
             .await;
     }
 
-    pub(super) async fn prune_idle_background(
-        &self,
-        thread: &str,
-        proactive_job: &Arc<Mutex<ThreadJob>>,
-    ) {
-        self.prune_background(thread, proactive_job, |job| matches!(job, ThreadJob::Idle))
-            .await;
+    pub(super) async fn prune_idle_background(&self, thread: &str, job: &Arc<Mutex<ThreadJob>>) {
+        self.settle_slot(thread, SlotTransition::Idle(job)).await;
     }
 
-    async fn prune_background(
-        &self,
-        thread: &str,
-        proactive_job: &Arc<Mutex<ThreadJob>>,
-        release: impl FnOnce(&ThreadJob) -> bool,
-    ) {
+    async fn settle_slot(&self, thread: &str, transition: SlotTransition<'_>) -> bool {
         let mut drivers = self.drivers.lock().await;
-        let Some(entry) = drivers.get(thread).cloned() else {
-            return;
+        let Some(slot) = drivers.get(thread) else {
+            return false;
         };
-        if !Arc::ptr_eq(&entry.proactive_job, proactive_job)
-            || entry.driver_active.load(Ordering::Acquire)
+        let mut job = slot.proactive_job.lock().await;
+        match transition {
+            SlotTransition::Departed(id) if slot.id == id => {
+                slot.driver_active.store(false, Ordering::Release);
+            }
+            SlotTransition::Completed(exact) if Arc::ptr_eq(&slot.proactive_job, exact) => {
+                job.complete();
+            }
+            SlotTransition::Idle(exact) if Arc::ptr_eq(&slot.proactive_job, exact) => {}
+            _ => return false,
+        }
+        if slot.driver_active.load(Ordering::Acquire)
+            || !matches!(*job, ThreadJob::Idle | ThreadJob::Completed(_))
         {
-            return;
+            return false;
         }
-        if !release(&*entry.proactive_job.lock().await) {
-            return;
-        }
+        drop(job);
         drivers.remove(thread);
+        true
     }
 
     fn foreground_in(
