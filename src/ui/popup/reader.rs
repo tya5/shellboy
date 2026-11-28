@@ -442,6 +442,7 @@ mod tests {
     #[test]
     fn limited_confirmation_screen_uses_configured_language_at_standard_widths() {
         fn configure(ui: &mut crate::ui::UiState) {
+            ui.config.cache.layout_bytes = 64 * 1024;
             ui.confirmation = Some(crate::ui::Confirmation::Operation {
                 command: crate::protocol::Command::Status(crate::protocol::StatusArgs::default()),
                 detail: "x".repeat(300_000),
