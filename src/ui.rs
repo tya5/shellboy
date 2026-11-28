@@ -3455,10 +3455,18 @@ impl UiState {
                 if let Some((key, view)) = self.views.iter_mut().find(|(_, view)| {
                     view.thread_id.as_deref() == Some(&thread_id) && view.draft.draft_id == draft_id
                 }) {
-                    if let Some(crate::protocol::DraftAnchorRefusal::CursorExpired) = anchor_refusal
-                        && !follow
-                        && view.navigation.follow() == follow
-                        && view.navigation.anchor == anchor
+                    let stamp = autosave::Signature {
+                        draft_id,
+                        revision,
+                        cursor,
+                        anchor,
+                        follow,
+                    };
+                    if matches!(
+                        anchor_refusal,
+                        Some(crate::protocol::DraftAnchorRefusal::CursorExpired)
+                    ) && !stamp.follow
+                        && stamp == autosave::Signature::of(view)
                     {
                         view.status = "Saved view anchor is no longer selected".into();
                         if key == &self.active {
@@ -3471,20 +3479,11 @@ impl UiState {
                                 thread_id,
                                 generation: view.generation,
                                 view_revision: view.navigation.view_revision,
-                                anchor: anchor.clone(),
+                                anchor: stamp.anchor.clone(),
                             });
                         }
                     }
-                    self.autosave.settled(
-                        key.clone(),
-                        autosave::Signature {
-                            draft_id,
-                            revision,
-                            cursor,
-                            anchor,
-                            follow,
-                        },
-                    );
+                    self.autosave.settled(key.clone(), stamp);
                 }
             }
             UiUpdate::DraftSaveFailed { thread_id, message } => {
