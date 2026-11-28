@@ -697,7 +697,7 @@ mod tests {
             panic!("interrupted call created an OS process");
         };
         assert_eq!(
-            error.details.unwrap()["reason"],
+            ApiError::from(error).details.unwrap()["reason"],
             "turn_interrupted_before_spawn"
         );
         assert!(!directory.path().join("must-not-exist").exists());

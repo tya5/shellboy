@@ -162,15 +162,7 @@ async fn run(
             })
         }
         Err(_) if cancel.is_cancelled() => Outcome::Cancelled,
-        Err(error)
-            if error
-                .details
-                .as_ref()
-                .and_then(|value| value["reason"].as_str())
-                == Some("deadline_before_spawn") =>
-        {
-            Outcome::TimedOut
-        }
+        Err(crate::shell::SpawnRefusal::Deadline) => Outcome::TimedOut,
         Err(_) => Outcome::Failed,
     };
     stdout.finish();

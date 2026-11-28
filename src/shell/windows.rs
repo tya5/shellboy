@@ -530,7 +530,7 @@ impl ShellSupervisor {
         gate: Option<Arc<tokio::sync::Mutex<bool>>>,
         deadline: Option<tokio::time::Instant>,
         owner: SpawnOwner,
-    ) -> Result<ShellExecution, ApiError> {
+    ) -> Result<ShellExecution, SpawnRefusal> {
         let native_cwd = LaunchPath::Cwd.prepare(&cwd)?;
         let entries = environment(&self.config, env)?;
         let executable = resolve_program(&self.config, &cwd, &entries)?;
@@ -555,11 +555,7 @@ impl ShellSupervisor {
             None => None,
         };
         if turn_gate.as_ref().is_some_and(|guard| **guard) {
-            return Err(ApiError::new(
-                ErrorCode::InvalidState,
-                "Turn interrupted before shell spawn",
-            )
-            .details(serde_json::json!({"reason":"turn_interrupted_before_spawn"})));
+            return Err(SpawnRefusal::Interrupted);
         }
         let jobs = [job.as_raw_handle()];
         let inherited = [
@@ -597,7 +593,7 @@ impl ShellSupervisor {
             )
         } == 0
         {
-            return Err(create_process_error(std::io::Error::last_os_error()));
+            return Err(create_process_error(std::io::Error::last_os_error()).into());
         }
         let process = take_handle(info.hProcess, "own shell process handle")?;
         let thread = take_handle(info.hThread, "own shell thread handle")?;
